@@ -1,0 +1,25 @@
+{
+  "name": "skillscat",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.24.0",
+  "scripts": {
+    "init:project": "node scripts/init.mjs",
+    "init:local": "node scripts/init.mjs --local",
+    "dev": "turbo run dev",
+    "dev:web": "node scripts/dev-workers.mjs --web",
+    "dev:workers": "node scripts/dev-workers.mjs --github-events --indexing --classification --trending",
+    "dev:all": "node scripts/dev-workers.mjs --all",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "db:generate": "pnpm --filter @skillscat/web db:generate",
+    "db:migrate": "pnpm --filter @skillscat/web db:migrate",
+    "deploy": "turbo run deploy"
+  },
+  "devDependencies": {
+    "turbo": "^2.7.4",
+    "typescript": "^5.9.3"
+  }
+}

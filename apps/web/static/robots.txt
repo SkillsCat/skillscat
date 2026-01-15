@@ -1,0 +1,11 @@
+# SkillsCat robots.txt
+# https://skillscat.dev/robots.txt
+
+User-agent: *
+Allow: /
+
+# Sitemap
+Sitemap: https://skillscat.dev/sitemap.xml
+
+# Disallow API routes
+Disallow: /api/

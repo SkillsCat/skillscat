@@ -1,0 +1,31 @@
+# SkillsCat GitHub Events Worker
+# 轮询 GitHub Events API，发现新的 SKILL.md 文件
+# 复制此文件为 wrangler.github-events.toml 并填入你的配置
+
+name = "skillscat-github-events"
+main = "workers/github-events/src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cron Trigger - 每 5 分钟轮询一次
+[triggers]
+crons = ["*/5 * * * *"]
+
+# D1 Database - 用于记录已处理的事件
+[[d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-database-id>"
+
+# KV - 用于存储轮询状态
+[[kv_namespaces]]
+binding = "KV"
+id = "<your-kv-namespace-id>"
+
+# Queue - 发送到 indexing 队列
+[[queues.producers]]
+binding = "INDEXING_QUEUE"
+queue = "skillscat-indexing"
+
+[vars]
+GITHUB_EVENTS_PER_PAGE = "100"

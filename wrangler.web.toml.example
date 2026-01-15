@@ -1,0 +1,40 @@
+# SkillsCat Web - SvelteKit 主站
+# 复制此文件为 wrangler.web.toml 并填入你的配置
+
+name = "skillscat-web"
+main = "apps/web/.svelte-kit/cloudflare/_worker.js"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+binding = "ASSETS"
+directory = "apps/web/.svelte-kit/cloudflare"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-database-id>"
+
+# R2 Storage
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+# KV Namespace (for rate limiting, session cache)
+[[kv_namespaces]]
+binding = "KV"
+id = "<your-kv-namespace-id>"
+
+# Queues - Web 作为生产者
+[[queues.producers]]
+binding = "INDEXING_QUEUE"
+queue = "skillscat-indexing"
+
+[[queues.producers]]
+binding = "CLASSIFICATION_QUEUE"
+queue = "skillscat-classification"
+
+# Environment Variables (set via Cloudflare dashboard or wrangler secret)
+[vars]
+PUBLIC_APP_URL = "https://skillscat.dev"

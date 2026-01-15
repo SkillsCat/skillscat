@@ -1,0 +1,54 @@
+# ========== Dependencies ==========
+node_modules/
+.pnpm-store/
+
+# ========== Build outputs ==========
+dist/
+.svelte-kit/
+.output/
+build/
+
+# ========== Cloudflare ==========
+.wrangler/
+.dev.vars
+wrangler.toml
+wrangler.*.toml
+!wrangler.*.toml.example
+.mf/
+
+# ========== Environment & Secrets ==========
+.env
+.env.*
+!.env.example
+!.dev.vars.example
+
+# ========== IDE ==========
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+.DS_Store
+
+# ========== Logs ==========
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ========== Testing ==========
+coverage/
+.nyc_output/
+
+# ========== Turbo ==========
+.turbo/
+
+# ========== Database ==========
+*.sqlite
+*.sqlite-journal
+*.db
+
+# ========== Misc ==========
+*.tgz
+.cache/
+tmp/

@@ -1,0 +1,35 @@
+# SkillsCat Indexing Worker
+# 消费 indexing 队列，获取 GitHub 仓库信息并入库
+# 复制此文件为 wrangler.indexing.toml 并填入你的配置
+
+name = "skillscat-indexing"
+main = "workers/indexing/src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Queue Consumer - 消费 indexing 队列
+[[queues.consumers]]
+queue = "skillscat-indexing"
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+dead_letter_queue = "skillscat-indexing-dlq"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-database-id>"
+
+# R2 Storage - 缓存 SKILL.md 内容
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+# Queue Producer - 发送到 classification 队列
+[[queues.producers]]
+binding = "CLASSIFICATION_QUEUE"
+queue = "skillscat-classification"
+
+[vars]
+GITHUB_API_VERSION = "2022-11-28"

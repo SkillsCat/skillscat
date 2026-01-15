@@ -1,0 +1,31 @@
+# SkillsCat Classification Worker
+# 消费 classification 队列，使用 AI 对 skill 进行分类
+# 复制此文件为 wrangler.classification.toml 并填入你的配置
+
+name = "skillscat-classification"
+main = "workers/classification/src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Queue Consumer - 消费 classification 队列
+[[queues.consumers]]
+queue = "skillscat-classification"
+max_batch_size = 5
+max_batch_timeout = 60
+max_retries = 3
+dead_letter_queue = "skillscat-classification-dlq"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-database-id>"
+
+# R2 Storage - 读取缓存的 SKILL.md 内容
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+[vars]
+AI_MODEL = "deepseek/deepseek-chat"
+AI_FALLBACK_MODEL = "openai/gpt-4o-mini"
