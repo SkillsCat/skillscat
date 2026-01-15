@@ -10,7 +10,7 @@
  */
 
 import type {
-  Env,
+  IndexingEnv,
   IndexingMessage,
   ClassificationMessage,
   GitHubRepo,
@@ -19,26 +19,17 @@ import type {
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
-/**
- * 生成唯一 ID
- */
 function generateId(): string {
   return crypto.randomUUID();
 }
 
-/**
- * 生成 slug
- */
 function generateSlug(owner: string, name: string): string {
   return `${owner}-${name}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
 }
 
-/**
- * GitHub API 请求
- */
 async function githubFetch<T>(
   url: string,
-  env: Env
+  env: IndexingEnv
 ): Promise<T | null> {
   const headers: HeadersInit = {
     Accept: 'application/vnd.github+json',
@@ -63,27 +54,20 @@ async function githubFetch<T>(
   return response.json();
 }
 
-/**
- * 获取仓库信息
- */
 async function getRepoInfo(
   owner: string,
   name: string,
-  env: Env
+  env: IndexingEnv
 ): Promise<GitHubRepo | null> {
   const url = `${GITHUB_API_BASE}/repos/${owner}/${name}`;
   return githubFetch<GitHubRepo>(url, env);
 }
 
-/**
- * 获取 SKILL.md 内容
- */
 async function getSkillMd(
   owner: string,
   name: string,
-  env: Env
+  env: IndexingEnv
 ): Promise<GitHubContent | null> {
-  // 尝试多个可能的路径
   const paths = ['SKILL.md', '.claude/SKILL.md', 'skill.md', '.claude/skill.md'];
 
   for (const path of paths) {
@@ -97,20 +81,14 @@ async function getSkillMd(
   return null;
 }
 
-/**
- * 解码 Base64 内容
- */
 function decodeBase64(content: string): string {
   return atob(content.replace(/\n/g, ''));
 }
 
-/**
- * 检查 skill 是否已存在
- */
 async function skillExists(
   owner: string,
   name: string,
-  env: Env
+  env: IndexingEnv
 ): Promise<boolean> {
   const result = await env.DB.prepare(
     'SELECT id FROM skills WHERE repo_owner = ? AND repo_name = ? LIMIT 1'
@@ -121,12 +99,9 @@ async function skillExists(
   return result !== null;
 }
 
-/**
- * 创建或更新 author
- */
 async function upsertAuthor(
   repo: GitHubRepo,
-  env: Env
+  env: IndexingEnv
 ): Promise<string> {
   const authorId = `github-${repo.owner.id}`;
   const now = Date.now();
@@ -153,31 +128,25 @@ async function upsertAuthor(
   return authorId;
 }
 
-/**
- * 创建 skill 记录
- */
 async function createSkill(
   repo: GitHubRepo,
   skillMd: GitHubContent,
   authorId: string,
-  env: Env
+  env: IndexingEnv
 ): Promise<string> {
   const skillId = generateId();
   const slug = generateSlug(repo.owner.login, repo.name);
   const now = Date.now();
 
-  // 从 SKILL.md 提取名称和描述
   let name = repo.name;
   let description = repo.description;
 
   if (skillMd.content) {
     const content = decodeBase64(skillMd.content);
-    // 尝试从 SKILL.md 提取标题
     const titleMatch = content.match(/^#\s+(.+)$/m);
     if (titleMatch) {
       name = titleMatch[1].trim();
     }
-    // 尝试提取第一段作为描述
     const descMatch = content.match(/^#.+\n+(.+?)(?:\n\n|\n#|$)/s);
     if (descMatch) {
       description = descMatch[1].trim().slice(0, 500);
@@ -206,7 +175,7 @@ async function createSkill(
       repo.license?.spdx_id || null,
       JSON.stringify(repo.topics || []),
       authorId,
-      0, // initial trending score
+      0,
       now,
       now,
       now
@@ -216,14 +185,11 @@ async function createSkill(
   return skillId;
 }
 
-/**
- * 更新 skill 记录
- */
 async function updateSkill(
   owner: string,
   name: string,
   repo: GitHubRepo,
-  env: Env
+  env: IndexingEnv
 ): Promise<string | null> {
   const now = Date.now();
 
@@ -255,15 +221,12 @@ async function updateSkill(
   return result?.id || null;
 }
 
-/**
- * 缓存 SKILL.md 到 R2
- */
 async function cacheSkillMd(
   skillId: string,
   owner: string,
   name: string,
   skillMd: GitHubContent,
-  env: Env
+  env: IndexingEnv
 ): Promise<string> {
   const r2Path = `skills/${owner}/${name}/SKILL.md`;
 
@@ -289,44 +252,36 @@ async function cacheSkillMd(
   return r2Path;
 }
 
-/**
- * 处理单个消息
- */
 async function processMessage(
   message: IndexingMessage,
-  env: Env
+  env: IndexingEnv
 ): Promise<void> {
   const { repoOwner, repoName } = message;
 
   console.log(`Processing repo: ${repoOwner}/${repoName}`);
 
-  // 1. 获取仓库信息
   const repo = await getRepoInfo(repoOwner, repoName, env);
   if (!repo) {
     console.log(`Repo not found: ${repoOwner}/${repoName}`);
     return;
   }
 
-  // 跳过 fork 仓库
   if (repo.fork) {
     console.log(`Skipping fork: ${repoOwner}/${repoName}`);
     return;
   }
 
-  // 2. 检查 SKILL.md 是否存在
   const skillMd = await getSkillMd(repoOwner, repoName, env);
   if (!skillMd) {
     console.log(`No SKILL.md found: ${repoOwner}/${repoName}`);
     return;
   }
 
-  // 3. 检查是否已存在
   const exists = await skillExists(repoOwner, repoName, env);
 
   let skillId: string;
 
   if (exists) {
-    // 更新现有记录
     const updatedId = await updateSkill(repoOwner, repoName, repo, env);
     if (!updatedId) {
       console.error(`Failed to update skill: ${repoOwner}/${repoName}`);
@@ -335,16 +290,13 @@ async function processMessage(
     skillId = updatedId;
     console.log(`Updated skill: ${skillId}`);
   } else {
-    // 创建新记录
     const authorId = await upsertAuthor(repo, env);
     skillId = await createSkill(repo, skillMd, authorId, env);
     console.log(`Created skill: ${skillId}`);
   }
 
-  // 4. 缓存 SKILL.md 到 R2
   const r2Path = await cacheSkillMd(skillId, repoOwner, repoName, skillMd, env);
 
-  // 5. 发送到 classification 队列
   const classificationMessage: ClassificationMessage = {
     type: 'classify',
     skillId,
@@ -358,12 +310,9 @@ async function processMessage(
 }
 
 export default {
-  /**
-   * Queue Consumer Handler
-   */
   async queue(
     batch: MessageBatch<IndexingMessage>,
-    env: Env,
+    env: IndexingEnv,
     ctx: ExecutionContext
   ): Promise<void> {
     console.log(`Processing batch of ${batch.messages.length} messages`);
@@ -379,12 +328,9 @@ export default {
     }
   },
 
-  /**
-   * HTTP Handler (用于健康检查和手动触发)
-   */
   async fetch(
     request: Request,
-    env: Env,
+    env: IndexingEnv,
     ctx: ExecutionContext
   ): Promise<Response> {
     const url = new URL(request.url);

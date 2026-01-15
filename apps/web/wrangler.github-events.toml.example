@@ -1,9 +1,9 @@
-# SkillsCat GitHub Events Worker
-# 轮询 GitHub Events API，发现新的 SKILL.md 文件
+# GitHub Events Worker 配置
 # 复制此文件为 wrangler.github-events.toml 并填入你的配置
+# 轮询 GitHub Events API，发现新的 SKILL.md 文件
 
 name = "skillscat-github-events"
-main = "workers/github-events/src/index.ts"
+main = "workers/github-events.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
@@ -11,7 +11,7 @@ compatibility_flags = ["nodejs_compat"]
 [triggers]
 crons = ["*/5 * * * *"]
 
-# D1 Database - 用于记录已处理的事件
+# D1 Database
 [[d1_databases]]
 binding = "DB"
 database_name = "skillscat-db"
@@ -21,6 +21,11 @@ database_id = "<your-database-id>"
 [[kv_namespaces]]
 binding = "KV"
 id = "<your-kv-namespace-id>"
+
+# R2 Storage
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
 
 # Queue - 发送到 indexing 队列
 [[queues.producers]]

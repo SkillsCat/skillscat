@@ -1,9 +1,9 @@
-# SkillsCat Classification Worker
-# 消费 classification 队列，使用 AI 对 skill 进行分类
+# Classification Worker 配置
 # 复制此文件为 wrangler.classification.toml 并填入你的配置
+# 消费 classification 队列，使用 AI 对 skill 进行分类
 
 name = "skillscat-classification"
-main = "workers/classification/src/index.ts"
+main = "workers/classification.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
@@ -25,6 +25,11 @@ database_id = "<your-database-id>"
 [[r2_buckets]]
 binding = "R2"
 bucket_name = "skillscat-storage"
+
+# KV Namespace
+[[kv_namespaces]]
+binding = "KV"
+id = "<your-kv-namespace-id>"
 
 [vars]
 AI_MODEL = "deepseek/deepseek-chat"

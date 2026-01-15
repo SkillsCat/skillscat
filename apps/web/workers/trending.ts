@@ -9,7 +9,7 @@
  */
 
 import type {
-  Env,
+  TrendingEnv,
   StarSnapshot,
   SkillRecord,
   GitHubRepoData,
@@ -18,9 +18,6 @@ import type {
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
-/**
- * 计算 trending score
- */
 export function calculateTrendingScore(skill: {
   stars: number;
   starSnapshots: StarSnapshot[];
@@ -29,10 +26,8 @@ export function calculateTrendingScore(skill: {
 }): number {
   const now = Date.now();
 
-  // BaseScore: 基于 stars 的对数分数
   const baseScore = Math.log10(skill.stars + 1) * 10;
 
-  // VelocityMultiplier: 增速乘数
   const stars7dAgo = getStarsAtDaysAgo(skill.starSnapshots, 7, skill.stars);
   const stars30dAgo = getStarsAtDaysAgo(skill.starSnapshots, 30, skill.stars);
 
@@ -51,11 +46,9 @@ export function calculateTrendingScore(skill: {
     Math.max(1.0, 1.0 + Math.log2(dailyGrowth7d + 1) * Math.min(acceleration, 3) * 0.4)
   );
 
-  // RecencyBoost: 新鲜度加成
   const daysSinceIndexed = (now - skill.indexedAt) / 86400000;
   const recencyBoost = Math.max(1.0, 1.5 - daysSinceIndexed / 14);
 
-  // ActivityPenalty: 活跃度惩罚
   let activityPenalty = 1.0;
   if (skill.lastCommitAt) {
     const daysSinceCommit = (now - skill.lastCommitAt) / 86400000;
@@ -69,9 +62,6 @@ export function calculateTrendingScore(skill: {
   return Math.round(score * 100) / 100;
 }
 
-/**
- * 获取 N 天前的 stars 数量
- */
 function getStarsAtDaysAgo(
   snapshots: StarSnapshot[],
   daysAgo: number,
@@ -92,9 +82,6 @@ function getStarsAtDaysAgo(
   return snapshots[0]?.s ?? currentStars;
 }
 
-/**
- * 压缩 star 快照 (保留最多 20 个点)
- */
 function compressSnapshots(snapshots: StarSnapshot[]): StarSnapshot[] {
   if (snapshots.length <= 20) return snapshots;
 
@@ -106,14 +93,12 @@ function compressSnapshots(snapshots: StarSnapshot[]): StarSnapshot[] {
     const date = new Date(snap.d);
     const daysAgo = (now.getTime() - date.getTime()) / 86400000;
 
-    // 保留规则
     const isFirst = i === 0;
     const isLast = i === snapshots.length - 1;
-    const isRecent = daysAgo <= 7; // 最近 7 天
-    const isWeekly = daysAgo <= 56 && date.getDay() === 0; // 8 周内的周日
-    const isMonthly = daysAgo > 56 && date.getDate() === 1; // 更早的月初
+    const isRecent = daysAgo <= 7;
+    const isWeekly = daysAgo <= 56 && date.getDay() === 0;
+    const isMonthly = daysAgo > 56 && date.getDate() === 1;
 
-    // 显著变化 (> 10%)
     const prev = snapshots[i - 1];
     const isSignificant =
       prev && prev.s > 0 && Math.abs(snap.s - prev.s) / prev.s > 0.1;
@@ -126,13 +111,10 @@ function compressSnapshots(snapshots: StarSnapshot[]): StarSnapshot[] {
   return result.slice(-20);
 }
 
-/**
- * 获取 GitHub 仓库数据
- */
 async function fetchGitHubRepo(
   owner: string,
   name: string,
-  env: Env
+  env: TrendingEnv
 ): Promise<GitHubRepoData | null> {
   const url = `${GITHUB_API_BASE}/repos/${owner}/${name}`;
 
@@ -166,11 +148,7 @@ async function fetchGitHubRepo(
   };
 }
 
-/**
- * 更新需要更新的 skills (从 KV 标记)
- */
-async function updateMarkedSkills(env: Env): Promise<number> {
-  // 获取需要更新的 skill IDs
+async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
   const list = await env.KV.list({ prefix: 'needs_update:', limit: 100 });
 
   if (list.keys.length === 0) {
@@ -179,7 +157,6 @@ async function updateMarkedSkills(env: Env): Promise<number> {
 
   const skillIds = list.keys.map((k) => k.name.replace('needs_update:', ''));
 
-  // 从 D1 获取 skill 信息
   const placeholders = skillIds.map(() => '?').join(',');
   const skills = await env.DB.prepare(`
     SELECT id, repo_owner, repo_name, stars, star_snapshots, indexed_at, last_commit_at
@@ -197,19 +174,16 @@ async function updateMarkedSkills(env: Env): Promise<number> {
     score: number;
   }> = [];
 
-  // 批量获取 GitHub 数据
   for (const skill of skills.results) {
     try {
       const ghData = await fetchGitHubRepo(skill.repo_owner, skill.repo_name, env);
 
       if (!ghData) continue;
 
-      // 解析现有快照
       const snapshots: StarSnapshot[] = skill.star_snapshots
         ? JSON.parse(skill.star_snapshots)
         : [];
 
-      // 添加新快照 (如果 stars 变化)
       if (ghData.stars !== skill.stars) {
         snapshots.push({
           d: new Date().toISOString().split('T')[0],
@@ -217,10 +191,8 @@ async function updateMarkedSkills(env: Env): Promise<number> {
         });
       }
 
-      // 压缩快照
       const compressed = compressSnapshots(snapshots);
 
-      // 计算 trending score
       const score = calculateTrendingScore({
         stars: ghData.stars,
         starSnapshots: compressed,
@@ -241,7 +213,6 @@ async function updateMarkedSkills(env: Env): Promise<number> {
     }
   }
 
-  // 批量写入 D1
   if (updates.length > 0) {
     const now = Date.now();
     const statements = updates.map((u) =>
@@ -255,19 +226,14 @@ async function updateMarkedSkills(env: Env): Promise<number> {
     await env.DB.batch(statements);
   }
 
-  // 清理 KV 标记
   await Promise.all(list.keys.map((k) => env.KV.delete(k.name)));
 
   return updates.length;
 }
 
-/**
- * 更新所有 skills 的 trending score (不获取 GitHub 数据)
- */
-async function recalculateAllScores(env: Env): Promise<number> {
-  // 获取所有 skills
+async function recalculateAllScores(env: TrendingEnv): Promise<number> {
   const skills = await env.DB.prepare(`
-    SELECT id, stars, star_snapshots, indexed_at, last_commit_at
+    SELECT id, stars, star_snapshots, indexed_at, last_commit_at, trending_score
     FROM skills
   `).all<SkillRecord>();
 
@@ -285,13 +251,11 @@ async function recalculateAllScores(env: Env): Promise<number> {
       lastCommitAt: skill.last_commit_at,
     });
 
-    // 只有分数变化才更新
     if (Math.abs(score - skill.trending_score) > 0.01) {
       updates.push({ id: skill.id, score });
     }
   }
 
-  // 批量更新 (每批最多 100 条)
   const now = Date.now();
   for (let i = 0; i < updates.length; i += 100) {
     const batch = updates.slice(i, i + 100);
@@ -306,13 +270,9 @@ async function recalculateAllScores(env: Env): Promise<number> {
   return updates.length;
 }
 
-/**
- * 重新生成缓存列表
- */
-async function regenerateListCaches(env: Env): Promise<void> {
+async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   const now = Date.now();
 
-  // Trending 列表
   const trending = await env.DB.prepare(`
     SELECT s.id, s.name, s.slug, s.description, s.repo_owner, s.repo_name,
            s.stars, s.forks, s.trending_score, s.updated_at,
@@ -329,7 +289,6 @@ async function regenerateListCaches(env: Env): Promise<void> {
     { httpMetadata: { contentType: 'application/json' } }
   );
 
-  // Top 列表 (by stars)
   const top = await env.DB.prepare(`
     SELECT s.id, s.name, s.slug, s.description, s.repo_owner, s.repo_name,
            s.stars, s.forks, s.trending_score, s.updated_at,
@@ -346,7 +305,6 @@ async function regenerateListCaches(env: Env): Promise<void> {
     { httpMetadata: { contentType: 'application/json' } }
   );
 
-  // Recent 列表
   const recent = await env.DB.prepare(`
     SELECT s.id, s.name, s.slug, s.description, s.repo_owner, s.repo_name,
            s.stars, s.forks, s.trending_score, s.updated_at,
@@ -367,37 +325,27 @@ async function regenerateListCaches(env: Env): Promise<void> {
 }
 
 export default {
-  /**
-   * Cron Trigger Handler
-   * 每小时执行一次
-   */
   async scheduled(
     controller: ScheduledController,
-    env: Env,
+    env: TrendingEnv,
     ctx: ExecutionContext
   ): Promise<void> {
     console.log('Trending Worker triggered at:', new Date().toISOString());
 
-    // 1. 更新标记的 skills (从 KV)
     const markedUpdates = await updateMarkedSkills(env);
     console.log(`Updated ${markedUpdates} marked skills`);
 
-    // 2. 重新计算所有 trending scores
     const scoreUpdates = await recalculateAllScores(env);
     console.log(`Recalculated ${scoreUpdates} trending scores`);
 
-    // 3. 重新生成缓存
     await regenerateListCaches(env);
 
     console.log('Trending update completed');
   },
 
-  /**
-   * HTTP Handler (用于健康检查和手动触发)
-   */
   async fetch(
     request: Request,
-    env: Env,
+    env: TrendingEnv,
     ctx: ExecutionContext
   ): Promise<Response> {
     const url = new URL(request.url);

@@ -1,9 +1,9 @@
-# SkillsCat Indexing Worker
-# 消费 indexing 队列，获取 GitHub 仓库信息并入库
+# Indexing Worker 配置
 # 复制此文件为 wrangler.indexing.toml 并填入你的配置
+# 消费 indexing 队列，获取 GitHub 仓库信息并入库
 
 name = "skillscat-indexing"
-main = "workers/indexing/src/index.ts"
+main = "workers/indexing.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
@@ -25,6 +25,11 @@ database_id = "<your-database-id>"
 [[r2_buckets]]
 binding = "R2"
 bucket_name = "skillscat-storage"
+
+# KV Namespace
+[[kv_namespaces]]
+binding = "KV"
+id = "<your-kv-namespace-id>"
 
 # Queue Producer - 发送到 classification 队列
 [[queues.producers]]

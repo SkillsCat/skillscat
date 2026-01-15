@@ -1,3 +1,7 @@
 packages:
-  - "apps/*"
-  - "workers/*"
+  - apps/*
+
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - workerd

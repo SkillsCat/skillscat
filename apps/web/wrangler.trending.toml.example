@@ -1,9 +1,9 @@
-# SkillsCat Trending Worker
-# 定时计算 trending 分数
+# Trending Worker 配置
 # 复制此文件为 wrangler.trending.toml 并填入你的配置
+# 定时计算 trending 分数
 
 name = "skillscat-trending"
-main = "workers/trending/src/index.ts"
+main = "workers/trending.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
@@ -17,8 +17,17 @@ binding = "DB"
 database_name = "skillscat-db"
 database_id = "<your-database-id>"
 
+# R2 Storage - 生成缓存列表
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+# KV Namespace - 读取需要更新的标记
+[[kv_namespaces]]
+binding = "KV"
+id = "<your-kv-namespace-id>"
+
 [vars]
-# Trending 算法参数
 TRENDING_DECAY_HOURS = "72"
 TRENDING_STAR_WEIGHT = "1.0"
 TRENDING_FORK_WEIGHT = "2.0"

@@ -15,7 +15,6 @@ SkillsCat 是一个 Claude Code Skills 收集与分享平台，基于 SvelteKit 
 - **存储**: Cloudflare R2
 - **队列**: Cloudflare Queues
 - **认证**: Better Auth (GitHub + Google OAuth)
-- **Monorepo**: Turborepo + pnpm
 
 ## 项目结构
 
@@ -33,20 +32,23 @@ skillscat/
 │       │   │   └── utils/          # 工具函数
 │       │   ├── routes/             # 页面路由
 │       │   └── app.css             # 全局样式
-│       └── static/                 # 静态资源
-├── workers/
-│   ├── github-events/              # GitHub 事件轮询 (Cron)
-│   ├── indexing/                   # 入库处理 (Queue Consumer)
-│   ├── classification/             # AI 分类 (Queue Consumer)
-│   └── trending/                   # Trending 计算 (Cron)
+│       ├── workers/                # Cloudflare Workers (独立 TS 文件)
+│       │   ├── github-events.ts    # GitHub 事件轮询 (Cron)
+│       │   ├── indexing.ts         # 入库处理 (Queue Consumer)
+│       │   ├── classification.ts   # AI 分类 (Queue Consumer)
+│       │   ├── trending.ts         # Trending 计算 (Cron)
+│       │   ├── types.ts            # Workers 共享类型
+│       │   └── categories.ts       # 分类定义
+│       ├── scripts/
+│       │   └── preview.mjs         # Preview 启动脚本
+│       ├── static/                 # 静态资源
+│       ├── wrangler.preview.toml   # Web 主站配置
+│       ├── wrangler.github-events.toml
+│       ├── wrangler.indexing.toml
+│       ├── wrangler.classification.toml
+│       └── wrangler.trending.toml
 ├── scripts/
-│   └── dev-workers.mjs             # 多 Worker 开发脚本
-├── wrangler.web.toml.example       # Web Worker 配置示例
-├── wrangler.github-events.toml.example
-├── wrangler.indexing.toml.example
-├── wrangler.classification.toml.example
-├── wrangler.trending.toml.example
-├── turbo.json
+│   └── init.mjs                    # 项目初始化脚本
 ├── pnpm-workspace.yaml
 └── CLAUDE.md
 ```
@@ -86,14 +88,12 @@ pnpm init:local         # 仅本地配置，不创建 Cloudflare 资源
 # 安装依赖
 pnpm install
 
-# 开发模式 (仅 Web)
+# 开发模式 (仅 SvelteKit，热重载)
 pnpm dev
+pnpm dev:web            # 同上
 
-# 开发模式 (Web + Workers)
-pnpm dev:all
-
-# 开发模式 (仅 Workers)
-pnpm dev:workers
+# 预览模式 (完整项目，包含所有 Workers)
+pnpm preview:web        # 启动 Web + 所有 Workers
 
 # 构建
 pnpm build
@@ -112,35 +112,26 @@ pnpm deploy
 pnpm init:project
 
 # 2. 脚本会自动:
-#    - 复制 wrangler.*.toml.example 到 wrangler.*.toml
 #    - 生成随机 secrets (BETTER_AUTH_SECRET, WORKER_SECRET)
 #    - 创建 .dev.vars 文件
 #    - (可选) 创建 Cloudflare 资源 (D1, R2, KV, Queues)
-#    - (可选) 更新 wrangler.toml 中的资源 ID
 
 # 3. 启动开发服务器
-pnpm dev
+pnpm dev                # 仅 SvelteKit (推荐日常开发)
+pnpm preview:web        # 完整预览 (包含 Workers)
 ```
 
 ## Wrangler 配置
 
-项目使用多个 wrangler 配置文件，每个 Worker 一个。
+所有 wrangler 配置文件位于 `apps/web/` 目录下：
 
-**推荐**: 使用 `pnpm init:project` 自动配置。
+- `wrangler.preview.toml` - Web 主站配置
+- `wrangler.github-events.toml` - GitHub 事件轮询 Worker
+- `wrangler.indexing.toml` - 入库处理 Worker
+- `wrangler.classification.toml` - AI 分类 Worker
+- `wrangler.trending.toml` - Trending 计算 Worker
 
-**手动配置**:
-```bash
-# 复制示例配置
-cp wrangler.web.toml.example wrangler.web.toml
-cp wrangler.github-events.toml.example wrangler.github-events.toml
-cp wrangler.indexing.toml.example wrangler.indexing.toml
-cp wrangler.classification.toml.example wrangler.classification.toml
-cp wrangler.trending.toml.example wrangler.trending.toml
-
-# 编辑配置，填入你的 database_id, kv_id 等
-```
-
-**注意**: `wrangler.*.toml` 文件已被 gitignore，只有 `.example` 文件会被提交。
+Preview 模式会合并所有配置文件启动完整项目。
 
 ## 开发规范
 
@@ -173,7 +164,7 @@ cp wrangler.trending.toml.example wrangler.trending.toml
 
 ## 环境变量
 
-创建 `.dev.vars` 文件 (不提交):
+在 `apps/web/` 目录下创建 `.dev.vars` 文件 (不提交):
 
 ```
 GITHUB_CLIENT_ID=xxx

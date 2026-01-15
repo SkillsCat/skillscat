@@ -1,7 +1,5 @@
 /**
  * Predefined categories for skill classification
- * This is a copy from apps/web/src/lib/constants/categories.ts
- * Keep in sync!
  */
 
 import type { Category } from './types';
