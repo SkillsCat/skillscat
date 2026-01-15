@@ -21,4 +21,5 @@ export { default as MarkdownRenderer } from './MarkdownRenderer.svelte';
 export { default as CodeViewer } from './CodeViewer.svelte';
 export { default as InstallDialog } from './InstallDialog.svelte';
 export { default as SubmitDialog } from './SubmitDialog.svelte';
+export { default as LoginDialog } from './LoginDialog.svelte';
 export { default as SEO } from './SEO.svelte';
