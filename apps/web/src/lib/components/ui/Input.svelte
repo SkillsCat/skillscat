@@ -1,10 +1,11 @@
 <script lang="ts">
   import type { HTMLInputAttributes } from 'svelte/elements';
 
-  interface Props extends HTMLInputAttributes {
+  interface Props extends Omit<HTMLInputAttributes, 'value'> {
     label?: string;
     error?: string;
     icon?: 'search' | 'link' | 'user' | 'mail' | null;
+    value?: string;
   }
 
   let {
@@ -13,6 +14,7 @@
     icon = null,
     class: className = '',
     id,
+    value = $bindable(''),
     ...restProps
   }: Props = $props();
 
@@ -55,6 +57,7 @@
 
     <input
       id={inputId}
+      bind:value
       class="input {icon ? 'pl-10' : ''} {error ? 'border-error focus:ring-error/30 focus:border-error' : ''} {className}"
       {...restProps}
     />

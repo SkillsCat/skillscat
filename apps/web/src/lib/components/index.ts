@@ -1,25 +1,36 @@
-export { default as Button } from './Button.svelte';
-export { default as ThemeToggle } from './ThemeToggle.svelte';
-export { default as Input } from './Input.svelte';
-export { default as SearchBox } from './SearchBox.svelte';
-export { default as SkillCard } from './SkillCard.svelte';
-export { default as SkillCardCompact } from './SkillCardCompact.svelte';
-export { default as Logo } from './Logo.svelte';
-export { default as Navbar } from './Navbar.svelte';
-export { default as Footer } from './Footer.svelte';
-export { default as Section } from './Section.svelte';
-export { default as Grid } from './Grid.svelte';
-export { default as StatsBanner } from './StatsBanner.svelte';
-export { default as ListPage } from './ListPage.svelte';
-export { default as CopyButton } from './CopyButton.svelte';
-export { default as StatItem } from './StatItem.svelte';
-export { default as UserMenu } from './UserMenu.svelte';
-export { default as EmptyState } from './EmptyState.svelte';
-export { default as ErrorState } from './ErrorState.svelte';
-export { default as FileBrowser } from './FileBrowser.svelte';
-export { default as MarkdownRenderer } from './MarkdownRenderer.svelte';
-export { default as CodeViewer } from './CodeViewer.svelte';
-export { default as InstallDialog } from './InstallDialog.svelte';
-export { default as SubmitDialog } from './SubmitDialog.svelte';
-export { default as LoginDialog } from './LoginDialog.svelte';
-export { default as SEO } from './SEO.svelte';
+// UI Components
+export { default as Button } from './ui/Button.svelte';
+export { default as Input } from './ui/Input.svelte';
+export { default as CopyButton } from './ui/CopyButton.svelte';
+export { default as ThemeToggle } from './ui/ThemeToggle.svelte';
+
+// Layout Components
+export { default as Navbar } from './layout/Navbar.svelte';
+export { default as Footer } from './layout/Footer.svelte';
+export { default as Section } from './layout/Section.svelte';
+export { default as Grid } from './layout/Grid.svelte';
+export { default as ListPage } from './layout/ListPage.svelte';
+
+// Dialog Components
+export { default as LoginDialog } from './dialog/LoginDialog.svelte';
+export { default as SubmitDialog } from './dialog/SubmitDialog.svelte';
+export { default as InstallDialog } from './dialog/InstallDialog.svelte';
+
+// Skill Components
+export { default as SkillCard } from './skill/SkillCard.svelte';
+export { default as SkillCardCompact } from './skill/SkillCardCompact.svelte';
+export { default as FileBrowser } from './skill/FileBrowser.svelte';
+export { default as CodeViewer } from './skill/CodeViewer.svelte';
+export { default as MarkdownRenderer } from './skill/MarkdownRenderer.svelte';
+
+// Feedback Components
+export { default as EmptyState } from './feedback/EmptyState.svelte';
+export { default as ErrorState } from './feedback/ErrorState.svelte';
+
+// Common Components
+export { default as Logo } from './common/Logo.svelte';
+export { default as SearchBox } from './common/SearchBox.svelte';
+export { default as UserMenu } from './common/UserMenu.svelte';
+export { default as StatsBanner } from './common/StatsBanner.svelte';
+export { default as StatItem } from './common/StatItem.svelte';
+export { default as SEO } from './common/SEO.svelte';

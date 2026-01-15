@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { Button } from '$lib/components';
+
   interface Props {
     emoji?: string;
     title: string;
@@ -17,8 +19,8 @@
     <p class="text-fg-muted mb-6 max-w-md mx-auto">{description}</p>
   {/if}
   {#if actionText && actionHref}
-    <a href={actionHref} class="btn btn-primary">
+    <Button href={actionHref} variant="primary">
       {actionText}
-    </a>
+    </Button>
   {/if}
 </div>

@@ -142,14 +142,14 @@
 
 <style>
   .prose {
-    color: var(--color-fg);
+    color: var(--foreground);
   }
 
   .prose h1 {
     font-size: 2.25rem;
     font-weight: 700;
     margin-bottom: 1rem;
-    color: var(--color-fg);
+    color: var(--foreground);
   }
 
   .prose h2 {
@@ -157,7 +157,7 @@
     font-weight: 600;
     margin-top: 2rem;
     margin-bottom: 1rem;
-    color: var(--color-fg);
+    color: var(--foreground);
   }
 
   .prose h3 {
@@ -165,18 +165,18 @@
     font-weight: 600;
     margin-top: 1.5rem;
     margin-bottom: 0.75rem;
-    color: var(--color-fg);
+    color: var(--foreground);
   }
 
   .prose p {
     margin-bottom: 1rem;
     line-height: 1.75;
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
   }
 
   .prose .lead {
     font-size: 1.125rem;
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
   }
 
   .prose ul {
@@ -188,16 +188,16 @@
   .prose li {
     margin-bottom: 0.5rem;
     line-height: 1.75;
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
   }
 
   .prose strong {
     font-weight: 600;
-    color: var(--color-fg);
+    color: var(--foreground);
   }
 
   .prose a {
-    color: var(--color-primary);
+    color: var(--primary);
     text-decoration: none;
   }
 

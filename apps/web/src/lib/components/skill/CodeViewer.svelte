@@ -118,8 +118,8 @@
   .code-viewer {
     border-radius: 0.5rem;
     overflow: hidden;
-    background-color: var(--color-bg-subtle);
-    border: 1px solid var(--color-border);
+    background-color: var(--card);
+    border: 1px solid var(--border);
   }
 
   .code-header {
@@ -127,19 +127,19 @@
     align-items: center;
     justify-content: space-between;
     padding: 0.5rem 1rem;
-    background-color: var(--color-bg-muted);
-    border-bottom: 1px solid var(--color-border);
+    background-color: var(--muted);
+    border-bottom: 1px solid var(--border);
     font-size: 0.75rem;
   }
 
   .code-filename {
     font-family: var(--font-mono, ui-monospace, monospace);
-    color: var(--color-fg);
+    color: var(--foreground);
     font-weight: 500;
   }
 
   .code-language {
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
     text-transform: uppercase;
   }
 
@@ -165,7 +165,7 @@
     font-size: 0.875rem;
     line-height: 1.6;
     font-family: var(--font-mono, ui-monospace, monospace);
-    color: var(--color-fg);
+    color: var(--foreground);
   }
 
   /* Shiki theme support */

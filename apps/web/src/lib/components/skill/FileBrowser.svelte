@@ -158,7 +158,7 @@
     padding: 0.375rem 0.5rem;
     border: none;
     background: transparent;
-    color: var(--color-fg);
+    color: var(--foreground);
     text-align: left;
     cursor: pointer;
     border-radius: 0.375rem;
@@ -166,12 +166,12 @@
   }
 
   .file-item:hover {
-    background-color: var(--color-bg-subtle);
+    background-color: var(--card);
   }
 
   .file-item.selected {
-    background-color: var(--color-primary-subtle);
-    color: var(--color-primary);
+    background-color: var(--primary-subtle);
+    color: var(--primary);
   }
 
   .expand-icon {
@@ -205,7 +205,7 @@
   }
 
   .file-size {
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
     font-size: 0.75rem;
   }
 </style>

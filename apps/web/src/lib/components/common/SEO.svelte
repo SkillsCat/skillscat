@@ -33,8 +33,10 @@
 
   const siteName = 'SkillsCat';
   const siteUrl = 'https://skillscat.dev';
-  const fullUrl = url ? `${siteUrl}${url}` : siteUrl;
-  const fullImage = image.startsWith('http') ? image : `${siteUrl}${image}`;
+
+  // Use $derived for computed values that depend on props
+  const fullUrl = $derived(url ? `${siteUrl}${url}` : siteUrl);
+  const fullImage = $derived(image.startsWith('http') ? image : `${siteUrl}${image}`);
 
   // Default structured data for the website
   const defaultStructuredData = {
@@ -53,7 +55,7 @@
     },
   };
 
-  const jsonLd = structuredData || defaultStructuredData;
+  const jsonLd = $derived(structuredData || defaultStructuredData);
 </script>
 
 <svelte:head>

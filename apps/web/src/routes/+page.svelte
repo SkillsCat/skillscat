@@ -31,11 +31,10 @@
   <!-- Hero -->
   <div class="text-center mb-16">
     <h1 class="text-4xl md:text-5xl font-bold text-fg mb-4">
-      Discover Claude Code Skills
+      Find, install, and share skills with the community.
     </h1>
     <p class="text-lg text-fg-muted max-w-2xl mx-auto">
-      The cutest collection of agent skills for Claude Code.
-      Find, install, and share skills with the community.
+      The cutest collection of agent skills for Claude Code / Codex / Cursor / more..
     </p>
   </div>
 
