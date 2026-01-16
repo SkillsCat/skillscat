@@ -23,9 +23,9 @@ export const load: PageServerLoad = async ({ locals, platform, fetch }) => {
       };
     }
 
-    const data = await response.json();
+    const data = await response.json() as { favorites: SkillCardData[] };
     return {
-      favorites: data.favorites as SkillCardData[],
+      favorites: data.favorites,
       isAuthenticated: true,
     };
   } catch (error) {

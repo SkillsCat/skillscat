@@ -1,5 +1,7 @@
 <script lang="ts">
   import { browser } from '$app/environment';
+  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { Sun02Icon, Moon02Icon } from '@hugeicons/core-free-icons';
 
   let isDark = $state(false);
 
@@ -24,17 +26,44 @@
 
 <button
   onclick={toggleTheme}
-  class="btn btn-ghost p-2 rounded-full"
+  class="theme-toggle"
   aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
 >
-  {#if isDark}
-    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-      <circle cx="12" cy="12" r="5" />
-      <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-    </svg>
-  {:else}
-    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-    </svg>
-  {/if}
+  <span class="icon-wrapper" class:rotate={isDark}>
+    {#if isDark}
+      <HugeiconsIcon icon={Sun02Icon} size={18} strokeWidth={2} />
+    {:else}
+      <HugeiconsIcon icon={Moon02Icon} size={18} strokeWidth={2} />
+    {/if}
+  </span>
 </button>
+
+<style>
+  .theme-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.625rem;
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-lg);
+    color: var(--foreground);
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+
+  .theme-toggle:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    transform: scale(1.1);
+  }
+
+  .icon-wrapper {
+    display: flex;
+    transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+
+  .icon-wrapper.rotate {
+    transform: rotate(180deg);
+  }
+</style>

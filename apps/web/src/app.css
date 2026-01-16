@@ -1,85 +1,190 @@
+/* ===== Google Fonts - Poppins ===== */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
+
 /* ===== CSS 变量标准 (shadcn/bits-ui 兼容) ===== */
 :root {
-  /* ===== 背景色 ===== */
-  --background: oklch(97% 0.02 85);
-  --card: oklch(95% 0.025 85);
-  --muted: oklch(92% 0.03 85);
-  --popover: oklch(97% 0.02 85);
+  /* ===== 背景色 (shadcn 兼容) ===== */
+  --background: oklch(97.5% 0.015 85);
+  --card: oklch(99% 0.008 85);
+  --muted: oklch(94% 0.02 85);
+  --popover: oklch(99% 0.008 85);
 
-  /* ===== 前景色 ===== */
-  --foreground: oklch(25% 0.02 85);
-  --card-foreground: oklch(25% 0.02 85);
-  --muted-foreground: oklch(45% 0.02 85);
-  --popover-foreground: oklch(25% 0.02 85);
+  /* ===== 背景色层级 (UnoCSS 语义化) ===== */
+  --bg-base: oklch(97.5% 0.015 85);
+  --bg-subtle: oklch(99% 0.008 85);
+  --bg-muted: oklch(94% 0.02 85);
+  --bg-emphasis: oklch(90% 0.03 85);
 
-  /* ===== 主题色 (可爱橙黄) ===== */
-  --primary: oklch(75% 0.15 70);
-  --primary-foreground: oklch(98% 0.01 85);
-  --primary-hover: oklch(70% 0.17 70);
-  --primary-subtle: oklch(95% 0.05 70);
+  /* ===== 前景色 (shadcn 兼容) ===== */
+  --foreground: oklch(20% 0.02 85);
+  --card-foreground: oklch(20% 0.02 85);
+  --muted-foreground: oklch(40% 0.02 85);
+  --popover-foreground: oklch(20% 0.02 85);
+
+  /* ===== 前景色层级 (UnoCSS 语义化) ===== */
+  --fg-default: oklch(20% 0.02 85);
+  --fg-muted: oklch(40% 0.02 85);
+  --fg-subtle: oklch(55% 0.02 85);
+  --fg-on-emphasis: oklch(99% 0.005 85);
+
+  /* ===== 主题色 (温暖橙色 - 更鲜艳) ===== */
+  --primary: oklch(72% 0.18 55);
+  --primary-foreground: oklch(99% 0.005 85);
+  --primary-hover: oklch(67% 0.20 55);
+  --primary-active: oklch(62% 0.22 55);
+  --primary-subtle: oklch(95% 0.06 55);
 
   /* ===== 次要色 ===== */
-  --secondary: oklch(92% 0.03 85);
-  --secondary-foreground: oklch(25% 0.02 85);
+  --secondary: oklch(94% 0.02 85);
+  --secondary-foreground: oklch(20% 0.02 85);
 
-  /* ===== 强调色 (可爱粉) ===== */
-  --accent: oklch(75% 0.12 350);
-  --accent-foreground: oklch(98% 0.01 85);
+  /* ===== 强调色 (可爱粉 - 更柔和) ===== */
+  --accent: oklch(78% 0.14 350);
+  --accent-foreground: oklch(99% 0.005 85);
+  --accent-subtle: oklch(96% 0.04 350);
 
   /* ===== 功能色 ===== */
-  --destructive: oklch(65% 0.18 25);
-  --destructive-foreground: oklch(98% 0.01 85);
-  --success: oklch(70% 0.15 145);
-  --warning: oklch(80% 0.14 85);
-  --info: oklch(70% 0.12 240);
+  --destructive: oklch(62% 0.20 25);
+  --destructive-foreground: oklch(99% 0.005 85);
+  --success: oklch(72% 0.16 145);
+  --warning: oklch(82% 0.15 85);
+  --info: oklch(72% 0.14 240);
+  --error: oklch(62% 0.20 25);
 
-  /* ===== 边框和输入框 ===== */
-  --border: oklch(88% 0.02 85);
-  --input: oklch(88% 0.02 85);
-  --ring: oklch(75% 0.15 70);
+  /* ===== 边框 (shadcn 兼容) ===== */
+  --border: oklch(90% 0.015 85);
+  --input: oklch(90% 0.015 85);
+  --ring: oklch(72% 0.18 55);
 
-  /* ===== 圆角 ===== */
-  --radius: 0.5rem;
+  /* ===== 边框层级 (UnoCSS 语义化) ===== */
+  --border-default: oklch(90% 0.015 85);
+  --border-muted: oklch(94% 0.01 85);
+  --border-emphasis: oklch(82% 0.025 85);
 
-  /* ===== 字体 ===== */
-  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* ===== 手绘风格边框 ===== */
+  --border-sketch: oklch(35% 0.02 85);
+
+  /* ===== 圆角系统 (更圆润) ===== */
+  --radius: 0.75rem;
+  --radius-sm: 0.5rem;     /* 8px */
+  --radius-md: 0.75rem;    /* 12px */
+  --radius-lg: 1rem;       /* 16px - 卡片 */
+  --radius-xl: 1.25rem;    /* 20px */
+  --radius-2xl: 1.75rem;   /* 28px - 对话框 */
+  --radius-full: 9999px;   /* 胶囊 */
+
+  /* ===== 间距系统 (4px 基准) ===== */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* ===== 字体 - Poppins ===== */
+  --font-sans: 'Poppins', ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Monaco, Consolas, monospace;
+  --font-display: 'Poppins', var(--font-sans);
 
-  /* ===== 动效 ===== */
+  /* ===== 动效时长 ===== */
   --duration-fast: 150ms;
-  --duration-normal: 200ms;
-  --duration-slow: 300ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+  --duration-slower: 500ms;
+
+  /* ===== 缓动函数 ===== */
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+  /* ===== 阴影系统 (右下方向偏移) ===== */
+  --shadow-sm: 2px 2px 8px -2px rgba(0, 0, 0, 0.08);
+  --shadow-md: 3px 3px 12px -3px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 4px 4px 20px -4px rgba(0, 0, 0, 0.12);
+  --shadow-xl: 6px 6px 32px -6px rgba(0, 0, 0, 0.15);
+  --shadow-cute: 4px 4px 0 0 var(--border-sketch);
+  --shadow-cute-hover: 6px 6px 0 0 var(--border-sketch);
+  --shadow-cute-active: 2px 2px 0 0 var(--border-sketch);
+
+  /* ===== 3D 按钮系统 ===== */
+  --btn-3d-depth: 4px;
+  --btn-3d-depth-hover: 6px;
+  --btn-3d-depth-active: 2px;
 }
 
 /* ===== 暗色主题 ===== */
 :root.dark {
-  --background: oklch(18% 0.02 85);
-  --card: oklch(22% 0.025 85);
-  --muted: oklch(26% 0.03 85);
-  --popover: oklch(22% 0.025 85);
+  /* ===== 背景色 (shadcn 兼容) ===== */
+  --background: oklch(15% 0.015 85);
+  --card: oklch(18% 0.02 85);
+  --muted: oklch(22% 0.025 85);
+  --popover: oklch(18% 0.02 85);
 
-  --foreground: oklch(92% 0.02 85);
-  --card-foreground: oklch(92% 0.02 85);
-  --muted-foreground: oklch(70% 0.02 85);
-  --popover-foreground: oklch(92% 0.02 85);
+  /* ===== 背景色层级 (UnoCSS 语义化) ===== */
+  --bg-base: oklch(15% 0.015 85);
+  --bg-subtle: oklch(18% 0.02 85);
+  --bg-muted: oklch(22% 0.025 85);
+  --bg-emphasis: oklch(28% 0.03 85);
 
-  --primary: oklch(78% 0.14 70);
-  --primary-foreground: oklch(18% 0.02 85);
-  --primary-hover: oklch(82% 0.15 70);
-  --primary-subtle: oklch(25% 0.05 70);
+  /* ===== 前景色 (shadcn 兼容) ===== */
+  --foreground: oklch(95% 0.01 85);
+  --card-foreground: oklch(95% 0.01 85);
+  --muted-foreground: oklch(70% 0.015 85);
+  --popover-foreground: oklch(95% 0.01 85);
 
-  --secondary: oklch(26% 0.03 85);
-  --secondary-foreground: oklch(92% 0.02 85);
+  /* ===== 前景色层级 (UnoCSS 语义化) ===== */
+  --fg-default: oklch(95% 0.01 85);
+  --fg-muted: oklch(70% 0.015 85);
+  --fg-subtle: oklch(55% 0.015 85);
+  --fg-on-emphasis: oklch(15% 0.015 85);
 
-  --accent: oklch(78% 0.11 350);
-  --accent-foreground: oklch(98% 0.01 85);
+  /* ===== 主题色 ===== */
+  --primary: oklch(75% 0.16 55);
+  --primary-foreground: oklch(15% 0.015 85);
+  --primary-hover: oklch(80% 0.17 55);
+  --primary-active: oklch(85% 0.18 55);
+  --primary-subtle: oklch(25% 0.08 55);
 
-  --destructive: oklch(55% 0.2 25);
-  --destructive-foreground: oklch(98% 0.01 85);
+  /* ===== 次要色 ===== */
+  --secondary: oklch(22% 0.025 85);
+  --secondary-foreground: oklch(95% 0.01 85);
 
-  --border: oklch(30% 0.02 85);
-  --input: oklch(30% 0.02 85);
-  --ring: oklch(78% 0.14 70);
+  /* ===== 强调色 ===== */
+  --accent: oklch(80% 0.12 350);
+  --accent-foreground: oklch(15% 0.015 85);
+  --accent-subtle: oklch(25% 0.06 350);
+
+  /* ===== 功能色 ===== */
+  --destructive: oklch(55% 0.22 25);
+  --destructive-foreground: oklch(95% 0.01 85);
+  --error: oklch(55% 0.22 25);
+
+  /* ===== 边框 (shadcn 兼容) ===== */
+  --border: oklch(28% 0.02 85);
+  --input: oklch(28% 0.02 85);
+  --ring: oklch(75% 0.16 55);
+
+  /* ===== 边框层级 (UnoCSS 语义化) ===== */
+  --border-default: oklch(28% 0.02 85);
+  --border-muted: oklch(22% 0.015 85);
+  --border-emphasis: oklch(38% 0.025 85);
+
+  /* ===== 手绘风格边框 ===== */
+  --border-sketch: oklch(75% 0.16 55);
+
+  /* ===== 阴影系统 (暗色模式 - 右下偏移) ===== */
+  --shadow-sm: 2px 2px 8px -2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 3px 3px 12px -3px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 4px 4px 20px -4px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 6px 6px 32px -6px rgba(0, 0, 0, 0.6);
+  --shadow-cute: 4px 4px 0 0 var(--border-sketch);
+  --shadow-cute-hover: 6px 6px 0 0 var(--border-sketch);
+  --shadow-cute-active: 2px 2px 0 0 var(--border-sketch);
 }
 
 /* ===== 基础样式 ===== */
@@ -129,21 +234,22 @@ body {
   color: var(--primary-foreground);
 }
 
-/* ===== 按钮样式 ===== */
+/* ===== 按钮样式 (3D 可爱风格) ===== */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  font-weight: 500;
+  font-weight: 600;
   border: none;
   cursor: pointer;
   text-decoration: none;
-  transition: background-color var(--duration-fast), color var(--duration-fast), transform var(--duration-fast);
-}
-
-.btn:active {
-  transform: scale(0.98);
+  position: relative;
+  transition:
+    background-color var(--duration-fast) var(--ease-default),
+    color var(--duration-fast) var(--ease-default),
+    transform var(--duration-fast) var(--ease-default),
+    box-shadow var(--duration-fast) var(--ease-default);
 }
 
 .btn:disabled {
@@ -155,27 +261,43 @@ body {
 .btn-primary {
   background-color: var(--primary);
   color: var(--primary-foreground);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-cute);
 }
 
 .btn-primary:hover:not(:disabled) {
   background-color: var(--primary-hover);
+  box-shadow: var(--shadow-cute-hover);
+  transform: translate(-2px, -2px);
+}
+
+.btn-primary:active:not(:disabled) {
+  box-shadow: var(--shadow-cute-active);
+  transform: translate(2px, 2px);
 }
 
 .btn-secondary {
   background-color: var(--secondary);
   color: var(--secondary-foreground);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-secondary:hover:not(:disabled) {
   background-color: var(--muted);
+  box-shadow: var(--shadow-md);
+  transform: translate(-1px, -1px);
+}
+
+.btn-secondary:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: none;
 }
 
 .btn-ghost {
   background-color: transparent;
   color: var(--foreground);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
 }
 
 .btn-ghost:hover:not(:disabled) {
@@ -185,29 +307,216 @@ body {
 .btn-outline {
   background-color: transparent;
   color: var(--primary);
-  border: 2px solid var(--primary);
-  border-radius: var(--radius);
+  border: 3px solid var(--primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-cute);
 }
 
 .btn-outline:hover:not(:disabled) {
   background-color: var(--primary-subtle);
+  box-shadow: var(--shadow-cute-hover);
+  transform: translate(-2px, -2px);
+}
+
+.btn-outline:active:not(:disabled) {
+  box-shadow: var(--shadow-cute-active);
+  transform: translate(2px, 2px);
+}
+
+/* Button - 3D Cute variant */
+.btn-cute {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-cute);
+  border: 3px solid var(--border-sketch);
+}
+
+.btn-cute:hover:not(:disabled) {
+  background-color: var(--primary-hover);
+  box-shadow: var(--shadow-cute-hover);
+  transform: translate(-2px, -2px);
+  animation: btn-wobble 0.5s ease-in-out infinite;
+}
+
+.btn-cute:active:not(:disabled) {
+  box-shadow: var(--shadow-cute-active);
+  transform: translate(2px, 2px);
+  animation: none;
+}
+
+@keyframes btn-wobble {
+  0%, 100% { transform: translate(-2px, -2px) rotate(0deg); }
+  25% { transform: translate(-2px, -2px) rotate(-1deg); }
+  75% { transform: translate(-2px, -2px) rotate(1deg); }
 }
 
 /* Button Sizes */
 .btn-sm {
-  padding: 0.375rem 0.75rem;
+  padding: 0.5rem 1rem;
   font-size: 0.875rem;
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
 }
 
 .btn-md {
-  padding: 0.5rem 1rem;
+  padding: 0.625rem 1.25rem;
   font-size: 0.9375rem;
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
 }
 
 .btn-lg {
-  padding: 0.75rem 1.5rem;
-  font-size: 1rem;
-  border-radius: calc(var(--radius) * 1.5);
+  padding: 0.875rem 1.75rem;
+  font-size: 1.0625rem;
+  border-radius: var(--radius-lg);
+}
+
+/* ===== 可爱动画 ===== */
+@keyframes bounce-slow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  25% { transform: translateY(-10px) rotate(1deg); }
+  75% { transform: translateY(-5px) rotate(-1deg); }
+}
+
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-3deg); }
+  75% { transform: rotate(3deg); }
+}
+
+@keyframes pulse-cute {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+
+.animate-bounce-slow {
+  animation: bounce-slow 2s var(--ease-out) infinite;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-wiggle {
+  animation: wiggle 0.5s ease-in-out;
+}
+
+.animate-pulse-cute {
+  animation: pulse-cute 2s ease-in-out infinite;
+}
+
+/* ===== 手绘风格边框 ===== */
+.sketch-border {
+  position: relative;
+  border: 3px solid var(--border-sketch);
+  border-radius: var(--radius-lg);
+}
+
+.sketch-border::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 3px solid var(--border-sketch);
+  border-radius: var(--radius-lg);
+  opacity: 0.3;
+  transform: rotate(0.5deg);
+  pointer-events: none;
+}
+
+/* ===== 卡片手绘风格 ===== */
+.card-sketch {
+  background: var(--card);
+  border: 3px solid var(--border-sketch);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  transition: all var(--duration-normal) var(--ease-spring);
+  position: relative;
+}
+
+.card-sketch::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 3px solid var(--border-sketch);
+  border-radius: var(--radius-lg);
+  opacity: 0.2;
+  transform: rotate(-0.5deg);
+  pointer-events: none;
+  transition: opacity var(--duration-normal) var(--ease-default);
+}
+
+.card-sketch:hover {
+  transform: translateY(-4px) rotate(0.5deg);
+  box-shadow: var(--shadow-lg);
+}
+
+.card-sketch:hover::before {
+  opacity: 0.4;
+}
+
+/* ===== 可爱标签 ===== */
+.tag-cute {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-subtle);
+  border: 2px solid var(--primary);
+  border-radius: var(--radius-full);
+  transition: all var(--duration-fast) var(--ease-spring);
+}
+
+.tag-cute:hover {
+  transform: scale(1.05);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+/* ===== 装饰元素 ===== */
+.deco-dots {
+  background-image: radial-gradient(circle, var(--border-muted) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.deco-grid {
+  background-image:
+    linear-gradient(var(--border-muted) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-muted) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ===== 可爱输入框 ===== */
+.input-cute {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 0.9375rem;
+  font-family: var(--font-sans);
+  color: var(--foreground);
+  background: var(--card);
+  border: 3px solid var(--border);
+  border-radius: var(--radius-full);
+  outline: none;
+  transition: all var(--duration-normal) var(--ease-spring);
+}
+
+.input-cute:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-subtle);
+  transform: translateY(-2px);
+}
+
+.input-cute::placeholder {
+  color: var(--muted-foreground);
 }

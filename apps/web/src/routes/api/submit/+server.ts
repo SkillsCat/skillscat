@@ -21,7 +21,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       throw error(401, 'Please sign in to submit a skill');
     }
 
-    const body = await request.json();
+    const body = await request.json() as { url?: string; owner?: string; repo?: string; path?: string };
     const { url, owner, repo, path } = body;
 
     if (!url || !owner || !repo) {
@@ -78,7 +78,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       throw error(400, 'Failed to fetch repository information');
     }
 
-    const repoData = await repoResponse.json();
+    const repoData = await repoResponse.json() as { fork?: boolean; name?: string; description?: string; stargazers_count?: number };
 
     // 检查是否是 fork
     if (repoData.fork) {
@@ -196,7 +196,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
       return json({ valid: false, error: 'Repository not found' });
     }
 
-    const repoData = await repoResponse.json();
+    const repoData = await repoResponse.json() as { fork?: boolean; name?: string; description?: string; stargazers_count?: number };
 
     if (repoData.fork) {
       return json({ valid: false, error: 'Forked repositories are not accepted' });

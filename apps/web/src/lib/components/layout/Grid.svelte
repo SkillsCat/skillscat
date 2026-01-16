@@ -3,11 +3,11 @@
 
   interface Props {
     cols?: 1 | 2 | 3 | 4;
-    gap?: 'sm' | 'md' | 'lg';
+    gap?: 'sm' | 'md' | 'lg' | 'xl';
     children: Snippet;
   }
 
-  let { cols = 4, gap = 'md', children }: Props = $props();
+  let { cols = 4, gap = 'lg', children }: Props = $props();
 
   const colClasses: Record<number, string> = {
     1: 'grid-cols-1',
@@ -17,9 +17,10 @@
   };
 
   const gapClasses: Record<string, string> = {
-    sm: 'gap-3',
-    md: 'gap-4',
-    lg: 'gap-6'
+    sm: 'gap-4',
+    md: 'gap-5',
+    lg: 'gap-6',
+    xl: 'gap-8'
   };
 </script>
 

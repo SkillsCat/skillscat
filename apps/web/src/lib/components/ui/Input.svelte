@@ -1,11 +1,14 @@
 <script lang="ts">
   import type { HTMLInputAttributes } from 'svelte/elements';
+  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { Search01Icon, Link01Icon, UserCircleIcon, Mail01Icon } from '@hugeicons/core-free-icons';
 
   interface Props extends Omit<HTMLInputAttributes, 'value'> {
     label?: string;
     error?: string;
     icon?: 'search' | 'link' | 'user' | 'mail' | null;
     value?: string;
+    variant?: 'default' | 'rounded';
   }
 
   let {
@@ -15,55 +18,110 @@
     class: className = '',
     id,
     value = $bindable(''),
+    variant = 'default',
     ...restProps
   }: Props = $props();
 
   const inputId = $derived(id || (label ? `input-${label.toLowerCase().replace(/\s+/g, '-')}` : undefined));
+
+  const iconMap = {
+    search: Search01Icon,
+    link: Link01Icon,
+    user: UserCircleIcon,
+    mail: Mail01Icon
+  };
 </script>
 
 <div class="w-full">
   {#if label}
-    <label for={inputId} class="block text-sm font-medium text-fg-muted mb-1.5">
+    <label for={inputId} class="input-label">
       {label}
     </label>
   {/if}
 
   <div class="relative">
     {#if icon}
-      <div class="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle">
-        {#if icon === 'search'}
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" />
-          </svg>
-        {:else if icon === 'link'}
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-          </svg>
-        {:else if icon === 'user'}
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <circle cx="12" cy="8" r="4" />
-            <path d="M20 21a8 8 0 1 0-16 0" />
-          </svg>
-        {:else if icon === 'mail'}
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <rect width="20" height="16" x="2" y="4" rx="2" />
-            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-          </svg>
-        {/if}
+      <div class="icon-wrapper">
+        <HugeiconsIcon icon={iconMap[icon]} size={20} strokeWidth={2} />
       </div>
     {/if}
 
     <input
       id={inputId}
       bind:value
-      class="input {icon ? 'pl-10' : ''} {error ? 'border-error focus:ring-error/30 focus:border-error' : ''} {className}"
+      class="input-field {variant === 'rounded' ? 'input-rounded' : ''} {icon ? 'has-icon' : ''} {error ? 'has-error' : ''} {className}"
       {...restProps}
     />
   </div>
 
   {#if error}
-    <p class="mt-1.5 text-sm text-error">{error}</p>
+    <p class="error-message">{error}</p>
   {/if}
 </div>
+
+<style>
+  .input-label {
+    display: block;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--fg-muted);
+    margin-bottom: 0.5rem;
+  }
+
+  .icon-wrapper {
+    position: absolute;
+    left: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--fg-subtle);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .input-field {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    font-size: 0.9375rem;
+    font-family: var(--font-sans);
+    color: var(--foreground);
+    background: var(--card);
+    border: 3px solid var(--border);
+    border-radius: var(--radius-lg);
+    outline: none;
+    transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+
+  .input-field:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 4px var(--primary-subtle);
+    transform: translateY(-2px);
+  }
+
+  .input-field::placeholder {
+    color: var(--muted-foreground);
+  }
+
+  .input-field.has-icon {
+    padding-left: 3rem;
+  }
+
+  .input-field.input-rounded {
+    border-radius: var(--radius-full);
+  }
+
+  .input-field.has-error {
+    border-color: var(--error);
+  }
+
+  .input-field.has-error:focus {
+    border-color: var(--error);
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--error) 20%, transparent);
+  }
+
+  .error-message {
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--error);
+    font-weight: 500;
+  }
+</style>

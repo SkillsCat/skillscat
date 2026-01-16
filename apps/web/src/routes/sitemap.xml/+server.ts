@@ -46,7 +46,7 @@ export const GET: RequestHandler = async ({ platform }) => {
   }
 
   // Generate XML
-  const allPages = [...staticPages, ...categoryPages, ...skillPages];
+  const allPages: { url: string; priority: string; changefreq: string; lastmod?: string }[] = [...staticPages, ...categoryPages, ...skillPages];
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">

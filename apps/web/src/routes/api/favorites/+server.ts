@@ -112,7 +112,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     }
 
     const userId = session.user.id;
-    const body = await request.json();
+    const body = await request.json() as { skillId?: string };
     const { skillId } = body;
 
     if (!skillId) {
@@ -181,7 +181,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request }) => {
     }
 
     const userId = session.user.id;
-    const body = await request.json();
+    const body = await request.json() as { skillId?: string };
     const { skillId } = body;
 
     if (!skillId) {

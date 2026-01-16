@@ -34,6 +34,12 @@ export interface SkillDetail extends SkillCardData {
   lastCommitAt: number | null;
   createdAt: number;
   indexedAt: number;
+  // Author info
+  authorUsername?: string;
+  authorDisplayName?: string;
+  authorBio?: string;
+  authorSkillsCount?: number;
+  authorTotalStars?: number;
 }
 
 // ========== File Node ==========

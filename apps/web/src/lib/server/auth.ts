@@ -7,7 +7,7 @@ import { env } from '$env/dynamic/private';
 
 export const auth = betterAuth({
   // Database will be configured at runtime in Cloudflare Workers
-  database: undefined as unknown as ReturnType<typeof betterAuth>['$context']['db'],
+  database: undefined as any,
   // Use environment secret or a placeholder for build
   secret: env?.BETTER_AUTH_SECRET || 'placeholder-secret-for-build-only',
   emailAndPassword: {
@@ -34,3 +34,4 @@ export const auth = betterAuth({
 });
 
 export type Session = typeof auth.$Infer.Session;
+export type User = typeof auth.$Infer.Session.user;

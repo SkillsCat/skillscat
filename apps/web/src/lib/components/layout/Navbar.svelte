@@ -3,9 +3,59 @@
   import { Logo, ThemeToggle, SearchBox, UserMenu } from '$lib/components';
   import { CATEGORIES } from '$lib/constants/categories';
   import { goto } from '$app/navigation';
+  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import {
+    ArrowDown01Icon,
+    Menu01Icon,
+    Cancel01Icon,
+    GitBranchIcon,
+    CodeIcon,
+    RefreshIcon,
+    Bug01Icon,
+    EyeIcon,
+    TestTubeIcon,
+    SecurityLockIcon,
+    SpeedTrain01Icon,
+    FileScriptIcon,
+    EarthIcon,
+    Link01Icon,
+    Database01Icon,
+    DatabaseExportIcon,
+    PaintBrush01Icon,
+    AccessIcon,
+    Settings01Icon,
+    Activity01Icon,
+    Folder01Icon,
+    WorkflowSquare01Icon,
+    SparklesIcon
+  } from '@hugeicons/core-free-icons';
 
   let mobileMenuOpen = $state(false);
   let searchQuery = $state('');
+
+  // Icon mapping for categories
+  const categoryIcons: Record<string, any> = {
+    'git': GitBranchIcon,
+    'code-generation': CodeIcon,
+    'refactoring': RefreshIcon,
+    'debugging': Bug01Icon,
+    'code-review': EyeIcon,
+    'testing': TestTubeIcon,
+    'security': SecurityLockIcon,
+    'performance': SpeedTrain01Icon,
+    'documentation': FileScriptIcon,
+    'i18n': EarthIcon,
+    'api': Link01Icon,
+    'database': Database01Icon,
+    'data-processing': DatabaseExportIcon,
+    'ui-components': PaintBrush01Icon,
+    'accessibility': AccessIcon,
+    'devops': Settings01Icon,
+    'monitoring': Activity01Icon,
+    'file-operations': Folder01Icon,
+    'automation': WorkflowSquare01Icon,
+    'productivity': SparklesIcon
+  };
 
   function handleSearch(query: string) {
     if (query.trim()) {
@@ -53,15 +103,9 @@
             <NavigationMenu.Item value="categories">
               <NavigationMenu.Trigger class="nav-link nav-trigger">
                 Categories
-                <svg
-                  class="chevron-icon"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
+                <span class="chevron-icon">
+                  <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2} />
+                </span>
               </NavigationMenu.Trigger>
 
               <NavigationMenu.Content class="nav-content">
@@ -74,11 +118,10 @@
                             href="/categories/{category.slug}"
                             class="category-item"
                           >
-                            <span class="category-emoji">{category.emoji}</span>
-                            <div>
-                              <div class="category-name">{category.name}</div>
-                              <div class="category-desc">{category.description}</div>
+                            <div class="category-icon">
+                              <HugeiconsIcon icon={categoryIcons[category.slug]} size={18} strokeWidth={2} />
                             </div>
+                            <div class="category-name">{category.name}</div>
                           </NavigationMenu.Link>
                         </li>
                       {/each}
@@ -115,13 +158,11 @@
           onclick={() => mobileMenuOpen = !mobileMenuOpen}
           aria-label="Toggle menu"
         >
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            {#if mobileMenuOpen}
-              <path d="M18 6 6 18M6 6l12 12" />
-            {:else}
-              <path d="M4 6h16M4 12h16M4 18h16" />
-            {/if}
-          </svg>
+          {#if mobileMenuOpen}
+            <HugeiconsIcon icon={Cancel01Icon} size={20} strokeWidth={1.5} />
+          {:else}
+            <HugeiconsIcon icon={Menu01Icon} size={20} strokeWidth={1.5} />
+          {/if}
         </button>
       </div>
     </div>
@@ -162,9 +203,7 @@
     position: sticky;
     top: 0;
     z-index: 50;
-    background-color: color-mix(in oklch, var(--background) 80%, transparent);
-    backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--border);
+    background-color: transparent;
   }
 
   .navbar-container {
@@ -189,14 +228,14 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 4rem;
+    height: 4.5rem;
     gap: 1rem;
   }
 
   .search-desktop {
     display: none;
     flex: 1;
-    max-width: 28rem;
+    max-width: 20rem;
     margin: 0 1rem;
   }
 
@@ -231,25 +270,25 @@
     justify-content: center;
     padding: 0.25rem;
     margin: 0;
-    gap: 0.25rem;
+    gap: 0.5rem;
   }
 
   :global(.nav-link) {
     display: inline-flex;
     align-items: center;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.875rem;
-    font-weight: 500;
+    padding: 0.625rem 1rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
     color: var(--muted-foreground);
-    border-radius: var(--radius);
+    border-radius: var(--radius-full);
     text-decoration: none;
-    transition: color 0.15s, background-color 0.15s;
+    transition: all 0.15s ease;
   }
 
   :global(.nav-link:hover),
   :global(.nav-link[data-active]) {
-    color: var(--foreground);
-    background-color: var(--muted);
+    color: var(--primary);
+    background-color: var(--primary-subtle);
   }
 
   :global(.nav-trigger) {
@@ -259,8 +298,8 @@
   }
 
   :global(.nav-trigger[data-state="open"]) {
-    color: var(--foreground);
-    background-color: var(--muted);
+    color: var(--primary);
+    background-color: var(--primary-subtle);
   }
 
   :global(.nav-trigger[data-state="open"]) .chevron-icon {
@@ -268,10 +307,10 @@
   }
 
   .chevron-icon {
-    width: 0.75rem;
-    height: 0.75rem;
-    margin-left: 0.25rem;
-    transition: transform 0.2s;
+    width: 0.875rem;
+    height: 0.875rem;
+    margin-left: 0.375rem;
+    transition: transform 0.2s ease;
   }
 
   /* Content - positioned absolute within viewport */
@@ -288,14 +327,14 @@
     left: 50%;
     top: 100%;
     transform: translateX(-50%);
-    margin-top: 0.5rem;
+    margin-top: 0.75rem;
     width: var(--bits-navigation-menu-viewport-width);
     height: var(--bits-navigation-menu-viewport-height);
     overflow: hidden;
-    background-color: var(--background);
-    border: 1px solid var(--border);
-    border-radius: 0.75rem;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    background-color: var(--card);
+    border: 3px solid var(--border-sketch);
+    border-radius: var(--radius-2xl);
+    box-shadow: var(--shadow-lg);
     transition: width 0.3s ease, height 0.3s ease;
   }
 
@@ -310,7 +349,7 @@
     left: 0;
     z-index: 10;
     display: flex;
-    height: 0.625rem;
+    height: 0.75rem;
     align-items: flex-end;
     justify-content: center;
     overflow: hidden;
@@ -324,20 +363,20 @@
   .nav-indicator-arrow {
     position: relative;
     top: 70%;
-    width: 0.625rem;
-    height: 0.625rem;
+    width: 0.75rem;
+    height: 0.75rem;
     transform: rotate(45deg);
-    border-top-left-radius: 2px;
-    background-color: var(--border);
+    border-top-left-radius: 3px;
+    background-color: var(--border-sketch);
   }
 
   /* Dropdown Content Layout */
   .dropdown-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, 1fr);
     gap: 0.5rem;
-    padding: 0.75rem;
-    min-width: 500px;
+    padding: 1rem;
+    min-width: 380px;
   }
 
   .category-list {
@@ -351,56 +390,67 @@
 
   :global(.category-item) {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 0.75rem;
-    padding: 0.5rem 0.75rem;
-    border-radius: var(--radius);
+    padding: 0.625rem 0.875rem;
+    border-radius: var(--radius-lg);
     text-decoration: none;
-    transition: background-color 0.15s;
+    transition: all 0.15s ease;
   }
 
   :global(.category-item:hover),
   :global(.category-item[data-highlighted]) {
-    background-color: var(--muted);
+    background-color: var(--primary-subtle);
   }
 
-  .category-emoji {
-    font-size: 1.25rem;
-    line-height: 1;
+  .category-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-md);
+    background: var(--primary-subtle);
+    color: var(--primary);
     flex-shrink: 0;
+    transition: all 0.15s ease;
+  }
+
+  :global(.category-item:hover) .category-icon {
+    background: var(--primary);
+    color: var(--primary-foreground);
+    transform: scale(1.1) rotate(5deg);
   }
 
   .category-name {
     font-size: 0.875rem;
-    font-weight: 500;
+    font-weight: 600;
     color: var(--foreground);
     line-height: 1.25;
   }
 
-  .category-desc {
-    font-size: 0.75rem;
-    color: var(--muted-foreground);
-    line-height: 1.4;
-    margin-top: 0.125rem;
+  :global(.category-item:hover) .category-name {
+    color: var(--primary);
   }
 
   .dropdown-footer {
-    padding: 0.75rem;
-    border-top: 1px solid var(--border);
-    background-color: var(--card);
+    padding: 0.75rem 1rem;
+    border-top: 2px solid var(--border);
+    background-color: var(--bg-muted);
   }
 
   :global(.view-all-link) {
     display: block;
     font-size: 0.875rem;
-    font-weight: 500;
+    font-weight: 600;
     color: var(--primary);
     text-decoration: none;
     text-align: center;
+    transition: transform 0.2s ease;
   }
 
   :global(.view-all-link:hover) {
-    text-decoration: underline;
+    transform: translateX(4px);
   }
 
   /* Right Side */
@@ -415,16 +465,17 @@
     align-items: center;
     justify-content: center;
     padding: 0.5rem;
-    border: none;
-    background: transparent;
+    border: 2px solid var(--border);
+    background: var(--card);
     color: var(--foreground);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
     cursor: pointer;
-    transition: background-color 0.15s;
+    transition: all 0.15s ease;
   }
 
   .mobile-menu-btn:hover {
-    background-color: var(--muted);
+    border-color: var(--primary);
+    color: var(--primary);
   }
 
   @media (min-width: 768px) {
@@ -437,7 +488,7 @@
   .mobile-menu {
     display: block;
     padding: 1rem 0;
-    border-top: 1px solid var(--border);
+    border-top: 2px solid var(--border);
   }
 
   @media (min-width: 768px) {
@@ -453,19 +504,20 @@
   .mobile-links {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.25rem;
   }
 
   .mobile-link {
-    padding: 0.5rem 0.75rem;
-    border-radius: var(--radius);
+    padding: 0.625rem 0.875rem;
+    border-radius: var(--radius-lg);
     color: var(--muted-foreground);
+    font-weight: 600;
     text-decoration: none;
-    transition: color 0.15s, background-color 0.15s;
+    transition: all 0.15s ease;
   }
 
   .mobile-link:hover {
-    color: var(--foreground);
-    background-color: var(--muted);
+    color: var(--primary);
+    background-color: var(--primary-subtle);
   }
 </style>

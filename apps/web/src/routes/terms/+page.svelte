@@ -191,11 +191,6 @@
     color: var(--muted-foreground);
   }
 
-  .prose strong {
-    font-weight: 600;
-    color: var(--foreground);
-  }
-
   .prose a {
     color: var(--primary);
     text-decoration: none;

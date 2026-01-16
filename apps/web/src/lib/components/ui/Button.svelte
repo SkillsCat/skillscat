@@ -1,12 +1,12 @@
 <script lang="ts">
   /**
-   * Button - 按钮组件
+   * Button - 可爱风格按钮组件
    * 支持 href 时自动渲染为 a 标签
    */
   import type { Snippet } from 'svelte';
 
   interface Props {
-    variant?: 'primary' | 'secondary' | 'ghost' | 'outline';
+    variant?: 'primary' | 'secondary' | 'ghost' | 'outline' | 'cute';
     size?: 'sm' | 'md' | 'lg';
     href?: string;
     children: Snippet;
@@ -31,7 +31,8 @@
     primary: 'btn-primary',
     secondary: 'btn-secondary',
     ghost: 'btn-ghost',
-    outline: 'bg-transparent border-2 border-primary text-primary hover:bg-primary-subtle'
+    outline: 'btn-outline',
+    cute: 'btn-cute'
   };
 
   const sizeClasses: Record<string, string> = {
@@ -45,10 +46,22 @@
 
 {#if href}
   <a {href} class={classes} class:opacity-50={disabled} class:pointer-events-none={disabled}>
-    {@render children()}
+    <span class="btn-content">
+      {@render children()}
+    </span>
   </a>
 {:else}
   <button {type} {disabled} {onclick} class={classes}>
-    {@render children()}
+    <span class="btn-content">
+      {@render children()}
+    </span>
   </button>
 {/if}
+
+<style>
+  .btn-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+</style>
