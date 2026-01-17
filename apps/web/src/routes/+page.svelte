@@ -1,7 +1,14 @@
 <script lang="ts">
   import { StatsBanner, Section, Grid, SkillCard, EmptyState } from '$lib/components';
   import { HugeiconsIcon } from '@hugeicons/svelte';
-  import { Fire03Icon, Notification01Icon, StarIcon } from '@hugeicons/core-free-icons';
+  import {
+    Fire03Icon,
+    Notification01Icon,
+    StarIcon,
+    RocketIcon,
+    Sad01Icon,
+    HeartbreakIcon
+  } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
 
   interface Props {
@@ -26,11 +33,6 @@
 
 <div class="home-page">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-    <!-- Stats Banner -->
-    <div class="mb-12 animate-float">
-      <StatsBanner count={data.stats.totalSkills} />
-    </div>
-
     <!-- Hero Section -->
     <div class="hero-section">
       <div class="hero-deco hero-deco-1 animate-float"></div>
@@ -38,6 +40,11 @@
       <div class="hero-deco hero-deco-3 animate-float"></div>
 
       <div class="text-center mb-16 relative z-10">
+        <!-- Stats Capsule -->
+        <div class="mb-6">
+          <StatsBanner count={data.stats.totalSkills} />
+        </div>
+
         <h1 class="hero-title">
           <span class="hero-title-line">Find & Share</span>
           <span class="hero-title-highlight">
@@ -68,7 +75,11 @@
         <EmptyState
           title="No trending skills yet"
           description="Be the first to submit a skill!"
-        />
+        >
+          {#snippet icon()}
+            <HugeiconsIcon icon={RocketIcon} size={40} strokeWidth={1.5} />
+          {/snippet}
+        </EmptyState>
       {/if}
     </Section>
 
@@ -87,7 +98,11 @@
         <EmptyState
           title="No skills added yet"
           description="Skills will appear here once they're indexed."
-        />
+        >
+          {#snippet icon()}
+            <HugeiconsIcon icon={Sad01Icon} size={40} strokeWidth={1.5} />
+          {/snippet}
+        </EmptyState>
       {/if}
     </Section>
 
@@ -106,7 +121,11 @@
         <EmptyState
           title="No top rated skills yet"
           description="Star your favorite skills to see them here."
-        />
+        >
+          {#snippet icon()}
+            <HugeiconsIcon icon={HeartbreakIcon} size={40} strokeWidth={1.5} />
+          {/snippet}
+        </EmptyState>
       {/if}
     </Section>
   </div>

@@ -64,22 +64,40 @@
   }
 
   .view-all-link {
-    display: flex;
+    --btn-shadow-offset: 3px;
+    --btn-shadow-color: oklch(50% 0.22 55);
+
+    display: inline-flex;
     align-items: center;
     gap: 0.375rem;
     font-size: 0.875rem;
     font-weight: 600;
-    color: var(--primary);
+    color: #ffffff;
     text-decoration: none;
-    padding: 0.5rem 0.875rem;
-    background: var(--primary-subtle);
+    padding: 0.5rem 1rem;
+    background-color: var(--primary);
     border-radius: var(--radius-full);
-    transition: all 0.2s ease;
+    box-shadow: 0 var(--btn-shadow-offset) 0 0 var(--btn-shadow-color);
+    transform: translateY(0);
+    transition:
+      transform 0.1s ease,
+      box-shadow 0.1s ease,
+      background-color 0.15s ease;
   }
 
   .view-all-link:hover {
-    background: var(--primary);
-    color: var(--primary-foreground);
-    transform: translateX(2px);
+    --btn-shadow-offset: 5px;
+    background-color: var(--primary-hover);
+    transform: translateY(-2px);
+  }
+
+  .view-all-link:active {
+    --btn-shadow-offset: 1px;
+    transform: translateY(2px);
+  }
+
+  :global(.dark) .view-all-link {
+    --btn-shadow-color: oklch(40% 0.20 55);
+    color: #ffffff;
   }
 </style>

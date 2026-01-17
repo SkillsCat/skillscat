@@ -71,6 +71,9 @@
 </script>
 
 <nav class="navbar">
+  <!-- Background mask -->
+  <div class="navbar-backdrop"></div>
+
   <div class="navbar-container">
     <div class="navbar-inner">
       <!-- Logo -->
@@ -115,7 +118,7 @@
                       {#each column as category}
                         <li>
                           <NavigationMenu.Link
-                            href="/categories/{category.slug}"
+                            href="/category/{category.slug}"
                             class="category-item"
                           >
                             <div class="category-icon">
@@ -203,13 +206,38 @@
     position: sticky;
     top: 0;
     z-index: 50;
-    background-color: transparent;
+  }
+
+  .navbar-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 5.5rem;
+    background: linear-gradient(
+      to bottom,
+      var(--background) 0%,
+      var(--background) 60%,
+      transparent 100%
+    );
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  :global(.dark) .navbar-backdrop {
+    background: linear-gradient(
+      to bottom,
+      var(--background) 0%,
+      var(--background) 60%,
+      transparent 100%
+    );
   }
 
   .navbar-container {
     max-width: 80rem;
     margin: 0 auto;
     padding: 0 1rem;
+    position: relative;
   }
 
   @media (min-width: 640px) {

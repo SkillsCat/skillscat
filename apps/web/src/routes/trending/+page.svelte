@@ -1,5 +1,7 @@
 <script lang="ts">
   import { ListPage } from '$lib/components';
+  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { Fire03Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
 
   interface Props {
@@ -18,8 +20,11 @@
 
 <ListPage
   title="Trending Skills"
-  emoji="🔥"
   description="The hottest skills gaining momentum in the community right now."
   skills={data.skills}
   emptyMessage="No trending skills yet"
-/>
+>
+  {#snippet icon()}
+    <HugeiconsIcon icon={Fire03Icon} strokeWidth={2} />
+  {/snippet}
+</ListPage>

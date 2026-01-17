@@ -2,6 +2,32 @@
   import { SearchBox, Grid, SkillCard, EmptyState, ErrorState } from '$lib/components';
   import type { Category } from '$lib/constants/categories';
   import type { SkillCardData } from '$lib/types';
+  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import {
+    GitBranchIcon,
+    CodeIcon,
+    RefreshIcon,
+    Bug01Icon,
+    EyeIcon,
+    TestTubeIcon,
+    SecurityLockIcon,
+    SpeedTrain01Icon,
+    FileScriptIcon,
+    EarthIcon,
+    Link01Icon,
+    Database01Icon,
+    DatabaseExportIcon,
+    PaintBrush01Icon,
+    AccessIcon,
+    Settings01Icon,
+    Activity01Icon,
+    Folder01Icon,
+    WorkflowSquare01Icon,
+    SparklesIcon,
+    Search01Icon,
+    Sad01Icon,
+    AlertCircleIcon
+  } from '@hugeicons/core-free-icons';
 
   interface Props {
     data: {
@@ -13,6 +39,30 @@
   let { data }: Props = $props();
 
   let searchQuery = $state('');
+
+  // Icon mapping for categories (same as Navbar and categories page)
+  const categoryIcons: Record<string, any> = {
+    'git': GitBranchIcon,
+    'code-generation': CodeIcon,
+    'refactoring': RefreshIcon,
+    'debugging': Bug01Icon,
+    'code-review': EyeIcon,
+    'testing': TestTubeIcon,
+    'security': SecurityLockIcon,
+    'performance': SpeedTrain01Icon,
+    'documentation': FileScriptIcon,
+    'i18n': EarthIcon,
+    'api': Link01Icon,
+    'database': Database01Icon,
+    'data-processing': DatabaseExportIcon,
+    'ui-components': PaintBrush01Icon,
+    'accessibility': AccessIcon,
+    'devops': Settings01Icon,
+    'monitoring': Activity01Icon,
+    'file-operations': Folder01Icon,
+    'automation': WorkflowSquare01Icon,
+    'productivity': SparklesIcon
+  };
 
   const filteredSkills = $derived(
     searchQuery
@@ -50,7 +100,9 @@
     <!-- Header -->
     <div class="mb-8">
       <div class="flex items-center gap-4 mb-2">
-        <span class="text-5xl">{data.category.emoji}</span>
+        <div class="category-icon-large">
+          <HugeiconsIcon icon={categoryIcons[data.category.slug]} size={32} strokeWidth={2} />
+        </div>
         <h1 class="text-3xl md:text-4xl font-bold text-fg">
           {data.category.name}
         </h1>
@@ -81,33 +133,54 @@
 
       {#if filteredSkills.length === 0 && searchQuery}
         <EmptyState
-          emoji="🔍"
           title="No matches"
           description={`No skills found matching "${searchQuery}"`}
-        />
+        >
+          {#snippet icon()}
+            <HugeiconsIcon icon={Search01Icon} size={40} strokeWidth={1.5} />
+          {/snippet}
+        </EmptyState>
       {/if}
     {:else}
       <EmptyState
-        emoji={data.category.emoji}
         title="No skills in this category yet"
         description="Skills will appear here once they're classified into this category."
         actionText="Browse Trending"
         actionHref="/trending"
-      />
+      >
+        {#snippet icon()}
+          <HugeiconsIcon icon={Sad01Icon} size={40} strokeWidth={1.5} />
+        {/snippet}
+      </EmptyState>
     {/if}
   </div>
 {:else}
   <!-- Not Found -->
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-    <ErrorState
-      emoji="404"
+    <EmptyState
       title="Category Not Found"
-      message="The category you're looking for doesn't exist."
-    />
-    <div class="text-center">
-      <a href="/categories" class="btn btn-primary">
-        Browse Categories
-      </a>
-    </div>
+      description="The category you're looking for doesn't exist."
+      actionText="Browse Categories"
+      actionHref="/categories"
+    >
+      {#snippet icon()}
+        <HugeiconsIcon icon={AlertCircleIcon} size={40} strokeWidth={1.5} />
+      {/snippet}
+    </EmptyState>
   </div>
 {/if}
+
+<style>
+  .category-icon-large {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 4rem;
+    height: 4rem;
+    background: var(--primary-subtle);
+    border: 3px solid var(--primary);
+    border-radius: var(--radius-xl);
+    color: var(--primary);
+    flex-shrink: 0;
+  }
+</style>

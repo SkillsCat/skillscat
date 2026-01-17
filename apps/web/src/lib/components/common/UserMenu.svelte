@@ -84,8 +84,7 @@
   <!-- Logged out state -->
   <button
     onclick={() => (showLoginDialog = true)}
-    class="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg
-           bg-primary text-white hover:bg-primary-hover transition-colors"
+    class="sign-in-btn"
   >
     <HugeiconsIcon icon={Login03Icon} size={16} />
     <span class="hidden sm:inline">Sign In</span>
@@ -95,6 +94,44 @@
 {/if}
 
 <style>
+  .sign-in-btn {
+    --btn-shadow-offset: 3px;
+    --btn-shadow-color: oklch(50% 0.22 55);
+
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #ffffff;
+    background-color: var(--primary);
+    border: none;
+    border-radius: var(--radius-full);
+    box-shadow: 0 var(--btn-shadow-offset) 0 0 var(--btn-shadow-color);
+    cursor: pointer;
+    transform: translateY(0);
+    transition:
+      transform 0.1s ease,
+      box-shadow 0.1s ease,
+      background-color 0.15s ease;
+  }
+
+  .sign-in-btn:hover {
+    --btn-shadow-offset: 5px;
+    background-color: var(--primary-hover);
+    transform: translateY(-2px);
+  }
+
+  .sign-in-btn:active {
+    --btn-shadow-offset: 1px;
+    transform: translateY(2px);
+  }
+
+  :global(.dark) .sign-in-btn {
+    --btn-shadow-color: oklch(40% 0.20 55);
+  }
+
   .dropdown-content {
     min-width: 14rem;
     background-color: var(--background);

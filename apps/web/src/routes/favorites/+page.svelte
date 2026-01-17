@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Grid, SkillCard, EmptyState, SearchBox } from '$lib/components';
+  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { SecurityLockIcon, Search01Icon, FavouriteIcon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
 
   interface Props {
@@ -32,7 +34,10 @@
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
   <!-- Header -->
   <div class="mb-8">
-    <h1 class="text-3xl md:text-4xl font-bold text-fg mb-2">
+    <h1 class="page-title">
+      <span class="page-title-icon">
+        <HugeiconsIcon icon={FavouriteIcon} strokeWidth={2} />
+      </span>
       My Favorites
     </h1>
     <p class="text-fg-muted">
@@ -42,12 +47,15 @@
 
   {#if !data.isAuthenticated}
     <EmptyState
-      emoji="🔒"
       title="Sign in to view favorites"
       description="You need to be signed in to save and view your favorite skills."
       actionText="Sign In"
       actionHref="/api/auth/signin"
-    />
+    >
+      {#snippet icon()}
+        <HugeiconsIcon icon={SecurityLockIcon} size={40} strokeWidth={1.5} />
+      {/snippet}
+    </EmptyState>
   {:else if data.favorites.length > 0}
     <!-- Search -->
     <div class="mb-8 max-w-md">
@@ -71,18 +79,74 @@
 
     {#if filteredFavorites.length === 0 && searchQuery}
       <EmptyState
-        emoji="🔍"
         title="No matches"
         description={`No favorites found matching "${searchQuery}"`}
-      />
+      >
+        {#snippet icon()}
+          <HugeiconsIcon icon={Search01Icon} size={40} strokeWidth={1.5} />
+        {/snippet}
+      </EmptyState>
     {/if}
   {:else}
     <EmptyState
-      emoji="💝"
       title="No favorites yet"
       description="Start exploring and save skills you like!"
       actionText="Browse Skills"
       actionHref="/trending"
-    />
+    >
+      {#snippet icon()}
+        <HugeiconsIcon icon={FavouriteIcon} size={40} strokeWidth={1.5} />
+      {/snippet}
+    </EmptyState>
   {/if}
 </div>
+
+<style>
+  .page-title {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.875rem;
+    font-weight: 700;
+    color: var(--fg);
+    margin-bottom: 0.5rem;
+  }
+
+  @media (min-width: 768px) {
+    .page-title {
+      font-size: 2.25rem;
+    }
+  }
+
+  .page-title-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    background: var(--primary-subtle);
+    border: 2px solid var(--primary);
+    border-radius: var(--radius-lg);
+    color: var(--primary);
+    flex-shrink: 0;
+  }
+
+  @media (min-width: 768px) {
+    .page-title-icon {
+      width: 3rem;
+      height: 3rem;
+    }
+  }
+
+  .page-title-icon :global(svg) {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  @media (min-width: 768px) {
+    .page-title-icon :global(svg) {
+      width: 1.5rem;
+      height: 1.5rem;
+    }
+  }
+</style>

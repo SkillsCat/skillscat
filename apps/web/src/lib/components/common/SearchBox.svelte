@@ -1,6 +1,29 @@
 <script lang="ts">
   import { HugeiconsIcon } from '@hugeicons/svelte';
-  import { Search01Icon, Cancel01Icon } from '@hugeicons/core-free-icons';
+  import {
+    Search01Icon,
+    Cancel01Icon,
+    GitBranchIcon,
+    CodeIcon,
+    RefreshIcon,
+    Bug01Icon,
+    EyeIcon,
+    TestTubeIcon,
+    SecurityLockIcon,
+    SpeedTrain01Icon,
+    FileScriptIcon,
+    EarthIcon,
+    Link01Icon,
+    Database01Icon,
+    DatabaseExportIcon,
+    PaintBrush01Icon,
+    AccessIcon,
+    Settings01Icon,
+    Activity01Icon,
+    Folder01Icon,
+    WorkflowSquare01Icon,
+    SparklesIcon
+  } from '@hugeicons/core-free-icons';
   import { CATEGORIES } from '$lib/constants';
 
   interface Props {
@@ -21,6 +44,30 @@
 
   let isFocused = $state(false);
   let inputElement: HTMLInputElement;
+
+  // Icon mapping for categories
+  const categoryIcons: Record<string, any> = {
+    'git': GitBranchIcon,
+    'code-generation': CodeIcon,
+    'refactoring': RefreshIcon,
+    'debugging': Bug01Icon,
+    'code-review': EyeIcon,
+    'testing': TestTubeIcon,
+    'security': SecurityLockIcon,
+    'performance': SpeedTrain01Icon,
+    'documentation': FileScriptIcon,
+    'i18n': EarthIcon,
+    'api': Link01Icon,
+    'database': Database01Icon,
+    'data-processing': DatabaseExportIcon,
+    'ui-components': PaintBrush01Icon,
+    'accessibility': AccessIcon,
+    'devops': Settings01Icon,
+    'monitoring': Activity01Icon,
+    'file-operations': Folder01Icon,
+    'automation': WorkflowSquare01Icon,
+    'productivity': SparklesIcon
+  };
 
   // Filter suggestions based on input
   const suggestions = $derived(() => {
@@ -104,8 +151,8 @@
             onclick={() => selectSuggestion(category.name)}
             class="suggestion-item"
           >
-            <span class="suggestion-emoji">
-              {category.emoji}
+            <span class="suggestion-icon">
+              <HugeiconsIcon icon={categoryIcons[category.slug]} size={18} strokeWidth={2} />
             </span>
             <span class="suggestion-name">
               {category.name}
@@ -123,9 +170,27 @@
   }
 
   .search-input-wrapper {
+    --input-shadow-offset: 3px;
+    --input-shadow-color: oklch(75% 0.02 85);
+
     position: relative;
     display: flex;
     align-items: center;
+    box-shadow: 0 var(--input-shadow-offset) 0 0 var(--input-shadow-color);
+    border-radius: var(--radius-full);
+    transform: translateY(0);
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+
+  .search-input-wrapper:focus-within {
+    --input-shadow-offset: 1px;
+    transform: translateY(2px);
+  }
+
+  :global(.dark) .search-input-wrapper {
+    --input-shadow-color: oklch(25% 0.02 85);
   }
 
   .search-icon {
@@ -138,6 +203,11 @@
     z-index: 1;
     display: flex;
     align-items: center;
+    transition: color 0.15s ease;
+  }
+
+  .search-input-wrapper:focus-within .search-icon {
+    color: var(--primary);
   }
 
   .search-input {
@@ -150,12 +220,12 @@
     border: 2px solid var(--border);
     border-radius: var(--radius-full);
     outline: none;
-    transition: all 0.15s ease;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
   }
 
   .search-input:focus {
     border-color: var(--primary);
-    box-shadow: 4px 4px 0 0 var(--primary-subtle);
+    background: var(--background);
   }
 
   .search-input::placeholder {
@@ -193,7 +263,7 @@
     margin-top: 0.5rem;
     z-index: 50;
     background: var(--card);
-    border: 2px solid var(--border-sketch);
+    border: 2px solid var(--border);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-lg);
     overflow: hidden;
@@ -208,7 +278,7 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.625rem 0.75rem;
+    padding: 0.5rem 0.75rem;
     background: none;
     border: none;
     border-radius: var(--radius-md);
@@ -221,9 +291,23 @@
     background: var(--primary-subtle);
   }
 
-  .suggestion-emoji {
-    font-size: 1.25rem;
-    line-height: 1;
+  .suggestion-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    background: var(--primary-subtle);
+    border: 2px solid var(--primary);
+    border-radius: var(--radius-md);
+    color: var(--primary);
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+  }
+
+  .suggestion-item:hover .suggestion-icon {
+    background: var(--primary);
+    color: var(--primary-foreground);
   }
 
   .suggestion-name {

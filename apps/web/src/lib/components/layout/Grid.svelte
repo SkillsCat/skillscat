@@ -3,7 +3,7 @@
 
   interface Props {
     cols?: 1 | 2 | 3 | 4;
-    gap?: 'sm' | 'md' | 'lg' | 'xl';
+    gap?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
     children: Snippet;
   }
 
@@ -20,7 +20,8 @@
     sm: 'gap-4',
     md: 'gap-5',
     lg: 'gap-6',
-    xl: 'gap-8'
+    xl: 'gap-8',
+    '2xl': 'gap-10'
   };
 </script>
 

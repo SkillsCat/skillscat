@@ -109,12 +109,13 @@
   --shadow-xl: 6px 6px 32px -6px rgba(0, 0, 0, 0.15);
   --shadow-cute: 4px 4px 0 0 var(--border-sketch);
   --shadow-cute-hover: 6px 6px 0 0 var(--border-sketch);
-  --shadow-cute-active: 2px 2px 0 0 var(--border-sketch);
+  --shadow-cute-active: 0px 0px 0 0 var(--border-sketch);
 
   /* ===== 3D 按钮系统 ===== */
   --btn-3d-depth: 4px;
   --btn-3d-depth-hover: 6px;
-  --btn-3d-depth-active: 2px;
+  --btn-3d-depth-active: 0px;
+  --btn-3d-shadow-color: oklch(25% 0.02 85);
 }
 
 /* ===== 暗色主题 ===== */
@@ -184,7 +185,10 @@
   --shadow-xl: 6px 6px 32px -6px rgba(0, 0, 0, 0.6);
   --shadow-cute: 4px 4px 0 0 var(--border-sketch);
   --shadow-cute-hover: 6px 6px 0 0 var(--border-sketch);
-  --shadow-cute-active: 2px 2px 0 0 var(--border-sketch);
+  --shadow-cute-active: 0px 0px 0 0 var(--border-sketch);
+
+  /* ===== 3D 按钮系统 ===== */
+  --btn-3d-shadow-color: oklch(10% 0.02 85);
 }
 
 /* ===== 基础样式 ===== */
@@ -323,32 +327,39 @@ body {
   transform: translate(2px, 2px);
 }
 
-/* Button - 3D Cute variant */
+/* ===== Button - Cute variant (Flat Design) ===== */
 .btn-cute {
+  --btn-shadow-offset: 4px;
+  --btn-shadow-color: oklch(50% 0.22 55);
+
+  position: relative;
   background-color: var(--primary);
-  color: var(--primary-foreground);
+  color: #ffffff;
+  border: none;
   border-radius: var(--radius-full);
-  box-shadow: var(--shadow-cute);
-  border: 3px solid var(--border-sketch);
+  box-shadow: 0 var(--btn-shadow-offset) 0 0 var(--btn-shadow-color);
+  transform: translateY(0);
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.1s ease,
+    background-color 0.15s ease;
 }
 
 .btn-cute:hover:not(:disabled) {
+  --btn-shadow-offset: 6px;
   background-color: var(--primary-hover);
-  box-shadow: var(--shadow-cute-hover);
-  transform: translate(-2px, -2px);
-  animation: btn-wobble 0.5s ease-in-out infinite;
+  transform: translateY(-2px);
 }
 
 .btn-cute:active:not(:disabled) {
-  box-shadow: var(--shadow-cute-active);
-  transform: translate(2px, 2px);
-  animation: none;
+  --btn-shadow-offset: 1px;
+  transform: translateY(3px);
 }
 
-@keyframes btn-wobble {
-  0%, 100% { transform: translate(-2px, -2px) rotate(0deg); }
-  25% { transform: translate(-2px, -2px) rotate(-1deg); }
-  75% { transform: translate(-2px, -2px) rotate(1deg); }
+/* Dark mode adjustments for cute button */
+:root.dark .btn-cute {
+  --btn-shadow-color: oklch(40% 0.20 55);
+  color: #ffffff;
 }
 
 /* Button Sizes */

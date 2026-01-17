@@ -1,8 +1,20 @@
 <script lang="ts">
   import '../app.css';
   import { Navbar, Footer } from '$lib/components';
+  import { onMount } from 'svelte';
 
   let { children } = $props();
+
+  let scrollY = $state(0);
+  let showNavbarMask = $derived(scrollY > 20);
+
+  onMount(() => {
+    const handleScroll = () => {
+      scrollY = window.scrollY;
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  });
 </script>
 
 <div class="app-wrapper">
@@ -12,6 +24,9 @@
     <div class="global-bg-blob global-bg-blob-2"></div>
     <div class="global-bg-blob global-bg-blob-3"></div>
   </div>
+
+  <!-- Navbar gradient mask -->
+  <div class="navbar-mask" class:navbar-mask-visible={showNavbarMask}></div>
 
   <div class="min-h-screen flex flex-col relative z-10">
     <Navbar />
@@ -28,6 +43,28 @@
   .app-wrapper {
     position: relative;
     min-height: 100vh;
+  }
+
+  .navbar-mask {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 5rem;
+    background: linear-gradient(
+      to bottom,
+      var(--background) 0%,
+      var(--background) 60%,
+      transparent 100%
+    );
+    z-index: 40;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--duration-normal) var(--ease-default);
+  }
+
+  .navbar-mask-visible {
+    opacity: 1;
   }
 
   .global-bg-deco {
