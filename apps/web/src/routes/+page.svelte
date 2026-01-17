@@ -35,10 +35,6 @@
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     <!-- Hero Section -->
     <div class="hero-section">
-      <div class="hero-deco hero-deco-1 animate-float"></div>
-      <div class="hero-deco hero-deco-2 animate-pulse-cute"></div>
-      <div class="hero-deco hero-deco-3 animate-float"></div>
-
       <div class="text-center mb-16 relative z-10">
         <!-- Stats Capsule -->
         <div class="mb-6">
@@ -141,44 +137,6 @@
     margin-bottom: 4rem;
   }
 
-  /* Decorative elements */
-  .hero-deco {
-    position: absolute;
-    border-radius: 50%;
-    pointer-events: none;
-    z-index: 0;
-  }
-
-  .hero-deco-1 {
-    top: -40px;
-    right: 10%;
-    width: 120px;
-    height: 120px;
-    background: radial-gradient(circle, var(--primary-subtle), transparent);
-    opacity: 0.6;
-    animation-delay: 0s;
-  }
-
-  .hero-deco-2 {
-    top: 20px;
-    left: 5%;
-    width: 80px;
-    height: 80px;
-    background: radial-gradient(circle, var(--accent-subtle), transparent);
-    opacity: 0.5;
-    animation-delay: 1s;
-  }
-
-  .hero-deco-3 {
-    bottom: -60px;
-    right: 20%;
-    width: 100px;
-    height: 100px;
-    background: radial-gradient(circle, var(--primary-subtle), transparent);
-    opacity: 0.4;
-    animation-delay: 0.5s;
-  }
-
   /* Hero Title */
   .hero-title {
     display: flex;
@@ -228,44 +186,8 @@
     line-height: 1.6;
   }
 
-  /* Animations */
-  @keyframes float {
-    0%, 100% {
-      transform: translateY(0px) rotate(0deg);
-    }
-    25% {
-      transform: translateY(-15px) rotate(2deg);
-    }
-    75% {
-      transform: translateY(-8px) rotate(-2deg);
-    }
-  }
-
-  .animate-float {
-    animation: float 4s ease-in-out infinite;
-  }
-
-  .animate-pulse-cute {
-    animation: pulse-cute 3s ease-in-out infinite;
-  }
-
-  @keyframes pulse-cute {
-    0%, 100% {
-      transform: scale(1);
-      opacity: 0.5;
-    }
-    50% {
-      transform: scale(1.2);
-      opacity: 0.8;
-    }
-  }
-
   /* Responsive */
   @media (max-width: 768px) {
-    .hero-deco {
-      display: none;
-    }
-
     .hero-title-line {
       font-size: 2rem;
     }

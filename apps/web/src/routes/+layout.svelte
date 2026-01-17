@@ -1,34 +1,24 @@
 <script lang="ts">
   import '../app.css';
   import { Navbar, Footer } from '$lib/components';
-  import { onMount } from 'svelte';
 
   let { children } = $props();
-
-  let scrollY = $state(0);
-  let showNavbarMask = $derived(scrollY > 20);
-
-  onMount(() => {
-    const handleScroll = () => {
-      scrollY = window.scrollY;
-    };
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  });
 </script>
 
 <div class="app-wrapper">
-  <!-- Global Background Effect -->
-  <div class="global-bg-deco">
-    <div class="global-bg-blob global-bg-blob-1"></div>
-    <div class="global-bg-blob global-bg-blob-2"></div>
-    <div class="global-bg-blob global-bg-blob-3"></div>
+  <!-- Lava Lamp Background Effect -->
+  <div class="lava-bg">
+    <div class="lava-blob lava-blob-1"></div>
+    <div class="lava-blob lava-blob-2"></div>
+    <div class="lava-blob lava-blob-3"></div>
+    <div class="lava-blob lava-blob-4"></div>
+    <div class="lava-blob lava-blob-5"></div>
   </div>
 
-  <!-- Navbar gradient mask -->
-  <div class="navbar-mask" class:navbar-mask-visible={showNavbarMask}></div>
+  <!-- Navbar Background -->
+  <div class="navbar-bg"></div>
 
-  <div class="min-h-screen flex flex-col relative z-10">
+  <div class="app-content">
     <Navbar />
 
     <main class="flex-1">
@@ -43,101 +33,224 @@
   .app-wrapper {
     position: relative;
     min-height: 100vh;
+    background: var(--background);
   }
 
-  .navbar-mask {
+  /* Lava Lamp Background - Clean, Subtle Design */
+  .lava-bg {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .lava-blob {
+    position: absolute;
+    border-radius: 50%;
+    backface-visibility: hidden;
+    transform: translateZ(0);
+  }
+
+  /*
+   * Light Mode Design Principles:
+   * - Moderate saturation (chroma 0.06-0.10) for visible but soft colors
+   * - High lightness (88-93%) for gentle warmth
+   * - Warm peach/coral/amber palette
+   * - Medium opacity (50-65%) for visible blobs
+   * - Moderate blur (60-80px) for soft but recognizable shapes
+   */
+
+  .lava-blob-1 {
+    width: 700px;
+    height: 700px;
+    background: radial-gradient(circle, oklch(90% 0.08 55) 0%, transparent 65%);
+    top: -20%;
+    right: -15%;
+    opacity: 0.55;
+    filter: blur(70px);
+    animation: lava-1 30s ease-in-out infinite;
+  }
+
+  .lava-blob-2 {
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, oklch(92% 0.06 75) 0%, transparent 65%);
+    top: 20%;
+    left: -20%;
+    opacity: 0.5;
+    filter: blur(80px);
+    animation: lava-2 35s ease-in-out infinite;
+  }
+
+  .lava-blob-3 {
+    width: 550px;
+    height: 550px;
+    background: radial-gradient(circle, oklch(88% 0.10 40) 0%, transparent 65%);
+    bottom: 30%;
+    right: -10%;
+    opacity: 0.5;
+    filter: blur(65px);
+    animation: lava-3 25s ease-in-out infinite;
+  }
+
+  .lava-blob-4 {
+    width: 500px;
+    height: 500px;
+    background: radial-gradient(circle, oklch(91% 0.07 65) 0%, transparent 65%);
+    top: 55%;
+    left: 15%;
+    opacity: 0.45;
+    filter: blur(75px);
+    animation: lava-4 40s ease-in-out infinite;
+  }
+
+  .lava-blob-5 {
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, oklch(89% 0.08 50) 0%, transparent 65%);
+    bottom: -10%;
+    left: -10%;
+    opacity: 0.5;
+    filter: blur(70px);
+    animation: lava-5 32s ease-in-out infinite;
+  }
+
+  /* Dark mode - richer, deeper colors with more blur */
+  :global(.dark) .lava-blob {
+    filter: blur(100px);
+  }
+
+  :global(.dark) .lava-blob-1 {
+    background: radial-gradient(circle, oklch(35% 0.14 55) 0%, transparent 65%);
+    opacity: 0.35;
+  }
+
+  :global(.dark) .lava-blob-2 {
+    background: radial-gradient(circle, oklch(32% 0.10 75) 0%, transparent 65%);
+    opacity: 0.3;
+  }
+
+  :global(.dark) .lava-blob-3 {
+    background: radial-gradient(circle, oklch(34% 0.12 40) 0%, transparent 65%);
+    opacity: 0.32;
+  }
+
+  :global(.dark) .lava-blob-4 {
+    background: radial-gradient(circle, oklch(30% 0.08 65) 0%, transparent 65%);
+    opacity: 0.28;
+  }
+
+  :global(.dark) .lava-blob-5 {
+    background: radial-gradient(circle, oklch(33% 0.12 50) 0%, transparent 65%);
+    opacity: 0.3;
+  }
+
+  @keyframes lava-1 {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    25% { transform: translate3d(-100px, 120px, 0) scale(1.08); }
+    50% { transform: translate3d(-50px, 250px, 0) scale(0.95); }
+    75% { transform: translate3d(80px, 100px, 0) scale(1.03); }
+  }
+
+  @keyframes lava-2 {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    20% { transform: translate3d(120px, -80px, 0) scale(1.1); }
+    40% { transform: translate3d(180px, 100px, 0) scale(0.92); }
+    60% { transform: translate3d(90px, 180px, 0) scale(1.05); }
+    80% { transform: translate3d(-40px, 80px, 0) scale(0.97); }
+  }
+
+  @keyframes lava-3 {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    33% { transform: translate3d(-120px, -100px, 0) scale(1.12); }
+    66% { transform: translate3d(90px, -60px, 0) scale(0.9); }
+  }
+
+  @keyframes lava-4 {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    25% { transform: translate3d(-110px, -120px, 0) scale(1.08); }
+    50% { transform: translate3d(120px, -100px, 0) scale(0.92); }
+    75% { transform: translate3d(60px, 80px, 0) scale(1.06); }
+  }
+
+  @keyframes lava-5 {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    20% { transform: translate3d(150px, -100px, 0) scale(1.08); }
+    40% { transform: translate3d(100px, -180px, 0) scale(0.93); }
+    60% { transform: translate3d(-80px, -120px, 0) scale(1.1); }
+    80% { transform: translate3d(-50px, 60px, 0) scale(0.96); }
+  }
+
+  /* Navbar Background - covers full navbar height */
+  .navbar-bg {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
-    height: 5rem;
+    height: 6rem;
     background: linear-gradient(
       to bottom,
       var(--background) 0%,
-      var(--background) 60%,
+      var(--background) 70%,
       transparent 100%
     );
-    z-index: 40;
     pointer-events: none;
-    opacity: 0;
-    transition: opacity var(--duration-normal) var(--ease-default);
+    z-index: 45;
   }
 
-  .navbar-mask-visible {
-    opacity: 1;
+  /* App Content */
+  .app-content {
+    position: relative;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
   }
 
-  .global-bg-deco {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    overflow: hidden;
-  }
-
-  .global-bg-blob {
-    position: absolute;
-    border-radius: 50%;
-    filter: blur(60px);
-    opacity: 0.5;
-  }
-
-  :global(.dark) .global-bg-blob {
-    filter: blur(100px);
-    opacity: 0.35;
-  }
-
-  .global-bg-blob-1 {
-    top: -15%;
-    right: -10%;
-    width: 500px;
-    height: 500px;
-    background: var(--primary-subtle);
-    animation: blob-float 15s ease-in-out infinite;
-  }
-
-  .global-bg-blob-2 {
-    bottom: -20%;
-    left: -10%;
-    width: 400px;
-    height: 400px;
-    background: var(--accent-subtle);
-    animation: blob-float 18s ease-in-out infinite reverse;
-    animation-delay: 2s;
-  }
-
-  .global-bg-blob-3 {
-    top: 40%;
-    right: 10%;
-    width: 300px;
-    height: 300px;
-    background: var(--primary-subtle);
-    animation: blob-float 20s ease-in-out infinite;
-    animation-delay: 4s;
-  }
-
-  @keyframes blob-float {
-    0%, 100% {
-      transform: translate(0, 0) scale(1);
-    }
-    25% {
-      transform: translate(30px, -30px) scale(1.05);
-    }
-    50% {
-      transform: translate(-20px, 20px) scale(0.95);
-    }
-    75% {
-      transform: translate(20px, 10px) scale(1.02);
-    }
-  }
-
+  /* Responsive */
   @media (max-width: 768px) {
-    .global-bg-blob {
-      opacity: 0.3;
+    .lava-blob {
+      filter: blur(50px);
     }
 
-    :global(.dark) .global-bg-blob {
+    .lava-blob-1 {
+      width: 400px;
+      height: 400px;
+      opacity: 0.5;
+    }
+
+    .lava-blob-2 {
+      width: 350px;
+      height: 350px;
+      opacity: 0.45;
+    }
+
+    .lava-blob-3 {
+      width: 300px;
+      height: 300px;
+      opacity: 0.45;
+    }
+
+    .lava-blob-4,
+    .lava-blob-5 {
+      display: none;
+    }
+
+    :global(.dark) .lava-blob {
+      filter: blur(70px);
+    }
+
+    :global(.dark) .lava-blob-1,
+    :global(.dark) .lava-blob-2,
+    :global(.dark) .lava-blob-3 {
       opacity: 0.25;
+    }
+  }
+
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    .lava-blob {
+      animation: none;
     }
   }
 </style>

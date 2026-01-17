@@ -16,15 +16,16 @@
   --bg-emphasis: oklch(90% 0.03 85);
 
   /* ===== 前景色 (shadcn 兼容) ===== */
-  --foreground: oklch(20% 0.02 85);
-  --card-foreground: oklch(20% 0.02 85);
-  --muted-foreground: oklch(40% 0.02 85);
-  --popover-foreground: oklch(20% 0.02 85);
+  --foreground: oklch(25% 0.015 85);
+  --card-foreground: oklch(25% 0.015 85);
+  --muted-foreground: oklch(45% 0.015 85);
+  --popover-foreground: oklch(25% 0.015 85);
 
   /* ===== 前景色层级 (UnoCSS 语义化) ===== */
-  --fg-default: oklch(20% 0.02 85);
-  --fg-muted: oklch(40% 0.02 85);
-  --fg-subtle: oklch(55% 0.02 85);
+  --fg: oklch(25% 0.015 85);
+  --fg-default: oklch(25% 0.015 85);
+  --fg-muted: oklch(45% 0.015 85);
+  --fg-subtle: oklch(55% 0.015 85);
   --fg-on-emphasis: oklch(99% 0.005 85);
 
   /* ===== 主题色 (温暖橙色 - 更鲜艳) ===== */
@@ -62,7 +63,7 @@
   --border-emphasis: oklch(82% 0.025 85);
 
   /* ===== 手绘风格边框 ===== */
-  --border-sketch: oklch(35% 0.02 85);
+  --border-sketch: oklch(72% 0.18 55);
 
   /* ===== 圆角系统 (更圆润) ===== */
   --radius: 0.75rem;
@@ -139,6 +140,7 @@
   --popover-foreground: oklch(95% 0.01 85);
 
   /* ===== 前景色层级 (UnoCSS 语义化) ===== */
+  --fg: oklch(95% 0.01 85);
   --fg-default: oklch(95% 0.01 85);
   --fg-muted: oklch(70% 0.015 85);
   --fg-subtle: oklch(55% 0.015 85);

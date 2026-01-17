@@ -102,8 +102,8 @@
     position: fixed;
     inset: 0;
     z-index: 50;
-    background-color: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
+    background-color: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
   }
 
   .dialog {
@@ -114,23 +114,23 @@
     z-index: 51;
     width: calc(100% - 2rem);
     max-width: 24rem;
-    background-color: var(--background);
-    border: 1px solid var(--border);
+    background-color: var(--card);
+    border: 3px solid var(--border-sketch);
     border-radius: var(--radius-2xl);
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    box-shadow: var(--shadow-xl);
   }
 
   .dialog-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1rem 1.5rem;
-    border-bottom: 1px solid var(--border);
+    padding: 1.25rem 1.5rem;
+    border-bottom: 2px solid var(--border);
   }
 
   :global(.dialog-title) {
-    font-size: 1.25rem;
-    font-weight: 600;
+    font-size: 1.375rem;
+    font-weight: 700;
     color: var(--foreground);
     margin: 0;
   }
@@ -139,19 +139,21 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    border: none;
-    background: transparent;
+    width: 2.25rem;
+    height: 2.25rem;
+    border: 2px solid var(--border);
+    background: var(--card);
     color: var(--muted-foreground);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-lg);
     cursor: pointer;
-    transition: background-color 0.15s, color 0.15s;
+    transition: all 0.15s ease;
   }
 
   :global(.dialog-close:hover) {
-    background-color: var(--card);
-    color: var(--foreground);
+    border-color: var(--primary);
+    background-color: var(--primary-subtle);
+    color: var(--primary);
+    transform: rotate(90deg);
   }
 
   .dialog-content {
@@ -161,6 +163,7 @@
   :global(.dialog-description) {
     margin: 0 0 1.5rem 0;
     color: var(--muted-foreground);
+    font-size: 0.9375rem;
     line-height: 1.6;
     text-align: center;
   }
@@ -168,51 +171,77 @@
   .login-buttons {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.875rem;
   }
 
   .login-button {
+    --btn-shadow-offset: 4px;
+
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 0.75rem;
     width: 100%;
-    padding: 0.75rem 1rem;
+    padding: 0.875rem 1.25rem;
     font-size: 0.9375rem;
-    font-weight: 500;
-    border-radius: 0.5rem;
+    font-weight: 600;
+    border-radius: var(--radius-full);
     cursor: pointer;
-    transition: all 0.15s;
-    border: 1px solid var(--border);
+    border: none;
+    transform: translateY(0);
+    transition: transform 0.1s ease, box-shadow 0.1s ease, background-color 0.15s ease;
+  }
+
+  .login-button:hover {
+    --btn-shadow-offset: 6px;
+    transform: translateY(-2px);
+  }
+
+  .login-button:active {
+    --btn-shadow-offset: 1px;
+    transform: translateY(3px);
   }
 
   .login-button-github {
+    --btn-shadow-color: #0d1117;
     background-color: #24292e;
     color: white;
-    border-color: #24292e;
+    box-shadow: 0 var(--btn-shadow-offset) 0 0 var(--btn-shadow-color);
   }
 
   .login-button-github:hover {
-    background-color: #1b1f23;
+    background-color: #2d333b;
   }
 
   .login-button-google {
+    --btn-shadow-color: #c2c2c2;
     background-color: white;
     color: #3c4043;
-    border-color: #dadce0;
+    box-shadow: 0 var(--btn-shadow-offset) 0 0 var(--btn-shadow-color);
   }
 
   .login-button-google:hover {
     background-color: #f8f9fa;
   }
 
+  :global(.dark) .login-button-google {
+    --btn-shadow-color: #1a1a1a;
+    background-color: #f8f9fa;
+    color: #3c4043;
+  }
+
+  :global(.dark) .login-button-google:hover {
+    background-color: white;
+  }
+
   .dialog-footer-text {
     margin-top: 1.5rem;
     padding-top: 1rem;
-    border-top: 1px solid var(--border);
-    font-size: 0.75rem;
+    border-top: 2px solid var(--border);
+    font-size: 0.8125rem;
     color: var(--muted-foreground);
     text-align: center;
-    line-height: 1.5;
+    line-height: 1.6;
   }
 </style>

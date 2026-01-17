@@ -71,9 +71,6 @@
 </script>
 
 <nav class="navbar">
-  <!-- Background mask -->
-  <div class="navbar-backdrop"></div>
-
   <div class="navbar-container">
     <div class="navbar-inner">
       <!-- Logo -->
@@ -206,31 +203,6 @@
     position: sticky;
     top: 0;
     z-index: 50;
-  }
-
-  .navbar-backdrop {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 5.5rem;
-    background: linear-gradient(
-      to bottom,
-      var(--background) 0%,
-      var(--background) 60%,
-      transparent 100%
-    );
-    pointer-events: none;
-    z-index: -1;
-  }
-
-  :global(.dark) .navbar-backdrop {
-    background: linear-gradient(
-      to bottom,
-      var(--background) 0%,
-      var(--background) 60%,
-      transparent 100%
-    );
   }
 
   .navbar-container {
