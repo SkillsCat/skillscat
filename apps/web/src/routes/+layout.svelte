@@ -1,8 +1,25 @@
 <script lang="ts">
   import '../app.css';
   import { Navbar, Footer } from '$lib/components';
+  import { onMount } from 'svelte';
 
   let { children } = $props();
+
+  let scrollY = $state(0);
+  let isScrolled = $derived(scrollY > 20);
+
+  onMount(() => {
+    const handleScroll = () => {
+      scrollY = window.scrollY;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+    };
+  });
 </script>
 
 <div class="app-wrapper">
@@ -15,8 +32,8 @@
     <div class="lava-blob lava-blob-5"></div>
   </div>
 
-  <!-- Navbar Background -->
-  <div class="navbar-bg"></div>
+  <!-- Navbar Background - fades in when scrolled -->
+  <div class="navbar-bg" class:navbar-bg-visible={isScrolled}></div>
 
   <div class="app-content">
     <Navbar />
@@ -182,7 +199,7 @@
     80% { transform: translate3d(-50px, 60px, 0) scale(0.96); }
   }
 
-  /* Navbar Background - covers full navbar height */
+  /* Navbar Background - covers full navbar height, fades based on scroll */
   .navbar-bg {
     position: fixed;
     top: 0;
@@ -197,6 +214,12 @@
     );
     pointer-events: none;
     z-index: 45;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+
+  .navbar-bg-visible {
+    opacity: 1;
   }
 
   /* App Content */
