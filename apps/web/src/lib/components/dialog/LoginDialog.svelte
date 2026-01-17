@@ -115,7 +115,6 @@
     width: calc(100% - 2rem);
     max-width: 24rem;
     background-color: var(--card);
-    border: 3px solid var(--border-sketch);
     border-radius: var(--radius-2xl);
     box-shadow: var(--shadow-xl);
   }
