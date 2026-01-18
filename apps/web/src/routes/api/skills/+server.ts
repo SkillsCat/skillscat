@@ -1,34 +1,184 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import type { SkillCardData, ApiResponse } from '$lib/types';
+import type { SkillCardData, ApiResponse, SortOption } from '$lib/types';
 
 export const GET: RequestHandler = async ({ url, platform }) => {
   try {
-    const sort = url.searchParams.get('sort') || 'trending';
+    const sort = (url.searchParams.get('sort') || 'trending') as SortOption;
     const category = url.searchParams.get('category');
     const search = url.searchParams.get('q');
     const cursor = url.searchParams.get('cursor');
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
 
-    // TODO: Replace with actual D1 database queries
-    // const db = platform?.env?.DB;
+    const db = platform?.env?.DB;
 
-    const skills: SkillCardData[] = [];
-    const total = 0;
+    if (!db) {
+      return json({
+        success: true,
+        data: {
+          skills: [],
+          nextCursor: null
+        },
+        meta: {
+          total: 0,
+          hasMore: false
+        }
+      } satisfies ApiResponse<{ skills: SkillCardData[]; nextCursor: string | null }>);
+    }
 
-    const response: ApiResponse<{ skills: SkillCardData[]; nextCursor: string | null }> = {
+    // Build query
+    let sql = `
+      SELECT
+        s.id,
+        s.name,
+        s.slug,
+        s.description,
+        s.repo_owner as repoOwner,
+        s.repo_name as repoName,
+        s.stars,
+        s.forks,
+        s.trending_score as trendingScore,
+        s.updated_at as updatedAt,
+        GROUP_CONCAT(sc.category_slug) as categories,
+        a.avatar_url as authorAvatar
+      FROM skills s
+      LEFT JOIN skill_categories sc ON s.id = sc.skill_id
+      LEFT JOIN authors a ON s.repo_owner = a.username
+      WHERE 1=1
+    `;
+    const params: (string | number)[] = [];
+
+    if (search) {
+      sql += ` AND (s.name LIKE ? OR s.description LIKE ?)`;
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    if (category) {
+      sql += ` AND EXISTS (SELECT 1 FROM skill_categories sc2 WHERE sc2.skill_id = s.id AND sc2.category_slug = ?)`;
+      params.push(category);
+    }
+
+    // Cursor-based pagination
+    if (cursor) {
+      const [cursorValue, cursorId] = cursor.split(':');
+      if (sort === 'trending') {
+        sql += ` AND (s.trending_score < ? OR (s.trending_score = ? AND s.id > ?))`;
+        params.push(parseFloat(cursorValue), parseFloat(cursorValue), cursorId);
+      } else if (sort === 'stars') {
+        sql += ` AND (s.stars < ? OR (s.stars = ? AND s.id > ?))`;
+        params.push(parseInt(cursorValue), parseInt(cursorValue), cursorId);
+      } else if (sort === 'recent') {
+        sql += ` AND (s.updated_at < ? OR (s.updated_at = ? AND s.id > ?))`;
+        params.push(parseInt(cursorValue), parseInt(cursorValue), cursorId);
+      } else {
+        sql += ` AND (s.name > ? OR (s.name = ? AND s.id > ?))`;
+        params.push(cursorValue, cursorValue, cursorId);
+      }
+    }
+
+    sql += ` GROUP BY s.id`;
+
+    // Sort order
+    switch (sort) {
+      case 'trending':
+        sql += ` ORDER BY s.trending_score DESC, s.id ASC`;
+        break;
+      case 'stars':
+        sql += ` ORDER BY s.stars DESC, s.id ASC`;
+        break;
+      case 'recent':
+        sql += ` ORDER BY s.updated_at DESC, s.id ASC`;
+        break;
+      case 'name':
+        sql += ` ORDER BY s.name ASC, s.id ASC`;
+        break;
+    }
+
+    sql += ` LIMIT ?`;
+    params.push(limit + 1); // Fetch one extra to check if there's more
+
+    const result = await db.prepare(sql).bind(...params).all<{
+      id: string;
+      name: string;
+      slug: string;
+      description: string | null;
+      repoOwner: string;
+      repoName: string;
+      stars: number;
+      forks: number;
+      trendingScore: number;
+      updatedAt: number;
+      categories: string | null;
+      authorAvatar: string | null;
+    }>();
+
+    const rows = result.results || [];
+    const hasMore = rows.length > limit;
+    const skills: SkillCardData[] = rows.slice(0, limit).map(row => ({
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      description: row.description,
+      repoOwner: row.repoOwner,
+      repoName: row.repoName,
+      stars: row.stars,
+      forks: row.forks,
+      trendingScore: row.trendingScore,
+      updatedAt: row.updatedAt,
+      categories: row.categories ? row.categories.split(',') : [],
+      authorAvatar: row.authorAvatar || undefined
+    }));
+
+    // Generate next cursor
+    let nextCursor: string | null = null;
+    if (hasMore && skills.length > 0) {
+      const lastSkill = skills[skills.length - 1];
+      switch (sort) {
+        case 'trending':
+          nextCursor = `${lastSkill.trendingScore}:${lastSkill.id}`;
+          break;
+        case 'stars':
+          nextCursor = `${lastSkill.stars}:${lastSkill.id}`;
+          break;
+        case 'recent':
+          nextCursor = `${lastSkill.updatedAt}:${lastSkill.id}`;
+          break;
+        case 'name':
+          nextCursor = `${lastSkill.name}:${lastSkill.id}`;
+          break;
+      }
+    }
+
+    // Get total count
+    let countSql = `SELECT COUNT(DISTINCT s.id) as total FROM skills s`;
+    const countParams: (string | number)[] = [];
+
+    if (category) {
+      countSql += ` LEFT JOIN skill_categories sc ON s.id = sc.skill_id WHERE sc.category_slug = ?`;
+      countParams.push(category);
+      if (search) {
+        countSql += ` AND (s.name LIKE ? OR s.description LIKE ?)`;
+        countParams.push(`%${search}%`, `%${search}%`);
+      }
+    } else if (search) {
+      countSql += ` WHERE s.name LIKE ? OR s.description LIKE ?`;
+      countParams.push(`%${search}%`, `%${search}%`);
+    }
+
+    const countResult = await db.prepare(countSql).bind(...countParams).first<{ total: number }>();
+    const total = countResult?.total || 0;
+
+    return json({
       success: true,
       data: {
         skills,
-        nextCursor: null
+        nextCursor
       },
       meta: {
         total,
-        hasMore: false
+        hasMore
       }
-    };
-
-    return json(response);
+    } satisfies ApiResponse<{ skills: SkillCardData[]; nextCursor: string | null }>);
   } catch (error) {
     console.error('Error fetching skills:', error);
     return json({

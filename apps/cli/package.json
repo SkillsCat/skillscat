@@ -1,0 +1,41 @@
+{
+  "name": "skillscat",
+  "version": "0.1.0",
+  "description": "CLI for installing Claude Code skills from SkillsCat registry",
+  "type": "module",
+  "bin": {
+    "skillscat": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "dev": "tsup src/index.ts --format esm --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.9.3"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "skills",
+    "cli",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/skillscat/skillscat"
+  },
+  "homepage": "https://skillscat.com"
+}

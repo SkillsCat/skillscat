@@ -1,7 +1,7 @@
 <script lang="ts">
   import { NavigationMenu } from 'bits-ui';
   import { Logo, ThemeToggle, SearchBox, UserMenu } from '$lib/components';
-  import { CATEGORIES } from '$lib/constants/categories';
+  import { CATEGORY_SECTIONS } from '$lib/constants/categories';
   import { goto } from '$app/navigation';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import {
@@ -27,34 +27,84 @@
     Activity01Icon,
     Folder01Icon,
     WorkflowSquare01Icon,
-    SparklesIcon
+    SparklesIcon,
+    CloudIcon,
+    FlowIcon,
+    SmartPhone01Icon,
+    AiGenerativeIcon,
+    AiBrain01Icon,
+    AiChat01Icon,
+    Mail01Icon,
+    Share01Icon,
+    Edit01Icon,
+    MessageIcon,
+    LockPasswordIcon,
+    Loading01Icon,
+    Analytics01Icon,
+    ConsoleIcon,
+    DocumentCodeIcon,
+    LayoutIcon,
+    CheckListIcon,
+    CubeIcon,
+    Search01Icon
   } from '@hugeicons/core-free-icons';
 
   let mobileMenuOpen = $state(false);
   let searchQuery = $state('');
 
-  // Icon mapping for categories
+  // Icon mapping for categories (by slug)
   const categoryIcons: Record<string, any> = {
-    'git': GitBranchIcon,
+    // Development
     'code-generation': CodeIcon,
     'refactoring': RefreshIcon,
     'debugging': Bug01Icon,
-    'code-review': EyeIcon,
     'testing': TestTubeIcon,
-    'security': SecurityLockIcon,
-    'performance': SpeedTrain01Icon,
-    'documentation': FileScriptIcon,
-    'i18n': EarthIcon,
+    'code-review': EyeIcon,
+    'git': GitBranchIcon,
+    // Backend
     'api': Link01Icon,
     'database': Database01Icon,
-    'data-processing': DatabaseExportIcon,
+    'auth': LockPasswordIcon,
+    'caching': Loading01Icon,
+    // Frontend
     'ui-components': PaintBrush01Icon,
     'accessibility': AccessIcon,
-    'devops': Settings01Icon,
+    'animation': SparklesIcon,
+    'responsive': SmartPhone01Icon,
+    // DevOps
+    'ci-cd': FlowIcon,
+    'docker': CubeIcon,
+    'kubernetes': Settings01Icon,
+    'cloud': CloudIcon,
     'monitoring': Activity01Icon,
-    'file-operations': Folder01Icon,
+    // Quality
+    'security': SecurityLockIcon,
+    'performance': SpeedTrain01Icon,
+    'linting': CheckListIcon,
+    'types': DocumentCodeIcon,
+    // Docs
+    'documentation': FileScriptIcon,
+    'comments': MessageIcon,
+    'i18n': EarthIcon,
+    // Data
+    'data-processing': DatabaseExportIcon,
+    'analytics': Analytics01Icon,
+    'scraping': Search01Icon,
+    // AI
+    'prompts': AiChat01Icon,
+    'embeddings': AiBrain01Icon,
+    'agents': AiGenerativeIcon,
+    'ml-ops': AiGenerativeIcon,
+    // Productivity
     'automation': WorkflowSquare01Icon,
-    'productivity': SparklesIcon
+    'file-ops': Folder01Icon,
+    'cli': ConsoleIcon,
+    'templates': LayoutIcon,
+    // Content
+    'writing': Edit01Icon,
+    'email': Mail01Icon,
+    'social': Share01Icon,
+    'seo': Search01Icon
   };
 
   function handleSearch(query: string) {
@@ -63,11 +113,8 @@
     }
   }
 
-  // Split categories into columns for better display
-  const categoryColumns = $derived(() => {
-    const half = Math.ceil(CATEGORIES.length / 2);
-    return [CATEGORIES.slice(0, half), CATEGORIES.slice(half)];
-  });
+  // Get first 5 sections for dropdown (most relevant for developers)
+  const displaySections = CATEGORY_SECTIONS.slice(0, 5);
 </script>
 
 <nav class="navbar">
@@ -109,23 +156,26 @@
               </NavigationMenu.Trigger>
 
               <NavigationMenu.Content class="nav-content">
-                <div class="dropdown-grid">
-                  {#each categoryColumns() as column}
-                    <ul class="category-list">
-                      {#each column as category}
-                        <li>
-                          <NavigationMenu.Link
-                            href="/category/{category.slug}"
-                            class="category-item"
-                          >
-                            <div class="category-icon">
-                              <HugeiconsIcon icon={categoryIcons[category.slug]} size={18} strokeWidth={2} />
-                            </div>
-                            <div class="category-name">{category.name}</div>
-                          </NavigationMenu.Link>
-                        </li>
-                      {/each}
-                    </ul>
+                <div class="dropdown-sections">
+                  {#each displaySections as section}
+                    <div class="section-group">
+                      <div class="section-title">{section.name}</div>
+                      <ul class="category-list">
+                        {#each section.categories as category}
+                          <li>
+                            <NavigationMenu.Link
+                              href="/category/{category.slug}"
+                              class="category-item"
+                            >
+                              <div class="category-icon">
+                                <HugeiconsIcon icon={categoryIcons[category.slug] || SparklesIcon} size={16} strokeWidth={2} />
+                              </div>
+                              <div class="category-name">{category.name}</div>
+                            </NavigationMenu.Link>
+                          </li>
+                        {/each}
+                      </ul>
+                    </div>
                   {/each}
                 </div>
                 <div class="dropdown-footer">
@@ -370,19 +420,36 @@
     background-color: var(--border-sketch);
   }
 
-  /* Dropdown Content Layout */
-  .dropdown-grid {
+  /* Dropdown Content Layout - Grouped by Sections */
+  .dropdown-sections {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 0.5rem;
+    grid-template-columns: repeat(5, minmax(120px, 1fr));
+    gap: 0.25rem;
     padding: 1rem;
-    min-width: 380px;
+    min-width: 600px;
+    max-width: 700px;
+  }
+
+  .section-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .section-title {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted-foreground);
+    padding: 0.25rem 0.5rem;
+    margin-bottom: 0.125rem;
   }
 
   .category-list {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 0.125rem;
     list-style: none;
     margin: 0;
     padding: 0;
@@ -391,9 +458,9 @@
   :global(.category-item) {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.625rem 0.875rem;
-    border-radius: var(--radius-lg);
+    gap: 0.5rem;
+    padding: 0.375rem 0.5rem;
+    border-radius: var(--radius-md);
     text-decoration: none;
     transition: all 0.15s ease;
   }
@@ -407,9 +474,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    border-radius: var(--radius-md);
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: var(--radius-sm);
     background: var(--primary-subtle);
     color: var(--primary);
     flex-shrink: 0;
@@ -419,14 +486,15 @@
   :global(.category-item:hover) .category-icon {
     background: var(--primary);
     color: var(--primary-foreground);
-    transform: scale(1.1) rotate(5deg);
+    transform: scale(1.1);
   }
 
   .category-name {
-    font-size: 0.875rem;
-    font-weight: 600;
+    font-size: 0.8125rem;
+    font-weight: 500;
     color: var(--foreground);
     line-height: 1.25;
+    white-space: nowrap;
   }
 
   :global(.category-item:hover) .category-name {

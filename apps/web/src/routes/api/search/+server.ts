@@ -27,9 +27,66 @@ export const GET: RequestHandler = async ({ url, platform }) => {
         c.keywords.some((k) => k.includes(query))
     ).slice(0, 5);
 
-    // TODO: Search skills from D1 database
-    // const db = platform?.env?.DB;
-    const skills: SkillCardData[] = [];
+    // Search skills from D1 database
+    const db = platform?.env?.DB;
+    let skills: SkillCardData[] = [];
+
+    if (db) {
+      try {
+        const result = await db.prepare(`
+          SELECT
+            s.id,
+            s.name,
+            s.slug,
+            s.description,
+            s.repo_owner as repoOwner,
+            s.repo_name as repoName,
+            s.stars,
+            s.forks,
+            s.trending_score as trendingScore,
+            s.updated_at as updatedAt,
+            GROUP_CONCAT(sc.category_slug) as categories,
+            a.avatar_url as authorAvatar
+          FROM skills s
+          LEFT JOIN skill_categories sc ON s.id = sc.skill_id
+          LEFT JOIN authors a ON s.repo_owner = a.username
+          WHERE s.name LIKE ? OR s.description LIKE ?
+          GROUP BY s.id
+          ORDER BY s.trending_score DESC
+          LIMIT ?
+        `).bind(`%${query}%`, `%${query}%`, limit).all<{
+          id: string;
+          name: string;
+          slug: string;
+          description: string | null;
+          repoOwner: string;
+          repoName: string;
+          stars: number;
+          forks: number;
+          trendingScore: number;
+          updatedAt: number;
+          categories: string | null;
+          authorAvatar: string | null;
+        }>();
+
+        skills = (result.results || []).map(row => ({
+          id: row.id,
+          name: row.name,
+          slug: row.slug,
+          description: row.description,
+          repoOwner: row.repoOwner,
+          repoName: row.repoName,
+          stars: row.stars,
+          forks: row.forks,
+          trendingScore: row.trendingScore,
+          updatedAt: row.updatedAt,
+          categories: row.categories ? row.categories.split(',') : [],
+          authorAvatar: row.authorAvatar || undefined
+        }));
+      } catch {
+        // Database query failed, return empty results
+      }
+    }
 
     return json({
       success: true,

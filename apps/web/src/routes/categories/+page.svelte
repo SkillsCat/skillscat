@@ -1,6 +1,6 @@
 <script lang="ts">
   import { SearchBox } from '$lib/components';
-  import type { CategoryWithCount } from '$lib/constants/categories';
+  import { CATEGORY_SECTIONS, type CategoryWithCount } from '$lib/constants/categories';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import {
     GitBranchIcon,
@@ -23,7 +23,25 @@
     Folder01Icon,
     WorkflowSquare01Icon,
     SparklesIcon,
-    Search01Icon
+    Search01Icon,
+    CloudIcon,
+    FlowIcon,
+    SmartPhone01Icon,
+    AiGenerativeIcon,
+    AiBrain01Icon,
+    AiChat01Icon,
+    Mail01Icon,
+    Share01Icon,
+    Edit01Icon,
+    MessageIcon,
+    LockPasswordIcon,
+    Loading01Icon,
+    Analytics01Icon,
+    ConsoleIcon,
+    DocumentCodeIcon,
+    LayoutIcon,
+    CheckListIcon,
+    CubeIcon
   } from '@hugeicons/core-free-icons';
 
   interface Props {
@@ -38,26 +56,57 @@
 
   // Icon mapping for categories (same as Navbar)
   const categoryIcons: Record<string, any> = {
-    'git': GitBranchIcon,
+    // Development
     'code-generation': CodeIcon,
     'refactoring': RefreshIcon,
     'debugging': Bug01Icon,
-    'code-review': EyeIcon,
     'testing': TestTubeIcon,
-    'security': SecurityLockIcon,
-    'performance': SpeedTrain01Icon,
-    'documentation': FileScriptIcon,
-    'i18n': EarthIcon,
+    'code-review': EyeIcon,
+    'git': GitBranchIcon,
+    // Backend
     'api': Link01Icon,
     'database': Database01Icon,
-    'data-processing': DatabaseExportIcon,
+    'auth': LockPasswordIcon,
+    'caching': Loading01Icon,
+    // Frontend
     'ui-components': PaintBrush01Icon,
     'accessibility': AccessIcon,
-    'devops': Settings01Icon,
+    'animation': SparklesIcon,
+    'responsive': SmartPhone01Icon,
+    // DevOps
+    'ci-cd': FlowIcon,
+    'docker': CubeIcon,
+    'kubernetes': Settings01Icon,
+    'cloud': CloudIcon,
     'monitoring': Activity01Icon,
-    'file-operations': Folder01Icon,
+    // Quality
+    'security': SecurityLockIcon,
+    'performance': SpeedTrain01Icon,
+    'linting': CheckListIcon,
+    'types': DocumentCodeIcon,
+    // Docs
+    'documentation': FileScriptIcon,
+    'comments': MessageIcon,
+    'i18n': EarthIcon,
+    // Data
+    'data-processing': DatabaseExportIcon,
+    'analytics': Analytics01Icon,
+    'scraping': Search01Icon,
+    // AI
+    'prompts': AiChat01Icon,
+    'embeddings': AiBrain01Icon,
+    'agents': AiGenerativeIcon,
+    'ml-ops': AiGenerativeIcon,
+    // Productivity
     'automation': WorkflowSquare01Icon,
-    'productivity': SparklesIcon
+    'file-ops': Folder01Icon,
+    'cli': ConsoleIcon,
+    'templates': LayoutIcon,
+    // Content
+    'writing': Edit01Icon,
+    'email': Mail01Icon,
+    'social': Share01Icon,
+    'seo': Search01Icon
   };
 
   const filteredCategories = $derived(
@@ -69,6 +118,19 @@
         )
       : data.categories
   );
+
+  // Group categories by section for display
+  const groupedCategories = $derived(() => {
+    return CATEGORY_SECTIONS.map(section => ({
+      ...section,
+      categories: section.categories.filter(cat =>
+        filteredCategories.some(fc => fc.slug === cat.slug)
+      ).map(cat => {
+        const found = filteredCategories.find(fc => fc.slug === cat.slug);
+        return { ...cat, skillCount: found?.skillCount ?? 0 };
+      })
+    })).filter(section => section.categories.length > 0);
+  });
 </script>
 
 <svelte:head>
@@ -98,30 +160,35 @@
     {filteredCategories.length} categories
   </div>
 
-  <!-- Categories Grid -->
-  <div class="categories-grid">
-    {#each filteredCategories as category (category.slug)}
-      <a
-        href="/category/{category.slug}"
-        class="category-card group"
-      >
-        <div class="category-icon-wrapper">
-          <HugeiconsIcon icon={categoryIcons[category.slug]} size={24} strokeWidth={2} />
-        </div>
-        <div class="category-content">
-          <h2 class="category-title">
-            {category.name}
-          </h2>
-          <p class="category-description">
-            {category.description}
-          </p>
-        </div>
-        <span class="category-count">
-          {category.skillCount}
-        </span>
-      </a>
-    {/each}
-  </div>
+  <!-- Categories Grid - Grouped by Section -->
+  {#each groupedCategories() as section}
+    <div class="section-group">
+      <h2 class="section-title">{section.name}</h2>
+      <div class="categories-grid">
+        {#each section.categories as category (category.slug)}
+          <a
+            href="/category/{category.slug}"
+            class="category-card group"
+          >
+            <div class="category-icon-wrapper">
+              <HugeiconsIcon icon={categoryIcons[category.slug] || SparklesIcon} size={24} strokeWidth={2} />
+            </div>
+            <div class="category-content">
+              <h3 class="category-title">
+                {category.name}
+              </h3>
+              <p class="category-description">
+                {category.description}
+              </p>
+            </div>
+            <span class="category-count">
+              {category.skillCount}
+            </span>
+          </a>
+        {/each}
+      </div>
+    </div>
+  {/each}
 
   {#if filteredCategories.length === 0}
     <div class="empty-state">
@@ -134,6 +201,19 @@
 </div>
 
 <style>
+  .section-group {
+    margin-bottom: 2.5rem;
+  }
+
+  .section-title {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--foreground);
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+
   .categories-grid {
     display: grid;
     grid-template-columns: repeat(1, 1fr);

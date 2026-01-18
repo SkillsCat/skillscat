@@ -13,7 +13,26 @@
 
   let { data }: Props = $props();
 
-  const installCommand = $derived(data.skill ? `claude skill add ${data.skill.repoOwner}/${data.skill.name}` : '');
+  // Installation commands for different CLI tools
+  const skillIdentifier = $derived(data.skill ? `${data.skill.repoOwner}/${data.skill.repoName}` : '');
+
+  const installCommands = $derived(data.skill ? [
+    {
+      name: 'add-skill',
+      label: 'Vercel add-skill',
+      command: `npx add-skill ${skillIdentifier}`,
+      description: 'Works with Claude Code, Cursor, Codex, and 10+ agents'
+    },
+    {
+      name: 'skillscat',
+      label: 'SkillsCat CLI',
+      command: `npx skillscat add ${skillIdentifier}`,
+      description: 'SkillsCat registry CLI'
+    }
+  ] : []);
+
+  let selectedInstaller = $state('add-skill');
+  const currentCommand = $derived(installCommands.find(c => c.name === selectedInstaller)?.command || '');
 
   function formatRelativeTime(timestamp: number): string {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -101,10 +120,30 @@
         <!-- Installation -->
         <div class="card">
           <h2 class="text-lg font-semibold text-fg mb-4">Installation</h2>
-          <div class="flex items-center gap-3 p-3 bg-bg-subtle rounded-lg font-mono text-sm">
-            <code class="flex-1 text-fg overflow-x-auto">{installCommand}</code>
-            <CopyButton text={installCommand} />
+
+          <!-- CLI Selector -->
+          <div class="flex gap-2 mb-4">
+            {#each installCommands as installer (installer.name)}
+              <button
+                class="install-tab"
+                class:install-tab-active={selectedInstaller === installer.name}
+                onclick={() => selectedInstaller = installer.name}
+              >
+                {installer.label}
+              </button>
+            {/each}
           </div>
+
+          <!-- Command -->
+          <div class="flex items-center gap-3 p-3 bg-bg-subtle rounded-lg font-mono text-sm">
+            <code class="flex-1 text-fg overflow-x-auto">{currentCommand}</code>
+            <CopyButton text={currentCommand} />
+          </div>
+
+          <!-- Description -->
+          <p class="mt-2 text-xs text-fg-muted">
+            {installCommands.find(c => c.name === selectedInstaller)?.description}
+          </p>
         </div>
 
         <!-- README -->
@@ -129,7 +168,7 @@
                     href="/category/{categorySlug}"
                     class="tag hover:bg-primary-subtle hover:text-primary transition-colors"
                   >
-                    {category.emoji} {category.name}
+                    {category.name}
                   </a>
                 {/if}
               {/each}
@@ -217,3 +256,32 @@
     </div>
   </div>
 {/if}
+
+<style>
+  .install-tab {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--muted-foreground);
+    background: transparent;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .install-tab:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+  }
+
+  .install-tab-active {
+    color: var(--primary-foreground);
+    background: var(--primary);
+    border-color: var(--primary);
+  }
+
+  .install-tab-active:hover {
+    color: var(--primary-foreground);
+  }
+</style>

@@ -24,7 +24,25 @@
     Activity01Icon,
     Folder01Icon,
     WorkflowSquare01Icon,
-    SparklesIcon
+    SparklesIcon,
+    CloudIcon,
+    FlowIcon,
+    SmartPhone01Icon,
+    AiGenerativeIcon,
+    AiBrain01Icon,
+    AiChat01Icon,
+    Mail01Icon,
+    Share01Icon,
+    Edit01Icon,
+    MessageIcon,
+    LockPasswordIcon,
+    Loading01Icon,
+    Analytics01Icon,
+    ConsoleIcon,
+    DocumentCodeIcon,
+    LayoutIcon,
+    CheckListIcon,
+    CubeIcon
   } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
 
@@ -42,26 +60,57 @@
 
   // Icon mapping for categories
   const categoryIcons: Record<string, any> = {
-    'git': GitBranchIcon,
+    // Development
     'code-generation': CodeIcon,
     'refactoring': RefreshIcon,
     'debugging': Bug01Icon,
-    'code-review': EyeIcon,
     'testing': TestTubeIcon,
-    'security': SecurityLockIcon,
-    'performance': SpeedTrain01Icon,
-    'documentation': FileScriptIcon,
-    'i18n': EarthIcon,
+    'code-review': EyeIcon,
+    'git': GitBranchIcon,
+    // Backend
     'api': Link01Icon,
     'database': Database01Icon,
-    'data-processing': DatabaseExportIcon,
+    'auth': LockPasswordIcon,
+    'caching': Loading01Icon,
+    // Frontend
     'ui-components': PaintBrush01Icon,
     'accessibility': AccessIcon,
-    'devops': Settings01Icon,
+    'animation': SparklesIcon,
+    'responsive': SmartPhone01Icon,
+    // DevOps
+    'ci-cd': FlowIcon,
+    'docker': CubeIcon,
+    'kubernetes': Settings01Icon,
+    'cloud': CloudIcon,
     'monitoring': Activity01Icon,
-    'file-operations': Folder01Icon,
+    // Quality
+    'security': SecurityLockIcon,
+    'performance': SpeedTrain01Icon,
+    'linting': CheckListIcon,
+    'types': DocumentCodeIcon,
+    // Docs
+    'documentation': FileScriptIcon,
+    'comments': MessageIcon,
+    'i18n': EarthIcon,
+    // Data
+    'data-processing': DatabaseExportIcon,
+    'analytics': Analytics01Icon,
+    'scraping': Search01Icon,
+    // AI
+    'prompts': AiChat01Icon,
+    'embeddings': AiBrain01Icon,
+    'agents': AiGenerativeIcon,
+    'ml-ops': AiGenerativeIcon,
+    // Productivity
     'automation': WorkflowSquare01Icon,
-    'productivity': SparklesIcon
+    'file-ops': Folder01Icon,
+    'cli': ConsoleIcon,
+    'templates': LayoutIcon,
+    // Content
+    'writing': Edit01Icon,
+    'email': Mail01Icon,
+    'social': Share01Icon,
+    'seo': Search01Icon
   };
 
   $effect(() => {
@@ -114,7 +163,7 @@
               class="category-chip"
             >
               <span class="category-chip-icon">
-                <HugeiconsIcon icon={categoryIcons[category.slug]} size={18} strokeWidth={2} />
+                <HugeiconsIcon icon={categoryIcons[category.slug] || SparklesIcon} size={18} strokeWidth={2} />
               </span>
               <span class="font-medium text-fg">{category.name}</span>
             </a>

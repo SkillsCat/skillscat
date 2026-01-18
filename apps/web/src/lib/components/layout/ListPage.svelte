@@ -78,7 +78,9 @@
       actionHref="/categories"
     >
       {#snippet icon()}
-        {@render icon()}
+        {#if icon}
+          {@render icon()}
+        {/if}
       {/snippet}
     </EmptyState>
   {/if}

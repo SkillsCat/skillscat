@@ -1,0 +1,118 @@
+import pc from 'picocolors';
+import { REGISTRY_URL } from '../utils/paths.js';
+import { error, spinner, warn, info } from '../utils/ui.js';
+
+interface SearchOptions {
+  category?: string;
+  limit?: string;
+}
+
+interface RegistrySkill {
+  name: string;
+  description: string;
+  owner: string;
+  repo: string;
+  stars: number;
+  categories: string[];
+  platform: 'github' | 'gitlab';
+}
+
+interface SearchResult {
+  skills: RegistrySkill[];
+  total: number;
+}
+
+export async function search(query?: string, options: SearchOptions = {}): Promise<void> {
+  const limit = parseInt(options.limit || '20', 10);
+
+  const searchSpinner = spinner(
+    query ? `Searching for "${query}"` : 'Fetching trending skills'
+  );
+
+  let result: SearchResult;
+
+  try {
+    const params = new URLSearchParams();
+    if (query) params.set('q', query);
+    if (options.category) params.set('category', options.category);
+    params.set('limit', String(limit));
+
+    const response = await fetch(`${REGISTRY_URL}/search?${params}`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/1.0'
+      }
+    });
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        searchSpinner.stop(false);
+        warn('Rate limit exceeded. Please try again later.');
+        process.exit(1);
+      }
+      throw new Error(`Registry error: ${response.statusText}`);
+    }
+
+    result = await response.json() as SearchResult;
+  } catch (err) {
+    searchSpinner.stop(false);
+
+    if (err instanceof Error && err.message.includes('fetch')) {
+      // Fallback: show help for direct GitHub/GitLab usage
+      console.log();
+      info('Unable to connect to SkillsCat registry.');
+      console.log();
+      console.log(pc.dim('You can still install skills directly from GitHub/GitLab:'));
+      console.log();
+      console.log(`  ${pc.cyan('npx skillscat add vercel-labs/agent-skills')}`);
+      console.log(`  ${pc.cyan('npx skillscat add owner/repo')}`);
+      console.log();
+      console.log(pc.dim('Popular skill repositories:'));
+      console.log(`  ${pc.dim('•')} vercel-labs/agent-skills - React, Next.js best practices`);
+      console.log(`  ${pc.dim('•')} anthropics/claude-code-skills - Official Claude Code skills`);
+      return;
+    }
+
+    error(err instanceof Error ? err.message : 'Failed to search skills');
+    process.exit(1);
+  }
+
+  searchSpinner.stop(true);
+
+  if (result.skills.length === 0) {
+    warn('No skills found.');
+    if (query) {
+      console.log(pc.dim('Try a different search term or browse categories.'));
+    }
+    console.log();
+    console.log(pc.dim('You can also install skills directly from GitHub/GitLab:'));
+    console.log(`  ${pc.cyan('npx skillscat add owner/repo')}`);
+    return;
+  }
+
+  console.log();
+  console.log(pc.bold(`Found ${result.total} skill(s):`));
+  console.log();
+
+  for (const skill of result.skills) {
+    const identifier = `${skill.owner}/${skill.repo}`;
+    const platformIcon = skill.platform === 'github' ? '' : ' (GitLab)';
+
+    console.log(`  ${pc.bold(pc.cyan(identifier))}${pc.dim(platformIcon)}`);
+    if (skill.description) {
+      console.log(`  ${pc.dim(skill.description)}`);
+    }
+    console.log(
+      `  ${pc.yellow('★')} ${skill.stars}  ${pc.dim('|')}  ` +
+      pc.dim(skill.categories.length > 0 ? skill.categories.join(', ') : 'uncategorized')
+    );
+    console.log();
+  }
+
+  console.log(pc.dim('─'.repeat(50)));
+  console.log();
+  console.log(pc.dim('Install a skill:'));
+  console.log(`  ${pc.cyan('npx skillscat add <owner>/<repo>')}`);
+  console.log();
+  console.log(pc.dim('View skill details:'));
+  console.log(`  ${pc.cyan('npx skillscat info <owner>/<repo>')}`);
+}

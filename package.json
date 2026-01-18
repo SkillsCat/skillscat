@@ -11,11 +11,13 @@
     "dev:web": "pnpm --filter @skillscat/web dev",
     "preview:web": "pnpm --filter @skillscat/web preview",
     "build": "pnpm --filter @skillscat/web build",
-    "typecheck": "pnpm --filter @skillscat/web typecheck",
+    "build:cli": "pnpm --filter skillscat build",
+    "typecheck": "pnpm -r typecheck",
     "lint": "pnpm --filter @skillscat/web lint",
     "db:generate": "pnpm --filter @skillscat/web db:generate",
     "db:migrate": "pnpm --filter @skillscat/web db:migrate",
-    "deploy": "pnpm --filter @skillscat/web deploy"
+    "deploy": "pnpm --filter @skillscat/web deploy",
+    "publish:cli": "pnpm --filter skillscat publish"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

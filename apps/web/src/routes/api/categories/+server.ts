@@ -5,13 +5,30 @@ import type { ApiResponse } from '$lib/types';
 
 export const GET: RequestHandler = async ({ platform }) => {
   try {
-    // TODO: Get actual skill counts from D1 database
-    // const db = platform?.env?.DB;
-    // SELECT category_slug, COUNT(*) FROM skill_categories GROUP BY category_slug
+    const db = platform?.env?.DB;
+
+    // Get skill counts from D1 database
+    let categoryCounts: Record<string, number> = {};
+
+    if (db) {
+      try {
+        const result = await db.prepare(`
+          SELECT category_slug, COUNT(*) as count
+          FROM skill_categories
+          GROUP BY category_slug
+        `).all<{ category_slug: string; count: number }>();
+
+        for (const row of result.results || []) {
+          categoryCounts[row.category_slug] = row.count;
+        }
+      } catch {
+        // Database not available or query failed, use defaults
+      }
+    }
 
     const categories: CategoryWithCount[] = CATEGORIES.map((cat) => ({
       ...cat,
-      skillCount: 0
+      skillCount: categoryCounts[cat.slug] || 0
     }));
 
     return json({
