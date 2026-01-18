@@ -11,6 +11,38 @@ export const GET: RequestHandler = async ({ url, platform }) => {
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
 
     const db = platform?.env?.DB;
+    const kv = platform?.env?.KV;
+
+    // Generate cache key (only cache first page without search)
+    const canCache = !cursor && !search;
+    const cacheKey = canCache ? `api:skills:${sort}:${category || 'all'}:${limit}` : null;
+
+    // Check cache first (only for cacheable requests)
+    if (kv && cacheKey) {
+      try {
+        const cached = await kv.get<{ skills: SkillCardData[]; nextCursor: string | null; total: number; hasMore: boolean }>(cacheKey, 'json');
+        if (cached) {
+          return json({
+            success: true,
+            data: {
+              skills: cached.skills,
+              nextCursor: cached.nextCursor
+            },
+            meta: {
+              total: cached.total,
+              hasMore: cached.hasMore
+            }
+          } satisfies ApiResponse<{ skills: SkillCardData[]; nextCursor: string | null }>, {
+            headers: {
+              'Cache-Control': 'public, max-age=60, stale-while-revalidate=120',
+              'X-Cache': 'HIT'
+            }
+          });
+        }
+      } catch {
+        // Cache miss
+      }
+    }
 
     if (!db) {
       return json({
@@ -168,6 +200,15 @@ export const GET: RequestHandler = async ({ url, platform }) => {
     const countResult = await db.prepare(countSql).bind(...countParams).first<{ total: number }>();
     const total = countResult?.total || 0;
 
+    // Cache the result (only for first page without search)
+    if (kv && cacheKey && skills.length > 0) {
+      try {
+        await kv.put(cacheKey, JSON.stringify({ skills, nextCursor, total, hasMore }), { expirationTtl: 60 });
+      } catch {
+        // Ignore cache write errors
+      }
+    }
+
     return json({
       success: true,
       data: {
@@ -178,7 +219,12 @@ export const GET: RequestHandler = async ({ url, platform }) => {
         total,
         hasMore
       }
-    } satisfies ApiResponse<{ skills: SkillCardData[]; nextCursor: string | null }>);
+    } satisfies ApiResponse<{ skills: SkillCardData[]; nextCursor: string | null }>, {
+      headers: {
+        'Cache-Control': canCache ? 'public, max-age=60, stale-while-revalidate=120' : 'private, no-cache',
+        'X-Cache': 'MISS'
+      }
+    });
   } catch (error) {
     console.error('Error fetching skills:', error);
     return json({

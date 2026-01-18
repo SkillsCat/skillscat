@@ -6,6 +6,28 @@ import type { ApiResponse } from '$lib/types';
 export const GET: RequestHandler = async ({ platform }) => {
   try {
     const db = platform?.env?.DB;
+    const kv = platform?.env?.KV;
+
+    // Check cache first
+    const cacheKey = 'api:categories';
+    if (kv) {
+      try {
+        const cached = await kv.get<{ categories: CategoryWithCount[] }>(cacheKey, 'json');
+        if (cached) {
+          return json({
+            success: true,
+            data: cached
+          } satisfies ApiResponse<{ categories: CategoryWithCount[] }>, {
+            headers: {
+              'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
+              'X-Cache': 'HIT'
+            }
+          });
+        }
+      } catch {
+        // Cache miss
+      }
+    }
 
     // Get skill counts from D1 database
     let categoryCounts: Record<string, number> = {};
@@ -31,10 +53,24 @@ export const GET: RequestHandler = async ({ platform }) => {
       skillCount: categoryCounts[cat.slug] || 0
     }));
 
+    // Cache the result
+    if (kv) {
+      try {
+        await kv.put(cacheKey, JSON.stringify({ categories }), { expirationTtl: 300 });
+      } catch {
+        // Ignore cache write errors
+      }
+    }
+
     return json({
       success: true,
       data: { categories }
-    } satisfies ApiResponse<{ categories: CategoryWithCount[] }>);
+    } satisfies ApiResponse<{ categories: CategoryWithCount[] }>, {
+      headers: {
+        'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
+        'X-Cache': 'MISS'
+      }
+    });
   } catch (error) {
     console.error('Error fetching categories:', error);
     return json({

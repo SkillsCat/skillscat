@@ -5,6 +5,28 @@ import type { SkillDetail, SkillCardData, ApiResponse, FileNode } from '$lib/typ
 export const GET: RequestHandler = async ({ params, platform }) => {
   try {
     const db = platform?.env?.DB;
+    const kv = platform?.env?.KV;
+
+    // Check cache first
+    const cacheKey = `api:skill:${params.slug}`;
+    if (kv) {
+      try {
+        const cached = await kv.get<{ skill: SkillDetail; relatedSkills: SkillCardData[] }>(cacheKey, 'json');
+        if (cached) {
+          return json({
+            success: true,
+            data: cached
+          } satisfies ApiResponse<{ skill: SkillDetail; relatedSkills: SkillCardData[] }>, {
+            headers: {
+              'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
+              'X-Cache': 'HIT'
+            }
+          });
+        }
+      } catch {
+        // Cache miss
+      }
+    }
 
     if (!db) {
       return json({
@@ -174,13 +196,26 @@ export const GET: RequestHandler = async ({ params, platform }) => {
       }));
     }
 
+    const responseData = { skill, relatedSkills };
+
+    // Cache the result
+    if (kv) {
+      try {
+        await kv.put(cacheKey, JSON.stringify(responseData), { expirationTtl: 300 });
+      } catch {
+        // Ignore cache write errors
+      }
+    }
+
     return json({
       success: true,
-      data: {
-        skill,
-        relatedSkills
+      data: responseData
+    } satisfies ApiResponse<{ skill: SkillDetail; relatedSkills: SkillCardData[] }>, {
+      headers: {
+        'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
+        'X-Cache': 'MISS'
       }
-    } satisfies ApiResponse<{ skill: SkillDetail; relatedSkills: SkillCardData[] }>);
+    });
   } catch (err) {
     console.error('Error fetching skill:', err);
     return json({

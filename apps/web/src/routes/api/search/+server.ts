@@ -19,6 +19,36 @@ export const GET: RequestHandler = async ({ url, platform }) => {
       });
     }
 
+    const db = platform?.env?.DB;
+    const kv = platform?.env?.KV;
+
+    // Check cache first
+    const cacheKey = `api:search:${query}:${limit}`;
+    if (kv) {
+      try {
+        const cached = await kv.get<{ skills: SkillCardData[]; categories: typeof CATEGORIES; total: number }>(cacheKey, 'json');
+        if (cached) {
+          return json({
+            success: true,
+            data: {
+              skills: cached.skills,
+              categories: cached.categories
+            },
+            meta: {
+              total: cached.total
+            }
+          } satisfies ApiResponse<{ skills: SkillCardData[]; categories: typeof CATEGORIES }>, {
+            headers: {
+              'Cache-Control': 'public, max-age=60, stale-while-revalidate=120',
+              'X-Cache': 'HIT'
+            }
+          });
+        }
+      } catch {
+        // Cache miss
+      }
+    }
+
     // Search categories (from constants)
     const matchedCategories = CATEGORIES.filter(
       (c) =>
@@ -28,7 +58,6 @@ export const GET: RequestHandler = async ({ url, platform }) => {
     ).slice(0, 5);
 
     // Search skills from D1 database
-    const db = platform?.env?.DB;
     let skills: SkillCardData[] = [];
 
     if (db) {
@@ -88,6 +117,17 @@ export const GET: RequestHandler = async ({ url, platform }) => {
       }
     }
 
+    const total = skills.length + matchedCategories.length;
+
+    // Cache the result
+    if (kv && (skills.length > 0 || matchedCategories.length > 0)) {
+      try {
+        await kv.put(cacheKey, JSON.stringify({ skills, categories: matchedCategories, total }), { expirationTtl: 60 });
+      } catch {
+        // Ignore cache write errors
+      }
+    }
+
     return json({
       success: true,
       data: {
@@ -95,9 +135,14 @@ export const GET: RequestHandler = async ({ url, platform }) => {
         categories: matchedCategories
       },
       meta: {
-        total: skills.length + matchedCategories.length
+        total
       }
-    } satisfies ApiResponse<{ skills: SkillCardData[]; categories: typeof matchedCategories }>);
+    } satisfies ApiResponse<{ skills: SkillCardData[]; categories: typeof matchedCategories }>, {
+      headers: {
+        'Cache-Control': 'public, max-age=60, stale-while-revalidate=120',
+        'X-Cache': 'MISS'
+      }
+    });
   } catch (error) {
     console.error('Error searching:', error);
     return json({

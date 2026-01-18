@@ -5,6 +5,26 @@ const SITE_URL = 'https://skillscat.dev';
 
 export const GET: RequestHandler = async ({ platform }) => {
   const db = platform?.env?.DB;
+  const kv = platform?.env?.KV;
+
+  // Check cache first
+  const cacheKey = 'sitemap:xml';
+  if (kv) {
+    try {
+      const cached = await kv.get(cacheKey, 'text');
+      if (cached) {
+        return new Response(cached, {
+          headers: {
+            'Content-Type': 'application/xml',
+            'Cache-Control': 'public, max-age=3600',
+            'X-Cache': 'HIT'
+          }
+        });
+      }
+    } catch {
+      // Cache miss
+    }
+  }
 
   // Static pages
   const staticPages = [
@@ -61,10 +81,20 @@ ${allPages
   .join('\n')}
 </urlset>`;
 
+  // Cache the result
+  if (kv) {
+    try {
+      await kv.put(cacheKey, xml, { expirationTtl: 3600 });
+    } catch {
+      // Ignore cache write errors
+    }
+  }
+
   return new Response(xml, {
     headers: {
       'Content-Type': 'application/xml',
-      'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
+      'Cache-Control': 'public, max-age=3600',
+      'X-Cache': 'MISS'
     },
   });
 };
