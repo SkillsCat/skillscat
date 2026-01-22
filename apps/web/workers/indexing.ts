@@ -15,52 +15,29 @@ import type {
   ClassificationMessage,
   GitHubRepo,
   GitHubContent,
+  MessageBatch,
+  ExecutionContext,
 } from './types';
-
-const GITHUB_API_BASE = 'https://api.github.com';
-
-function generateId(): string {
-  return crypto.randomUUID();
-}
-
-function generateSlug(owner: string, name: string): string {
-  return `${owner}-${name}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-}
-
-async function githubFetch<T>(
-  url: string,
-  env: IndexingEnv
-): Promise<T | null> {
-  const headers: HeadersInit = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': env.GITHUB_API_VERSION || '2022-11-28',
-    'User-Agent': 'SkillsCat-Indexing-Worker/1.0',
-  };
-
-  if (env.GITHUB_TOKEN) {
-    headers.Authorization = `Bearer ${env.GITHUB_TOKEN}`;
-  }
-
-  const response = await fetch(url, { headers });
-
-  if (response.status === 404) {
-    return null;
-  }
-
-  if (!response.ok) {
-    throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
-  }
-
-  return response.json();
-}
+import {
+  isInDotFolder,
+  githubFetch,
+  getRepoApiUrl,
+  getContentsApiUrl,
+  generateId,
+  generateSlug,
+  decodeBase64,
+} from './utils';
 
 async function getRepoInfo(
   owner: string,
   name: string,
   env: IndexingEnv
 ): Promise<GitHubRepo | null> {
-  const url = `${GITHUB_API_BASE}/repos/${owner}/${name}`;
-  return githubFetch<GitHubRepo>(url, env);
+  return githubFetch<GitHubRepo>(getRepoApiUrl(owner, name), {
+    token: env.GITHUB_TOKEN,
+    apiVersion: env.GITHUB_API_VERSION,
+    userAgent: 'SkillsCat-Indexing-Worker/1.0',
+  });
 }
 
 async function getSkillMd(
@@ -68,21 +45,29 @@ async function getSkillMd(
   name: string,
   env: IndexingEnv
 ): Promise<GitHubContent | null> {
-  const paths = ['SKILL.md', '.claude/SKILL.md', 'skill.md', '.claude/skill.md'];
+  // Only accept SKILL.md in root directory (not in any dot folders like .claude/, .cursor/, etc.)
+  // Skills in dot folders are IDE-specific configurations
+  const paths = ['SKILL.md', 'skill.md'];
 
   for (const path of paths) {
-    const url = `${GITHUB_API_BASE}/repos/${owner}/${name}/contents/${path}`;
-    const content = await githubFetch<GitHubContent>(url, env);
+    const content = await githubFetch<GitHubContent>(
+      getContentsApiUrl(owner, name, path),
+      {
+        token: env.GITHUB_TOKEN,
+        apiVersion: env.GITHUB_API_VERSION,
+        userAgent: 'SkillsCat-Indexing-Worker/1.0',
+      }
+    );
     if (content && content.type === 'file') {
+      // Double-check the returned path is not in a dot folder
+      if (content.path && isInDotFolder(content.path)) {
+        continue;
+      }
       return content;
     }
   }
 
   return null;
-}
-
-function decodeBase64(content: string): string {
-  return atob(content.replace(/\n/g, ''));
 }
 
 async function skillExists(
@@ -313,7 +298,7 @@ export default {
   async queue(
     batch: MessageBatch<IndexingMessage>,
     env: IndexingEnv,
-    ctx: ExecutionContext
+    _ctx: ExecutionContext
   ): Promise<void> {
     console.log(`Processing batch of ${batch.messages.length} messages`);
 
@@ -330,8 +315,8 @@ export default {
 
   async fetch(
     request: Request,
-    env: IndexingEnv,
-    ctx: ExecutionContext
+    _env: IndexingEnv,
+    _ctx: ExecutionContext
   ): Promise<Response> {
     const url = new URL(request.url);
 

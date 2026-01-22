@@ -3,6 +3,48 @@
  */
 
 // ============================================
+// Cloudflare Workers Types
+// ============================================
+
+/**
+ * Cloudflare Workers ExecutionContext
+ */
+export interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+  passThroughOnException(): void;
+}
+
+/**
+ * Cloudflare Workers ScheduledController
+ */
+export interface ScheduledController {
+  scheduledTime: number;
+  cron: string;
+  noRetry(): void;
+}
+
+/**
+ * Cloudflare Workers Queue Message
+ */
+export interface Message<T> {
+  readonly id: string;
+  readonly timestamp: Date;
+  readonly body: T;
+  ack(): void;
+  retry(): void;
+}
+
+/**
+ * Cloudflare Workers MessageBatch
+ */
+export interface MessageBatch<T> {
+  readonly queue: string;
+  readonly messages: readonly Message<T>[];
+  ackAll(): void;
+  retryAll(): void;
+}
+
+// ============================================
 // Environment Types
 // ============================================
 

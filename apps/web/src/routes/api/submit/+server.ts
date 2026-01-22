@@ -4,6 +4,15 @@ import type { RequestHandler } from './$types';
 const GITHUB_API_BASE = 'https://api.github.com';
 const GITLAB_API_BASE = 'https://gitlab.com/api/v4';
 
+/**
+ * Check if a path starts with a dot folder (e.g., .claude/, .cursor/, .trae/)
+ * Skills in dot folders are IDE-specific configurations and should not be accepted
+ * as standalone skills in the registry.
+ */
+function isInDotFolder(path: string): boolean {
+  return /^\.[\w-]+\//.test(path) || /^\.[\w-]+$/.test(path);
+}
+
 type Platform = 'github' | 'gitlab';
 
 interface GitHubContent {
@@ -133,7 +142,7 @@ async function fetchGitLabRepo(owner: string, repo: string, token?: string): Pro
 }
 
 /**
- * Check if SKILL.md exists in GitHub repo
+ * Check if SKILL.md exists in GitHub repo (only in root, not in dot folders)
  */
 async function checkGitHubSkillMd(owner: string, repo: string, path: string, token?: string): Promise<boolean> {
   const headers: HeadersInit = {
@@ -146,11 +155,10 @@ async function checkGitHubSkillMd(owner: string, repo: string, path: string, tok
     headers.Authorization = `Bearer ${token}`;
   }
 
+  // Only check root SKILL.md (not in dot folders like .claude/, .cursor/, etc.)
   const skillPaths = [
     path ? `${path}/SKILL.md` : 'SKILL.md',
-    path ? `${path}/.claude/SKILL.md` : '.claude/SKILL.md',
-    path ? `${path}/.claude/skills/SKILL.md` : '.claude/skills/SKILL.md',
-  ];
+  ].filter(p => !isInDotFolder(p));
 
   for (const checkPath of skillPaths) {
     const response = await fetch(
@@ -164,7 +172,7 @@ async function checkGitHubSkillMd(owner: string, repo: string, path: string, tok
 }
 
 /**
- * Check if SKILL.md exists in GitLab repo
+ * Check if SKILL.md exists in GitLab repo (only in root, not in dot folders)
  */
 async function checkGitLabSkillMd(owner: string, repo: string, path: string, token?: string): Promise<boolean> {
   const projectPath = encodeURIComponent(`${owner}/${repo}`);
@@ -176,11 +184,10 @@ async function checkGitLabSkillMd(owner: string, repo: string, path: string, tok
     headers['PRIVATE-TOKEN'] = token;
   }
 
+  // Only check root SKILL.md (not in dot folders like .claude/, .cursor/, etc.)
   const skillPaths = [
     path ? `${path}/SKILL.md` : 'SKILL.md',
-    path ? `${path}/.claude/SKILL.md` : '.claude/SKILL.md',
-    path ? `${path}/.claude/skills/SKILL.md` : '.claude/skills/SKILL.md',
-  ];
+  ].filter(p => !isInDotFolder(p));
 
   for (const checkPath of skillPaths) {
     const encodedPath = encodeURIComponent(checkPath);
@@ -226,6 +233,11 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     }
 
     const { platform: repoPlatform, owner, repo, path } = repoInfo;
+
+    // Reject submissions from dot folders (IDE-specific configurations)
+    if (path && isInDotFolder(path)) {
+      throw error(400, 'Skills from IDE-specific folders (e.g., .claude, .cursor, .trae) are not accepted. Please submit standalone skills from the repository root.');
+    }
 
     const db = platform?.env?.DB;
     const queue = platform?.env?.INDEXING_QUEUE;

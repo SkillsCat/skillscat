@@ -11,16 +11,34 @@ export interface Agent {
 
 export const AGENTS: Agent[] = [
   {
-    id: 'opencode',
-    name: 'OpenCode',
-    projectPath: '.opencode/skill/',
-    globalPath: join(homedir(), '.config', 'opencode', 'skill')
+    id: 'amp',
+    name: 'Amp',
+    projectPath: '.agents/skills/',
+    globalPath: join(homedir(), '.config', 'agents', 'skills')
+  },
+  {
+    id: 'antigravity',
+    name: 'Antigravity',
+    projectPath: '.agent/skills/',
+    globalPath: join(homedir(), '.gemini', 'antigravity', 'skills')
   },
   {
     id: 'claude-code',
     name: 'Claude Code',
     projectPath: '.claude/skills/',
     globalPath: join(homedir(), '.claude', 'skills')
+  },
+  {
+    id: 'clawdbot',
+    name: 'Clawdbot',
+    projectPath: 'skills/',
+    globalPath: join(homedir(), '.clawdbot', 'skills')
+  },
+  {
+    id: 'codebuddy',
+    name: 'CodeBuddy',
+    projectPath: '.codebuddy/skills/',
+    globalPath: join(homedir(), '.codebuddy', 'skills')
   },
   {
     id: 'codex',
@@ -35,28 +53,10 @@ export const AGENTS: Agent[] = [
     globalPath: join(homedir(), '.cursor', 'skills')
   },
   {
-    id: 'amp',
-    name: 'Amp',
-    projectPath: '.agents/skills/',
-    globalPath: join(homedir(), '.config', 'agents', 'skills')
-  },
-  {
-    id: 'kilo-code',
-    name: 'Kilo Code',
-    projectPath: '.kilocode/skills/',
-    globalPath: join(homedir(), '.kilocode', 'skills')
-  },
-  {
-    id: 'roo-code',
-    name: 'Roo Code',
-    projectPath: '.roo/skills/',
-    globalPath: join(homedir(), '.roo', 'skills')
-  },
-  {
-    id: 'goose',
-    name: 'Goose',
-    projectPath: '.goose/skills/',
-    globalPath: join(homedir(), '.config', 'goose', 'skills')
+    id: 'droid',
+    name: 'Droid',
+    projectPath: '.factory/skills/',
+    globalPath: join(homedir(), '.factory', 'skills')
   },
   {
     id: 'gemini-cli',
@@ -65,28 +65,58 @@ export const AGENTS: Agent[] = [
     globalPath: join(homedir(), '.gemini', 'skills')
   },
   {
-    id: 'antigravity',
-    name: 'Antigravity',
-    projectPath: '.agent/skills/',
-    globalPath: join(homedir(), '.gemini', 'antigravity', 'skills')
-  },
-  {
     id: 'github-copilot',
     name: 'GitHub Copilot',
     projectPath: '.github/skills/',
     globalPath: join(homedir(), '.copilot', 'skills')
   },
   {
-    id: 'clawdbot',
-    name: 'Clawdbot',
-    projectPath: 'skills/',
-    globalPath: join(homedir(), '.clawdbot', 'skills')
+    id: 'goose',
+    name: 'Goose',
+    projectPath: '.goose/skills/',
+    globalPath: join(homedir(), '.config', 'goose', 'skills')
   },
   {
-    id: 'droid',
-    name: 'Droid',
-    projectPath: '.factory/skills/',
-    globalPath: join(homedir(), '.factory', 'skills')
+    id: 'kilo-code',
+    name: 'Kilo Code',
+    projectPath: '.kilocode/skills/',
+    globalPath: join(homedir(), '.kilocode', 'skills')
+  },
+  {
+    id: 'kiro-cli',
+    name: 'Kiro CLI',
+    projectPath: '.kiro/skills/',
+    globalPath: join(homedir(), '.kiro', 'skills')
+  },
+  {
+    id: 'neovate',
+    name: 'Neovate',
+    projectPath: '.neovate/skills/',
+    globalPath: join(homedir(), '.neovate', 'skills')
+  },
+  {
+    id: 'opencode',
+    name: 'OpenCode',
+    projectPath: '.opencode/skill/',
+    globalPath: join(homedir(), '.config', 'opencode', 'skill')
+  },
+  {
+    id: 'qoder',
+    name: 'Qoder',
+    projectPath: '.qoder/skills/',
+    globalPath: join(homedir(), '.qoder', 'skills')
+  },
+  {
+    id: 'roo-code',
+    name: 'Roo Code',
+    projectPath: '.roo/skills/',
+    globalPath: join(homedir(), '.roo', 'skills')
+  },
+  {
+    id: 'trae',
+    name: 'Trae',
+    projectPath: '.trae/skills/',
+    globalPath: join(homedir(), '.trae', 'skills')
   },
   {
     id: 'windsurf',
