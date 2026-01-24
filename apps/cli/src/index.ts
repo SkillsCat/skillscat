@@ -12,6 +12,7 @@ import { login } from './commands/login.js';
 import { logout } from './commands/logout.js';
 import { whoami } from './commands/whoami.js';
 import { publish } from './commands/publish.js';
+import { submit } from './commands/submit.js';
 
 const program = new Command();
 
@@ -107,6 +108,12 @@ program
   .option('-p, --public', 'Make the skill public')
   .option('-d, --description <desc>', 'Skill description')
   .action(publish);
+
+// Submit command
+program
+  .command('submit [url]')
+  .description('Submit a GitHub repository to SkillsCat registry')
+  .action(submit);
 
 // Error handling
 program.exitOverride((err) => {
