@@ -155,7 +155,7 @@
                 </span>
               </NavigationMenu.Trigger>
 
-              <NavigationMenu.Content class="nav-content">
+              <NavigationMenu.Content class="nav-content" forceMount>
                 <div class="dropdown-sections">
                   {#each displaySections as section}
                     <div class="section-group">
@@ -193,7 +193,7 @@
           </NavigationMenu.List>
 
           <!-- Viewport - Required for content rendering -->
-          <NavigationMenu.Viewport class="nav-viewport" />
+          <NavigationMenu.Viewport class="nav-viewport" forceMount />
         </NavigationMenu.Root>
       </div>
 
@@ -385,11 +385,14 @@
     border: 3px solid var(--border-sketch);
     border-radius: var(--radius-2xl);
     box-shadow: var(--shadow-lg);
-    transition: width 0.3s ease, height 0.3s ease;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
   }
 
-  :global(.nav-viewport[data-state="closed"]) {
-    display: none;
+  :global(.nav-viewport[data-state="open"]) {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   /* Indicator */
@@ -403,7 +406,6 @@
     align-items: flex-end;
     justify-content: center;
     overflow: hidden;
-    transition: transform 0.25s ease, width 0.25s ease;
   }
 
   :global(.nav-indicator[data-state="hidden"]) {
@@ -423,11 +425,11 @@
   /* Dropdown Content Layout - Grouped by Sections */
   .dropdown-sections {
     display: grid;
-    grid-template-columns: repeat(5, minmax(120px, 1fr));
+    grid-template-columns: repeat(5, minmax(140px, 1fr));
     gap: 0.25rem;
     padding: 1rem;
-    min-width: 600px;
-    max-width: 700px;
+    min-width: 700px;
+    max-width: 800px;
   }
 
   .section-group {
@@ -494,7 +496,6 @@
     font-weight: 500;
     color: var(--foreground);
     line-height: 1.25;
-    white-space: nowrap;
   }
 
   :global(.category-item:hover) .category-name {
