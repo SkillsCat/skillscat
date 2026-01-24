@@ -17,10 +17,6 @@ export const auth = betterAuth({
     github: {
       clientId: env?.GITHUB_CLIENT_ID || 'placeholder',
       clientSecret: env?.GITHUB_CLIENT_SECRET || 'placeholder'
-    },
-    google: {
-      clientId: env?.GOOGLE_CLIENT_ID || 'placeholder',
-      clientSecret: env?.GOOGLE_CLIENT_SECRET || 'placeholder'
     }
   },
   session: {

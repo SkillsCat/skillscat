@@ -241,7 +241,8 @@ export async function searchSkills(
  */
 export async function getSkillBySlug(
   env: DbEnv,
-  slug: string
+  slug: string,
+  userId?: string | null
 ): Promise<SkillDetail | null> {
   if (!env.DB) return null;
 
@@ -253,9 +254,16 @@ export async function getSkillBySlug(
       a.avatar_url as authorAvatar,
       a.bio as authorBio,
       a.skills_count as authorSkillsCount,
-      a.total_stars as authorTotalStars
+      a.total_stars as authorTotalStars,
+      u.name as ownerName,
+      u.image as ownerAvatar,
+      o.name as orgName,
+      o.slug as orgSlug,
+      o.avatar_url as orgAvatar
     FROM skills s
     LEFT JOIN authors a ON s.author_id = a.id
+    LEFT JOIN user u ON s.owner_id = u.id
+    LEFT JOIN organizations o ON s.org_id = o.id
     WHERE s.slug = ?
   `)
     .bind(slug)
@@ -263,17 +271,66 @@ export async function getSkillBySlug(
 
   if (!result) return null;
 
+  const skillData = result as any;
+
+  // 权限检查
+  if (skillData.visibility === 'private') {
+    if (!userId) {
+      return null; // 未登录用户无法访问私有 skill
+    }
+
+    // 检查是否是所有者
+    const isOwner = skillData.owner_id === userId;
+
+    // 检查是否是组织成员
+    let isOrgMember = false;
+    if (skillData.org_id) {
+      const membership = await env.DB.prepare(`
+        SELECT 1 FROM org_members WHERE org_id = ? AND user_id = ?
+      `)
+        .bind(skillData.org_id, userId)
+        .first();
+      isOrgMember = !!membership;
+    }
+
+    // 检查是否有显式权限
+    let hasPermission = false;
+    if (!isOwner && !isOrgMember) {
+      const permission = await env.DB.prepare(`
+        SELECT 1 FROM skill_permissions
+        WHERE skill_id = ? AND grantee_type = 'user' AND grantee_id = ?
+          AND (expires_at IS NULL OR expires_at > ?)
+      `)
+        .bind(skillData.id, userId, Date.now())
+        .first();
+      hasPermission = !!permission;
+    }
+
+    if (!isOwner && !isOrgMember && !hasPermission) {
+      return null; // 无权限访问
+    }
+  }
+
   // 获取分类
   const categories = await env.DB.prepare(`
     SELECT category_slug FROM skill_categories WHERE skill_id = ?
   `)
-    .bind((result as any).id)
+    .bind(skillData.id)
     .all();
 
   // 从 R2 读取 SKILL.md 内容
-  let readme = (result as any).readme;
+  let readme = skillData.readme;
   if (env.R2 && !readme) {
-    const r2Path = `skills/${(result as any).repo_owner}/${(result as any).repo_name}/SKILL.md`;
+    // 根据 source_type 决定 R2 路径
+    let r2Path: string;
+    if (skillData.source_type === 'upload') {
+      // 上传的 skill 使用 slug 中的 owner 和 name
+      const slugParts = skillData.slug.replace(/^@/, '').split('/');
+      r2Path = `skills/${slugParts[0]}/${slugParts[1] || skillData.name}/SKILL.md`;
+    } else {
+      r2Path = `skills/${skillData.repo_owner}/${skillData.repo_name}/SKILL.md`;
+    }
+
     try {
       const object = await env.R2.get(r2Path);
       if (object) {
@@ -287,36 +344,46 @@ export async function getSkillBySlug(
   // 解析文件结构
   let fileStructure = [];
   try {
-    if ((result as any).file_structure) {
-      fileStructure = JSON.parse((result as any).file_structure);
+    if (skillData.file_structure) {
+      fileStructure = JSON.parse(skillData.file_structure);
     }
   } catch {}
 
   return {
-    id: (result as any).id,
-    name: (result as any).name,
-    slug: (result as any).slug,
-    description: (result as any).description,
-    repoOwner: (result as any).repo_owner,
-    repoName: (result as any).repo_name,
-    githubUrl: (result as any).github_url || `https://github.com/${(result as any).repo_owner}/${(result as any).repo_name}`,
-    skillPath: (result as any).skill_path || '',
-    stars: (result as any).stars,
-    forks: (result as any).forks,
-    trendingScore: (result as any).trending_score,
-    updatedAt: (result as any).updated_at,
-    lastCommitAt: (result as any).last_commit_at || null,
-    createdAt: (result as any).created_at || (result as any).indexed_at,
-    indexedAt: (result as any).indexed_at,
+    id: skillData.id,
+    name: skillData.name,
+    slug: skillData.slug,
+    description: skillData.description,
+    repoOwner: skillData.repo_owner,
+    repoName: skillData.repo_name,
+    githubUrl: skillData.github_url || (skillData.repo_owner ? `https://github.com/${skillData.repo_owner}/${skillData.repo_name}` : null),
+    skillPath: skillData.skill_path || '',
+    stars: skillData.stars || 0,
+    forks: skillData.forks || 0,
+    trendingScore: skillData.trending_score || 0,
+    updatedAt: skillData.updated_at,
+    lastCommitAt: skillData.last_commit_at || null,
+    createdAt: skillData.created_at || skillData.indexed_at,
+    indexedAt: skillData.indexed_at,
     readme,
     fileStructure,
     categories: categories.results.map((c: any) => c.category_slug),
-    authorAvatar: (result as any).authorAvatar,
-    authorUsername: (result as any).authorUsername,
-    authorDisplayName: (result as any).authorDisplayName,
-    authorBio: (result as any).authorBio,
-    authorSkillsCount: (result as any).authorSkillsCount,
-    authorTotalStars: (result as any).authorTotalStars,
+    authorAvatar: skillData.authorAvatar,
+    authorUsername: skillData.authorUsername,
+    authorDisplayName: skillData.authorDisplayName,
+    authorBio: skillData.authorBio,
+    authorSkillsCount: skillData.authorSkillsCount,
+    authorTotalStars: skillData.authorTotalStars,
+    // 新增字段
+    visibility: skillData.visibility || 'public',
+    sourceType: skillData.source_type || 'github',
+    ownerId: skillData.owner_id,
+    ownerName: skillData.ownerName,
+    ownerAvatar: skillData.ownerAvatar,
+    orgId: skillData.org_id,
+    orgName: skillData.orgName,
+    orgSlug: skillData.orgSlug,
+    orgAvatar: skillData.orgAvatar,
   };
 }
 

@@ -27,7 +27,7 @@ export interface SkillCardData {
 }
 
 export interface SkillDetail extends SkillCardData {
-  githubUrl: string;
+  githubUrl: string | null;
   skillPath: string;
   readme: string | null;
   fileStructure: FileNode[] | null;
@@ -40,6 +40,16 @@ export interface SkillDetail extends SkillCardData {
   authorBio?: string;
   authorSkillsCount?: number;
   authorTotalStars?: number;
+  // Private skill fields
+  visibility: 'public' | 'private' | 'unlisted';
+  sourceType: 'github' | 'upload';
+  ownerId?: string;
+  ownerName?: string;
+  ownerAvatar?: string;
+  orgId?: string;
+  orgName?: string;
+  orgSlug?: string;
+  orgAvatar?: string;
 }
 
 // ========== File Node ==========

@@ -8,12 +8,16 @@ import { search } from './commands/search.js';
 import { remove } from './commands/remove.js';
 import { update } from './commands/update.js';
 import { info } from './commands/info.js';
+import { login } from './commands/login.js';
+import { logout } from './commands/logout.js';
+import { whoami } from './commands/whoami.js';
+import { publish } from './commands/publish.js';
 
 const program = new Command();
 
 program
   .name('skillscat')
-  .description('CLI for installing agent skills from GitHub/GitLab repositories')
+  .description('CLI for installing agent skills from GitHub repositories')
   .version('0.1.0');
 
 // Main add command (compatible with add-skill)
@@ -74,6 +78,35 @@ program
   .command('info <source>')
   .description('Show detailed information about a skill or repository')
   .action(info);
+
+// Login command
+program
+  .command('login')
+  .description('Authenticate with SkillsCat')
+  .option('-t, --token <token>', 'Use an API token directly')
+  .action(login);
+
+// Logout command
+program
+  .command('logout')
+  .description('Sign out from SkillsCat')
+  .action(logout);
+
+// Whoami command
+program
+  .command('whoami')
+  .description('Show current authenticated user')
+  .action(whoami);
+
+// Publish command
+program
+  .command('publish <path>')
+  .description('Publish a skill to SkillsCat')
+  .option('-n, --name <name>', 'Skill name')
+  .option('-o, --org <org>', 'Publish under an organization')
+  .option('-p, --public', 'Make the skill public')
+  .option('-d, --description <desc>', 'Skill description')
+  .action(publish);
 
 // Error handling
 program.exitOverride((err) => {

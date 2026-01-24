@@ -1,6 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { checkRateLimit, getRateLimitKey, rateLimitHeaders, RATE_LIMITS } from '$lib/server/ratelimit';
+import { getAuthContext } from '$lib/server/middleware/auth';
+import { getAccessibleSkillIds } from '$lib/server/permissions';
 
 export interface RegistrySkillItem {
   name: string;
@@ -10,7 +12,8 @@ export interface RegistrySkillItem {
   stars: number;
   updatedAt: number;
   categories: string[];
-  platform: 'github' | 'gitlab';
+  visibility: 'public' | 'private' | 'unlisted';
+  slug: string;
 }
 
 export interface RegistrySearchResult {
@@ -18,14 +21,18 @@ export interface RegistrySearchResult {
   total: number;
 }
 
-export const GET: RequestHandler = async ({ url, platform, request }) => {
+export const GET: RequestHandler = async ({ url, platform, request, locals }) => {
   const query = url.searchParams.get('q') || '';
   const category = url.searchParams.get('category') || '';
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '20', 10), 100);
   const offset = parseInt(url.searchParams.get('offset') || '0', 10);
+  const includePrivate = url.searchParams.get('include_private') === 'true';
 
   const kv = platform?.env?.KV;
   const db = platform?.env?.DB;
+
+  // Get auth context for private skill access
+  const auth = await getAuthContext(request, locals, db);
 
   // Rate limiting
   if (kv) {
@@ -71,23 +78,39 @@ export const GET: RequestHandler = async ({ url, platform, request }) => {
     let total = 0;
 
     if (db) {
+      // Get accessible private skill IDs if user is authenticated and wants private skills
+      let accessiblePrivateIds: string[] = [];
+      if (includePrivate && auth.userId) {
+        accessiblePrivateIds = await getAccessibleSkillIds(auth.userId, db);
+      }
+
       // Build query
       let sql = `
         SELECT
           s.id,
           s.name,
+          s.slug,
           s.description,
           s.repo_owner as owner,
           s.repo_name as repo,
           s.stars,
           s.updated_at as updatedAt,
-          s.platform,
+          s.visibility,
           GROUP_CONCAT(sc.category_slug) as categories
         FROM skills s
         LEFT JOIN skill_categories sc ON s.id = sc.skill_id
-        WHERE 1=1
+        WHERE (s.visibility = 'public'
       `;
       const params: (string | number)[] = [];
+
+      // Include user's accessible private skills
+      if (accessiblePrivateIds.length > 0) {
+        const placeholders = accessiblePrivateIds.map(() => '?').join(',');
+        sql += ` OR s.id IN (${placeholders})`;
+        params.push(...accessiblePrivateIds);
+      }
+
+      sql += `)`;
 
       if (query) {
         sql += ` AND (s.name LIKE ? OR s.description LIKE ?)`;
@@ -106,34 +129,36 @@ export const GET: RequestHandler = async ({ url, platform, request }) => {
       const result = await db.prepare(sql).bind(...params).all<{
         id: string;
         name: string;
+        slug: string;
         description: string | null;
         owner: string;
         repo: string;
         stars: number;
         updatedAt: number;
-        platform: string;
+        visibility: string;
         categories: string | null;
       }>();
 
       skills = (result.results || []).map(row => ({
         name: row.name,
         description: row.description || '',
-        owner: row.owner,
-        repo: row.repo,
-        stars: row.stars,
+        owner: row.owner || '',
+        repo: row.repo || '',
+        stars: row.stars || 0,
         updatedAt: row.updatedAt,
         categories: row.categories ? row.categories.split(',') : [],
-        platform: (row.platform || 'github') as 'github' | 'gitlab'
+        visibility: (row.visibility || 'public') as 'public' | 'private' | 'unlisted',
+        slug: row.slug
       }));
 
-      // Get total count
-      let countSql = `SELECT COUNT(DISTINCT s.id) as total FROM skills s`;
+      // Get total count (only public skills for unauthenticated users)
+      let countSql = `SELECT COUNT(DISTINCT s.id) as total FROM skills s WHERE s.visibility = 'public'`;
       if (category) {
-        countSql += ` LEFT JOIN skill_categories sc ON s.id = sc.skill_id WHERE sc.category_slug = ?`;
+        countSql = `SELECT COUNT(DISTINCT s.id) as total FROM skills s LEFT JOIN skill_categories sc ON s.id = sc.skill_id WHERE s.visibility = 'public' AND sc.category_slug = ?`;
         const countResult = await db.prepare(countSql).bind(category).first<{ total: number }>();
         total = countResult?.total || 0;
       } else if (query) {
-        countSql += ` WHERE s.name LIKE ? OR s.description LIKE ?`;
+        countSql += ` AND (s.name LIKE ? OR s.description LIKE ?)`;
         const countResult = await db.prepare(countSql).bind(`%${query}%`, `%${query}%`).first<{ total: number }>();
         total = countResult?.total || 0;
       } else {

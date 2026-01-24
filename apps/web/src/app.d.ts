@@ -12,13 +12,10 @@ declare global {
         CLASSIFICATION_QUEUE: Queue;
         GITHUB_CLIENT_ID: string;
         GITHUB_CLIENT_SECRET: string;
-        GOOGLE_CLIENT_ID: string;
-        GOOGLE_CLIENT_SECRET: string;
         BETTER_AUTH_SECRET: string;
         OPENROUTER_API_KEY: string;
         DEEPSEEK_API_KEY: string;
         GITHUB_TOKEN?: string;
-        GITLAB_TOKEN?: string;
       };
       context: ExecutionContext;
       caches: CacheStorage & { default: Cache };

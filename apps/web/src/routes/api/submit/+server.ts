@@ -2,7 +2,6 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 const GITHUB_API_BASE = 'https://api.github.com';
-const GITLAB_API_BASE = 'https://gitlab.com/api/v4';
 
 /**
  * Check if a path starts with a dot folder (e.g., .claude/, .cursor/, .trae/)
@@ -13,8 +12,6 @@ function isInDotFolder(path: string): boolean {
   return /^\.[\w-]+\//.test(path) || /^\.[\w-]+$/.test(path);
 }
 
-type Platform = 'github' | 'gitlab';
-
 interface GitHubContent {
   name: string;
   path: string;
@@ -23,7 +20,6 @@ interface GitHubContent {
 }
 
 interface RepoInfo {
-  platform: Platform;
   owner: string;
   repo: string;
   path: string;
@@ -34,37 +30,17 @@ interface RepoInfo {
 }
 
 /**
- * Parse repository URL to extract platform, owner, repo, and path
+ * Parse repository URL to extract owner, repo, and path (GitHub only)
  */
 function parseRepoUrl(url: string): RepoInfo | null {
   // GitHub: https://github.com/owner/repo or https://github.com/owner/repo/tree/branch/path
   const githubMatch = url.match(/github\.com\/([^\/]+)\/([^\/]+)(?:\/tree\/[^\/]+)?(\/.+)?$/);
   if (githubMatch) {
     return {
-      platform: 'github',
       owner: githubMatch[1],
       repo: githubMatch[2].replace(/\.git$/, ''),
       path: githubMatch[3]?.slice(1) || ''
     };
-  }
-
-  // GitLab: https://gitlab.com/owner/repo or https://gitlab.com/owner/group/repo/-/tree/branch/path
-  const gitlabMatch = url.match(/gitlab\.com\/(.+?)(?:\/-\/tree\/[^\/]+)?(\/.+)?$/);
-  if (gitlabMatch) {
-    const fullPath = gitlabMatch[1];
-    // GitLab can have nested groups, so we need to handle owner/group/repo format
-    const parts = fullPath.split('/').filter(p => p && !p.startsWith('-'));
-    if (parts.length >= 2) {
-      // Last part is repo, everything before is owner/group
-      const repo = parts.pop()!.replace(/\.git$/, '');
-      const owner = parts.join('/');
-      return {
-        platform: 'gitlab',
-        owner,
-        repo,
-        path: gitlabMatch[2]?.slice(1) || ''
-      };
-    }
   }
 
   return null;
@@ -95,7 +71,6 @@ async function fetchGitHubRepo(owner: string, repo: string, token?: string): Pro
   };
 
   return {
-    platform: 'github',
     owner,
     repo,
     path: '',
@@ -103,41 +78,6 @@ async function fetchGitHubRepo(owner: string, repo: string, token?: string): Pro
     description: data.description || undefined,
     stars: data.stargazers_count,
     fork: data.fork
-  };
-}
-
-/**
- * Fetch repository info from GitLab
- */
-async function fetchGitLabRepo(owner: string, repo: string, token?: string): Promise<RepoInfo | null> {
-  const projectPath = encodeURIComponent(`${owner}/${repo}`);
-  const headers: HeadersInit = {
-    'User-Agent': 'SkillsCat/1.0',
-  };
-
-  if (token) {
-    headers['PRIVATE-TOKEN'] = token;
-  }
-
-  const response = await fetch(`${GITLAB_API_BASE}/projects/${projectPath}`, { headers });
-  if (!response.ok) return null;
-
-  const data = await response.json() as {
-    name?: string;
-    description?: string;
-    star_count?: number;
-    forked_from_project?: object;
-  };
-
-  return {
-    platform: 'gitlab',
-    owner,
-    repo,
-    path: '',
-    name: data.name,
-    description: data.description || undefined,
-    stars: data.star_count,
-    fork: !!data.forked_from_project
   };
 }
 
@@ -172,43 +112,6 @@ async function checkGitHubSkillMd(owner: string, repo: string, path: string, tok
 }
 
 /**
- * Check if SKILL.md exists in GitLab repo (only in root, not in dot folders)
- */
-async function checkGitLabSkillMd(owner: string, repo: string, path: string, token?: string): Promise<boolean> {
-  const projectPath = encodeURIComponent(`${owner}/${repo}`);
-  const headers: HeadersInit = {
-    'User-Agent': 'SkillsCat/1.0',
-  };
-
-  if (token) {
-    headers['PRIVATE-TOKEN'] = token;
-  }
-
-  // Only check root SKILL.md (not in dot folders like .claude/, .cursor/, etc.)
-  const skillPaths = [
-    path ? `${path}/SKILL.md` : 'SKILL.md',
-  ].filter(p => !isInDotFolder(p));
-
-  for (const checkPath of skillPaths) {
-    const encodedPath = encodeURIComponent(checkPath);
-    const response = await fetch(
-      `${GITLAB_API_BASE}/projects/${projectPath}/repository/files/${encodedPath}?ref=main`,
-      { headers }
-    );
-    if (response.ok) return true;
-
-    // Try master branch as fallback
-    const masterResponse = await fetch(
-      `${GITLAB_API_BASE}/projects/${projectPath}/repository/files/${encodedPath}?ref=master`,
-      { headers }
-    );
-    if (masterResponse.ok) return true;
-  }
-
-  return false;
-}
-
-/**
  * POST /api/submit - Submit a Skill
  */
 export const POST: RequestHandler = async ({ locals, platform, request }) => {
@@ -229,10 +132,10 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     // Parse URL
     const repoInfo = parseRepoUrl(url);
     if (!repoInfo) {
-      throw error(400, 'Invalid repository URL. Supported platforms: GitHub, GitLab');
+      throw error(400, 'Invalid repository URL. Only GitHub repositories are supported.');
     }
 
-    const { platform: repoPlatform, owner, repo, path } = repoInfo;
+    const { owner, repo, path } = repoInfo;
 
     // Reject submissions from dot folders (IDE-specific configurations)
     if (path && isInDotFolder(path)) {
@@ -245,9 +148,9 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     // Check if already exists
     if (db) {
       const existing = await db.prepare(`
-        SELECT slug FROM skills WHERE repo_owner = ? AND repo_name = ? AND platform = ?
+        SELECT slug FROM skills WHERE repo_owner = ? AND repo_name = ?
       `)
-        .bind(owner, repo, repoPlatform)
+        .bind(owner, repo)
         .first<{ slug: string }>();
 
       if (existing) {
@@ -264,23 +167,8 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 
     // Fetch repository info
     const githubToken = platform?.env?.GITHUB_TOKEN;
-    const gitlabToken = platform?.env?.GITLAB_TOKEN;
 
-    let repoData: RepoInfo | null = null;
-    let hasSkillMd = false;
-
-    if (repoPlatform === 'github') {
-      repoData = await fetchGitHubRepo(owner, repo, githubToken);
-      if (repoData) {
-        hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken);
-      }
-    } else if (repoPlatform === 'gitlab') {
-      repoData = await fetchGitLabRepo(owner, repo, gitlabToken);
-      if (repoData) {
-        hasSkillMd = await checkGitLabSkillMd(owner, repo, path, gitlabToken);
-      }
-    }
-
+    const repoData = await fetchGitHubRepo(owner, repo, githubToken);
     if (!repoData) {
       throw error(404, 'Repository not found');
     }
@@ -289,6 +177,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       throw error(400, 'Forked repositories are not accepted. Please submit the original repository.');
     }
 
+    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken);
     if (!hasSkillMd) {
       throw error(400, 'No SKILL.md file found in the repository');
     }
@@ -297,7 +186,6 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     if (queue) {
       await queue.send({
         type: 'check_skill',
-        platform: repoPlatform,
         repoOwner: owner,
         repoName: repo,
         skillPath: path,
@@ -319,7 +207,6 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     return json({
       success: true,
       message: 'Skill submitted successfully. It will appear in our catalog once processed.',
-      platform: repoPlatform,
     });
   } catch (err: any) {
     console.error('Error submitting skill:', err);
@@ -341,19 +228,19 @@ export const GET: RequestHandler = async ({ platform, url }) => {
     // Parse URL
     const repoInfo = parseRepoUrl(repoUrl);
     if (!repoInfo) {
-      return json({ valid: false, error: 'Invalid repository URL. Supported platforms: GitHub, GitLab' });
+      return json({ valid: false, error: 'Invalid repository URL. Only GitHub repositories are supported.' });
     }
 
-    const { platform: repoPlatform, owner, repo, path } = repoInfo;
+    const { owner, repo, path } = repoInfo;
 
     const db = platform?.env?.DB;
 
     // Check if already exists
     if (db) {
       const existing = await db.prepare(`
-        SELECT slug FROM skills WHERE repo_owner = ? AND repo_name = ? AND platform = ?
+        SELECT slug FROM skills WHERE repo_owner = ? AND repo_name = ?
       `)
-        .bind(owner, repo, repoPlatform)
+        .bind(owner, repo)
         .first<{ slug: string }>();
 
       if (existing) {
@@ -367,23 +254,8 @@ export const GET: RequestHandler = async ({ platform, url }) => {
 
     // Fetch repository info
     const githubToken = platform?.env?.GITHUB_TOKEN;
-    const gitlabToken = platform?.env?.GITLAB_TOKEN;
 
-    let repoData: RepoInfo | null = null;
-    let hasSkillMd = false;
-
-    if (repoPlatform === 'github') {
-      repoData = await fetchGitHubRepo(owner, repo, githubToken);
-      if (repoData) {
-        hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken);
-      }
-    } else if (repoPlatform === 'gitlab') {
-      repoData = await fetchGitLabRepo(owner, repo, gitlabToken);
-      if (repoData) {
-        hasSkillMd = await checkGitLabSkillMd(owner, repo, path, gitlabToken);
-      }
-    }
-
+    const repoData = await fetchGitHubRepo(owner, repo, githubToken);
     if (!repoData) {
       return json({ valid: false, error: 'Repository not found' });
     }
@@ -392,13 +264,13 @@ export const GET: RequestHandler = async ({ platform, url }) => {
       return json({ valid: false, error: 'Forked repositories are not accepted' });
     }
 
+    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken);
     if (!hasSkillMd) {
       return json({ valid: false, error: 'No SKILL.md file found' });
     }
 
     return json({
       valid: true,
-      platform: repoPlatform,
       owner,
       repo,
       path,

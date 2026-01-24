@@ -1,6 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { checkRateLimit, getRateLimitKey, rateLimitHeaders, RATE_LIMITS } from '$lib/server/ratelimit';
+import { getAuthContext } from '$lib/server/middleware/auth';
+import { checkSkillAccess } from '$lib/server/permissions';
 
 export interface RegistrySkillItem {
   name: string;
@@ -12,19 +14,23 @@ export interface RegistrySkillItem {
   categories: string[];
   content: string;
   githubUrl: string;
-  platform: 'github' | 'gitlab';
+  visibility: 'public' | 'private' | 'unlisted';
 }
 
-export const GET: RequestHandler = async ({ params, platform, request }) => {
+export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const identifier = params.identifier;
 
   // identifier can be:
+  // - "@owner/skill-name" (e.g., "@anthropics/commit-message") - private skill format
   // - "owner/skill-name" (e.g., "anthropics/commit-message")
   // - "skill-name" (search and pick first match)
 
   const kv = platform?.env?.KV;
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
+
+  // Get auth context for permission checks
+  const auth = await getAuthContext(request, locals, db);
 
   // Rate limiting
   if (kv) {
@@ -76,14 +82,111 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
     // Parse identifier
     let owner: string | undefined;
     let skillName: string;
+    let isPrivateFormat = false;
 
-    if (identifier.includes('/')) {
+    // Handle @owner/skill-name format (private skills)
+    if (identifier.startsWith('@')) {
+      isPrivateFormat = true;
+      const slug = identifier; // Keep the @ prefix for slug lookup
+      const parts = identifier.slice(1).split('/');
+      if (parts.length === 2) {
+        [owner, skillName] = parts;
+      } else {
+        skillName = identifier;
+      }
+
+      // Try to find by slug first for private skills
+      const slugRow = await db.prepare(`
+        SELECT
+          s.id,
+          s.name,
+          s.description,
+          s.repo_owner as owner,
+          s.repo_name as repo,
+          s.stars,
+          s.updated_at as updatedAt,
+          s.github_url as githubUrl,
+          s.skill_path as skillPath,
+          s.visibility,
+          GROUP_CONCAT(sc.category_slug) as categories
+        FROM skills s
+        LEFT JOIN skill_categories sc ON s.id = sc.skill_id
+        WHERE s.slug = ?
+        GROUP BY s.id
+        LIMIT 1
+      `).bind(slug).first<{
+        id: string;
+        name: string;
+        description: string | null;
+        owner: string | null;
+        repo: string | null;
+        stars: number;
+        updatedAt: number;
+        githubUrl: string | null;
+        skillPath: string | null;
+        visibility: string;
+        categories: string | null;
+      }>();
+
+      if (slugRow) {
+        // Check access permission for private skills
+        if (slugRow.visibility === 'private') {
+          if (!auth.userId) {
+            return json(
+              { error: 'Authentication required to access this skill' },
+              { status: 401, headers: { 'Access-Control-Allow-Origin': '*' } }
+            );
+          }
+          const hasAccess = await checkSkillAccess(slugRow.id, auth.userId, db);
+          if (!hasAccess) {
+            return json(
+              { error: 'You do not have permission to access this skill' },
+              { status: 403, headers: { 'Access-Control-Allow-Origin': '*' } }
+            );
+          }
+        }
+
+        // Fetch content and return
+        let content = '';
+        if (r2 && slugRow.owner && slugRow.repo) {
+          try {
+            const r2Key = `skills/${slugRow.owner}/${slugRow.repo}/SKILL.md`;
+            const object = await r2.get(r2Key);
+            if (object) {
+              content = await object.text();
+            }
+          } catch {
+            // Content not in R2
+          }
+        }
+
+        const skill: RegistrySkillItem = {
+          name: slugRow.name,
+          description: slugRow.description || '',
+          owner: slugRow.owner || '',
+          repo: slugRow.repo || '',
+          stars: slugRow.stars || 0,
+          updatedAt: slugRow.updatedAt,
+          categories: slugRow.categories ? slugRow.categories.split(',') : [],
+          content,
+          githubUrl: slugRow.githubUrl || '',
+          visibility: slugRow.visibility as 'public' | 'private' | 'unlisted'
+        };
+
+        return json(skill, {
+          headers: {
+            'Cache-Control': slugRow.visibility === 'public' ? 'public, max-age=300' : 'private, no-cache',
+            'Access-Control-Allow-Origin': '*'
+          }
+        });
+      }
+    } else if (identifier.includes('/')) {
       [owner, skillName] = identifier.split('/');
     } else {
       skillName = identifier;
     }
 
-    // Build query
+    // Build query for public skills (legacy format)
     let sql = `
       SELECT
         s.id,
@@ -95,22 +198,22 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
         s.updated_at as updatedAt,
         s.github_url as githubUrl,
         s.skill_path as skillPath,
-        s.platform,
+        s.visibility,
         GROUP_CONCAT(sc.category_slug) as categories
       FROM skills s
       LEFT JOIN skill_categories sc ON s.id = sc.skill_id
-      WHERE s.name = ?
+      WHERE s.name = ? AND s.visibility = 'public'
     `;
-    const params: string[] = [skillName];
+    const queryParams: string[] = [skillName];
 
     if (owner) {
       sql += ` AND s.repo_owner = ?`;
-      params.push(owner);
+      queryParams.push(owner);
     }
 
     sql += ` GROUP BY s.id LIMIT 1`;
 
-    const row = await db.prepare(sql).bind(...params).first<{
+    const row = await db.prepare(sql).bind(...queryParams).first<{
       id: string;
       name: string;
       description: string | null;
@@ -120,7 +223,7 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
       updatedAt: number;
       githubUrl: string;
       skillPath: string;
-      platform: string;
+      visibility: string;
       categories: string | null;
     }>();
 
@@ -135,7 +238,7 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
     let content = '';
     if (r2) {
       try {
-        const r2Key = `${row.owner}/${row.repo}/${row.skillPath || 'SKILL.md'}`;
+        const r2Key = `skills/${row.owner}/${row.repo}/SKILL.md`;
         const object = await r2.get(r2Key);
         if (object) {
           content = await object.text();
@@ -155,11 +258,11 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
       categories: row.categories ? row.categories.split(',') : [],
       content,
       githubUrl: row.githubUrl,
-      platform: (row.platform || 'github') as 'github' | 'gitlab'
+      visibility: (row.visibility || 'public') as 'public' | 'private' | 'unlisted'
     };
 
-    // Cache the result
-    if (kv) {
+    // Cache the result (only for public skills)
+    if (kv && row.visibility === 'public') {
       try {
         await kv.put(cacheKey, JSON.stringify(skill), { expirationTtl: 300 });
       } catch {

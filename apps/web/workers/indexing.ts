@@ -28,6 +28,76 @@ import {
   decodeBase64,
 } from './utils';
 
+// Anti-abuse: Compute SHA-256 hash
+async function computeHash(content: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(content);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Anti-abuse: Normalize content for comparison
+function normalizeContent(content: string): string {
+  return content
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/^[ \t]+/gm, '')
+    .trim();
+}
+
+// Anti-abuse: Check for duplicate of high-star skill
+async function checkForDuplicate(
+  contentHash: string,
+  env: IndexingEnv,
+  minStars: number = 1000
+): Promise<{ isDuplicate: boolean; originalSlug?: string }> {
+  const match = await env.DB.prepare(`
+    SELECT ch.skill_id, s.slug, s.stars
+    FROM content_hashes ch
+    INNER JOIN skills s ON ch.skill_id = s.id
+    WHERE ch.hash_value = ?
+      AND s.stars >= ?
+      AND s.visibility = 'public'
+    ORDER BY s.stars DESC
+    LIMIT 1
+  `)
+    .bind(contentHash, minStars)
+    .first<{ skill_id: string; slug: string; stars: number }>();
+
+  if (match) {
+    return { isDuplicate: true, originalSlug: match.slug };
+  }
+  return { isDuplicate: false };
+}
+
+// Anti-abuse: Store content hashes
+async function storeContentHashes(
+  skillId: string,
+  fullHash: string,
+  normalizedHash: string,
+  env: IndexingEnv
+): Promise<void> {
+  const now = Date.now();
+
+  await env.DB.prepare(`
+    INSERT INTO content_hashes (id, skill_id, hash_type, hash_value, created_at)
+    VALUES (?, ?, 'full', ?, ?)
+    ON CONFLICT(skill_id, hash_type) DO UPDATE SET hash_value = excluded.hash_value
+  `)
+    .bind(crypto.randomUUID(), skillId, fullHash, now)
+    .run();
+
+  await env.DB.prepare(`
+    INSERT INTO content_hashes (id, skill_id, hash_type, hash_value, created_at)
+    VALUES (?, ?, 'normalized', ?, ?)
+    ON CONFLICT(skill_id, hash_type) DO UPDATE SET hash_value = excluded.hash_value
+  `)
+    .bind(crypto.randomUUID(), skillId, normalizedHash, now)
+    .run();
+}
+
 async function getRepoInfo(
   owner: string,
   name: string,
@@ -262,7 +332,29 @@ async function processMessage(
     return;
   }
 
+  // Get SKILL.md content for anti-abuse check
+  let skillMdContent = '';
+  if (skillMd.content) {
+    skillMdContent = decodeBase64(skillMd.content);
+  } else if (skillMd.download_url) {
+    const response = await fetch(skillMd.download_url);
+    skillMdContent = await response.text();
+  }
+
+  // Compute content hashes
+  const fullHash = await computeHash(skillMdContent);
+  const normalizedHash = await computeHash(normalizeContent(skillMdContent));
+
   const exists = await skillExists(repoOwner, repoName, env);
+
+  // Anti-abuse check for new skills with low stars
+  if (!exists && repo.stargazers_count < 100) {
+    const duplicate = await checkForDuplicate(normalizedHash, env, 1000);
+    if (duplicate.isDuplicate) {
+      console.log(`Rejecting duplicate of ${duplicate.originalSlug}: ${repoOwner}/${repoName}`);
+      return;
+    }
+  }
 
   let skillId: string;
 
@@ -279,6 +371,9 @@ async function processMessage(
     skillId = await createSkill(repo, skillMd, authorId, env);
     console.log(`Created skill: ${skillId}`);
   }
+
+  // Store content hashes for future duplicate detection
+  await storeContentHashes(skillId, fullHash, normalizedHash, env);
 
   const r2Path = await cacheSkillMd(skillId, repoOwner, repoName, skillMd, env);
 
