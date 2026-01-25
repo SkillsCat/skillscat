@@ -1,8 +1,9 @@
 <script lang="ts">
   import { NavigationMenu } from 'bits-ui';
-  import { Logo, ThemeToggle, SearchBox, UserMenu } from '$lib/components';
+  import { Logo, ThemeToggle, SearchBox, UserMenu, SubmitDialog } from '$lib/components';
   import { CATEGORY_SECTIONS } from '$lib/constants/categories';
   import { goto } from '$app/navigation';
+  import { useSession } from '$lib/auth-client';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import {
     ArrowDown01Icon,
@@ -46,11 +47,15 @@
     LayoutIcon,
     CheckListIcon,
     CubeIcon,
-    Search01Icon
+    Search01Icon,
+    Add01Icon
   } from '@hugeicons/core-free-icons';
 
   let mobileMenuOpen = $state(false);
   let searchQuery = $state('');
+  let showSubmitDialog = $state(false);
+
+  const session = useSession();
 
   // Icon mapping for categories (by slug)
   const categoryIcons: Record<string, any> = {
@@ -199,6 +204,15 @@
 
       <!-- Right Side -->
       <div class="navbar-right">
+        {#if $session.data?.user}
+          <button
+            class="submit-btn"
+            onclick={() => showSubmitDialog = true}
+          >
+            <HugeiconsIcon icon={Add01Icon} size={16} strokeWidth={2} />
+            <span class="submit-btn-text">Submit</span>
+          </button>
+        {/if}
         <ThemeToggle />
         <UserMenu />
 
@@ -247,6 +261,8 @@
     {/if}
   </div>
 </nav>
+
+<SubmitDialog isOpen={showSubmitDialog} onClose={() => showSubmitDialog = false} />
 
 <style>
   .navbar {
@@ -527,6 +543,40 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
+  }
+
+  .submit-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem 0.875rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--primary-foreground);
+    background-color: var(--primary);
+    border: none;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .submit-btn:hover {
+    background-color: var(--primary-hover);
+    transform: translateY(-1px);
+  }
+
+  .submit-btn:active {
+    transform: translateY(0);
+  }
+
+  .submit-btn-text {
+    display: none;
+  }
+
+  @media (min-width: 640px) {
+    .submit-btn-text {
+      display: inline;
+    }
   }
 
   .mobile-menu-btn {
