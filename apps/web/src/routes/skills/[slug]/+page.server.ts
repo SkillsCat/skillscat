@@ -1,10 +1,11 @@
 import type { PageServerLoad } from './$types';
-import { getSkillBySlug, getRelatedSkills } from '$lib/server/db/utils';
+import { getSkillBySlug, getRelatedSkills, recordSkillAccess } from '$lib/server/db/utils';
 
 export const load: PageServerLoad = async ({ params, platform, locals }) => {
   const env = {
     DB: platform?.env?.DB,
     R2: platform?.env?.R2,
+    KV: platform?.env?.KV,
   };
 
   // Get current user session
@@ -20,6 +21,14 @@ export const load: PageServerLoad = async ({ params, platform, locals }) => {
         relatedSkills: [],
         error: 'Skill not found or you do not have permission to view it.',
       };
+    }
+
+    // Record access asynchronously (don't block response)
+    // This updates access counts and marks for update if needed
+    if (skill.visibility === 'public') {
+      recordSkillAccess(env, skill.id).catch((err) => {
+        console.error('Failed to record skill access:', err);
+      });
     }
 
     // Get related skills based on categories (only public ones)

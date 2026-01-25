@@ -1,22 +1,29 @@
 /**
  * Trending Worker
  *
- * 定时计算 trending 分数
- * - 每小时运行一次
- * - 计算所有 skills 的 trending score
- * - 更新 D1 数据库
- * - 重新生成 R2 缓存
+ * Cost-optimized trending score calculation with tiered updates:
+ * - Hot tier (stars>=1000 or 7d access): every 6 hours
+ * - Warm tier (stars>=100 or 30d access): every 24 hours
+ * - Cool tier (stars>=10 or 90d access): every 7 days
+ * - Cold tier: only on user access
+ * - Archived: never updated
+ *
+ * Uses GitHub GraphQL API for batch queries (50 repos per request)
  */
 
 import type {
   TrendingEnv,
   StarSnapshot,
   SkillRecord,
-  GitHubRepoData,
   SkillListItem,
-} from './types';
+  SkillTier,
+  GitHubGraphQLRepoData,
+} from './shared/types';
+import { TIER_CONFIG } from './shared/types';
 
-const GITHUB_API_BASE = 'https://api.github.com';
+const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql';
+const BATCH_SIZE = 50; // GitHub GraphQL limit
+const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
 
 export function calculateTrendingScore(skill: {
   stars: number;
@@ -111,43 +118,112 @@ function compressSnapshots(snapshots: StarSnapshot[]): StarSnapshot[] {
   return result.slice(-20);
 }
 
-async function fetchGitHubRepo(
-  owner: string,
-  name: string,
+/**
+ * Batch fetch GitHub repo data using GraphQL API
+ * Reduces API calls by 98% (50 repos per request vs 1)
+ */
+async function batchFetchGitHubRepos(
+  repos: Array<{ owner: string; name: string; id: string }>,
   env: TrendingEnv
-): Promise<GitHubRepoData | null> {
-  const url = `${GITHUB_API_BASE}/repos/${owner}/${name}`;
+): Promise<Map<string, GitHubGraphQLRepoData>> {
+  const results = new Map<string, GitHubGraphQLRepoData>();
 
-  const headers: HeadersInit = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'SkillsCat-Trending-Worker/1.0',
-  };
-
-  if (env.GITHUB_TOKEN) {
-    headers.Authorization = `Bearer ${env.GITHUB_TOKEN}`;
+  if (!env.GITHUB_TOKEN || repos.length === 0) {
+    return results;
   }
 
-  const response = await fetch(url, { headers });
+  // Build GraphQL query for batch of repos
+  const repoQueries = repos.map((repo, idx) => {
+    const alias = `repo${idx}`;
+    return `${alias}: repository(owner: "${repo.owner}", name: "${repo.name}") {
+      stargazerCount
+      forkCount
+      pushedAt
+      description
+      repositoryTopics(first: 10) {
+        nodes { topic { name } }
+      }
+    }`;
+  }).join('\n');
 
-  if (!response.ok) {
-    console.error(`GitHub API error for ${owner}/${name}: ${response.status}`);
-    return null;
+  const query = `query { ${repoQueries} }`;
+
+  try {
+    const response = await fetch(GITHUB_GRAPHQL_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+        'User-Agent': 'SkillsCat-Trending-Worker/2.0',
+      },
+      body: JSON.stringify({ query }),
+    });
+
+    if (!response.ok) {
+      console.error(`GitHub GraphQL error: ${response.status}`);
+      return results;
+    }
+
+    const data = await response.json() as { data: Record<string, GitHubGraphQLRepoData | null> };
+
+    repos.forEach((repo, idx) => {
+      const repoData = data.data?.[`repo${idx}`];
+      if (repoData) {
+        results.set(repo.id, repoData);
+      }
+    });
+  } catch (error) {
+    console.error('GitHub GraphQL batch fetch failed:', error);
   }
 
-  const data = await response.json() as {
-    stargazers_count: number;
-    forks_count: number;
-    pushed_at: string;
-  };
-
-  return {
-    stars: data.stargazers_count,
-    forks: data.forks_count,
-    pushedAt: new Date(data.pushed_at).getTime(),
-  };
+  return results;
 }
 
+/**
+ * Calculate the appropriate tier for a skill based on stars and access patterns
+ */
+export function calculateTier(skill: {
+  stars: number;
+  lastAccessedAt: number | null;
+  accessCount7d: number;
+}): SkillTier {
+  const now = Date.now();
+  const lastAccess = skill.lastAccessedAt || 0;
+
+  // Hot: stars >= 1000 OR accessed in last 7 days
+  if (skill.stars >= TIER_CONFIG.hot.minStars ||
+      (now - lastAccess) < TIER_CONFIG.hot.accessWindow) {
+    return 'hot';
+  }
+
+  // Warm: stars >= 100 OR accessed in last 30 days
+  if (skill.stars >= TIER_CONFIG.warm.minStars ||
+      (now - lastAccess) < TIER_CONFIG.warm.accessWindow) {
+    return 'warm';
+  }
+
+  // Cool: stars >= 10 OR accessed in last 90 days
+  if (skill.stars >= TIER_CONFIG.cool.minStars ||
+      (now - lastAccess) < TIER_CONFIG.cool.accessWindow) {
+    return 'cool';
+  }
+
+  // Cold: everything else
+  return 'cold';
+}
+
+/**
+ * Get next update time based on tier
+ */
+function getNextUpdateTime(tier: SkillTier): number | null {
+  const interval = TIER_CONFIG[tier].updateInterval;
+  if (interval === 0) return null;
+  return Date.now() + interval;
+}
+
+/**
+ * Update skills marked for update via KV (user-driven updates)
+ */
 async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
   const list = await env.KV.list({ prefix: 'needs_update:', limit: 100 });
 
@@ -159,11 +235,21 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
 
   const placeholders = skillIds.map(() => '?').join(',');
   const skills = await env.DB.prepare(`
-    SELECT id, repo_owner, repo_name, stars, star_snapshots, indexed_at, last_commit_at
+    SELECT id, repo_owner, repo_name, stars, star_snapshots, indexed_at, last_commit_at,
+           tier, last_accessed_at, access_count_7d
     FROM skills WHERE id IN (${placeholders})
   `)
     .bind(...skillIds)
     .all<SkillRecord>();
+
+  // Batch fetch from GitHub
+  const reposToFetch = skills.results.map(s => ({
+    owner: s.repo_owner,
+    name: s.repo_name,
+    id: s.id,
+  }));
+
+  const githubData = await batchFetchGitHubRepos(reposToFetch, env);
 
   const updates: Array<{
     id: string;
@@ -172,45 +258,52 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
     starSnapshots: string;
     lastCommitAt: number;
     score: number;
+    tier: SkillTier;
+    nextUpdateAt: number | null;
   }> = [];
 
   for (const skill of skills.results) {
-    try {
-      const ghData = await fetchGitHubRepo(skill.repo_owner, skill.repo_name, env);
+    const ghData = githubData.get(skill.id);
+    if (!ghData) continue;
 
-      if (!ghData) continue;
+    const snapshots: StarSnapshot[] = skill.star_snapshots
+      ? JSON.parse(skill.star_snapshots)
+      : [];
 
-      const snapshots: StarSnapshot[] = skill.star_snapshots
-        ? JSON.parse(skill.star_snapshots)
-        : [];
-
-      if (ghData.stars !== skill.stars) {
-        snapshots.push({
-          d: new Date().toISOString().split('T')[0],
-          s: ghData.stars,
-        });
-      }
-
-      const compressed = compressSnapshots(snapshots);
-
-      const score = calculateTrendingScore({
-        stars: ghData.stars,
-        starSnapshots: compressed,
-        indexedAt: skill.indexed_at,
-        lastCommitAt: ghData.pushedAt,
+    const newStars = ghData.stargazerCount;
+    if (newStars !== skill.stars) {
+      snapshots.push({
+        d: new Date().toISOString().split('T')[0],
+        s: newStars,
       });
-
-      updates.push({
-        id: skill.id,
-        stars: ghData.stars,
-        forks: ghData.forks,
-        starSnapshots: JSON.stringify(compressed),
-        lastCommitAt: ghData.pushedAt,
-        score,
-      });
-    } catch (error) {
-      console.error(`Failed to update ${skill.id}:`, error);
     }
+
+    const compressed = compressSnapshots(snapshots);
+    const pushedAt = new Date(ghData.pushedAt).getTime();
+
+    const score = calculateTrendingScore({
+      stars: newStars,
+      starSnapshots: compressed,
+      indexedAt: skill.indexed_at,
+      lastCommitAt: pushedAt,
+    });
+
+    const newTier = calculateTier({
+      stars: newStars,
+      lastAccessedAt: skill.last_accessed_at,
+      accessCount7d: skill.access_count_7d,
+    });
+
+    updates.push({
+      id: skill.id,
+      stars: newStars,
+      forks: ghData.forkCount,
+      starSnapshots: JSON.stringify(compressed),
+      lastCommitAt: pushedAt,
+      score,
+      tier: newTier,
+      nextUpdateAt: getNextUpdateTime(newTier),
+    });
   }
 
   if (updates.length > 0) {
@@ -218,9 +311,10 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
     const statements = updates.map((u) =>
       env.DB.prepare(`
         UPDATE skills
-        SET stars = ?, forks = ?, star_snapshots = ?, last_commit_at = ?, trending_score = ?, updated_at = ?
+        SET stars = ?, forks = ?, star_snapshots = ?, last_commit_at = ?,
+            trending_score = ?, tier = ?, next_update_at = ?, updated_at = ?
         WHERE id = ?
-      `).bind(u.stars, u.forks, u.starSnapshots, u.lastCommitAt, u.score, now, u.id)
+      `).bind(u.stars, u.forks, u.starSnapshots, u.lastCommitAt, u.score, u.tier, u.nextUpdateAt, now, u.id)
     );
 
     await env.DB.batch(statements);
@@ -231,43 +325,124 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
   return updates.length;
 }
 
-async function recalculateAllScores(env: TrendingEnv): Promise<number> {
+/**
+ * Update skills by tier - only processes skills where next_update_at < now
+ * This replaces the old recalculateAllScores() which read ALL skills
+ */
+async function updateSkillsByTier(
+  env: TrendingEnv,
+  tiers: SkillTier[],
+  limit: number
+): Promise<number> {
+  const now = Date.now();
+  const tierPlaceholders = tiers.map(() => '?').join(',');
+
+  // Only fetch skills that are due for update
   const skills = await env.DB.prepare(`
-    SELECT id, stars, star_snapshots, indexed_at, last_commit_at, trending_score
+    SELECT id, repo_owner, repo_name, stars, star_snapshots, indexed_at, last_commit_at,
+           tier, last_accessed_at, access_count_7d
     FROM skills
-  `).all<SkillRecord>();
+    WHERE tier IN (${tierPlaceholders})
+      AND (next_update_at IS NULL OR next_update_at < ?)
+      AND visibility = 'public'
+    ORDER BY next_update_at ASC
+    LIMIT ?
+  `)
+    .bind(...tiers, now, limit)
+    .all<SkillRecord>();
 
-  const updates: Array<{ id: string; score: number }> = [];
+  if (skills.results.length === 0) {
+    return 0;
+  }
 
-  for (const skill of skills.results) {
-    const snapshots: StarSnapshot[] = skill.star_snapshots
-      ? JSON.parse(skill.star_snapshots)
-      : [];
+  console.log(`Processing ${skills.results.length} skills from tiers: ${tiers.join(', ')}`);
 
-    const score = calculateTrendingScore({
-      stars: skill.stars,
-      starSnapshots: snapshots,
-      indexedAt: skill.indexed_at,
-      lastCommitAt: skill.last_commit_at,
-    });
+  // Process in batches of BATCH_SIZE for GraphQL
+  let totalUpdated = 0;
 
-    if (Math.abs(score - skill.trending_score) > 0.01) {
-      updates.push({ id: skill.id, score });
+  for (let i = 0; i < skills.results.length; i += BATCH_SIZE) {
+    const batch = skills.results.slice(i, i + BATCH_SIZE);
+    const reposToFetch = batch.map(s => ({
+      owner: s.repo_owner,
+      name: s.repo_name,
+      id: s.id,
+    }));
+
+    const githubData = await batchFetchGitHubRepos(reposToFetch, env);
+
+    const updates: Array<{
+      id: string;
+      stars: number;
+      forks: number;
+      starSnapshots: string;
+      lastCommitAt: number;
+      score: number;
+      tier: SkillTier;
+      nextUpdateAt: number | null;
+    }> = [];
+
+    for (const skill of batch) {
+      const ghData = githubData.get(skill.id);
+
+      // If GitHub fetch failed, just recalculate score with existing data
+      const newStars = ghData?.stargazerCount ?? skill.stars;
+      const newForks = ghData?.forkCount ?? skill.forks;
+      const pushedAt = ghData ? new Date(ghData.pushedAt).getTime() : skill.last_commit_at;
+
+      const snapshots: StarSnapshot[] = skill.star_snapshots
+        ? JSON.parse(skill.star_snapshots)
+        : [];
+
+      if (ghData && newStars !== skill.stars) {
+        snapshots.push({
+          d: new Date().toISOString().split('T')[0],
+          s: newStars,
+        });
+      }
+
+      const compressed = compressSnapshots(snapshots);
+
+      const score = calculateTrendingScore({
+        stars: newStars,
+        starSnapshots: compressed,
+        indexedAt: skill.indexed_at,
+        lastCommitAt: pushedAt,
+      });
+
+      const newTier = calculateTier({
+        stars: newStars,
+        lastAccessedAt: skill.last_accessed_at,
+        accessCount7d: skill.access_count_7d,
+      });
+
+      updates.push({
+        id: skill.id,
+        stars: newStars,
+        forks: newForks,
+        starSnapshots: JSON.stringify(compressed),
+        lastCommitAt: pushedAt || 0,
+        score,
+        tier: newTier,
+        nextUpdateAt: getNextUpdateTime(newTier),
+      });
+    }
+
+    if (updates.length > 0) {
+      const statements = updates.map((u) =>
+        env.DB.prepare(`
+          UPDATE skills
+          SET stars = ?, forks = ?, star_snapshots = ?, last_commit_at = ?,
+              trending_score = ?, tier = ?, next_update_at = ?, updated_at = ?
+          WHERE id = ?
+        `).bind(u.stars, u.forks, u.starSnapshots, u.lastCommitAt, u.score, u.tier, u.nextUpdateAt, now, u.id)
+      );
+
+      await env.DB.batch(statements);
+      totalUpdated += updates.length;
     }
   }
 
-  const now = Date.now();
-  for (let i = 0; i < updates.length; i += 100) {
-    const batch = updates.slice(i, i + 100);
-    const statements = batch.map((u) =>
-      env.DB.prepare(`
-        UPDATE skills SET trending_score = ?, updated_at = ? WHERE id = ?
-      `).bind(u.score, now, u.id)
-    );
-    await env.DB.batch(statements);
-  }
-
-  return updates.length;
+  return totalUpdated;
 }
 
 async function regenerateListCaches(env: TrendingEnv): Promise<void> {
@@ -278,7 +453,8 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
            s.stars, s.forks, s.trending_score, s.updated_at,
            a.avatar_url as author_avatar
     FROM skills s
-    LEFT JOIN authors a ON s.author_id = a.id
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    WHERE s.visibility = 'public'
     ORDER BY s.trending_score DESC
     LIMIT 100
   `).all<SkillListItem>();
@@ -294,7 +470,8 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
            s.stars, s.forks, s.trending_score, s.updated_at,
            a.avatar_url as author_avatar
     FROM skills s
-    LEFT JOIN authors a ON s.author_id = a.id
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    WHERE s.visibility = 'public'
     ORDER BY s.stars DESC
     LIMIT 100
   `).all<SkillListItem>();
@@ -310,7 +487,8 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
            s.stars, s.forks, s.trending_score, s.updated_at,
            a.avatar_url as author_avatar
     FROM skills s
-    LEFT JOIN authors a ON s.author_id = a.id
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    WHERE s.visibility = 'public'
     ORDER BY s.indexed_at DESC
     LIMIT 100
   `).all<SkillListItem>();
@@ -324,6 +502,37 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   console.log('Cache lists regenerated');
 }
 
+/**
+ * Record cost metrics to KV for monitoring
+ */
+async function recordMetrics(
+  env: TrendingEnv,
+  metrics: {
+    markedUpdates: number;
+    hotUpdates: number;
+    warmUpdates: number;
+    coolUpdates: number;
+    githubApiCalls: number;
+  }
+): Promise<void> {
+  const now = Date.now();
+  const hourKey = `metrics:trending:${new Date().toISOString().slice(0, 13)}`;
+
+  const existing = await env.KV.get(hourKey, 'json') as Record<string, number> | null;
+  const updated = {
+    markedUpdates: (existing?.markedUpdates || 0) + metrics.markedUpdates,
+    hotUpdates: (existing?.hotUpdates || 0) + metrics.hotUpdates,
+    warmUpdates: (existing?.warmUpdates || 0) + metrics.warmUpdates,
+    coolUpdates: (existing?.coolUpdates || 0) + metrics.coolUpdates,
+    githubApiCalls: (existing?.githubApiCalls || 0) + metrics.githubApiCalls,
+    lastRun: now,
+  };
+
+  await env.KV.put(hourKey, JSON.stringify(updated), {
+    expirationTtl: 7 * 24 * 60 * 60, // 7 days
+  });
+}
+
 export default {
   async scheduled(
     controller: ScheduledController,
@@ -332,13 +541,34 @@ export default {
   ): Promise<void> {
     console.log('Trending Worker triggered at:', new Date().toISOString());
 
+    // 1. Process user-marked skills first (highest priority)
     const markedUpdates = await updateMarkedSkills(env);
     console.log(`Updated ${markedUpdates} marked skills`);
 
-    const scoreUpdates = await recalculateAllScores(env);
-    console.log(`Recalculated ${scoreUpdates} trending scores`);
+    // 2. Update hot tier skills (every 6 hours, but check every hour)
+    const hotUpdates = await updateSkillsByTier(env, ['hot'], MAX_SKILLS_PER_RUN);
+    console.log(`Updated ${hotUpdates} hot tier skills`);
 
+    // 3. Update warm tier skills (every 24 hours)
+    const warmUpdates = await updateSkillsByTier(env, ['warm'], MAX_SKILLS_PER_RUN);
+    console.log(`Updated ${warmUpdates} warm tier skills`);
+
+    // 4. Update cool tier skills (every 7 days, but process some each hour)
+    const coolUpdates = await updateSkillsByTier(env, ['cool'], Math.floor(MAX_SKILLS_PER_RUN / 4));
+    console.log(`Updated ${coolUpdates} cool tier skills`);
+
+    // 5. Regenerate list caches
     await regenerateListCaches(env);
+
+    // 6. Record metrics
+    const totalBatches = Math.ceil((markedUpdates + hotUpdates + warmUpdates + coolUpdates) / BATCH_SIZE);
+    await recordMetrics(env, {
+      markedUpdates,
+      hotUpdates,
+      warmUpdates,
+      coolUpdates,
+      githubApiCalls: totalBatches,
+    });
 
     console.log('Trending update completed');
   },
@@ -352,6 +582,15 @@ export default {
 
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({ status: 'ok' }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Metrics endpoint for monitoring
+    if (url.pathname === '/metrics') {
+      const hourKey = `metrics:trending:${new Date().toISOString().slice(0, 13)}`;
+      const metrics = await env.KV.get(hourKey, 'json');
+      return new Response(JSON.stringify(metrics || {}), {
         headers: { 'Content-Type': 'application/json' },
       });
     }

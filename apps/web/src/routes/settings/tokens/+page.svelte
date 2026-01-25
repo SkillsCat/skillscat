@@ -26,7 +26,7 @@
     try {
       const res = await fetch('/api/tokens');
       if (res.ok) {
-        const data = await res.json();
+        const data = await res.json() as { tokens?: Token[] };
         tokens = data.tokens || [];
       }
     } catch {
@@ -51,12 +51,12 @@
       });
 
       if (res.ok) {
-        const data = await res.json();
-        createdToken = data.token;
+        const data = await res.json() as { token?: string };
+        createdToken = data.token ?? null;
         newTokenName = '';
         await loadTokens();
       } else {
-        const data = await res.json();
+        const data = await res.json() as { error?: string };
         error = data.error || 'Failed to create token';
       }
     } catch {
@@ -130,7 +130,7 @@
       </div>
 
       <div class="form-group">
-        <label>Scopes</label>
+        <span class="form-label">Scopes</span>
         <div class="scopes">
           <label class="scope-option">
             <input
@@ -238,7 +238,7 @@
     margin-bottom: 1rem;
   }
 
-  label {
+  label, .form-label {
     display: block;
     margin-bottom: 0.5rem;
     font-weight: 500;

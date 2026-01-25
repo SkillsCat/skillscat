@@ -55,6 +55,13 @@ export const skills = sqliteTable('skills', {
   sourceType: text('source_type').notNull().default('github'), // 'github', 'upload'
   contentHash: text('content_hash'), // SHA-256 hash for duplicate detection
   verifiedRepoUrl: text('verified_repo_url'), // For private-to-public conversion
+  // Cost optimization: tiered update system
+  tier: text('tier').notNull().default('cold'), // 'hot', 'warm', 'cool', 'cold', 'archived'
+  lastAccessedAt: integer('last_accessed_at', { mode: 'timestamp_ms' }),
+  accessCount7d: integer('access_count_7d').notNull().default(0),
+  accessCount30d: integer('access_count_30d').notNull().default(0),
+  nextUpdateAt: integer('next_update_at', { mode: 'timestamp_ms' }),
+  classificationMethod: text('classification_method'), // 'ai', 'keyword', 'skipped'
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
   indexedAt: integer('indexed_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
@@ -65,7 +72,10 @@ export const skills = sqliteTable('skills', {
   index('skills_indexed_idx').on(table.indexedAt),
   index('skills_visibility_idx').on(table.visibility),
   index('skills_owner_idx').on(table.ownerId),
-  index('skills_content_hash_idx').on(table.contentHash)
+  index('skills_content_hash_idx').on(table.contentHash),
+  // Cost optimization indexes
+  index('skills_tier_idx').on(table.tier),
+  index('skills_next_update_idx').on(table.nextUpdateAt)
 ]);
 
 // ========== Authors ==========

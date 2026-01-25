@@ -17,13 +17,20 @@
 
   let { data }: Props = $props();
 
-  let userCode = $state(data.prefillCode ?? '');
+  let userCode = $state('');
   let loading = $state(false);
   let verifying = $state(false);
-  let error = $state<string | null>(data.error);
-  let deviceInfo = $state(data.deviceInfo);
+  let error = $state<string | null>(null);
+  let deviceInfo = $state<Props['data']['deviceInfo']>(null);
   let success = $state(false);
   let denied = $state(false);
+
+  // Initialize state from data on mount
+  $effect(() => {
+    userCode = data.prefillCode ?? '';
+    error = data.error;
+    deviceInfo = data.deviceInfo;
+  });
 
   function formatCode(value: string): string {
     const clean = value.toUpperCase().replace(/[^A-Z0-9]/g, '');

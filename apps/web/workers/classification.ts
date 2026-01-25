@@ -1,10 +1,12 @@
 /**
  * Classification Worker
  *
- * 消费 classification 队列，使用 AI 对 skill 进行分类
- * - 从 R2 读取 SKILL.md 内容
- * - 调用 AI API 进行分类
- * - 更新 skill_categories 表
+ * Cost-optimized skill classification with admission threshold:
+ * - AI classification for high-quality repos (stars>=100 or known orgs)
+ * - Keyword-based for repos with sufficient metadata
+ * - Skip classification for low-quality repos
+ *
+ * Expected to reduce AI API calls by ~85%
  */
 
 import type {
@@ -12,11 +14,59 @@ import type {
   ClassificationMessage,
   ClassificationResult,
   OpenRouterResponse,
-} from './types';
-import { CATEGORIES, getCategorySlugs } from './categories';
+  ClassificationMethod,
+} from './shared/types';
+import { KNOWN_ORGS } from './shared/types';
+import { CATEGORIES, getCategorySlugs } from './shared/categories';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
+
+// Extended message type with metadata for admission decision
+interface ClassificationMessageWithMeta extends ClassificationMessage {
+  stars?: number;
+  topics?: string[];
+  description?: string;
+}
+
+/**
+ * Determine the classification method based on repo metadata
+ * This is the core cost optimization logic
+ */
+function determineClassificationMethod(
+  repoOwner: string,
+  stars: number,
+  topics: string[],
+  description: string | null
+): ClassificationMethod {
+  // High-quality repos always get AI classification
+  if (stars >= 100) {
+    return 'ai';
+  }
+
+  // Known organizations always get AI classification
+  if (KNOWN_ORGS.includes(repoOwner.toLowerCase() as typeof KNOWN_ORGS[number])) {
+    return 'ai';
+  }
+
+  // Repos with sufficient metadata can use keyword classification
+  if (topics.length >= 2) {
+    return 'keyword';
+  }
+
+  // Repos with good description can use keyword classification
+  if (description && description.length > 50) {
+    return 'keyword';
+  }
+
+  // Low-quality repos: skip classification entirely
+  if (stars < 10 && topics.length === 0 && (!description || description.length < 20)) {
+    return 'skipped';
+  }
+
+  // Default to keyword classification
+  return 'keyword';
+}
 
 function buildClassificationPrompt(skillMdContent: string): string {
   const categoriesDescription = CATEGORIES.map(
@@ -184,7 +234,7 @@ function classifyByKeywords(content: string): ClassificationResult {
   };
 }
 
-async function classify(
+async function classifyWithAI(
   skillMdContent: string,
   env: ClassificationEnv
 ): Promise<ClassificationResult> {
@@ -207,13 +257,15 @@ async function classify(
     }
   }
 
-  console.log('Using keyword-based classification as fallback');
+  // Fallback to keyword classification if AI fails
+  console.log('AI classification failed, falling back to keywords');
   return classifyByKeywords(skillMdContent);
 }
 
 async function saveClassification(
   skillId: string,
   result: ClassificationResult,
+  method: ClassificationMethod,
   env: ClassificationEnv
 ): Promise<void> {
   const now = Date.now();
@@ -234,19 +286,60 @@ async function saveClassification(
       .run();
   }
 
-  await env.DB.prepare('UPDATE skills SET updated_at = ? WHERE id = ?')
-    .bind(now, skillId)
+  // Update skill with classification method
+  await env.DB.prepare('UPDATE skills SET classification_method = ?, updated_at = ? WHERE id = ?')
+    .bind(method, now, skillId)
     .run();
 }
 
+/**
+ * Record classification metrics to KV
+ */
+async function recordClassificationMetric(
+  env: ClassificationEnv,
+  method: ClassificationMethod
+): Promise<void> {
+  const hourKey = `metrics:classification:${new Date().toISOString().slice(0, 13)}`;
+
+  const existing = await env.KV.get(hourKey, 'json') as Record<string, number> | null;
+  const updated = {
+    ai: (existing?.ai || 0) + (method === 'ai' ? 1 : 0),
+    keyword: (existing?.keyword || 0) + (method === 'keyword' ? 1 : 0),
+    skipped: (existing?.skipped || 0) + (method === 'skipped' ? 1 : 0),
+    total: (existing?.total || 0) + 1,
+  };
+
+  await env.KV.put(hourKey, JSON.stringify(updated), {
+    expirationTtl: 7 * 24 * 60 * 60, // 7 days
+  });
+}
+
 async function processMessage(
-  message: ClassificationMessage,
+  message: ClassificationMessageWithMeta,
   env: ClassificationEnv
 ): Promise<void> {
-  const { skillId, repoOwner, repoName, skillMdPath } = message;
+  const { skillId, repoOwner, repoName, skillMdPath, stars = 0, topics = [], description = '' } = message;
 
-  console.log(`Classifying skill: ${skillId} (${repoOwner}/${repoName})`);
+  console.log(`Processing skill: ${skillId} (${repoOwner}/${repoName})`);
 
+  // Determine classification method based on repo metadata
+  const method = determineClassificationMethod(repoOwner, stars, topics, description);
+  console.log(`Classification method for ${skillId}: ${method}`);
+
+  // Record metric
+  await recordClassificationMetric(env, method);
+
+  // Skip classification for low-quality repos
+  if (method === 'skipped') {
+    console.log(`Skipping classification for low-quality repo: ${skillId}`);
+    const now = Date.now();
+    await env.DB.prepare('UPDATE skills SET classification_method = ?, updated_at = ? WHERE id = ?')
+      .bind('skipped', now, skillId)
+      .run();
+    return;
+  }
+
+  // Get SKILL.md content
   const r2Object = await env.R2.get(skillMdPath);
   if (!r2Object) {
     console.error(`SKILL.md not found in R2: ${skillMdPath}`);
@@ -255,22 +348,28 @@ async function processMessage(
 
   const skillMdContent = await r2Object.text();
 
-  const result = await classify(skillMdContent, env);
+  let result: ClassificationResult;
+
+  if (method === 'ai') {
+    result = await classifyWithAI(skillMdContent, env);
+  } else {
+    result = classifyByKeywords(skillMdContent);
+  }
 
   console.log(
     `Classification result for ${skillId}:`,
     result.categories,
-    `(confidence: ${result.confidence})`
+    `(confidence: ${result.confidence}, method: ${method})`
   );
 
-  await saveClassification(skillId, result, env);
+  await saveClassification(skillId, result, method, env);
 
   console.log(`Classification saved for skill: ${skillId}`);
 }
 
 export default {
   async queue(
-    batch: MessageBatch<ClassificationMessage>,
+    batch: MessageBatch<ClassificationMessageWithMeta>,
     env: ClassificationEnv,
     ctx: ExecutionContext
   ): Promise<void> {
@@ -296,6 +395,15 @@ export default {
 
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({ status: 'ok' }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Metrics endpoint for monitoring
+    if (url.pathname === '/metrics') {
+      const hourKey = `metrics:classification:${new Date().toISOString().slice(0, 13)}`;
+      const metrics = await env.KV.get(hourKey, 'json');
+      return new Response(JSON.stringify(metrics || {}), {
         headers: { 'Content-Type': 'application/json' },
       });
     }

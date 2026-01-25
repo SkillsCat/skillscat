@@ -22,6 +22,9 @@ const configs = [
   'wrangler.indexing.toml',
   'wrangler.classification.toml',
   'wrangler.trending.toml',
+  'wrangler.tier-recalc.toml',
+  'wrangler.archive.toml',
+  'wrangler.resurrection.toml',
 ];
 
 // 检查配置文件是否存在

@@ -203,6 +203,9 @@ export interface GitHubRepoData {
 // Database Types
 // ============================================
 
+export type SkillTier = 'hot' | 'warm' | 'cool' | 'cold' | 'archived';
+export type ClassificationMethod = 'ai' | 'keyword' | 'skipped';
+
 export interface SkillRecord {
   id: string;
   name: string;
@@ -224,6 +227,13 @@ export interface SkillRecord {
   updated_at: number;
   indexed_at: number;
   last_commit_at: number | null;
+  // Cost optimization fields
+  tier: SkillTier;
+  last_accessed_at: number | null;
+  access_count_7d: number;
+  access_count_30d: number;
+  next_update_at: number | null;
+  classification_method: ClassificationMethod | null;
 }
 
 export interface AuthorRecord {
@@ -277,6 +287,63 @@ export interface OpenRouterResponse {
 export interface StarSnapshot {
   d: string;
   s: number;
+}
+
+// Tier configuration: update intervals in milliseconds
+export const TIER_CONFIG = {
+  hot: {
+    updateInterval: 6 * 60 * 60 * 1000,      // 6 hours
+    minStars: 1000,
+    accessWindow: 7 * 24 * 60 * 60 * 1000,   // 7 days
+  },
+  warm: {
+    updateInterval: 24 * 60 * 60 * 1000,     // 24 hours
+    minStars: 100,
+    accessWindow: 30 * 24 * 60 * 60 * 1000,  // 30 days
+  },
+  cool: {
+    updateInterval: 7 * 24 * 60 * 60 * 1000, // 7 days
+    minStars: 10,
+    accessWindow: 90 * 24 * 60 * 60 * 1000,  // 90 days
+  },
+  cold: {
+    updateInterval: 0, // Only on access
+    minStars: 0,
+    accessWindow: 365 * 24 * 60 * 60 * 1000, // 1 year
+  },
+  archived: {
+    updateInterval: 0, // Never
+    minStars: 0,
+    accessWindow: 0,
+  },
+} as const;
+
+// Known high-quality organizations that always get AI classification
+export const KNOWN_ORGS = [
+  'anthropics',
+  'openai',
+  'google',
+  'microsoft',
+  'facebook',
+  'meta',
+  'vercel',
+  'cloudflare',
+  'supabase',
+  'prisma',
+  'drizzle-team',
+  'sveltejs',
+  'vuejs',
+  'reactjs',
+] as const;
+
+export interface GitHubGraphQLRepoData {
+  stargazerCount: number;
+  forkCount: number;
+  pushedAt: string;
+  description: string | null;
+  repositoryTopics: {
+    nodes: Array<{ topic: { name: string } }>;
+  };
 }
 
 export interface CachedList {

@@ -135,7 +135,9 @@ export const GET: RequestHandler = async ({ params, platform }) => {
       authorDisplayName: row.authorDisplayName || undefined,
       authorBio: row.authorBio || undefined,
       authorSkillsCount: row.authorSkillsCount || undefined,
-      authorTotalStars: row.authorTotalStars || undefined
+      authorTotalStars: row.authorTotalStars || undefined,
+      visibility: 'public',
+      sourceType: 'github',
     };
 
     // Get related skills (same category, exclude current)

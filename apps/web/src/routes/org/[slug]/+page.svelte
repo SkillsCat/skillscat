@@ -57,15 +57,15 @@
       ]);
 
       if (orgRes.ok) {
-        const data = await orgRes.json();
-        org = data.organization;
+        const data = await orgRes.json() as { organization?: Org };
+        org = data.organization ?? null;
       } else {
         error = 'Organization not found';
         return;
       }
 
       if (membersRes.ok) {
-        const data = await membersRes.json();
+        const data = await membersRes.json() as { members?: Member[] };
         members = data.members || [];
       }
     } catch {

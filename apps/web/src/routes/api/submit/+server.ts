@@ -3,6 +3,84 @@ import type { RequestHandler } from './$types';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
+interface ArchiveData {
+  id: string;
+  categories: string[];
+  skillMdContent: string | null;
+  repo_owner: string;
+  repo_name: string;
+}
+
+/**
+ * Trigger direct resurrection for user-submitted archived skills
+ * No threshold check - user submission is a strong signal
+ */
+async function triggerDirectResurrection(
+  db: D1Database,
+  r2: R2Bucket | undefined,
+  skillId: string
+): Promise<boolean> {
+  if (!r2) return false;
+
+  try {
+    // Find archive file
+    const archiveList = await r2.list({ prefix: 'archive/' });
+    let archivePath: string | null = null;
+
+    for (const obj of archiveList.objects) {
+      if (obj.key.includes(skillId)) {
+        archivePath = obj.key;
+        break;
+      }
+    }
+
+    if (!archivePath) {
+      // No archive found, just update tier to cold
+      const now = Date.now();
+      await db.prepare(`
+        UPDATE skills SET tier = 'cold', last_accessed_at = ?, updated_at = ? WHERE id = ?
+      `).bind(now, now, skillId).run();
+      return true;
+    }
+
+    // Get archive data
+    const archiveObj = await r2.get(archivePath);
+    if (!archiveObj) return false;
+
+    const archiveData = await archiveObj.json() as ArchiveData;
+
+    // Restore SKILL.md to R2
+    if (archiveData.skillMdContent) {
+      const skillMdPath = `skills/${archiveData.repo_owner}/${archiveData.repo_name}/SKILL.md`;
+      await r2.put(skillMdPath, archiveData.skillMdContent, {
+        httpMetadata: { contentType: 'text/markdown' },
+      });
+    }
+
+    // Update skill tier to cold
+    const now = Date.now();
+    await db.prepare(`
+      UPDATE skills SET tier = 'cold', last_accessed_at = ?, updated_at = ? WHERE id = ?
+    `).bind(now, now, skillId).run();
+
+    // Restore categories
+    for (const categorySlug of archiveData.categories || []) {
+      await db.prepare(`
+        INSERT OR IGNORE INTO skill_categories (skill_id, category_slug)
+        VALUES (?, ?)
+      `).bind(skillId, categorySlug).run();
+    }
+
+    // Delete archive file
+    await r2.delete(archivePath);
+
+    return true;
+  } catch (err) {
+    console.error('Failed to resurrect skill:', err);
+    return false;
+  }
+}
+
 /**
  * Check if a path starts with a dot folder (e.g., .claude/, .cursor/, .trae/)
  * Skills in dot folders are IDE-specific configurations and should not be accepted
@@ -148,12 +226,30 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     // Check if already exists
     if (db) {
       const existing = await db.prepare(`
-        SELECT slug FROM skills WHERE repo_owner = ? AND repo_name = ?
+        SELECT id, slug, tier FROM skills WHERE repo_owner = ? AND repo_name = ?
       `)
         .bind(owner, repo)
-        .first<{ slug: string }>();
+        .first<{ id: string; slug: string; tier: string }>();
 
       if (existing) {
+        // If archived, trigger resurrection (user submit = strong signal, no threshold)
+        if (existing.tier === 'archived') {
+          const resurrected = await triggerDirectResurrection(db, platform?.env?.R2, existing.id);
+          if (resurrected) {
+            return json({
+              success: true,
+              message: 'Skill has been resurrected and is now available.',
+              slug: existing.slug,
+            });
+          }
+          // If resurrection failed, still return the existing slug
+          return json({
+            success: false,
+            error: 'This skill is archived but could not be resurrected',
+            existingSlug: existing.slug,
+          }, { status: 409 });
+        }
+
         return json(
           {
             success: false,
@@ -238,12 +334,25 @@ export const GET: RequestHandler = async ({ platform, url }) => {
     // Check if already exists
     if (db) {
       const existing = await db.prepare(`
-        SELECT slug FROM skills WHERE repo_owner = ? AND repo_name = ?
+        SELECT slug, tier FROM skills WHERE repo_owner = ? AND repo_name = ?
       `)
         .bind(owner, repo)
-        .first<{ slug: string }>();
+        .first<{ slug: string; tier: string }>();
 
       if (existing) {
+        // If archived, allow submission (will trigger resurrection)
+        if (existing.tier === 'archived') {
+          return json({
+            valid: true,
+            owner,
+            repo,
+            path,
+            archived: true,
+            existingSlug: existing.slug,
+            message: 'This skill is archived and will be resurrected upon submission.',
+          });
+        }
+
         return json({
           valid: false,
           error: 'This skill already exists',

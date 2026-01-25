@@ -17,7 +17,7 @@ import type {
   GitHubContent,
   MessageBatch,
   ExecutionContext,
-} from './types';
+} from './shared/types';
 import {
   isInDotFolder,
   githubFetch,
@@ -26,7 +26,7 @@ import {
   generateId,
   generateSlug,
   decodeBase64,
-} from './utils';
+} from './shared/utils';
 
 // Anti-abuse: Compute SHA-256 hash
 async function computeHash(content: string): Promise<string> {

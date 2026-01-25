@@ -5,7 +5,7 @@
  * 通过 Cron Trigger 每 5 分钟执行一次
  */
 
-import type { GithubEventsEnv, GitHubEvent, IndexingMessage } from './types';
+import type { GithubEventsEnv, GitHubEvent, IndexingMessage } from './shared/types';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 const EVENTS_PER_PAGE = 100;

@@ -37,8 +37,12 @@ skillscat/
 │       │   ├── indexing.ts         # 入库处理 (Queue Consumer)
 │       │   ├── classification.ts   # AI 分类 (Queue Consumer)
 │       │   ├── trending.ts         # Trending 计算 (Cron)
+│       │   ├── tier-recalc.ts      # Tier 重算 (Cron daily)
+│       │   ├── archive.ts          # 归档冷数据 (Cron monthly)
+│       │   ├── resurrection.ts     # 复活归档 (Cron quarterly)
 │       │   ├── types.ts            # Workers 共享类型
-│       │   └── categories.ts       # 分类定义
+│       │   ├── categories.ts       # 分类定义
+│       │   └── utils.ts            # 工具函数
 │       ├── scripts/
 │       │   └── preview.mjs         # Preview 启动脚本
 │       ├── static/                 # 静态资源
@@ -46,7 +50,10 @@ skillscat/
 │       ├── wrangler.github-events.toml
 │       ├── wrangler.indexing.toml
 │       ├── wrangler.classification.toml
-│       └── wrangler.trending.toml
+│       ├── wrangler.trending.toml
+│       ├── wrangler.tier-recalc.toml
+│       ├── wrangler.archive.toml
+│       └── wrangler.resurrection.toml
 ├── scripts/
 │   └── init.mjs                    # 项目初始化脚本
 ├── pnpm-workspace.yaml
@@ -75,6 +82,18 @@ GitHub Events API
 
 ┌──────────────────┐
 │    trending      │ ──► 计算 trending score (Cron: 每小时)
+└──────────────────┘
+
+┌──────────────────┐
+│   tier-recalc    │ ──► 重算 tier，重置访问计数 (Cron: 每天)
+└──────────────────┘
+
+┌──────────────────┐
+│     archive      │ ──► 归档冷数据到 R2 (Cron: 每月)
+└──────────────────┘
+
+┌──────────────────┐
+│  resurrection    │ ──► 复活归档 skills (Cron: 每季度)
 └──────────────────┘
 ```
 
@@ -130,6 +149,9 @@ pnpm preview:web        # 完整预览 (包含 Workers)
 - `wrangler.indexing.toml` - 入库处理 Worker
 - `wrangler.classification.toml` - AI 分类 Worker
 - `wrangler.trending.toml` - Trending 计算 Worker
+- `wrangler.tier-recalc.toml` - Tier 重算 Worker
+- `wrangler.archive.toml` - 归档 Worker
+- `wrangler.resurrection.toml` - 复活 Worker
 
 Preview 模式会合并所有配置文件启动完整项目。
 
@@ -206,6 +228,7 @@ pnpm db:local
 - [详细需求文档](.claude/requirements.md)
 - [开发计划](.claude/development-plan.md)
 - [Trending 算法](.claude/trending-algorithm.md)
+- [Workers 架构](.claude/workers-architecture.md)
 - [UI 设计指南](.claude/ui-design-guide.md)
 - [SvelteKit 文档](https://kit.svelte.dev)
 - [Cloudflare Workers 文档](https://developers.cloudflare.com/workers)

@@ -40,7 +40,7 @@
     error = null;
 
     try {
-      const res = await fetch(`/api/users/${encodeURIComponent(username)}`);
+      const res = await fetch(`/api/users/${encodeURIComponent(username ?? '')}`);
 
       if (!res.ok) {
         if (res.status === 404) {
@@ -51,8 +51,8 @@
         return;
       }
 
-      const data = await res.json();
-      profile = data.user;
+      const data = await res.json() as { user?: UserProfile; skills?: Skill[] };
+      profile = data.user ?? null;
       skills = data.skills || [];
     } catch {
       error = 'Failed to load profile';
@@ -107,7 +107,7 @@
           <img src={profile.image} alt={profile.name} class="profile-avatar" />
         {:else}
           <div class="profile-avatar-placeholder">
-            {(profile.name || username)[0].toUpperCase()}
+            {(profile.name || username || 'U')[0].toUpperCase()}
           </div>
         {/if}
       </div>
@@ -407,6 +407,7 @@
     margin-bottom: 0.75rem;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }

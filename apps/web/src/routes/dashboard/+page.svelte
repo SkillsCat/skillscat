@@ -51,17 +51,17 @@
       ]);
 
       if (skillsRes.ok) {
-        const data = await skillsRes.json();
+        const data = await skillsRes.json() as { skills?: Skill[] };
         skills = data.skills || [];
       }
 
       if (tokensRes.ok) {
-        const data = await tokensRes.json();
+        const data = await tokensRes.json() as { tokens?: Token[] };
         tokens = data.tokens || [];
       }
 
       if (orgsRes.ok) {
-        const data = await orgsRes.json();
+        const data = await orgsRes.json() as { organizations?: Org[] };
         orgs = data.organizations || [];
       }
     } catch (e) {
