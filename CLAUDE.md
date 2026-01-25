@@ -14,7 +14,7 @@ SkillsCat 是一个 Claude Code Skills 收集与分享平台，基于 SvelteKit 
 - **数据库**: Cloudflare D1 + Drizzle ORM
 - **存储**: Cloudflare R2
 - **队列**: Cloudflare Queues
-- **认证**: Better Auth (GitHub + Google OAuth)
+- **认证**: Better Auth (GitHub OAuth)
 
 ## 项目结构
 
@@ -55,8 +55,7 @@ skillscat/
 │       ├── wrangler.archive.toml
 │       └── wrangler.resurrection.toml
 ├── scripts/
-│   ├── init.mjs                    # 本地开发环境初始化脚本
-│   └── init-production.mjs         # 线上环境初始化脚本
+│   └── init.mjs                    # 环境初始化脚本 (本地/生产)
 ├── pnpm-workspace.yaml
 └── CLAUDE.md
 ```
