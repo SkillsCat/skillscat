@@ -7,6 +7,7 @@
   "scripts": {
     "init:project": "node scripts/init.mjs",
     "init:local": "node scripts/init.mjs --local",
+    "init:production": "node scripts/init-production.mjs",
     "dev": "pnpm --filter @skillscat/web dev",
     "dev:web": "pnpm --filter @skillscat/web dev",
     "preview:web": "pnpm --filter @skillscat/web preview",

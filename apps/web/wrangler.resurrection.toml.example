@@ -1,0 +1,28 @@
+# Resurrection Worker 配置
+# 复制此文件为 wrangler.resurrection.toml 并填入你的配置
+# 每季度检查归档 skills 是否需要复活
+
+name = "skillscat-resurrection"
+main = "workers/resurrection.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cron Trigger - 每季度1号凌晨5点运行 (1月、4月、7月、10月)
+[triggers]
+crons = ["0 5 1 1,4,7,10 *"]
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-database-id>"
+
+# R2 Storage
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+# KV Namespace
+[[kv_namespaces]]
+binding = "KV"
+id = "<your-kv-namespace-id>"

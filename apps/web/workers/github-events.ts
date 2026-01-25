@@ -146,9 +146,9 @@ async function processEvents(env: GithubEventsEnv): Promise<{ processed: number;
 
 export default {
   async scheduled(
-    controller: ScheduledController,
+    _controller: ScheduledController,
     env: GithubEventsEnv,
-    ctx: ExecutionContext
+    _ctx: ExecutionContext
   ): Promise<void> {
     console.log('GitHub Events Worker triggered at:', new Date().toISOString());
 
@@ -157,39 +157,5 @@ export default {
     console.log(
       `Processed ${result.processed} events, queued ${result.queued} repos for indexing`
     );
-  },
-
-  async fetch(
-    request: Request,
-    env: GithubEventsEnv,
-    ctx: ExecutionContext
-  ): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    if (url.pathname === '/trigger') {
-      const authHeader = request.headers.get('Authorization');
-      if (authHeader !== `Bearer ${env.WORKER_SECRET}`) {
-        return new Response('Unauthorized', { status: 401 });
-      }
-
-      const result = await processEvents(env);
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          processed: result.processed,
-          queued: result.queued,
-        }),
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    return new Response('Not Found', { status: 404 });
   },
 };

@@ -68,9 +68,7 @@ export interface IndexingEnv extends BaseEnv {
 
 export interface ClassificationEnv extends BaseEnv {
   OPENROUTER_API_KEY?: string;
-  DEEPSEEK_API_KEY?: string;
-  AI_MODEL?: string;
-  AI_FALLBACK_MODEL?: string;
+  AI_MODEL?: string; // Optional: override default free model
 }
 
 export interface TrendingEnv extends BaseEnv {

@@ -535,9 +535,9 @@ async function recordMetrics(
 
 export default {
   async scheduled(
-    controller: ScheduledController,
+    _controller: ScheduledController,
     env: TrendingEnv,
-    ctx: ExecutionContext
+    _ctx: ExecutionContext
   ): Promise<void> {
     console.log('Trending Worker triggered at:', new Date().toISOString());
 
@@ -571,30 +571,5 @@ export default {
     });
 
     console.log('Trending update completed');
-  },
-
-  async fetch(
-    request: Request,
-    env: TrendingEnv,
-    ctx: ExecutionContext
-  ): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Metrics endpoint for monitoring
-    if (url.pathname === '/metrics') {
-      const hourKey = `metrics:trending:${new Date().toISOString().slice(0, 13)}`;
-      const metrics = await env.KV.get(hourKey, 'json');
-      return new Response(JSON.stringify(metrics || {}), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    return new Response('Not Found', { status: 404 });
   },
 };

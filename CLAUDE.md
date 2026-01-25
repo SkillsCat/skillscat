@@ -55,7 +55,8 @@ skillscat/
 │       ├── wrangler.archive.toml
 │       └── wrangler.resurrection.toml
 ├── scripts/
-│   └── init.mjs                    # 项目初始化脚本
+│   ├── init.mjs                    # 本地开发环境初始化脚本
+│   └── init-production.mjs         # 线上环境初始化脚本
 ├── pnpm-workspace.yaml
 └── CLAUDE.md
 ```
@@ -101,8 +102,9 @@ GitHub Events API
 
 ```bash
 # 项目初始化 (首次运行)
-pnpm init:project       # 交互式初始化，创建配置文件和 Cloudflare 资源
+pnpm init:project       # 本地开发环境初始化，创建配置文件
 pnpm init:local         # 仅本地配置，不创建 Cloudflare 资源
+pnpm init:production    # 线上环境初始化，创建 Cloudflare 资源并配置 secrets
 
 # 安装依赖
 pnpm install
@@ -127,17 +129,22 @@ pnpm deploy
 ## 快速开始
 
 ```bash
-# 1. 克隆项目后，运行初始化脚本
+# 1. 克隆项目后，运行本地开发环境初始化脚本
 pnpm init:project
 
 # 2. 脚本会自动:
 #    - 生成随机 secrets (BETTER_AUTH_SECRET, WORKER_SECRET)
-#    - 创建 .dev.vars 文件
+#    - 创建 apps/web/.dev.vars 文件
+#    - 复制 wrangler.*.toml.example 到 wrangler.*.toml (使用 local 配置)
 #    - (可选) 创建 Cloudflare 资源 (D1, R2, KV, Queues)
 
 # 3. 启动开发服务器
 pnpm dev                # 仅 SvelteKit (推荐日常开发)
 pnpm preview:web        # 完整预览 (包含 Workers)
+
+# 4. 线上环境部署
+pnpm init:production    # 创建 Cloudflare 资源并配置 secrets
+pnpm deploy             # 部署所有 Workers
 ```
 
 ## Wrangler 配置
@@ -186,18 +193,21 @@ Preview 模式会合并所有配置文件启动完整项目。
 
 ## 环境变量
 
-在 `apps/web/` 目录下创建 `.dev.vars` 文件 (不提交):
+在 `apps/web/` 目录下创建 `.dev.vars` 文件 (不提交)，或运行 `pnpm init:project` 自动生成:
 
 ```
+# 自动生成的 secrets
+BETTER_AUTH_SECRET=xxx
+WORKER_SECRET=xxx
+
+# GitHub OAuth (必需)
 GITHUB_CLIENT_ID=xxx
 GITHUB_CLIENT_SECRET=xxx
 GITHUB_TOKEN=xxx
-GOOGLE_CLIENT_ID=xxx
-GOOGLE_CLIENT_SECRET=xxx
+
+# OpenRouter API (可选，用于 AI 分类)
+# 只使用免费模型，无需付费
 OPENROUTER_API_KEY=xxx
-DEEPSEEK_API_KEY=xxx
-BETTER_AUTH_SECRET=xxx
-WORKER_SECRET=xxx
 ```
 
 ## 数据库操作

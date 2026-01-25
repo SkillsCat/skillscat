@@ -143,9 +143,9 @@ async function recordMetrics(
 
 export default {
   async scheduled(
-    controller: ScheduledController,
+    _controller: ScheduledController,
     env: ArchiveEnv,
-    ctx: ExecutionContext
+    _ctx: ExecutionContext
   ): Promise<void> {
     console.log('Archive Worker triggered at:', new Date().toISOString());
 
@@ -182,104 +182,5 @@ export default {
     });
 
     console.log('Archive Worker completed');
-  },
-
-  async fetch(
-    request: Request,
-    env: ArchiveEnv,
-    ctx: ExecutionContext
-  ): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Metrics endpoint
-    if (url.pathname === '/metrics') {
-      const now = new Date();
-      const monthKey = `metrics:archive:${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const metrics = await env.KV.get(monthKey, 'json');
-      return new Response(JSON.stringify(metrics || {}), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Restore endpoint (for manual restoration)
-    if (url.pathname === '/restore' && request.method === 'POST') {
-      const auth = request.headers.get('Authorization');
-      if (auth !== `Bearer ${env.WORKER_SECRET}`) {
-        return new Response('Unauthorized', { status: 401 });
-      }
-
-      const body = await request.json() as { skillId: string };
-      const { skillId } = body;
-
-      if (!skillId) {
-        return new Response('Missing skillId', { status: 400 });
-      }
-
-      // Find archive file
-      const archiveList = await env.R2.list({ prefix: 'archive/' });
-      let archivePath: string | null = null;
-
-      for (const obj of archiveList.objects) {
-        if (obj.key.includes(skillId)) {
-          archivePath = obj.key;
-          break;
-        }
-      }
-
-      if (!archivePath) {
-        return new Response('Archive not found', { status: 404 });
-      }
-
-      // Restore from archive
-      const archiveObj = await env.R2.get(archivePath);
-      if (!archiveObj) {
-        return new Response('Archive file not found', { status: 404 });
-      }
-
-      const archiveData = await archiveObj.json() as SkillToArchive & {
-        categories: string[];
-        skillMdContent: string | null;
-      };
-
-      // Restore SKILL.md to R2
-      if (archiveData.skillMdContent) {
-        const skillMdPath = `skills/${archiveData.repo_owner}/${archiveData.repo_name}/SKILL.md`;
-        await env.R2.put(skillMdPath, archiveData.skillMdContent, {
-          httpMetadata: { contentType: 'text/markdown' },
-        });
-      }
-
-      // Update skill tier to cold
-      await env.DB.prepare(`
-        UPDATE skills SET tier = 'cold', updated_at = ? WHERE id = ?
-      `)
-        .bind(Date.now(), skillId)
-        .run();
-
-      // Restore categories
-      for (const categorySlug of archiveData.categories) {
-        await env.DB.prepare(`
-          INSERT OR IGNORE INTO skill_categories (skill_id, category_slug)
-          VALUES (?, ?)
-        `)
-          .bind(skillId, categorySlug)
-          .run();
-      }
-
-      // Delete archive file
-      await env.R2.delete(archivePath);
-
-      return new Response(JSON.stringify({ success: true, skillId }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    return new Response('Not Found', { status: 404 });
   },
 };

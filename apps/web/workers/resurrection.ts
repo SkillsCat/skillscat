@@ -278,9 +278,9 @@ export default {
    * Quarterly scheduled check of all archived skills
    */
   async scheduled(
-    controller: ScheduledController,
+    _controller: ScheduledController,
     env: ResurrectionEnv,
-    ctx: ExecutionContext
+    _ctx: ExecutionContext
   ): Promise<void> {
     console.log('Resurrection Worker triggered at:', new Date().toISOString());
 
@@ -357,63 +357,8 @@ export default {
 
     console.log('Resurrection Worker completed');
   },
-
-  /**
-   * HTTP handler for on-demand resurrection checks
-   */
-  async fetch(
-    request: Request,
-    env: ResurrectionEnv,
-    ctx: ExecutionContext
-  ): Promise<Response> {
-    const url = new URL(request.url);
-
-    // Health check
-    if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Metrics endpoint
-    if (url.pathname === '/metrics') {
-      const now = new Date();
-      const quarterKey = `metrics:resurrection:${now.getFullYear()}-Q${Math.ceil((now.getMonth() + 1) / 3)}`;
-      const metrics = await env.KV.get(quarterKey, 'json');
-      return new Response(JSON.stringify(metrics || {}), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    // On-demand resurrection check (called by utils.ts on user access)
-    if (url.pathname === '/check' && request.method === 'POST') {
-      const auth = request.headers.get('Authorization');
-      if (auth !== `Bearer ${env.WORKER_SECRET}`) {
-        return new Response('Unauthorized', { status: 401 });
-      }
-
-      const body = await request.json() as { skillId: string };
-      const { skillId } = body;
-
-      if (!skillId) {
-        return new Response('Missing skillId', { status: 400 });
-      }
-
-      // Use lower threshold for user-triggered checks
-      const result = await checkAndResurrectSingle(
-        env,
-        skillId,
-        USER_ACCESS_STAR_THRESHOLD
-      );
-
-      return new Response(JSON.stringify(result), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    return new Response('Not Found', { status: 404 });
-  },
 };
 
-// Export types for use in other modules
+// Export types and functions for use in main web worker
 export type { ResurrectionEnv };
+export { checkAndResurrectSingle, USER_ACCESS_STAR_THRESHOLD };

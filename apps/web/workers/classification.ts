@@ -20,7 +20,9 @@ import { KNOWN_ORGS } from './shared/types';
 import { CATEGORIES, getCategorySlugs } from './shared/categories';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
+
+// Default free model if not configured via environment variable
+const DEFAULT_FREE_MODEL = 'liquid/lfm-2.5-1.2b-thinking:free';
 
 // Extended message type with metadata for admission decision
 interface ClassificationMessageWithMeta extends ClassificationMessage {
@@ -135,44 +137,6 @@ async function callOpenRouter(
   return parseClassificationResult(content);
 }
 
-async function callDeepSeek(
-  prompt: string,
-  apiKey: string
-): Promise<ClassificationResult> {
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      temperature: 0.3,
-      max_tokens: 500,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`DeepSeek API error: ${response.status} - ${error}`);
-  }
-
-  const data: OpenRouterResponse = await response.json();
-  const content = data.choices[0]?.message?.content;
-
-  if (!content) {
-    throw new Error('No content in DeepSeek response');
-  }
-
-  return parseClassificationResult(content);
-}
-
 function parseClassificationResult(content: string): ClassificationResult {
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
@@ -240,26 +204,23 @@ async function classifyWithAI(
 ): Promise<ClassificationResult> {
   const prompt = buildClassificationPrompt(skillMdContent);
 
-  if (env.OPENROUTER_API_KEY) {
-    try {
-      const model = env.AI_MODEL || 'deepseek/deepseek-chat';
-      return await callOpenRouter(prompt, model, env.OPENROUTER_API_KEY);
-    } catch (error) {
-      console.error('OpenRouter API failed:', error);
-    }
+  if (!env.OPENROUTER_API_KEY) {
+    console.log('No OpenRouter API key, falling back to keywords');
+    return classifyByKeywords(skillMdContent);
   }
 
-  if (env.DEEPSEEK_API_KEY) {
-    try {
-      return await callDeepSeek(prompt, env.DEEPSEEK_API_KEY);
-    } catch (error) {
-      console.error('DeepSeek API failed:', error);
-    }
-  }
+  // Use configured model or default free model
+  const model = env.AI_MODEL || DEFAULT_FREE_MODEL;
 
-  // Fallback to keyword classification if AI fails
-  console.log('AI classification failed, falling back to keywords');
-  return classifyByKeywords(skillMdContent);
+  try {
+    console.log(`Using model: ${model}`);
+    return await callOpenRouter(prompt, model, env.OPENROUTER_API_KEY);
+  } catch (error) {
+    console.error(`Model ${model} failed:`, error);
+    // Fallback to keyword classification if AI fails
+    console.log('AI classification failed, falling back to keywords');
+    return classifyByKeywords(skillMdContent);
+  }
 }
 
 async function saveClassification(
@@ -371,7 +332,7 @@ export default {
   async queue(
     batch: MessageBatch<ClassificationMessageWithMeta>,
     env: ClassificationEnv,
-    ctx: ExecutionContext
+    _ctx: ExecutionContext
   ): Promise<void> {
     console.log(`Processing batch of ${batch.messages.length} messages`);
 
@@ -389,7 +350,7 @@ export default {
   async fetch(
     request: Request,
     env: ClassificationEnv,
-    ctx: ExecutionContext
+    _ctx: ExecutionContext
   ): Promise<Response> {
     const url = new URL(request.url);
 

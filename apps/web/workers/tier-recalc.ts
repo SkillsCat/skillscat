@@ -203,9 +203,9 @@ async function recordMetrics(
 
 export default {
   async scheduled(
-    controller: ScheduledController,
+    _controller: ScheduledController,
     env: TierRecalcEnv,
-    ctx: ExecutionContext
+    _ctx: ExecutionContext
   ): Promise<void> {
     console.log('Tier Recalculation Worker triggered at:', new Date().toISOString());
 
@@ -229,30 +229,5 @@ export default {
     await recordMetrics(env, stats);
 
     console.log('Tier recalculation completed');
-  },
-
-  async fetch(
-    request: Request,
-    env: TierRecalcEnv,
-    ctx: ExecutionContext
-  ): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Metrics endpoint
-    if (url.pathname === '/metrics') {
-      const dateKey = `metrics:tier-recalc:${new Date().toISOString().slice(0, 10)}`;
-      const metrics = await env.KV.get(dateKey, 'json');
-      return new Response(JSON.stringify(metrics || {}), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    return new Response('Not Found', { status: 404 });
   },
 };

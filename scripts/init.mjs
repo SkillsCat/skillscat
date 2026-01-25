@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * SkillsCat 项目初始化脚本
+ * SkillsCat 本地开发环境初始化脚本
  *
  * 功能:
- * 1. 复制 wrangler.*.toml.example 到 wrangler.*.toml
+ * 1. 复制 wrangler.*.toml.example 到 wrangler.*.toml (本地开发配置)
  * 2. 创建 .dev.vars 文件并生成随机 secrets
  * 3. 可选: 使用 wrangler CLI 创建 Cloudflare 资源
  * 4. 更新 wrangler.toml 文件中的资源 ID
@@ -13,6 +13,8 @@
  *   pnpm init:project           # 交互式初始化
  *   pnpm init:project --local   # 仅本地配置 (不创建 Cloudflare 资源)
  *   pnpm init:project --force   # 强制覆盖现有配置
+ *
+ * 注意: 线上环境配置请使用 pnpm init:production
  */
 
 import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'fs';
@@ -24,6 +26,7 @@ import { randomBytes } from 'crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = resolve(__dirname, '..');
+const WEB_DIR = resolve(ROOT_DIR, 'apps/web');
 
 // 颜色输出
 const colors = {
@@ -144,31 +147,26 @@ function runWrangler(args, options = {}) {
 }
 
 /**
- * 从 wrangler 输出中提取 ID
- */
-function extractIdFromOutput(output, pattern) {
-  const match = output.match(pattern);
-  return match ? match[1] : null;
-}
-
-/**
- * 复制 wrangler 配置文件
+ * 复制 wrangler 配置文件 (从 example 复制，用于本地开发)
  */
 function copyWranglerConfigs(force = false) {
   const configs = [
-    'wrangler.web.toml',
+    'wrangler.preview.toml',
     'wrangler.github-events.toml',
     'wrangler.indexing.toml',
     'wrangler.classification.toml',
     'wrangler.trending.toml',
+    'wrangler.tier-recalc.toml',
+    'wrangler.archive.toml',
+    'wrangler.resurrection.toml',
   ];
 
   const copied = [];
   const skipped = [];
 
   for (const config of configs) {
-    const examplePath = resolve(ROOT_DIR, `${config}.example`);
-    const targetPath = resolve(ROOT_DIR, config);
+    const examplePath = resolve(WEB_DIR, `${config}.example`);
+    const targetPath = resolve(WEB_DIR, config);
 
     if (!existsSync(examplePath)) {
       logWarning(`Example file not found: ${config}.example`);
@@ -180,7 +178,13 @@ function copyWranglerConfigs(force = false) {
       continue;
     }
 
-    copyFileSync(examplePath, targetPath);
+    // 读取 example 文件并替换为本地开发配置
+    let content = readFileSync(examplePath, 'utf-8');
+    // 将 placeholder 替换为 local (本地开发)
+    content = content.replace(/<your-database-id>/g, 'local');
+    content = content.replace(/<your-kv-namespace-id>/g, 'local');
+
+    writeFileSync(targetPath, content);
     copied.push(config);
   }
 
@@ -191,7 +195,7 @@ function copyWranglerConfigs(force = false) {
  * 创建 .dev.vars 文件
  */
 function createDevVars(vars, force = false) {
-  const devVarsPath = resolve(ROOT_DIR, '.dev.vars');
+  const devVarsPath = resolve(WEB_DIR, '.dev.vars');
 
   if (existsSync(devVarsPath) && !force) {
     return { created: false, path: devVarsPath };
@@ -209,7 +213,7 @@ function createDevVars(vars, force = false) {
  * 更新 wrangler.toml 文件中的值
  */
 function updateWranglerConfig(configFile, updates) {
-  const configPath = resolve(ROOT_DIR, configFile);
+  const configPath = resolve(WEB_DIR, configFile);
 
   if (!existsSync(configPath)) {
     return false;
@@ -337,7 +341,7 @@ async function main() {
   console.log(`
 ${colors.cyan}╔════════════════════════════════════════════════════════════╗
 ║                                                            ║
-║   ${colors.bold}SkillsCat 项目初始化${colors.cyan}                                  ║
+║   ${colors.bold}SkillsCat 本地开发环境初始化${colors.cyan}                          ║
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝${colors.reset}
 `);
@@ -372,19 +376,16 @@ ${colors.cyan}╔═════════════════════
     console.log(`
 ${colors.gray}以下变量需要手动配置 (可以稍后在 .dev.vars 中修改):
 - GitHub OAuth: https://github.com/settings/developers
-- GitHub Token: https://github.com/settings/tokens
-- Google OAuth: https://console.cloud.google.com/apis/credentials
-- OpenRouter: https://openrouter.ai/keys
-- DeepSeek: https://platform.deepseek.com/api_keys${colors.reset}
+  Authorization callback URL: http://localhost:5173/api/auth/callback/github
+- GitHub Token: https://github.com/settings/tokens (需要 public_repo 权限)
+- OpenRouter: https://openrouter.ai/keys (可选，用于 AI 分类)
+  注意: 我们只使用免费模型，无需付费${colors.reset}
 `);
 
     const githubClientId = await ask(rl, 'GitHub Client ID', '');
     const githubClientSecret = await ask(rl, 'GitHub Client Secret', '');
     const githubToken = await ask(rl, 'GitHub Personal Access Token', '');
-    const googleClientId = await ask(rl, 'Google Client ID (可选)', '');
-    const googleClientSecret = await ask(rl, 'Google Client Secret (可选)', '');
-    const openrouterApiKey = await ask(rl, 'OpenRouter API Key (可选)', '');
-    const deepseekApiKey = await ask(rl, 'DeepSeek API Key (可选)', '');
+    const openrouterApiKey = await ask(rl, 'OpenRouter API Key (可选，免费模型)', '');
 
     // 创建 .dev.vars
     const devVars = {
@@ -393,10 +394,7 @@ ${colors.gray}以下变量需要手动配置 (可以稍后在 .dev.vars 中修�
       GITHUB_CLIENT_ID: githubClientId || 'your-github-client-id',
       GITHUB_CLIENT_SECRET: githubClientSecret || 'your-github-client-secret',
       GITHUB_TOKEN: githubToken || 'your-github-token',
-      GOOGLE_CLIENT_ID: googleClientId || '',
-      GOOGLE_CLIENT_SECRET: googleClientSecret || '',
       OPENROUTER_API_KEY: openrouterApiKey || '',
-      DEEPSEEK_API_KEY: deepseekApiKey || '',
     };
 
     const devVarsResult = createDevVars(devVars, force);
@@ -491,11 +489,14 @@ ${colors.gray}以下变量需要手动配置 (可以稍后在 .dev.vars 中修�
             }
 
             const configFiles = [
-              'wrangler.web.toml',
+              'wrangler.preview.toml',
               'wrangler.github-events.toml',
               'wrangler.indexing.toml',
               'wrangler.classification.toml',
               'wrangler.trending.toml',
+              'wrangler.tier-recalc.toml',
+              'wrangler.archive.toml',
+              'wrangler.resurrection.toml',
             ];
 
             for (const configFile of configFiles) {
@@ -516,17 +517,18 @@ ${colors.gray}以下变量需要手动配置 (可以稍后在 .dev.vars 中修�
     console.log(`
 ${colors.green}╔════════════════════════════════════════════════════════════╗
 ║                                                            ║
-║   ${colors.bold}初始化完成!${colors.green}                                            ║
+║   ${colors.bold}本地开发环境初始化完成!${colors.green}                              ║
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝${colors.reset}
 
 ${colors.bold}下一步:${colors.reset}
 
-1. 检查并完善 ${colors.cyan}.dev.vars${colors.reset} 中的配置
-2. 检查 ${colors.cyan}wrangler.*.toml${colors.reset} 文件中的资源 ID
+1. 检查并完善 ${colors.cyan}apps/web/.dev.vars${colors.reset} 中的配置
+2. 检查 ${colors.cyan}apps/web/wrangler.*.toml${colors.reset} 文件中的资源 ID
 3. 运行 ${colors.cyan}pnpm install${colors.reset} 安装依赖
 4. 运行 ${colors.cyan}pnpm dev${colors.reset} 启动开发服务器
 
+${colors.gray}线上环境配置请运行: pnpm init:production${colors.reset}
 ${colors.gray}更多信息请查看 CLAUDE.md${colors.reset}
 `);
   } finally {

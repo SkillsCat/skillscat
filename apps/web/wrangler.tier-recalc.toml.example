@@ -1,0 +1,28 @@
+# Tier Recalculation Worker 配置
+# 复制此文件为 wrangler.tier-recalc.toml 并填入你的配置
+# 每天凌晨重新计算 skill tiers
+
+name = "skillscat-tier-recalc"
+main = "workers/tier-recalc.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cron Trigger - 每天凌晨 3 点运行
+[triggers]
+crons = ["0 3 * * *"]
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-database-id>"
+
+# R2 Storage
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+# KV Namespace
+[[kv_namespaces]]
+binding = "KV"
+id = "<your-kv-namespace-id>"

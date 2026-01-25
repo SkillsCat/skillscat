@@ -1,0 +1,28 @@
+# Archive Worker 配置
+# 复制此文件为 wrangler.archive.toml 并填入你的配置
+# 每月 1 号凌晨归档冷数据
+
+name = "skillscat-archive"
+main = "workers/archive.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cron Trigger - 每月 1 号凌晨 4 点运行
+[triggers]
+crons = ["0 4 1 * *"]
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-database-id>"
+
+# R2 Storage
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+# KV Namespace
+[[kv_namespaces]]
+binding = "KV"
+id = "<your-kv-namespace-id>"
