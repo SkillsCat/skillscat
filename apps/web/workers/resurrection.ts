@@ -361,4 +361,4 @@ export default {
 
 // Export types and functions for use in main web worker
 export type { ResurrectionEnv };
-export { checkAndResurrectSingle, USER_ACCESS_STAR_THRESHOLD };
+export { checkAndResurrectSingle };
