@@ -63,7 +63,7 @@ export async function getTrendingSkills(
       s.updated_at as updatedAt,
       a.avatar_url as authorAvatar
     FROM skills s
-    LEFT JOIN authors a ON s.author_id = a.id
+    LEFT JOIN authors a ON s.repo_owner = a.username
     ORDER BY s.trending_score DESC
     LIMIT ?
   `)
@@ -103,7 +103,7 @@ export async function getRecentSkills(
       s.updated_at as updatedAt,
       a.avatar_url as authorAvatar
     FROM skills s
-    LEFT JOIN authors a ON s.author_id = a.id
+    LEFT JOIN authors a ON s.repo_owner = a.username
     ORDER BY s.indexed_at DESC
     LIMIT ?
   `)
@@ -143,7 +143,7 @@ export async function getTopSkills(
       s.updated_at as updatedAt,
       a.avatar_url as authorAvatar
     FROM skills s
-    LEFT JOIN authors a ON s.author_id = a.id
+    LEFT JOIN authors a ON s.repo_owner = a.username
     ORDER BY s.stars DESC
     LIMIT ?
   `)
@@ -179,7 +179,7 @@ export async function getSkillsByCategory(
       a.avatar_url as authorAvatar
     FROM skills s
     JOIN skill_categories sc ON s.id = sc.skill_id
-    LEFT JOIN authors a ON s.author_id = a.id
+    LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE sc.category_slug = ?
     ORDER BY s.trending_score DESC
     LIMIT ? OFFSET ?
@@ -227,7 +227,7 @@ export async function searchSkills(
       s.updated_at as updatedAt,
       a.avatar_url as authorAvatar
     FROM skills s
-    LEFT JOIN authors a ON s.author_id = a.id
+    LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.name LIKE ? OR s.description LIKE ? OR s.repo_owner LIKE ?
     ORDER BY s.trending_score DESC
     LIMIT ?
@@ -263,7 +263,7 @@ export async function getSkillBySlug(
       o.slug as orgSlug,
       o.avatar_url as orgAvatar
     FROM skills s
-    LEFT JOIN authors a ON s.author_id = a.id
+    LEFT JOIN authors a ON s.repo_owner = a.username
     LEFT JOIN user u ON s.owner_id = u.id
     LEFT JOIN organizations o ON s.org_id = o.id
     WHERE s.slug = ?
@@ -417,7 +417,7 @@ export async function getRelatedSkills(
       a.avatar_url as authorAvatar
     FROM skills s
     JOIN skill_categories sc ON s.id = sc.skill_id
-    LEFT JOIN authors a ON s.author_id = a.id
+    LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE sc.category_slug IN (${placeholders}) AND s.id != ?
     ORDER BY s.stars DESC
     LIMIT ?

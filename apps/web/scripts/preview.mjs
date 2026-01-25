@@ -4,16 +4,20 @@
  * Preview Script
  *
  * 启动完整的项目预览，包括 SvelteKit 主站和所有 Workers
- * 使用多个 wrangler 配置文件合并启动
+ * 1. 先构建 SvelteKit 应用
+ * 2. 使用多个 wrangler 配置文件合并启动
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const webDir = resolve(__dirname, '..');
+
+// 检查是否跳过构建
+const skipBuild = process.argv.includes('--skip-build');
 
 // 配置文件列表
 const configs = [
@@ -39,7 +43,25 @@ if (missingConfigs.length > 0) {
   process.exit(1);
 }
 
-// 构建 wrangler 命令参数
+// Step 1: 构建 SvelteKit 应用
+if (!skipBuild) {
+  console.log('Building SvelteKit application...\n');
+  const buildResult = spawnSync('npx', ['vite', 'build'], {
+    cwd: webDir,
+    stdio: 'inherit',
+    shell: true,
+  });
+
+  if (buildResult.status !== 0) {
+    console.error('\nBuild failed!');
+    process.exit(buildResult.status || 1);
+  }
+  console.log('\nBuild completed successfully!\n');
+} else {
+  console.log('Skipping build (--skip-build flag)\n');
+}
+
+// Step 2: 启动 wrangler dev
 const wranglerArgs = [
   'wrangler', 'dev',
   ...configs.flatMap((config) => ['-c', config]),

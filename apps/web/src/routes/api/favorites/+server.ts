@@ -45,7 +45,7 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
         f.created_at as favoritedAt
       FROM favorites f
       JOIN skills s ON f.skill_id = s.id
-      LEFT JOIN authors a ON s.author_id = a.id
+      LEFT JOIN authors a ON s.repo_owner = a.username
       WHERE f.user_id = ?
       ORDER BY f.created_at DESC
       LIMIT ? OFFSET ?
