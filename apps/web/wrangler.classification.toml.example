@@ -1,6 +1,14 @@
 # Classification Worker 配置
 # 复制此文件为 wrangler.classification.toml 并填入你的配置
 # 消费 classification 队列，使用 AI 对 skill 进行分类
+#
+# AI 分类 Fallback 策略:
+# 1. 使用配置的主模型调用 OpenRouter
+# 2. 失败后在同一模型上重试一次
+# 3. 从免费模型池中随机选择另一个模型重试
+# 4. 使用 DeepSeek 官方 API (deepseek-chat) 作为兜底
+# 5. 最终降级到关键词分类
+#
 # 注意: 推荐使用 OpenRouter 免费模型，无需付费
 
 name = "skillscat-classification"
@@ -32,7 +40,8 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-kv-namespace-id>"
 
-# 可选: 指定使用的模型 (默认: liquid/lfm-2.5-1.2b-thinking:free)
+# 必需 (如果使用 OpenRouter): 指定使用的模型
 # 查看可用免费模型: https://openrouter.ai/models?q=:free
 # [vars]
 # AI_MODEL = "liquid/lfm-2.5-1.2b-thinking:free"
+# FREE_MODELS = "liquid/lfm-2.5-1.2b-thinking:free,google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free"

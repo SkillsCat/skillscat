@@ -92,6 +92,31 @@ function generateSecret(length = 32) {
 }
 
 /**
+ * 读取现有的 .dev.vars 文件
+ */
+function readExistingDevVars() {
+  const devVarsPath = resolve(WEB_DIR, '.dev.vars');
+  if (!existsSync(devVarsPath)) return {};
+
+  const content = readFileSync(devVarsPath, 'utf-8');
+  const vars = {};
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIndex = trimmed.indexOf('=');
+    if (eqIndex > 0) {
+      const key = trimmed.slice(0, eqIndex).trim();
+      const value = trimmed.slice(eqIndex + 1).trim();
+      // Only keep values that are not placeholders
+      if (value && !value.startsWith('your-') && !value.startsWith('<')) {
+        vars[key] = value;
+      }
+    }
+  }
+  return vars;
+}
+
+/**
  * 创建 readline 接口
  */
 function createReadline() {
@@ -500,19 +525,25 @@ ${colors.cyan}╔═════════════════════
     // Step: 收集用户输入的 secrets
     logStep(isProduction ? '4/5' : '3/5', '配置环境变量');
 
+    // Read existing .dev.vars to preserve configured values
+    const existingVars = readExistingDevVars();
+
     console.log(`
 ${colors.gray}以下变量需要手动配置:
 - GitHub OAuth: https://github.com/settings/developers
   Authorization callback URL: ${isProduction ? 'https://your-domain.com' : 'http://localhost:5173'}/api/auth/callback/github
 - GitHub Token: https://github.com/settings/tokens (需要 public_repo 权限)
 - OpenRouter: https://openrouter.ai/keys (可选，用于 AI 分类)
-  注意: 我们只使用免费模型，无需付费${colors.reset}
+  注意: 我们只使用免费模型，无需付费
+- DeepSeek: https://platform.deepseek.com/api_keys (可选，AI 分类兜底)${colors.reset}
 `);
 
-    const githubClientId = await ask(rl, 'GitHub Client ID', '');
-    const githubClientSecret = await ask(rl, 'GitHub Client Secret', '');
-    const githubToken = await ask(rl, 'GitHub Personal Access Token', '');
-    const openrouterApiKey = await ask(rl, 'OpenRouter API Key (可选，免费模型)', '');
+    // Only prompt for values that are not already configured
+    const githubClientId = existingVars.GITHUB_CLIENT_ID || await ask(rl, 'GitHub Client ID', '');
+    const githubClientSecret = existingVars.GITHUB_CLIENT_SECRET || await ask(rl, 'GitHub Client Secret', '');
+    const githubToken = existingVars.GITHUB_TOKEN || await ask(rl, 'GitHub Personal Access Token', '');
+    const openrouterApiKey = existingVars.OPENROUTER_API_KEY || await ask(rl, 'OpenRouter API Key (可选，免费模型)', '');
+    const deepseekApiKey = existingVars.DEEPSEEK_API_KEY || await ask(rl, 'DeepSeek API Key (可选，兜底策略)', '');
 
     if (isProduction) {
       // 生产模式: 设置 Cloudflare secrets
@@ -528,6 +559,7 @@ ${colors.gray}以下变量需要手动配置:
         };
 
         if (openrouterApiKey) secrets.OPENROUTER_API_KEY = openrouterApiKey;
+        if (deepseekApiKey) secrets.DEEPSEEK_API_KEY = deepseekApiKey;
 
         // 为每个 worker 设置 secrets
         for (const worker of WORKERS) {
@@ -547,12 +579,13 @@ ${colors.gray}以下变量需要手动配置:
     } else {
       // 本地模式: 创建 .dev.vars
       const devVars = {
-        BETTER_AUTH_SECRET: betterAuthSecret,
-        WORKER_SECRET: workerSecret,
+        BETTER_AUTH_SECRET: existingVars.BETTER_AUTH_SECRET || betterAuthSecret,
+        WORKER_SECRET: existingVars.WORKER_SECRET || workerSecret,
         GITHUB_CLIENT_ID: githubClientId || 'your-github-client-id',
         GITHUB_CLIENT_SECRET: githubClientSecret || 'your-github-client-secret',
         GITHUB_TOKEN: githubToken || 'your-github-token',
         OPENROUTER_API_KEY: openrouterApiKey || '',
+        DEEPSEEK_API_KEY: deepseekApiKey || '',
       };
 
       const devVarsResult = createDevVars(devVars, force);

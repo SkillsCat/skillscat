@@ -18,11 +18,19 @@ GITHUB_CLIENT_SECRET=your-github-client-secret
 # 需要的权限: public_repo (用于读取公开仓库信息)
 GITHUB_TOKEN=your-github-token
 
-# ========== OpenRouter API (可选，用于 AI 分类) ==========
+# ========== OpenRouter API (用于 AI 分类) ==========
 # 获取 API Key: https://openrouter.ai/keys
 # 注意: 推荐使用免费模型，无需付费
 # 查看可用免费模型: https://openrouter.ai/models?q=:free
 OPENROUTER_API_KEY=
 
-# 可选: 指定使用的模型 (默认: liquid/lfm-2.5-1.2b-thinking:free)
-# AI_MODEL=liquid/lfm-2.5-1.2b-thinking:free
+# 必需 (如果使用 OpenRouter): 指定使用的模型
+AI_MODEL=liquid/lfm-2.5-1.2b-thinking:free
+
+# 可选: 免费模型池，逗号分隔 (用于 fallback)
+# FREE_MODELS=liquid/lfm-2.5-1.2b-thinking:free,google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free
+
+# ========== DeepSeek API (兜底策略，可选) ==========
+# 获取 API Key: https://platform.deepseek.com/api_keys
+# 当 OpenRouter 所有模型都失败时，使用 DeepSeek 作为最后兜底
+DEEPSEEK_API_KEY=

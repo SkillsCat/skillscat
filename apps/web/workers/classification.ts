@@ -20,9 +20,8 @@ import { KNOWN_ORGS } from './shared/types';
 import { CATEGORIES, getCategorySlugs } from './shared/categories';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-
-// Default free model if not configured via environment variable
-const DEFAULT_FREE_MODEL = 'liquid/lfm-2.5-1.2b-thinking:free';
+const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
+const DEEPSEEK_MODEL = 'deepseek-chat';
 
 // Extended message type with metadata for admission decision
 interface ClassificationMessageWithMeta extends ClassificationMessage {
@@ -161,6 +160,62 @@ function parseClassificationResult(content: string): ClassificationResult {
   };
 }
 
+/**
+ * Get free models list from environment variable
+ * Returns empty array if not configured
+ */
+function getFreeModels(env: ClassificationEnv): string[] {
+  if (env.FREE_MODELS) {
+    return env.FREE_MODELS.split(',').map((m) => m.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+/**
+ * Pick a random model from the list, excluding the specified model
+ */
+function pickRandomModel(models: string[], exclude: string): string | null {
+  const available = models.filter((m) => m !== exclude);
+  if (available.length === 0) return null;
+  return available[Math.floor(Math.random() * available.length)];
+}
+
+/**
+ * Call DeepSeek API for classification
+ */
+async function callDeepSeek(
+  prompt: string,
+  apiKey: string
+): Promise<ClassificationResult> {
+  const response = await fetch(DEEPSEEK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      max_tokens: 500,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`DeepSeek API error: ${response.status} - ${error}`);
+  }
+
+  const data = (await response.json()) as OpenRouterResponse;
+  const content = data.choices[0]?.message?.content;
+
+  if (!content) {
+    throw new Error('No content in DeepSeek response');
+  }
+
+  return parseClassificationResult(content);
+}
+
 function classifyByKeywords(content: string): ClassificationResult {
   const contentLower = content.toLowerCase();
   const scores: Record<string, number> = {};
@@ -198,29 +253,69 @@ function classifyByKeywords(content: string): ClassificationResult {
   };
 }
 
+/**
+ * Classify skill using AI with multi-model fallback strategy:
+ * 1. Try primary model on OpenRouter (AI_MODEL env var)
+ * 2. Retry primary model once
+ * 3. Try random fallback model from FREE_MODELS pool
+ * 4. Try DeepSeek as final AI fallback
+ * 5. Fall back to keyword classification
+ */
 async function classifyWithAI(
   skillMdContent: string,
   env: ClassificationEnv
 ): Promise<ClassificationResult> {
   const prompt = buildClassificationPrompt(skillMdContent);
+  const freeModels = getFreeModels(env);
+  const primaryModel = env.AI_MODEL || freeModels[0];
 
-  if (!env.OPENROUTER_API_KEY) {
-    console.log('No OpenRouter API key, falling back to keywords');
-    return classifyByKeywords(skillMdContent);
+  // 1. Try OpenRouter (if API key and model are available)
+  if (env.OPENROUTER_API_KEY && primaryModel) {
+    // 1a. Primary model - first attempt
+    try {
+      console.log(`[OpenRouter] Trying primary model: ${primaryModel}`);
+      return await callOpenRouter(prompt, primaryModel, env.OPENROUTER_API_KEY);
+    } catch (error) {
+      console.error(`[OpenRouter] Primary model failed:`, error);
+    }
+
+    // 1b. Primary model - retry
+    try {
+      console.log(`[OpenRouter] Retrying primary model: ${primaryModel}`);
+      return await callOpenRouter(prompt, primaryModel, env.OPENROUTER_API_KEY);
+    } catch (error) {
+      console.error(`[OpenRouter] Primary model retry failed:`, error);
+    }
+
+    // 1c. Random fallback model from pool (if configured)
+    const fallbackModel = pickRandomModel(freeModels, primaryModel);
+    if (fallbackModel) {
+      try {
+        console.log(`[OpenRouter] Trying fallback model: ${fallbackModel}`);
+        return await callOpenRouter(prompt, fallbackModel, env.OPENROUTER_API_KEY);
+      } catch (error) {
+        console.error(`[OpenRouter] Fallback model failed:`, error);
+      }
+    }
+  } else if (!env.OPENROUTER_API_KEY) {
+    console.log('[OpenRouter] No API key configured');
+  } else if (!primaryModel) {
+    console.log('[OpenRouter] No model configured (set AI_MODEL or FREE_MODELS)');
   }
 
-  // Use configured model or default free model
-  const model = env.AI_MODEL || DEFAULT_FREE_MODEL;
-
-  try {
-    console.log(`Using model: ${model}`);
-    return await callOpenRouter(prompt, model, env.OPENROUTER_API_KEY);
-  } catch (error) {
-    console.error(`Model ${model} failed:`, error);
-    // Fallback to keyword classification if AI fails
-    console.log('AI classification failed, falling back to keywords');
-    return classifyByKeywords(skillMdContent);
+  // 2. DeepSeek fallback
+  if (env.DEEPSEEK_API_KEY) {
+    try {
+      console.log(`[DeepSeek] Trying ${DEEPSEEK_MODEL} as fallback`);
+      return await callDeepSeek(prompt, env.DEEPSEEK_API_KEY);
+    } catch (error) {
+      console.error(`[DeepSeek] Failed:`, error);
+    }
   }
+
+  // 3. Final fallback to keyword classification
+  console.log('[Fallback] All AI providers failed, using keyword classification');
+  return classifyByKeywords(skillMdContent);
 }
 
 async function saveClassification(

@@ -204,10 +204,28 @@ GITHUB_CLIENT_ID=xxx
 GITHUB_CLIENT_SECRET=xxx
 GITHUB_TOKEN=xxx
 
-# OpenRouter API (可选，用于 AI 分类)
-# 只使用免费模型，无需付费
+# OpenRouter API (用于 AI 分类)
 OPENROUTER_API_KEY=xxx
+AI_MODEL=liquid/lfm-2.5-1.2b-thinking:free
+
+# 可选: 免费模型池 (用于 fallback)
+# FREE_MODELS=liquid/lfm-2.5-1.2b-thinking:free,google/gemma-3-1b-it:free
+
+# DeepSeek API (兜底策略，可选)
+DEEPSEEK_API_KEY=xxx
 ```
+
+### AI 分类 Fallback 策略
+
+Classification Worker 使用多层 fallback 策略确保分类成功率:
+
+1. 使用 AI_MODEL 指定的主模型调用 OpenRouter
+2. 失败后在同一模型上重试一次
+3. 从 FREE_MODELS 模型池中随机选择另一个模型重试
+4. 使用 DeepSeek 官方 API (deepseek-chat) 作为兜底
+5. 最终降级到关键词分类
+
+注意: 所有模型配置都通过环境变量指定，代码中不包含默认模型列表。
 
 ## 数据库操作
 
