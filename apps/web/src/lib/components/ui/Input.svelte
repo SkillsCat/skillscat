@@ -8,7 +8,7 @@
     error?: string;
     icon?: 'search' | 'link' | 'user' | 'mail' | null;
     value?: string;
-    variant?: 'default' | 'rounded';
+    variant?: 'default' | 'rounded' | 'cute';
   }
 
   let {
@@ -39,7 +39,7 @@
     </label>
   {/if}
 
-  <div class="relative">
+  <div class="input-wrapper {variant === 'cute' ? 'input-wrapper-cute' : ''}">
     {#if icon}
       <div class="icon-wrapper">
         <HugeiconsIcon icon={iconMap[icon]} size={20} strokeWidth={2} />
@@ -49,7 +49,7 @@
     <input
       id={inputId}
       bind:value
-      class="input-field {variant === 'rounded' ? 'input-rounded' : ''} {icon ? 'has-icon' : ''} {error ? 'has-error' : ''} {className}"
+      class="input-field {variant === 'rounded' ? 'input-rounded' : ''} {variant === 'cute' ? 'input-cute' : ''} {icon ? 'has-icon' : ''} {error ? 'has-error' : ''} {className}"
       {...restProps}
     />
   </div>
@@ -68,6 +68,28 @@
     margin-bottom: 0.5rem;
   }
 
+  .input-wrapper {
+    position: relative;
+  }
+
+  .input-wrapper-cute {
+    --input-shadow-offset: 3px;
+    --input-shadow-color: oklch(75% 0.02 85);
+    box-shadow: 0 var(--input-shadow-offset) 0 0 var(--input-shadow-color);
+    border-radius: var(--radius-xl);
+    transform: translateY(0);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .input-wrapper-cute:focus-within {
+    --input-shadow-offset: 1px;
+    transform: translateY(2px);
+  }
+
+  :global(.dark) .input-wrapper-cute {
+    --input-shadow-color: oklch(25% 0.02 85);
+  }
+
   .icon-wrapper {
     position: absolute;
     left: 1rem;
@@ -76,6 +98,11 @@
     color: var(--fg-subtle);
     pointer-events: none;
     z-index: 1;
+    transition: color 0.15s ease;
+  }
+
+  .input-wrapper-cute:focus-within .icon-wrapper {
+    color: var(--primary);
   }
 
   .input-field {
@@ -109,6 +136,19 @@
     border-radius: var(--radius-full);
   }
 
+  .input-field.input-cute {
+    border-width: 2px;
+    border-radius: var(--radius-xl);
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .input-field.input-cute:focus {
+    border-color: var(--primary);
+    background: var(--background);
+    box-shadow: none;
+    transform: none;
+  }
+
   .input-field.has-error {
     border-color: var(--error);
   }
@@ -116,6 +156,10 @@
   .input-field.has-error:focus {
     border-color: var(--error);
     box-shadow: 0 0 0 4px color-mix(in oklch, var(--error) 20%, transparent);
+  }
+
+  .input-field.input-cute.has-error:focus {
+    box-shadow: none;
   }
 
   .error-message {

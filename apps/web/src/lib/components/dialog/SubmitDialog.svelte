@@ -127,14 +127,18 @@
             <div class="dialog-content">
               {#if success}
                 <div class="success-message">
-                  <div class="success-icon">🎉</div>
+                  <div class="success-icon-wrapper">
+                    <span class="success-icon">🎉</span>
+                  </div>
                   <h3 class="success-title">Skill Submitted!</h3>
                   <Dialog.Description class="success-text">
                     Your skill has been submitted for review. It will appear in our catalog once processed.
                   </Dialog.Description>
-                  <Button variant="cute" onclick={handleDone}>
-                    Done
-                  </Button>
+                  <div class="success-action">
+                    <Button variant="cute" onclick={handleDone}>
+                      Done
+                    </Button>
+                  </div>
                 </div>
               {:else}
                 <Dialog.Description class="dialog-description">
@@ -150,6 +154,7 @@
                       placeholder="https://github.com/owner/repo/tree/main/skills/my-skill"
                       bind:value={githubUrl}
                       disabled={isSubmitting}
+                      variant="cute"
                     />
                     <p class="form-hint">
                       The folder must contain a SKILL.md file
@@ -362,25 +367,45 @@
   }
 
   .success-message {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     text-align: center;
-    padding: 1rem 0;
+    padding: 2rem 1rem;
+  }
+
+  .success-icon-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 5rem;
+    height: 5rem;
+    background: var(--primary-subtle);
+    border: 3px solid var(--primary);
+    border-radius: var(--radius-full);
+    margin-bottom: 1.5rem;
   }
 
   .success-icon {
-    font-size: 3rem;
-    margin-bottom: 1rem;
+    font-size: 2.5rem;
+    line-height: 1;
   }
 
   .success-title {
-    font-size: 1.25rem;
-    font-weight: 600;
+    font-size: 1.5rem;
+    font-weight: 700;
     color: var(--foreground);
-    margin-bottom: 0.5rem;
+    margin: 0 0 0.75rem 0;
   }
 
-  .success-text {
+  :global(.success-text) {
     color: var(--muted-foreground);
-    margin-bottom: 1.5rem;
     line-height: 1.6;
+    margin: 0;
+    max-width: 280px;
+  }
+
+  .success-action {
+    margin-top: 2rem;
   }
 </style>

@@ -41,6 +41,16 @@
 
   .logo-icon {
     flex-shrink: 0;
+    filter: drop-shadow(1px 1px 1px rgba(0, 0, 0, 0.15));
+    transition: filter 0.15s ease, transform 0.15s ease;
+  }
+
+  :global(.dark) .logo-icon {
+    filter: brightness(0.85) drop-shadow(1px 1px 1px rgba(0, 0, 0, 0.3));
+  }
+
+  .logo-link:hover .logo-icon {
+    transform: scale(1.05) rotate(-3deg);
   }
 
   .logo-text {
