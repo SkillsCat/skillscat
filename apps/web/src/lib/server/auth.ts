@@ -21,7 +21,11 @@ export const auth = betterAuth({
   },
   session: {
     expiresIn: 60 * 60 * 24 * 7, // 7 days
-    updateAge: 60 * 60 * 24 // Update session every 24 hours
+    updateAge: 60 * 60 * 24, // Update session every 24 hours
+    cookieCache: {
+      enabled: true,
+      maxAge: 5 * 60 // Cache session in cookie for 5 minutes to reduce DB queries
+    }
   },
   trustedOrigins: [
     'http://localhost:5173',
@@ -29,5 +33,5 @@ export const auth = betterAuth({
   ]
 });
 
-export type Session = typeof auth.$Infer.Session;
+export type Session = typeof auth.$Infer.Session.session;
 export type User = typeof auth.$Infer.Session.user;

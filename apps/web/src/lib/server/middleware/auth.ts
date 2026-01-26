@@ -12,9 +12,9 @@ export interface AuthContext {
   userId: string | null;
   user: {
     id: string;
-    name?: string;
-    email?: string;
-    image?: string;
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
   } | null;
   authMethod: 'session' | 'token' | null;
   tokenInfo: TokenInfo | null;
@@ -24,9 +24,9 @@ export interface AuthContext {
 interface SessionAuth {
   user: {
     id: string;
-    name?: string;
-    email?: string;
-    image?: string;
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
   } | null;
 }
 

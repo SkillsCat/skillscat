@@ -24,7 +24,7 @@ declare global {
     interface Locals {
       user: import('$lib/server/auth').User | null;
       session: import('$lib/server/auth').Session | null;
-      auth: () => Promise<{ user: { id: string; name?: string; email?: string; image?: string } | null }>;
+      auth: () => Promise<{ user: import('$lib/server/auth').User | null }>;
     }
     // interface Error {}
     // interface PageData {}
