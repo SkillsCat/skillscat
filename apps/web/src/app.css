@@ -368,18 +368,21 @@ body {
 .btn-sm {
   padding: 0.5rem 1rem;
   font-size: 0.875rem;
+  min-height: 36px;
   border-radius: var(--radius-md);
 }
 
 .btn-md {
   padding: 0.625rem 1.25rem;
   font-size: 0.9375rem;
+  min-height: 44px;
   border-radius: var(--radius-lg);
 }
 
 .btn-lg {
   padding: 0.875rem 1.75rem;
   font-size: 1.0625rem;
+  min-height: 48px;
   border-radius: var(--radius-lg);
 }
 

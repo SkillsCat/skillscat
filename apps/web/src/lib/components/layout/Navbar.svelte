@@ -1,6 +1,6 @@
 <script lang="ts">
   import { NavigationMenu } from 'bits-ui';
-  import { Logo, ThemeToggle, SearchBox, UserMenu, SubmitDialog } from '$lib/components';
+  import { Logo, ThemeToggle, SearchBox, UserMenu, SubmitDialog, Button } from '$lib/components';
   import { CATEGORY_SECTIONS } from '$lib/constants/categories';
   import { goto } from '$app/navigation';
   import { useSession } from '$lib/auth-client';
@@ -205,13 +205,14 @@
       <!-- Right Side -->
       <div class="navbar-right">
         {#if $session.data?.user}
-          <button
-            class="submit-btn"
+          <Button
+            variant="cute"
+            size="sm"
             onclick={() => showSubmitDialog = true}
           >
             <HugeiconsIcon icon={Add01Icon} size={16} strokeWidth={2} />
             <span class="submit-btn-text">Submit</span>
-          </button>
+          </Button>
         {/if}
         <ThemeToggle />
         <UserMenu />
@@ -441,11 +442,19 @@
   /* Dropdown Content Layout - Grouped by Sections */
   .dropdown-sections {
     display: grid;
-    grid-template-columns: repeat(5, minmax(140px, 1fr));
+    grid-template-columns: repeat(3, minmax(140px, 1fr));
     gap: 0.25rem;
     padding: 1rem;
-    min-width: 700px;
-    max-width: 800px;
+    min-width: 450px;
+    max-width: 500px;
+  }
+
+  @media (min-width: 1024px) {
+    .dropdown-sections {
+      grid-template-columns: repeat(5, minmax(140px, 1fr));
+      min-width: 700px;
+      max-width: 800px;
+    }
   }
 
   .section-group {
@@ -545,30 +554,6 @@
     gap: 0.75rem;
   }
 
-  .submit-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    padding: 0.5rem 0.875rem;
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--primary-foreground);
-    background-color: var(--primary);
-    border: none;
-    border-radius: var(--radius-full);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .submit-btn:hover {
-    background-color: var(--primary-hover);
-    transform: translateY(-1px);
-  }
-
-  .submit-btn:active {
-    transform: translateY(0);
-  }
-
   .submit-btn-text {
     display: none;
   }
@@ -583,7 +568,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0.5rem;
+    padding: 0.75rem;
+    min-width: 44px;
+    min-height: 44px;
     border: 2px solid var(--border);
     background: var(--card);
     color: var(--foreground);
@@ -627,10 +614,12 @@
   }
 
   .mobile-link {
-    padding: 0.625rem 0.875rem;
+    padding: 0.875rem 1rem;
+    min-height: 44px;
     border-radius: var(--radius-lg);
     color: var(--muted-foreground);
     font-weight: 600;
+    font-size: 1rem;
     text-decoration: none;
     transition: all 0.15s ease;
   }

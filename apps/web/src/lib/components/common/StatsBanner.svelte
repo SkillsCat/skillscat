@@ -53,7 +53,7 @@
   }
 
   .stats-text {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     font-weight: 500;
     color: var(--fg-muted);
     letter-spacing: -0.01em;

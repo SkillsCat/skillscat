@@ -406,8 +406,8 @@
   }
 
   .command-label {
-    padding: 0.375rem 0.75rem;
-    font-size: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8125rem;
     font-weight: 500;
     color: var(--muted-foreground);
     background-color: var(--card);
@@ -418,12 +418,13 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
+    padding: 0.625rem 0.75rem;
+    min-height: 44px;
   }
 
   .command-content code {
     flex: 1;
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     font-family: var(--font-mono, ui-monospace, monospace);
     color: var(--foreground);
     overflow-x: auto;

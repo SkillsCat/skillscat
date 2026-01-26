@@ -234,14 +234,16 @@
 
   .clear-btn {
     position: absolute;
-    right: 0.75rem;
+    right: 0.5rem;
     top: 50%;
     transform: translateY(-50%);
     z-index: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0.25rem;
+    width: 32px;
+    height: 32px;
+    padding: 0.375rem;
     background: none;
     border: none;
     color: var(--fg-subtle);
@@ -278,7 +280,8 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.5rem 0.75rem;
+    padding: 0.625rem 0.75rem;
+    min-height: 44px;
     background: none;
     border: none;
     border-radius: var(--radius-md);

@@ -132,7 +132,7 @@
                   <Dialog.Description class="success-text">
                     Your skill has been submitted for review. It will appear in our catalog once processed.
                   </Dialog.Description>
-                  <Button variant="primary" onclick={handleDone}>
+                  <Button variant="cute" onclick={handleDone}>
                     Done
                   </Button>
                 </div>
@@ -174,7 +174,7 @@
                       </Button>
                     </Dialog.Close>
                     <Button
-                      variant="primary"
+                      variant="cute"
                       type="submit"
                       disabled={!isValidUrl || isSubmitting}
                     >
@@ -194,10 +194,10 @@
                 <div class="guidelines">
                   <h4 class="guidelines-title">Submission Guidelines</h4>
                   <ul class="guidelines-list">
-                    <li>The repository must be public</li>
-                    <li>The folder must contain a valid SKILL.md file</li>
-                    <li>Skills should be useful for Claude Code users</li>
-                    <li>No malicious or harmful content</li>
+                    <li><span class="guidelines-icon">📦</span> The repository must be public</li>
+                    <li><span class="guidelines-icon">📄</span> The folder must contain a valid SKILL.md file</li>
+                    <li><span class="guidelines-icon">🎯</span> Skills should be useful for Claude Code users</li>
+                    <li><span class="guidelines-icon">🛡️</span> No malicious or harmful content</li>
                   </ul>
                 </div>
               {/if}
@@ -323,23 +323,42 @@
 
   .guidelines {
     margin-top: 1.5rem;
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--border);
+    padding: 1rem;
+    background-color: var(--bg-muted);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-lg);
   }
 
   .guidelines-title {
-    margin-bottom: 0.75rem;
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--foreground);
+    margin: 0 0 0.75rem 0;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted-foreground);
   }
 
   .guidelines-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
     margin: 0;
-    padding-left: 1.25rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  .guidelines-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
     font-size: 0.875rem;
-    color: var(--muted-foreground);
-    line-height: 1.8;
+    color: var(--foreground);
+    line-height: 1.4;
+  }
+
+  .guidelines-icon {
+    flex-shrink: 0;
+    font-size: 1rem;
   }
 
   .success-message {

@@ -7,15 +7,44 @@
   let { size = 'md', showText = true }: Props = $props();
 
   const sizes = {
-    sm: { icon: 'text-xl', text: 'text-lg' },
-    md: { icon: 'text-2xl', text: 'text-xl' },
-    lg: { icon: 'text-3xl', text: 'text-2xl' }
+    sm: { icon: 20, text: 'text-lg' },
+    md: { icon: 28, text: 'text-xl' },
+    lg: { icon: 36, text: 'text-2xl' }
   };
 </script>
 
-<a href="/" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
-  <span class={sizes[size].icon}>🐱</span>
+<a href="/" class="logo-link">
+  <img
+    src="/favicon-64x64.png"
+    alt="SkillsCat"
+    width={sizes[size].icon}
+    height={sizes[size].icon}
+    class="logo-icon"
+  />
   {#if showText}
-    <span class="{sizes[size].text} font-semibold text-fg">SkillsCat</span>
+    <span class="logo-text {sizes[size].text}">SkillsCat</span>
   {/if}
 </a>
+
+<style>
+  .logo-link {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    transition: opacity 0.15s ease;
+  }
+
+  .logo-link:hover {
+    opacity: 0.8;
+  }
+
+  .logo-icon {
+    flex-shrink: 0;
+  }
+
+  .logo-text {
+    font-weight: 600;
+    color: var(--foreground);
+  }
+</style>

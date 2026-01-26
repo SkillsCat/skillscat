@@ -147,7 +147,7 @@
   }
 
   .hero-title-line {
-    font-size: clamp(2.5rem, 5vw, 3.5rem);
+    font-size: clamp(1.75rem, 4vw + 0.5rem, 3.5rem);
     font-weight: 800;
     color: var(--fg);
     line-height: 1.2;
@@ -155,7 +155,7 @@
   }
 
   .hero-title-highlight {
-    font-size: clamp(2.5rem, 5vw, 4rem);
+    font-size: clamp(1.75rem, 4vw + 0.5rem, 4rem);
     font-weight: 900;
     background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
     -webkit-background-clip: text;
@@ -178,22 +178,11 @@
   }
 
   .hero-subtitle {
-    font-size: clamp(1.125rem, 2vw, 1.375rem);
+    font-size: clamp(1rem, 1.5vw + 0.5rem, 1.375rem);
     color: var(--fg-muted);
     font-weight: 500;
     max-width: 36rem;
     margin: 0 auto;
     line-height: 1.6;
-  }
-
-  /* Responsive */
-  @media (max-width: 768px) {
-    .hero-title-line {
-      font-size: 2rem;
-    }
-
-    .hero-title-highlight {
-      font-size: 2rem;
-    }
   }
 </style>

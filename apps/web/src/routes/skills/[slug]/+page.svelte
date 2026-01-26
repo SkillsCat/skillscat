@@ -380,7 +380,8 @@
 
 <style>
   .install-tab {
-    padding: 0.5rem 1rem;
+    padding: 0.625rem 1rem;
+    min-height: 44px;
     font-size: 0.875rem;
     font-weight: 600;
     color: var(--muted-foreground);
