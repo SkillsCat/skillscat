@@ -18,6 +18,9 @@ import type {
 } from './shared/types';
 import { KNOWN_ORGS } from './shared/types';
 import { CATEGORIES, getCategorySlugs } from './shared/categories';
+import { createLogger } from './shared/utils';
+
+const log = createLogger('Classification');
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
@@ -376,51 +379,71 @@ async function processMessage(
 ): Promise<void> {
   const { skillId, repoOwner, repoName, skillMdPath, stars = 0, topics = [], description = '' } = message;
 
-  console.log(`Processing skill: ${skillId} (${repoOwner}/${repoName})`);
+  log.log(`Processing skill: ${skillId} (${repoOwner}/${repoName})`, JSON.stringify(message));
 
   // Determine classification method based on repo metadata
   const method = determineClassificationMethod(repoOwner, stars, topics, description);
-  console.log(`Classification method for ${skillId}: ${method}`);
+  log.log(`Method for ${skillId}: ${method} (stars: ${stars}, topics: ${topics.length}, desc length: ${description?.length || 0})`);
 
   // Record metric
-  await recordClassificationMetric(env, method);
+  try {
+    await recordClassificationMetric(env, method);
+    log.log(`Metric recorded for ${skillId}: ${method}`);
+  } catch (metricError) {
+    log.error(`Failed to record metric for ${skillId}:`, metricError);
+    // Don't fail the whole process for metric errors
+  }
 
   // Skip classification for low-quality repos
   if (method === 'skipped') {
-    console.log(`Skipping classification for low-quality repo: ${skillId}`);
+    log.log(`Skipping classification for low-quality repo: ${skillId}`);
     const now = Date.now();
-    await env.DB.prepare('UPDATE skills SET classification_method = ?, updated_at = ? WHERE id = ?')
-      .bind('skipped', now, skillId)
-      .run();
+    try {
+      await env.DB.prepare('UPDATE skills SET classification_method = ?, updated_at = ? WHERE id = ?')
+        .bind('skipped', now, skillId)
+        .run();
+      log.log(`Updated skill as skipped: ${skillId}`);
+    } catch (dbError) {
+      log.error(`Failed to update skill as skipped: ${skillId}`, dbError);
+      throw dbError;
+    }
     return;
   }
 
   // Get SKILL.md content
+  log.log(`Fetching SKILL.md from R2: ${skillMdPath}`);
   const r2Object = await env.R2.get(skillMdPath);
   if (!r2Object) {
-    console.error(`SKILL.md not found in R2: ${skillMdPath}`);
+    log.error(`SKILL.md not found in R2: ${skillMdPath}`);
     return;
   }
 
   const skillMdContent = await r2Object.text();
+  log.log(`SKILL.md content length: ${skillMdContent.length} chars`);
 
   let result: ClassificationResult;
 
   if (method === 'ai') {
+    log.log(`Starting AI classification for ${skillId}`);
     result = await classifyWithAI(skillMdContent, env);
   } else {
+    log.log(`Starting keyword classification for ${skillId}`);
     result = classifyByKeywords(skillMdContent);
   }
 
-  console.log(
-    `Classification result for ${skillId}:`,
+  log.log(
+    `Result for ${skillId}:`,
     result.categories,
-    `(confidence: ${result.confidence}, method: ${method})`
+    `(confidence: ${result.confidence}, method: ${method}, reasoning: ${result.reasoning})`
   );
 
-  await saveClassification(skillId, result, method, env);
-
-  console.log(`Classification saved for skill: ${skillId}`);
+  try {
+    await saveClassification(skillId, result, method, env);
+    log.log(`Successfully saved classification for skill: ${skillId}, categories: ${result.categories.join(', ')}`);
+  } catch (saveError) {
+    log.error(`Failed to save classification for ${skillId}:`, saveError);
+    throw saveError;
+  }
 }
 
 export default {
@@ -429,15 +452,18 @@ export default {
     env: ClassificationEnv,
     _ctx: ExecutionContext
   ): Promise<void> {
-    console.log(`Processing batch of ${batch.messages.length} messages`);
+    log.log(`Processing batch of ${batch.messages.length} messages`);
 
     for (const message of batch.messages) {
       try {
+        log.log(`Processing message ID: ${message.id}`);
         await processMessage(message.body, env);
         message.ack();
+        log.log(`Message acknowledged: ${message.id}`);
       } catch (error) {
-        console.error(`Error processing message:`, error);
+        log.error(`Error processing message ${message.id}:`, error);
         message.retry();
+        log.log(`Message scheduled for retry: ${message.id}`);
       }
     }
   },

@@ -1,5 +1,8 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { createLogger } from '$lib';
+
+const log = createLogger('Submit');
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
@@ -76,7 +79,7 @@ async function triggerDirectResurrection(
 
     return true;
   } catch (err) {
-    console.error('Failed to resurrect skill:', err);
+    log.error('Failed to resurrect skill:', err);
     return false;
   }
 }
@@ -280,14 +283,25 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 
     // Send to indexing queue
     if (queue) {
-      await queue.send({
+      const queueMessage = {
         type: 'check_skill',
         repoOwner: owner,
         repoName: repo,
         skillPath: path,
         submittedBy: session.user.id,
         submittedAt: new Date().toISOString(),
-      });
+      };
+      log.log(`Sending to indexing queue: ${owner}/${repo}`, queueMessage);
+      try {
+        await queue.send(queueMessage);
+        log.log(`Successfully queued for indexing: ${owner}/${repo}, user: ${session.user.id}`);
+      } catch (queueError) {
+        log.error(`Failed to send to indexing queue: ${owner}/${repo}`, queueError);
+        throw error(500, 'Failed to queue skill for processing');
+      }
+    } else {
+      log.error(`INDEXING_QUEUE not available for ${owner}/${repo}`);
+      throw error(500, 'Indexing queue not configured');
     }
 
     // Record user action
@@ -305,7 +319,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       message: 'Skill submitted successfully. It will appear in our catalog once processed.',
     });
   } catch (err: any) {
-    console.error('Error submitting skill:', err);
+    log.error('Error submitting skill:', err);
     if (err.status) throw err;
     throw error(500, 'Failed to submit skill');
   }
@@ -388,7 +402,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
       stars: repoData.stars,
     });
   } catch (err: any) {
-    console.error('Error checking URL:', err);
+    log.error('Error checking URL:', err);
     return json({ valid: false, error: 'Failed to validate URL' });
   }
 };

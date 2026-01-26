@@ -88,9 +88,14 @@ export interface IndexingMessage {
   type: 'check_skill';
   repoOwner: string;
   repoName: string;
-  eventId: string;
-  eventType: string;
-  createdAt: string;
+  // From GitHub events worker
+  eventId?: string;
+  eventType?: string;
+  createdAt?: string;
+  // From user submission
+  skillPath?: string;
+  submittedBy?: string;
+  submittedAt?: string;
 }
 
 export interface ClassificationMessage {

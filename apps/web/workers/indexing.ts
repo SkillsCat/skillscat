@@ -26,7 +26,10 @@ import {
   generateId,
   generateSlug,
   decodeBase64,
+  createLogger,
 } from './shared/utils';
+
+const log = createLogger('Indexing');
 
 // Anti-abuse: Compute SHA-256 hash
 async function computeHash(content: string): Promise<string> {
@@ -312,25 +315,30 @@ async function processMessage(
   env: IndexingEnv
 ): Promise<void> {
   const { repoOwner, repoName } = message;
+  const source = message.submittedBy ? 'user-submit' : 'github-events';
 
-  console.log(`Processing repo: ${repoOwner}/${repoName}`);
+  log.log(`Processing repo: ${repoOwner}/${repoName} (source: ${source})`, JSON.stringify(message));
 
   const repo = await getRepoInfo(repoOwner, repoName, env);
   if (!repo) {
-    console.log(`Repo not found: ${repoOwner}/${repoName}`);
+    log.log(`Repo not found: ${repoOwner}/${repoName}`);
     return;
   }
 
   if (repo.fork) {
-    console.log(`Skipping fork: ${repoOwner}/${repoName}`);
+    log.log(`Skipping fork: ${repoOwner}/${repoName}`);
     return;
   }
 
+  log.log(`Repo info fetched: ${repoOwner}/${repoName}, stars: ${repo.stargazers_count}, fork: ${repo.fork}`);
+
   const skillMd = await getSkillMd(repoOwner, repoName, env);
   if (!skillMd) {
-    console.log(`No SKILL.md found: ${repoOwner}/${repoName}`);
+    log.log(`No SKILL.md found: ${repoOwner}/${repoName}`);
     return;
   }
+
+  log.log(`SKILL.md found: ${repoOwner}/${repoName}, path: ${skillMd.path}`);
 
   // Get SKILL.md content for anti-abuse check
   let skillMdContent = '';
@@ -341,17 +349,20 @@ async function processMessage(
     skillMdContent = await response.text();
   }
 
+  log.log(`SKILL.md content length: ${skillMdContent.length} chars`);
+
   // Compute content hashes
   const fullHash = await computeHash(skillMdContent);
   const normalizedHash = await computeHash(normalizeContent(skillMdContent));
 
   const exists = await skillExists(repoOwner, repoName, env);
+  log.log(`Skill exists in DB: ${exists}`);
 
   // Anti-abuse check for new skills with low stars
   if (!exists && repo.stargazers_count < 100) {
     const duplicate = await checkForDuplicate(normalizedHash, env, 1000);
     if (duplicate.isDuplicate) {
-      console.log(`Rejecting duplicate of ${duplicate.originalSlug}: ${repoOwner}/${repoName}`);
+      log.log(`Rejecting duplicate of ${duplicate.originalSlug}: ${repoOwner}/${repoName}`);
       return;
     }
   }
@@ -361,21 +372,31 @@ async function processMessage(
   if (exists) {
     const updatedId = await updateSkill(repoOwner, repoName, repo, env);
     if (!updatedId) {
-      console.error(`Failed to update skill: ${repoOwner}/${repoName}`);
+      log.error(`Failed to update skill: ${repoOwner}/${repoName}`);
       return;
     }
     skillId = updatedId;
-    console.log(`Updated skill: ${skillId}`);
+    log.log(`Updated skill: ${skillId}`);
   } else {
     const authorId = await upsertAuthor(repo, env);
+    log.log(`Author upserted: ${authorId}`);
     skillId = await createSkill(repo, skillMd, authorId, env);
-    console.log(`Created skill: ${skillId}`);
+    log.log(`Created skill: ${skillId}`);
   }
 
   // Store content hashes for future duplicate detection
   await storeContentHashes(skillId, fullHash, normalizedHash, env);
+  log.log(`Content hashes stored for: ${skillId}`);
 
-  const r2Path = await cacheSkillMd(skillId, repoOwner, repoName, skillMd, env);
+  // Cache SKILL.md to R2
+  let r2Path: string;
+  try {
+    r2Path = await cacheSkillMd(skillId, repoOwner, repoName, skillMd, env);
+    log.log(`Cached SKILL.md to R2: ${r2Path}`);
+  } catch (r2Error) {
+    log.error(`Failed to cache SKILL.md to R2: ${repoOwner}/${repoName}`, r2Error);
+    throw r2Error;
+  }
 
   const classificationMessage: ClassificationMessage = {
     type: 'classify',
@@ -385,8 +406,14 @@ async function processMessage(
     skillMdPath: r2Path,
   };
 
-  await env.CLASSIFICATION_QUEUE.send(classificationMessage);
-  console.log(`Sent to classification queue: ${skillId}`);
+  log.log(`Sending to classification queue: ${skillId}`, JSON.stringify(classificationMessage));
+  try {
+    await env.CLASSIFICATION_QUEUE.send(classificationMessage);
+    log.log(`Successfully sent to classification queue: ${skillId}`);
+  } catch (classificationError) {
+    log.error(`Failed to send to classification queue: ${skillId}`, classificationError);
+    throw classificationError;
+  }
 }
 
 export default {
@@ -395,15 +422,18 @@ export default {
     env: IndexingEnv,
     _ctx: ExecutionContext
   ): Promise<void> {
-    console.log(`Processing batch of ${batch.messages.length} messages`);
+    log.log(`Processing batch of ${batch.messages.length} messages`);
 
     for (const message of batch.messages) {
       try {
+        log.log(`Processing message ID: ${message.id}`);
         await processMessage(message.body, env);
         message.ack();
+        log.log(`Message acknowledged: ${message.id}`);
       } catch (error) {
-        console.error(`Error processing message:`, error);
+        log.error(`Error processing message ${message.id}:`, error);
         message.retry();
+        log.log(`Message scheduled for retry: ${message.id}`);
       }
     }
   },
