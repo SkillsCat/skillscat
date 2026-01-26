@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { checkRateLimit, getRateLimitKey, rateLimitHeaders, RATE_LIMITS } from '$lib/server/ratelimit';
 import { getAuthContext } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
+import { getCached } from '$lib/server/cache';
 
 export interface RegistrySkillItem {
   name: string;
@@ -32,7 +33,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
   // Get auth context for permission checks
   const auth = await getAuthContext(request, locals, db);
 
-  // Rate limiting
+  // Rate limiting (keep using KV for atomic counters)
   if (kv) {
     const clientKey = getRateLimitKey(request);
     const rateLimitResult = await checkRateLimit(kv, clientKey, RATE_LIMITS.skill);
@@ -49,25 +50,6 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
           }
         }
       );
-    }
-  }
-
-  // Check cache first
-  const cacheKey = `skill:${identifier}`;
-  if (kv) {
-    try {
-      const cached = await kv.get<RegistrySkillItem>(cacheKey, 'json');
-      if (cached) {
-        return json(cached, {
-          headers: {
-            'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
-            'X-Cache': 'HIT',
-            'Access-Control-Allow-Origin': '*'
-          }
-        });
-      }
-    } catch {
-      // Cache miss
     }
   }
 
@@ -186,94 +168,97 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
       skillName = identifier;
     }
 
-    // Build query for public skills (legacy format)
-    let sql = `
-      SELECT
-        s.id,
-        s.name,
-        s.description,
-        s.repo_owner as owner,
-        s.repo_name as repo,
-        s.stars,
-        s.updated_at as updatedAt,
-        s.github_url as githubUrl,
-        s.skill_path as skillPath,
-        s.visibility,
-        GROUP_CONCAT(sc.category_slug) as categories
-      FROM skills s
-      LEFT JOIN skill_categories sc ON s.id = sc.skill_id
-      WHERE s.name = ? AND s.visibility = 'public'
-    `;
-    const queryParams: string[] = [skillName];
+    // For public skills, use Cache API
+    const cacheKey = `skill:${identifier}`;
+    const { data: skill, hit } = await getCached(
+      cacheKey,
+      async () => {
+        // Build query for public skills (legacy format)
+        let sql = `
+          SELECT
+            s.id,
+            s.name,
+            s.description,
+            s.repo_owner as owner,
+            s.repo_name as repo,
+            s.stars,
+            s.updated_at as updatedAt,
+            s.github_url as githubUrl,
+            s.skill_path as skillPath,
+            s.visibility,
+            GROUP_CONCAT(sc.category_slug) as categories
+          FROM skills s
+          LEFT JOIN skill_categories sc ON s.id = sc.skill_id
+          WHERE s.name = ? AND s.visibility = 'public'
+        `;
+        const queryParams: string[] = [skillName];
 
-    if (owner) {
-      sql += ` AND s.repo_owner = ?`;
-      queryParams.push(owner);
-    }
+        if (owner) {
+          sql += ` AND s.repo_owner = ?`;
+          queryParams.push(owner);
+        }
 
-    sql += ` GROUP BY s.id LIMIT 1`;
+        sql += ` GROUP BY s.id LIMIT 1`;
 
-    const row = await db.prepare(sql).bind(...queryParams).first<{
-      id: string;
-      name: string;
-      description: string | null;
-      owner: string;
-      repo: string;
-      stars: number;
-      updatedAt: number;
-      githubUrl: string;
-      skillPath: string;
-      visibility: string;
-      categories: string | null;
-    }>();
+        const row = await db.prepare(sql).bind(...queryParams).first<{
+          id: string;
+          name: string;
+          description: string | null;
+          owner: string;
+          repo: string;
+          stars: number;
+          updatedAt: number;
+          githubUrl: string;
+          skillPath: string;
+          visibility: string;
+          categories: string | null;
+        }>();
 
-    if (!row) {
+        if (!row) {
+          return null;
+        }
+
+        // Fetch SKILL.md content from R2
+        let content = '';
+        if (r2) {
+          try {
+            const r2Key = `skills/${row.owner}/${row.repo}/SKILL.md`;
+            const object = await r2.get(r2Key);
+            if (object) {
+              content = await object.text();
+            }
+          } catch {
+            // Content not in R2, will be empty
+          }
+        }
+
+        return {
+          name: row.name,
+          description: row.description || '',
+          owner: row.owner,
+          repo: row.repo,
+          stars: row.stars,
+          updatedAt: row.updatedAt,
+          categories: row.categories ? row.categories.split(',') : [],
+          content,
+          githubUrl: row.githubUrl,
+          visibility: (row.visibility || 'public') as 'public' | 'private' | 'unlisted'
+        } satisfies RegistrySkillItem;
+      },
+      300
+    );
+
+    if (!skill) {
       return json(
         { error: 'Skill not found' },
         { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } }
       );
     }
 
-    // Fetch SKILL.md content from R2
-    let content = '';
-    if (r2) {
-      try {
-        const r2Key = `skills/${row.owner}/${row.repo}/SKILL.md`;
-        const object = await r2.get(r2Key);
-        if (object) {
-          content = await object.text();
-        }
-      } catch {
-        // Content not in R2, will be empty
-      }
-    }
-
-    const skill: RegistrySkillItem = {
-      name: row.name,
-      description: row.description || '',
-      owner: row.owner,
-      repo: row.repo,
-      stars: row.stars,
-      updatedAt: row.updatedAt,
-      categories: row.categories ? row.categories.split(',') : [],
-      content,
-      githubUrl: row.githubUrl,
-      visibility: (row.visibility || 'public') as 'public' | 'private' | 'unlisted'
-    };
-
-    // Cache the result (only for public skills)
-    if (kv && row.visibility === 'public') {
-      try {
-        await kv.put(cacheKey, JSON.stringify(skill), { expirationTtl: 300 });
-      } catch {
-        // Ignore cache write errors
-      }
-    }
-
     return json(skill, {
       headers: {
         'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
-        'X-Cache': 'MISS',
+        'X-Cache': hit ? 'HIT' : 'MISS',
         'Access-Control-Allow-Origin': '*'
       }
     });

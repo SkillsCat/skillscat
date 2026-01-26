@@ -16,6 +16,7 @@ declare global {
         OPENROUTER_API_KEY: string;
         DEEPSEEK_API_KEY: string;
         GITHUB_TOKEN?: string;
+        WORKER_SECRET?: string;
       };
       context: ExecutionContext;
       caches: CacheStorage & { default: Cache };
