@@ -37,7 +37,7 @@ export const skills = sqliteTable('skills', {
   name: text('name').notNull(),
   slug: text('slug').notNull(),
   description: text('description'),
-  githubUrl: text('github_url').unique(),
+  githubUrl: text('github_url'), // Not unique - multi-skill repos share the same URL
   repoOwner: text('repo_owner'),
   repoName: text('repo_name'),
   skillPath: text('skill_path'),

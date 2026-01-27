@@ -296,7 +296,6 @@ async function upsertAuthor(
 async function createSkill(
   repo: GitHubRepo,
   skillMd: GitHubContent,
-  authorId: string,
   env: IndexingEnv,
   skillPath?: string,
   frontmatter?: SkillFrontmatter | null
@@ -344,10 +343,9 @@ async function createSkill(
 
   await env.DB.prepare(`
     INSERT INTO skills (
-      id, name, slug, description, repo_owner, repo_name, skill_path, repo_url,
-      skill_md_url, stars, forks, language, license, topics,
-      author_id, trending_score, created_at, updated_at, indexed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      id, name, slug, description, repo_owner, repo_name, skill_path, github_url,
+      stars, forks, trending_score, created_at, updated_at, indexed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
     .bind(
       skillId,
@@ -358,13 +356,8 @@ async function createSkill(
       repo.name,
       normalizedPath,
       repo.html_url,
-      skillMd.html_url,
       repo.stargazers_count,
       repo.forks_count,
-      repo.language,
-      repo.license?.spdx_id || null,
-      JSON.stringify(repo.topics || []),
-      authorId,
       0,
       now,
       now,
@@ -389,9 +382,6 @@ async function updateSkill(
     UPDATE skills SET
       stars = ?,
       forks = ?,
-      language = ?,
-      license = ?,
-      topics = ?,
       updated_at = ?,
       indexed_at = ?
     WHERE repo_owner = ? AND repo_name = ? AND (skill_path = ? OR (skill_path IS NULL AND ? = ''))
@@ -400,9 +390,6 @@ async function updateSkill(
     .bind(
       repo.stargazers_count,
       repo.forks_count,
-      repo.language,
-      repo.license?.spdx_id || null,
-      JSON.stringify(repo.topics || []),
       now,
       now,
       owner,
@@ -592,7 +579,7 @@ async function processMessage(
   } else {
     const authorId = await upsertAuthor(repo, env);
     log.log(`Author upserted: ${authorId}`);
-    skillId = await createSkill(repo, skillMd, authorId, env, skillPath, frontmatter);
+    skillId = await createSkill(repo, skillMd, env, skillPath, frontmatter);
     log.log(`Created skill: ${skillId}`);
   }
 

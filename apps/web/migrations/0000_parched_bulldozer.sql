@@ -21,6 +21,8 @@ CREATE TABLE `authors` (
 	`display_name` text,
 	`avatar_url` text,
 	`bio` text,
+	`type` text,
+	`user_id` text,
 	`skills_count` integer DEFAULT 0,
 	`total_stars` integer DEFAULT 0,
 	`created_at` integer DEFAULT (unixepoch() * 1000) NOT NULL,
@@ -29,6 +31,7 @@ CREATE TABLE `authors` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `authors_github_id_unique` ON `authors` (`github_id`);--> statement-breakpoint
 CREATE INDEX `authors_username_idx` ON `authors` (`username`);--> statement-breakpoint
+CREATE INDEX `authors_user_id_idx` ON `authors` (`user_id`);--> statement-breakpoint
 CREATE TABLE `content_hashes` (
 	`id` text PRIMARY KEY NOT NULL,
 	`skill_id` text NOT NULL,
@@ -132,6 +135,15 @@ CREATE TABLE `skill_permissions` (
 CREATE UNIQUE INDEX `skill_permissions_unique_idx` ON `skill_permissions` (`skill_id`,`grantee_type`,`grantee_id`);--> statement-breakpoint
 CREATE INDEX `skill_permissions_skill_idx` ON `skill_permissions` (`skill_id`);--> statement-breakpoint
 CREATE INDEX `skill_permissions_grantee_idx` ON `skill_permissions` (`grantee_type`,`grantee_id`);--> statement-breakpoint
+CREATE TABLE `skill_tags` (
+	`skill_id` text NOT NULL,
+	`tag` text NOT NULL,
+	`created_at` integer DEFAULT (unixepoch() * 1000) NOT NULL,
+	PRIMARY KEY(`skill_id`, `tag`),
+	FOREIGN KEY (`skill_id`) REFERENCES `skills`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `skill_tags_tag_idx` ON `skill_tags` (`tag`);--> statement-breakpoint
 CREATE TABLE `skills` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
@@ -166,7 +178,6 @@ CREATE TABLE `skills` (
 	FOREIGN KEY (`org_id`) REFERENCES `organizations`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `skills_github_url_unique` ON `skills` (`github_url`);--> statement-breakpoint
 CREATE INDEX `skills_slug_idx` ON `skills` (`slug`);--> statement-breakpoint
 CREATE INDEX `skills_trending_idx` ON `skills` (`trending_score`);--> statement-breakpoint
 CREATE INDEX `skills_stars_idx` ON `skills` (`stars`);--> statement-breakpoint
@@ -176,6 +187,7 @@ CREATE INDEX `skills_owner_idx` ON `skills` (`owner_id`);--> statement-breakpoin
 CREATE INDEX `skills_content_hash_idx` ON `skills` (`content_hash`);--> statement-breakpoint
 CREATE INDEX `skills_tier_idx` ON `skills` (`tier`);--> statement-breakpoint
 CREATE INDEX `skills_next_update_idx` ON `skills` (`next_update_at`);--> statement-breakpoint
+CREATE UNIQUE INDEX `skills_repo_path_unique` ON `skills` (`repo_owner`,`repo_name`,`skill_path`);--> statement-breakpoint
 CREATE TABLE `user_actions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text,

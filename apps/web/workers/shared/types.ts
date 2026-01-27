@@ -219,20 +219,21 @@ export interface SkillRecord {
   description: string | null;
   repo_owner: string;
   repo_name: string;
-  repo_url: string;
-  skill_md_url: string;
+  skill_path: string | null;
+  github_url: string | null;
   stars: number;
   forks: number;
   star_snapshots: string | null;
-  language: string | null;
-  license: string | null;
-  topics: string | null;
-  author_id: string;
   trending_score: number;
-  created_at: number;
-  updated_at: number;
-  indexed_at: number;
+  file_structure: string | null;
+  readme: string | null;
   last_commit_at: number | null;
+  visibility: string;
+  owner_id: string | null;
+  org_id: string | null;
+  source_type: string;
+  content_hash: string | null;
+  verified_repo_url: string | null;
   // Cost optimization fields
   tier: SkillTier;
   last_accessed_at: number | null;
@@ -240,6 +241,9 @@ export interface SkillRecord {
   access_count_30d: number;
   next_update_at: number | null;
   classification_method: ClassificationMethod | null;
+  created_at: number;
+  updated_at: number;
+  indexed_at: number;
 }
 
 export interface AuthorRecord {

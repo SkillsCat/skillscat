@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "97b66ce4-1c70-4486-b6df-37b009f05948",
+  "id": "281e1197-eebb-4eb1-aec9-ad7c7f78500b",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "api_tokens": {
@@ -153,6 +153,20 @@
           "notNull": false,
           "autoincrement": false
         },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "skills_count": {
           "name": "skills_count",
           "type": "integer",
@@ -198,6 +212,13 @@
           "name": "authors_username_idx",
           "columns": [
             "username"
+          ],
+          "isUnique": false
+        },
+        "authors_user_id_idx": {
+          "name": "authors_user_id_idx",
+          "columns": [
+            "user_id"
           ],
           "isUnique": false
         }
@@ -902,6 +923,68 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "skill_tags": {
+      "name": "skill_tags",
+      "columns": {
+        "skill_id": {
+          "name": "skill_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tag": {
+          "name": "tag",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "skill_tags_tag_idx": {
+          "name": "skill_tags_tag_idx",
+          "columns": [
+            "tag"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "skill_tags_skill_id_skills_id_fk": {
+          "name": "skill_tags_skill_id_skills_id_fk",
+          "tableFrom": "skill_tags",
+          "tableTo": "skills",
+          "columnsFrom": [
+            "skill_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "skill_tags_skill_id_tag_pk": {
+          "columns": [
+            "skill_id",
+            "tag"
+          ],
+          "name": "skill_tags_skill_id_tag_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "skills": {
       "name": "skills",
       "columns": {
@@ -1128,13 +1211,6 @@
         }
       },
       "indexes": {
-        "skills_github_url_unique": {
-          "name": "skills_github_url_unique",
-          "columns": [
-            "github_url"
-          ],
-          "isUnique": true
-        },
         "skills_slug_idx": {
           "name": "skills_slug_idx",
           "columns": [
@@ -1197,6 +1273,15 @@
             "next_update_at"
           ],
           "isUnique": false
+        },
+        "skills_repo_path_unique": {
+          "name": "skills_repo_path_unique",
+          "columns": [
+            "repo_owner",
+            "repo_name",
+            "skill_path"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {

@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX `skills_repo_path_unique` ON `skills` (`repo_owner`,`repo_name`,`skill_path`);

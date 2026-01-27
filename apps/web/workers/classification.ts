@@ -379,13 +379,12 @@ async function saveClassification(
 
   for (let i = 0; i < result.categories.length; i++) {
     const categorySlug = result.categories[i];
-    const isPrimary = i === 0;
 
     await env.DB.prepare(`
-      INSERT INTO skill_categories (skill_id, category_slug, is_primary, confidence, created_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO skill_categories (skill_id, category_slug)
+      VALUES (?, ?)
     `)
-      .bind(skillId, categorySlug, isPrimary ? 1 : 0, result.confidence, now)
+      .bind(skillId, categorySlug)
       .run();
   }
 
