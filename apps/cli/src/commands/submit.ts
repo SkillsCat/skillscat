@@ -1,6 +1,6 @@
 import pc from 'picocolors';
-import { existsSync, readFileSync } from 'fs';
-import { resolve, join } from 'path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { resolve, join, relative, dirname } from 'path';
 import { isAuthenticated, getValidToken, getBaseUrl } from '../utils/auth.js';
 
 interface SubmitOptions {
@@ -12,6 +12,8 @@ interface SubmitResponse {
   message?: string;
   error?: string;
   existingSlug?: string;
+  multipleFound?: boolean;
+  skills?: Array<{ path: string; skillPath: string; depth: number }>;
 }
 
 /**
@@ -96,6 +98,80 @@ function getRepoUrlFromPackageJson(cwd: string): string | null {
   }
 }
 
+/**
+ * Find SKILL.md file in the current directory or its subdirectories
+ * Returns the path relative to the repo root where SKILL.md is located
+ */
+function findSkillMd(cwd: string, maxDepth: number = 3): string | null {
+  // First check if SKILL.md exists in current directory
+  const skillMdPath = join(cwd, 'SKILL.md');
+  const skillMdPathLower = join(cwd, 'skill.md');
+
+  if (existsSync(skillMdPath) || existsSync(skillMdPathLower)) {
+    return ''; // Root directory
+  }
+
+  // Search in subdirectories (up to maxDepth)
+  function searchDir(dir: string, depth: number): string | null {
+    if (depth > maxDepth) return null;
+
+    try {
+      const entries = readdirSync(dir);
+
+      for (const entry of entries) {
+        // Skip dot folders
+        if (entry.startsWith('.')) continue;
+
+        const fullPath = join(dir, entry);
+
+        try {
+          const stat = statSync(fullPath);
+
+          if (stat.isDirectory()) {
+            // Check for SKILL.md in this directory
+            const skillPath = join(fullPath, 'SKILL.md');
+            const skillPathLower = join(fullPath, 'skill.md');
+
+            if (existsSync(skillPath) || existsSync(skillPathLower)) {
+              return relative(cwd, fullPath);
+            }
+
+            // Recurse into subdirectory
+            const found = searchDir(fullPath, depth + 1);
+            if (found !== null) {
+              return found;
+            }
+          }
+        } catch {
+          // Skip inaccessible entries
+        }
+      }
+    } catch {
+      // Skip inaccessible directories
+    }
+
+    return null;
+  }
+
+  return searchDir(cwd, 1);
+}
+
+/**
+ * Find the git root directory
+ */
+function findGitRoot(cwd: string): string | null {
+  let dir = cwd;
+
+  while (dir !== '/') {
+    if (existsSync(join(dir, '.git'))) {
+      return dir;
+    }
+    dir = dirname(dir);
+  }
+
+  return null;
+}
+
 export async function submit(urlArg?: string, _options?: SubmitOptions): Promise<void> {
   // Step 1: Check authentication
   if (!isAuthenticated()) {
@@ -104,32 +180,79 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
     process.exit(1);
   }
 
-  // Step 2: Determine the URL to submit
+  // Step 2: Determine the URL and skill path to submit
   let repoUrl: string;
+  let skillPath: string | undefined;
+  const cwd = process.cwd();
 
   if (urlArg) {
     // URL provided as argument
     repoUrl = urlArg;
   } else {
-    // Try to read from package.json
-    const cwd = process.cwd();
-    const extractedUrl = getRepoUrlFromPackageJson(cwd);
+    // Try to find SKILL.md in current workspace first
+    const gitRoot = findGitRoot(cwd);
 
-    if (!extractedUrl) {
-      console.error(pc.red('No repository URL provided.'));
-      console.log();
-      console.log('Usage:');
-      console.log(pc.dim('  skillscat submit <github-url>'));
-      console.log(pc.dim('  skillscat submit                  # reads from package.json'));
-      console.log();
-      console.log('Examples:');
-      console.log(pc.dim('  skillscat submit https://github.com/owner/repo'));
-      console.log(pc.dim('  skillscat submit owner/repo'));
-      process.exit(1);
+    if (gitRoot) {
+      // Find SKILL.md relative to git root
+      const foundPath = findSkillMd(gitRoot);
+
+      if (foundPath !== null) {
+        // Found SKILL.md - get repo URL from package.json or git remote
+        const extractedUrl = getRepoUrlFromPackageJson(gitRoot);
+
+        if (extractedUrl) {
+          repoUrl = extractedUrl;
+          skillPath = foundPath;
+          if (foundPath) {
+            console.log(pc.dim(`Found SKILL.md at: ${foundPath}/SKILL.md`));
+          } else {
+            console.log(pc.dim('Found SKILL.md at repository root'));
+          }
+        } else {
+          console.error(pc.red('Found SKILL.md but could not determine repository URL.'));
+          console.log(pc.dim('Add a "repository" field to package.json or provide the URL as argument.'));
+          process.exit(1);
+        }
+      } else {
+        // No SKILL.md found - fall back to package.json
+        const extractedUrl = getRepoUrlFromPackageJson(cwd);
+
+        if (!extractedUrl) {
+          console.error(pc.red('No SKILL.md found and no repository URL provided.'));
+          console.log();
+          console.log('Usage:');
+          console.log(pc.dim('  skillscat submit <github-url>'));
+          console.log(pc.dim('  skillscat submit                  # auto-detect from workspace'));
+          console.log();
+          console.log('Make sure your project has:');
+          console.log(pc.dim('  - A SKILL.md file in the repository'));
+          console.log(pc.dim('  - A "repository" field in package.json'));
+          process.exit(1);
+        }
+
+        repoUrl = extractedUrl;
+        console.log(pc.dim(`Using repository from package.json: ${repoUrl}`));
+      }
+    } else {
+      // Not in a git repository - try package.json
+      const extractedUrl = getRepoUrlFromPackageJson(cwd);
+
+      if (!extractedUrl) {
+        console.error(pc.red('No repository URL provided.'));
+        console.log();
+        console.log('Usage:');
+        console.log(pc.dim('  skillscat submit <github-url>'));
+        console.log(pc.dim('  skillscat submit                  # reads from package.json'));
+        console.log();
+        console.log('Examples:');
+        console.log(pc.dim('  skillscat submit https://github.com/owner/repo'));
+        console.log(pc.dim('  skillscat submit owner/repo'));
+        process.exit(1);
+      }
+
+      repoUrl = extractedUrl;
+      console.log(pc.dim(`Using repository from package.json: ${repoUrl}`));
     }
-
-    repoUrl = extractedUrl;
-    console.log(pc.dim(`Using repository from package.json: ${repoUrl}`));
   }
 
   // Step 3: Validate and normalize URL
@@ -154,7 +277,8 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
   }
 
   // Step 5: Submit to API
-  console.log(pc.cyan(`Submitting: ${normalizedUrl}`));
+  const displayUrl = skillPath ? `${normalizedUrl} (path: ${skillPath})` : normalizedUrl;
+  console.log(pc.cyan(`Submitting: ${displayUrl}`));
 
   try {
     const baseUrl = getBaseUrl();
@@ -164,7 +288,10 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ url: normalizedUrl }),
+      body: JSON.stringify({
+        url: normalizedUrl,
+        skillPath: skillPath,
+      }),
     });
 
     const result = await response.json() as SubmitResponse;

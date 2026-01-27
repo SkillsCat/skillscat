@@ -35,3 +35,37 @@ export const auth = betterAuth({
 
 export type Session = typeof auth.$Infer.Session.session;
 export type User = typeof auth.$Infer.Session.user;
+
+/**
+ * Link an author record to a user after GitHub OAuth signup.
+ * This should be called after a user signs up via GitHub OAuth.
+ * It updates the authors table to set userId where github_id matches the user's GitHub ID.
+ */
+export async function linkAuthorToUser(
+  db: D1Database,
+  userId: string,
+  githubId: number
+): Promise<void> {
+  const now = Date.now();
+
+  // Update authors table to link the author record to the user
+  await db.prepare(`
+    UPDATE authors
+    SET user_id = ?, updated_at = ?
+    WHERE github_id = ? AND user_id IS NULL
+  `).bind(userId, now, githubId).run();
+
+  // Also update skills table to set ownerId for matching repo_owner
+  // First, get the author's username
+  const author = await db.prepare(`
+    SELECT username FROM authors WHERE github_id = ?
+  `).bind(githubId).first<{ username: string }>();
+
+  if (author) {
+    await db.prepare(`
+      UPDATE skills
+      SET owner_id = ?, updated_at = ?
+      WHERE repo_owner = ? AND owner_id IS NULL
+    `).bind(userId, now, author.username).run();
+  }
+}

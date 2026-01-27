@@ -95,3 +95,15 @@ export interface StarSnapshot {
   d: string; // date YYYY-MM-DD
   s: number; // star count
 }
+
+// ========== SKILL.md Scanning ==========
+export interface SkillMdLocation {
+  path: string;       // Full path: "skills/remotion/SKILL.md"
+  skillPath: string;  // Parent folder: "skills/remotion"
+  depth: number;      // 0 = root, 1 = one level deep
+}
+
+export interface ScanResult {
+  found: SkillMdLocation[];
+  truncated: boolean;
+}

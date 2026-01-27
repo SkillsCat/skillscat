@@ -75,7 +75,9 @@ export const skills = sqliteTable('skills', {
   index('skills_content_hash_idx').on(table.contentHash),
   // Cost optimization indexes
   index('skills_tier_idx').on(table.tier),
-  index('skills_next_update_idx').on(table.nextUpdateAt)
+  index('skills_next_update_idx').on(table.nextUpdateAt),
+  // Unique constraint for multi-skill repos (same repo can have multiple skills with different paths)
+  uniqueIndex('skills_repo_path_unique').on(table.repoOwner, table.repoName, table.skillPath)
 ]);
 
 // ========== Authors ==========
@@ -86,12 +88,15 @@ export const authors = sqliteTable('authors', {
   displayName: text('display_name'),
   avatarUrl: text('avatar_url'),
   bio: text('bio'),
+  type: text('type'), // 'User' or 'Organization' (from GitHub API)
+  userId: text('user_id'), // Better Auth user ID (linked after signup)
   skillsCount: integer('skills_count').default(0),
   totalStars: integer('total_stars').default(0),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
-  index('authors_username_idx').on(table.username)
+  index('authors_username_idx').on(table.username),
+  index('authors_user_id_idx').on(table.userId)
 ]);
 
 // ========== Skill Permissions ==========

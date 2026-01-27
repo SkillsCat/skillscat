@@ -12,13 +12,25 @@
     onClose?: () => void;
   }
 
+  interface SubmitResult {
+    path: string;
+    status: 'queued' | 'exists' | 'failed';
+    slug?: string;
+  }
+
   let { isOpen = false, onClose }: Props = $props();
 
+  // Form state
   let githubUrl = $state('');
   let isSubmitting = $state(false);
   let error = $state<string | null>(null);
   let success = $state(false);
   let existingSkillSlug = $state<string | null>(null);
+
+  // Result state for multi-skill submission
+  let submitResults = $state<SubmitResult[]>([]);
+  let submittedCount = $state(0);
+  let existingCount = $state(0);
 
   // Validate GitHub URL
   const isValidUrl = $derived(() => {
@@ -27,17 +39,6 @@
     return pattern.test(githubUrl);
   });
 
-  // Extract repo info from URL
-  function parseGitHubUrl(url: string): { owner: string; repo: string; path: string } | null {
-    const match = url.match(/github\.com\/([\w-]+)\/([\w.-]+)(?:\/tree\/[\w.-]+)?(\/.*)?$/);
-    if (!match) return null;
-    return {
-      owner: match[1],
-      repo: match[2],
-      path: match[3]?.slice(1) || '',
-    };
-  }
-
   async function handleSubmit() {
     if (!isValidUrl) return;
 
@@ -45,27 +46,28 @@
     error = null;
     success = false;
     existingSkillSlug = null;
+    submitResults = [];
+    submittedCount = 0;
+    existingCount = 0;
 
     try {
-      const repoInfo = parseGitHubUrl(githubUrl);
-      if (!repoInfo) {
-        throw new Error('Invalid GitHub URL');
-      }
-
       const response = await fetch('/api/submit', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          url: githubUrl,
-          owner: repoInfo.owner,
-          repo: repoInfo.repo,
-          path: repoInfo.path,
-        }),
+        body: JSON.stringify({ url: githubUrl }),
       });
 
-      const data = await response.json() as { error?: string; existingSlug?: string };
+      const data = await response.json() as {
+        success?: boolean;
+        error?: string;
+        existingSlug?: string;
+        submitted?: number;
+        existing?: number;
+        results?: SubmitResult[];
+        message?: string;
+      };
 
       if (!response.ok) {
         if (data.existingSlug) {
@@ -75,6 +77,13 @@
           throw new Error(data.error || 'Failed to submit skill');
         }
         return;
+      }
+
+      // Handle results
+      if (data.results && data.results.length > 0) {
+        submitResults = data.results;
+        submittedCount = data.submitted || 0;
+        existingCount = data.existing || 0;
       }
 
       success = true;
@@ -92,11 +101,21 @@
       error = null;
       success = false;
       existingSkillSlug = null;
+      submitResults = [];
+      submittedCount = 0;
+      existingCount = 0;
       onClose?.();
     }
   }
 
   function handleDone() {
+    githubUrl = '';
+    error = null;
+    success = false;
+    existingSkillSlug = null;
+    submitResults = [];
+    submittedCount = 0;
+    existingCount = 0;
     onClose?.();
   }
 </script>
@@ -130,10 +149,29 @@
                   <div class="success-icon-wrapper">
                     <span class="success-icon">🎉</span>
                   </div>
-                  <h3 class="success-title">Skill Submitted!</h3>
+                  <h3 class="success-title">
+                    {#if submittedCount > 1}
+                      {submittedCount} Skills Submitted!
+                    {:else}
+                      Skill Submitted!
+                    {/if}
+                  </h3>
                   <Dialog.Description class="success-text">
-                    Your skill has been submitted for review. It will appear in our catalog once processed.
+                    {#if submittedCount > 1}
+                      Your skills have been submitted for review. They will appear in our catalog once processed.
+                    {:else}
+                      Your skill has been submitted for review. It will appear in our catalog once processed.
+                    {/if}
                   </Dialog.Description>
+
+                  {#if submitResults.length > 1}
+                    <div class="results-summary">
+                      {#if existingCount > 0}
+                        <p class="results-note">{existingCount} skill{existingCount !== 1 ? 's' : ''} already existed</p>
+                      {/if}
+                    </div>
+                  {/if}
+
                   <div class="success-action">
                     <Button variant="cute" onclick={handleDone}>
                       Done
@@ -142,7 +180,7 @@
                 </div>
               {:else}
                 <Dialog.Description class="dialog-description">
-                  Share a Claude Code skill with the community. Enter the GitHub URL of a folder containing a SKILL.md file.
+                  Share a Claude Code skill with the community. Enter the GitHub URL of a repository containing SKILL.md file(s).
                 </Dialog.Description>
 
                 <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
@@ -151,13 +189,13 @@
                     <Input
                       id="github-url"
                       type="url"
-                      placeholder="https://github.com/owner/repo/tree/main/skills/my-skill"
+                      placeholder="https://github.com/owner/repo"
                       bind:value={githubUrl}
                       disabled={isSubmitting}
                       variant="cute"
                     />
                     <p class="form-hint">
-                      The folder must contain a SKILL.md file
+                      All SKILL.md files in the repository will be automatically submitted
                     </p>
                   </div>
 
@@ -190,7 +228,7 @@
                         </svg>
                         Submitting...
                       {:else}
-                        Submit Skill
+                        Submit
                       {/if}
                     </Button>
                   </div>
@@ -200,7 +238,7 @@
                   <h4 class="guidelines-title">Submission Guidelines</h4>
                   <ul class="guidelines-list">
                     <li><span class="guidelines-icon">📦</span> The repository must be public</li>
-                    <li><span class="guidelines-icon">📄</span> The folder must contain a valid SKILL.md file</li>
+                    <li><span class="guidelines-icon">📄</span> Must contain valid SKILL.md file(s)</li>
                     <li><span class="guidelines-icon">🎯</span> Skills should be useful for Claude Code users</li>
                     <li><span class="guidelines-icon">🛡️</span> No malicious or harmful content</li>
                   </ul>
@@ -403,6 +441,16 @@
     line-height: 1.6;
     margin: 0;
     max-width: 280px;
+  }
+
+  .results-summary {
+    margin-top: 1rem;
+  }
+
+  .results-note {
+    font-size: 0.875rem;
+    color: var(--muted-foreground);
+    margin: 0;
   }
 
   .success-action {
