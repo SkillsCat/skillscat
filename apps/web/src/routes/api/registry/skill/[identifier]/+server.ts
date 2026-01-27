@@ -132,7 +132,9 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
         let content = '';
         if (r2 && slugRow.owner && slugRow.repo) {
           try {
-            const r2Key = `skills/${slugRow.owner}/${slugRow.repo}/SKILL.md`;
+            // Include skillPath in R2 path for multi-skill repos
+            const skillPathPart = slugRow.skillPath ? `/${slugRow.skillPath}` : '';
+            const r2Key = `skills/${slugRow.owner}/${slugRow.repo}${skillPathPart}/SKILL.md`;
             const object = await r2.get(r2Key);
             if (object) {
               content = await object.text();
@@ -222,7 +224,9 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
         let content = '';
         if (r2) {
           try {
-            const r2Key = `skills/${row.owner}/${row.repo}/SKILL.md`;
+            // Include skillPath in R2 path for multi-skill repos
+            const skillPathPart = row.skillPath ? `/${row.skillPath}` : '';
+            const r2Key = `skills/${row.owner}/${row.repo}${skillPathPart}/SKILL.md`;
             const object = await r2.get(r2Key);
             if (object) {
               content = await object.text();

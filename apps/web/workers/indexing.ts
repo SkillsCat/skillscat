@@ -25,11 +25,107 @@ import {
   getContentsApiUrl,
   generateId,
   generateSlug,
+  checkSlugCollision,
   decodeBase64,
   createLogger,
 } from './shared/utils';
 
 const log = createLogger('Indexing');
+
+// ============================================
+// YAML Frontmatter Parsing
+// ============================================
+
+interface SkillFrontmatter {
+  name?: string;
+  description?: string;
+  category?: string;           // Single category slug
+  categories?: string;         // Comma-separated category slugs
+  keywords?: string;           // Alias for tags
+  metadata?: {
+    tags?: string; // comma-separated string
+    category?: string;         // Also check nested
+    categories?: string;
+  };
+}
+
+interface ParsedSkillMd {
+  frontmatter: SkillFrontmatter | null;
+  body: string;
+}
+
+/**
+ * Parse YAML frontmatter from SKILL.md content
+ * Supports format:
+ * ---
+ * name: skill-name
+ * description: Skill description
+ * category: git
+ * categories: git, automation
+ * keywords: tag1, tag2
+ * metadata:
+ *   tags: tag1, tag2, tag3
+ *   category: git
+ *   categories: git, automation
+ * ---
+ */
+function parseSkillFrontmatter(content: string): ParsedSkillMd {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!match) {
+    return { frontmatter: null, body: content };
+  }
+
+  const yamlContent = match[1];
+  const body = match[2];
+  const frontmatter: SkillFrontmatter = {};
+
+  // Parse name
+  const nameMatch = yamlContent.match(/^name:\s*(.+)$/m);
+  if (nameMatch) frontmatter.name = nameMatch[1].trim();
+
+  // Parse description
+  const descMatch = yamlContent.match(/^description:\s*(.+)$/m);
+  if (descMatch) frontmatter.description = descMatch[1].trim();
+
+  // Parse category (single, root level)
+  const categoryMatch = yamlContent.match(/^category:\s*(.+)$/m);
+  if (categoryMatch) frontmatter.category = categoryMatch[1].trim();
+
+  // Parse categories (multiple, root level)
+  const categoriesMatch = yamlContent.match(/^categories:\s*(.+)$/m);
+  if (categoriesMatch) frontmatter.categories = categoriesMatch[1].trim();
+
+  // Parse keywords (alias for tags, root level)
+  const keywordsMatch = yamlContent.match(/^keywords:\s*(.+)$/m);
+  if (keywordsMatch) frontmatter.keywords = keywordsMatch[1].trim();
+
+  // Parse metadata.tags
+  const tagsMatch = yamlContent.match(/tags:\s*(.+)$/m);
+  if (tagsMatch) {
+    frontmatter.metadata = frontmatter.metadata || {};
+    frontmatter.metadata.tags = tagsMatch[1].trim();
+  }
+
+  // Parse metadata.category (nested)
+  const metaCategoryMatch = yamlContent.match(/metadata:[\s\S]*?category:\s*(.+)$/m);
+  if (metaCategoryMatch && !frontmatter.category) {
+    frontmatter.metadata = frontmatter.metadata || {};
+    frontmatter.metadata.category = metaCategoryMatch[1].trim();
+  }
+
+  // Parse metadata.categories (nested)
+  const metaCategoriesMatch = yamlContent.match(/metadata:[\s\S]*?categories:\s*(.+)$/m);
+  if (metaCategoriesMatch && !frontmatter.categories) {
+    frontmatter.metadata = frontmatter.metadata || {};
+    frontmatter.metadata.categories = metaCategoriesMatch[1].trim();
+  }
+
+  return { frontmatter, body };
+}
+
+// ============================================
+// Anti-abuse Functions
+// ============================================
 
 // Anti-abuse: Compute SHA-256 hash
 async function computeHash(content: string): Promise<string> {
@@ -116,13 +212,20 @@ async function getRepoInfo(
 async function getSkillMd(
   owner: string,
   name: string,
-  env: IndexingEnv
+  env: IndexingEnv,
+  skillPath?: string
 ): Promise<GitHubContent | null> {
-  // Only accept SKILL.md in root directory (not in any dot folders like .claude/, .cursor/, etc.)
-  // Skills in dot folders are IDE-specific configurations
-  const paths = ['SKILL.md', 'skill.md'];
+  // Build paths based on skillPath
+  // Only accept SKILL.md in the specified path (not in any dot folders like .claude/, .cursor/, etc.)
+  const basePath = skillPath ? `${skillPath}/` : '';
+  const paths = [`${basePath}SKILL.md`, `${basePath}skill.md`];
 
   for (const path of paths) {
+    // Skip if path is in a dot folder
+    if (isInDotFolder(path)) {
+      continue;
+    }
+
     const content = await githubFetch<GitHubContent>(
       getContentsApiUrl(owner, name, path),
       {
@@ -146,12 +249,16 @@ async function getSkillMd(
 async function skillExists(
   owner: string,
   name: string,
+  skillPath: string | null,
   env: IndexingEnv
 ): Promise<boolean> {
+  // Normalize skillPath: null and empty string are treated the same
+  const normalizedPath = skillPath || '';
+
   const result = await env.DB.prepare(
-    'SELECT id FROM skills WHERE repo_owner = ? AND repo_name = ? LIMIT 1'
+    'SELECT id FROM skills WHERE repo_owner = ? AND repo_name = ? AND (skill_path = ? OR (skill_path IS NULL AND ? = \'\')) LIMIT 1'
   )
-    .bind(owner, name)
+    .bind(owner, name, normalizedPath, normalizedPath)
     .first();
 
   return result !== null;
@@ -190,33 +297,57 @@ async function createSkill(
   repo: GitHubRepo,
   skillMd: GitHubContent,
   authorId: string,
-  env: IndexingEnv
+  env: IndexingEnv,
+  skillPath?: string,
+  frontmatter?: SkillFrontmatter | null
 ): Promise<string> {
   const skillId = generateId();
-  const slug = generateSlug(repo.owner.login, repo.name);
   const now = Date.now();
 
-  let name = repo.name;
-  let description = repo.description;
+  // Use frontmatter name/description if available, fallback to repo data
+  let name = frontmatter?.name || repo.name;
+  let description = frontmatter?.description || repo.description;
 
-  if (skillMd.content) {
+  // Fallback: extract from markdown content if no frontmatter
+  if (!frontmatter?.name && skillMd.content) {
     const content = decodeBase64(skillMd.content);
     const titleMatch = content.match(/^#\s+(.+)$/m);
     if (titleMatch) {
       name = titleMatch[1].trim();
     }
-    const descMatch = content.match(/^#.+\n+(.+?)(?:\n\n|\n#|$)/s);
-    if (descMatch) {
-      description = descMatch[1].trim().slice(0, 500);
+    if (!frontmatter?.description) {
+      const descMatch = content.match(/^#.+\n+(.+?)(?:\n\n|\n#|$)/s);
+      if (descMatch) {
+        description = descMatch[1].trim().slice(0, 500);
+      }
     }
+  }
+
+  // Generate slug with collision handling
+  let slug: string;
+  const normalizedPath = skillPath || '';
+
+  if (normalizedPath && frontmatter?.name) {
+    // Try displayName-based slug first for subfolder skills
+    const displayNameSlug = generateSlug(repo.owner.login, repo.name, normalizedPath, frontmatter.name);
+    const hasCollision = await checkSlugCollision(env.DB, displayNameSlug);
+    if (hasCollision) {
+      // Fallback to path-based slug
+      slug = generateSlug(repo.owner.login, repo.name, normalizedPath);
+    } else {
+      slug = displayNameSlug;
+    }
+  } else {
+    // Root skill or no displayName
+    slug = generateSlug(repo.owner.login, repo.name, normalizedPath || undefined);
   }
 
   await env.DB.prepare(`
     INSERT INTO skills (
-      id, name, slug, description, repo_owner, repo_name, repo_url,
+      id, name, slug, description, repo_owner, repo_name, skill_path, repo_url,
       skill_md_url, stars, forks, language, license, topics,
       author_id, trending_score, created_at, updated_at, indexed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
     .bind(
       skillId,
@@ -225,6 +356,7 @@ async function createSkill(
       description,
       repo.owner.login,
       repo.name,
+      normalizedPath,
       repo.html_url,
       skillMd.html_url,
       repo.stargazers_count,
@@ -246,10 +378,12 @@ async function createSkill(
 async function updateSkill(
   owner: string,
   name: string,
+  skillPath: string | null,
   repo: GitHubRepo,
   env: IndexingEnv
 ): Promise<string | null> {
   const now = Date.now();
+  const normalizedPath = skillPath || '';
 
   const result = await env.DB.prepare(`
     UPDATE skills SET
@@ -260,7 +394,7 @@ async function updateSkill(
       topics = ?,
       updated_at = ?,
       indexed_at = ?
-    WHERE repo_owner = ? AND repo_name = ?
+    WHERE repo_owner = ? AND repo_name = ? AND (skill_path = ? OR (skill_path IS NULL AND ? = ''))
     RETURNING id
   `)
     .bind(
@@ -272,7 +406,9 @@ async function updateSkill(
       now,
       now,
       owner,
-      name
+      name,
+      normalizedPath,
+      normalizedPath
     )
     .first<{ id: string }>();
 
@@ -284,9 +420,12 @@ async function cacheSkillMd(
   owner: string,
   name: string,
   skillMd: GitHubContent,
-  env: IndexingEnv
+  env: IndexingEnv,
+  skillPath?: string
 ): Promise<string> {
-  const r2Path = `skills/${owner}/${name}/SKILL.md`;
+  // Include skill path in R2 path for multi-skill repos
+  const pathPart = skillPath ? `/${skillPath}` : '';
+  const r2Path = `skills/${owner}/${name}${pathPart}/SKILL.md`;
 
   let content = '';
   if (skillMd.content) {
@@ -304,20 +443,85 @@ async function cacheSkillMd(
       skillId,
       sha: skillMd.sha,
       indexedAt: new Date().toISOString(),
+      skillPath: skillPath || '',
     },
   });
 
   return r2Path;
 }
 
+/**
+ * Save skill tags from frontmatter to the database
+ */
+async function saveSkillTags(
+  skillId: string,
+  tagsString: string,
+  env: IndexingEnv
+): Promise<string[]> {
+  const tags = tagsString
+    .split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (tags.length === 0) return [];
+
+  const now = Date.now();
+
+  for (const tag of tags) {
+    await env.DB.prepare(`
+      INSERT INTO skill_tags (skill_id, tag, created_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(skill_id, tag) DO NOTHING
+    `)
+      .bind(skillId, tag, now)
+      .run();
+  }
+
+  log.log(`Saved ${tags.length} tags for skill ${skillId}: ${tags.join(', ')}`);
+  return tags;
+}
+
+/**
+ * Extract categories from frontmatter for direct classification
+ * Checks category, categories, metadata.category, metadata.categories
+ */
+function extractFrontmatterCategories(frontmatter: SkillFrontmatter | null): string[] {
+  if (!frontmatter) return [];
+
+  const categories: string[] = [];
+
+  // Check root level category (single)
+  if (frontmatter.category) {
+    categories.push(...frontmatter.category.split(',').map(c => c.trim().toLowerCase()));
+  }
+
+  // Check root level categories (multiple)
+  if (frontmatter.categories) {
+    categories.push(...frontmatter.categories.split(',').map(c => c.trim().toLowerCase()));
+  }
+
+  // Check metadata.category as fallback
+  if (frontmatter.metadata?.category && categories.length === 0) {
+    categories.push(...frontmatter.metadata.category.split(',').map(c => c.trim().toLowerCase()));
+  }
+
+  // Check metadata.categories as fallback
+  if (frontmatter.metadata?.categories && categories.length === 0) {
+    categories.push(...frontmatter.metadata.categories.split(',').map(c => c.trim().toLowerCase()));
+  }
+
+  // Deduplicate and return
+  return [...new Set(categories)].filter(Boolean);
+}
+
 async function processMessage(
   message: IndexingMessage,
   env: IndexingEnv
 ): Promise<void> {
-  const { repoOwner, repoName } = message;
+  const { repoOwner, repoName, skillPath } = message;
   const source = message.submittedBy ? 'user-submit' : 'github-events';
 
-  log.log(`Processing repo: ${repoOwner}/${repoName} (source: ${source})`, JSON.stringify(message));
+  log.log(`Processing repo: ${repoOwner}/${repoName} (source: ${source}, skillPath: ${skillPath || 'root'})`, JSON.stringify(message));
 
   const repo = await getRepoInfo(repoOwner, repoName, env);
   if (!repo) {
@@ -332,15 +536,16 @@ async function processMessage(
 
   log.log(`Repo info fetched: ${repoOwner}/${repoName}, stars: ${repo.stargazers_count}, fork: ${repo.fork}`);
 
-  const skillMd = await getSkillMd(repoOwner, repoName, env);
+  // Use skillPath when fetching SKILL.md
+  const skillMd = await getSkillMd(repoOwner, repoName, env, skillPath);
   if (!skillMd) {
-    log.log(`No SKILL.md found: ${repoOwner}/${repoName}`);
+    log.log(`No SKILL.md found: ${repoOwner}/${repoName}${skillPath ? `/${skillPath}` : ''}`);
     return;
   }
 
   log.log(`SKILL.md found: ${repoOwner}/${repoName}, path: ${skillMd.path}`);
 
-  // Get SKILL.md content for anti-abuse check
+  // Get SKILL.md content for anti-abuse check and frontmatter parsing
   let skillMdContent = '';
   if (skillMd.content) {
     skillMdContent = decodeBase64(skillMd.content);
@@ -351,11 +556,18 @@ async function processMessage(
 
   log.log(`SKILL.md content length: ${skillMdContent.length} chars`);
 
+  // Parse YAML frontmatter
+  const { frontmatter } = parseSkillFrontmatter(skillMdContent);
+  if (frontmatter) {
+    log.log(`Frontmatter parsed: name=${frontmatter.name}, description=${frontmatter.description?.slice(0, 50)}..., tags=${frontmatter.metadata?.tags}`);
+  }
+
   // Compute content hashes
   const fullHash = await computeHash(skillMdContent);
   const normalizedHash = await computeHash(normalizeContent(skillMdContent));
 
-  const exists = await skillExists(repoOwner, repoName, env);
+  // Check existence with skillPath
+  const exists = await skillExists(repoOwner, repoName, skillPath || null, env);
   log.log(`Skill exists in DB: ${exists}`);
 
   // Anti-abuse check for new skills with low stars
@@ -370,7 +582,7 @@ async function processMessage(
   let skillId: string;
 
   if (exists) {
-    const updatedId = await updateSkill(repoOwner, repoName, repo, env);
+    const updatedId = await updateSkill(repoOwner, repoName, skillPath || null, repo, env);
     if (!updatedId) {
       log.error(`Failed to update skill: ${repoOwner}/${repoName}`);
       return;
@@ -380,7 +592,7 @@ async function processMessage(
   } else {
     const authorId = await upsertAuthor(repo, env);
     log.log(`Author upserted: ${authorId}`);
-    skillId = await createSkill(repo, skillMd, authorId, env);
+    skillId = await createSkill(repo, skillMd, authorId, env, skillPath, frontmatter);
     log.log(`Created skill: ${skillId}`);
   }
 
@@ -388,23 +600,47 @@ async function processMessage(
   await storeContentHashes(skillId, fullHash, normalizedHash, env);
   log.log(`Content hashes stored for: ${skillId}`);
 
-  // Cache SKILL.md to R2
+  // Save tags from frontmatter (including keywords alias)
+  let tags: string[] = [];
+  const tagsString = frontmatter?.metadata?.tags || frontmatter?.keywords;
+  if (tagsString) {
+    tags = await saveSkillTags(skillId, tagsString, env);
+  }
+
+  // Extract categories from frontmatter for direct classification
+  const frontmatterCategories = extractFrontmatterCategories(frontmatter);
+  if (frontmatterCategories.length > 0) {
+    log.log(`Frontmatter categories extracted: ${frontmatterCategories.join(', ')}`);
+  }
+
+  // Cache SKILL.md to R2 (include skillPath in R2 path)
   let r2Path: string;
   try {
-    r2Path = await cacheSkillMd(skillId, repoOwner, repoName, skillMd, env);
+    r2Path = await cacheSkillMd(skillId, repoOwner, repoName, skillMd, env, skillPath);
     log.log(`Cached SKILL.md to R2: ${r2Path}`);
   } catch (r2Error) {
     log.error(`Failed to cache SKILL.md to R2: ${repoOwner}/${repoName}`, r2Error);
     throw r2Error;
   }
 
-  const classificationMessage: ClassificationMessage = {
+  // Send to classification queue with tags and frontmatter categories
+  const classificationMessage: ClassificationMessage & { tags?: string[] } = {
     type: 'classify',
     skillId,
     repoOwner,
     repoName,
     skillMdPath: r2Path,
   };
+
+  // Include frontmatter categories for direct classification (cost optimization)
+  if (frontmatterCategories.length > 0) {
+    classificationMessage.frontmatterCategories = frontmatterCategories;
+  }
+
+  // Include tags if available (for classification hints)
+  if (tags.length > 0) {
+    classificationMessage.tags = tags;
+  }
 
   log.log(`Sending to classification queue: ${skillId}`, JSON.stringify(classificationMessage));
   try {

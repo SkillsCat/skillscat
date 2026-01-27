@@ -104,6 +104,7 @@ export interface ClassificationMessage {
   repoOwner: string;
   repoName: string;
   skillMdPath: string;
+  frontmatterCategories?: string[];  // Direct categories from frontmatter for cost optimization
 }
 
 // ============================================
@@ -209,7 +210,7 @@ export interface GitHubRepoData {
 // ============================================
 
 export type SkillTier = 'hot' | 'warm' | 'cool' | 'cold' | 'archived';
-export type ClassificationMethod = 'ai' | 'keyword' | 'skipped';
+export type ClassificationMethod = 'ai' | 'keyword' | 'skipped' | 'direct';
 
 export interface SkillRecord {
   id: string;

@@ -226,12 +226,14 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     const db = platform?.env?.DB;
     const queue = platform?.env?.INDEXING_QUEUE;
 
-    // Check if already exists
+    // Check if already exists (include skill_path in uniqueness check)
     if (db) {
       const existing = await db.prepare(`
-        SELECT id, slug, tier FROM skills WHERE repo_owner = ? AND repo_name = ?
+        SELECT id, slug, tier FROM skills
+        WHERE repo_owner = ? AND repo_name = ?
+        AND (skill_path = ? OR (skill_path IS NULL AND ? = '') OR (skill_path = '' AND ? = ''))
       `)
-        .bind(owner, repo)
+        .bind(owner, repo, path || '', path || '', path || '')
         .first<{ id: string; slug: string; tier: string }>();
 
       if (existing) {
@@ -345,12 +347,14 @@ export const GET: RequestHandler = async ({ platform, url }) => {
 
     const db = platform?.env?.DB;
 
-    // Check if already exists
+    // Check if already exists (include skill_path in uniqueness check)
     if (db) {
       const existing = await db.prepare(`
-        SELECT slug, tier FROM skills WHERE repo_owner = ? AND repo_name = ?
+        SELECT slug, tier FROM skills
+        WHERE repo_owner = ? AND repo_name = ?
+        AND (skill_path = ? OR (skill_path IS NULL AND ? = '') OR (skill_path = '' AND ? = ''))
       `)
-        .bind(owner, repo)
+        .bind(owner, repo, path || '', path || '', path || '')
         .first<{ slug: string; tier: string }>();
 
       if (existing) {

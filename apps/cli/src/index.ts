@@ -13,6 +13,7 @@ import { logout } from './commands/logout.js';
 import { whoami } from './commands/whoami.js';
 import { publish } from './commands/publish.js';
 import { submit } from './commands/submit.js';
+import { deleteSkill } from './commands/delete.js';
 
 const program = new Command();
 
@@ -107,6 +108,7 @@ program
   .option('-o, --org <org>', 'Publish under an organization')
   .option('-p, --public', 'Make the skill public')
   .option('-d, --description <desc>', 'Skill description')
+  .option('-y, --yes', 'Skip confirmation prompt')
   .action(publish);
 
 // Submit command
@@ -114,6 +116,13 @@ program
   .command('submit [url]')
   .description('Submit a GitHub repository to SkillsCat registry')
   .action(submit);
+
+// Delete command
+program
+  .command('delete <slug>')
+  .description('Delete a private skill from SkillsCat')
+  .option('-y, --yes', 'Skip confirmation prompt')
+  .action(deleteSkill);
 
 // Error handling
 program.exitOverride((err) => {

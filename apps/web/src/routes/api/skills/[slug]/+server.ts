@@ -1,7 +1,9 @@
-import { json } from '@sveltejs/kit';
+import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { SkillDetail, SkillCardData, ApiResponse, FileNode } from '$lib/types';
 import { getCached } from '$lib/server/cache';
+import { getAuthContext } from '$lib/server/middleware/auth';
+import { isSkillOwner } from '$lib/server/permissions';
 
 export const GET: RequestHandler = async ({ params, platform }) => {
   try {
@@ -205,4 +207,109 @@ export const GET: RequestHandler = async ({ params, platform }) => {
       error: 'Failed to fetch skill'
     } satisfies ApiResponse<never>, { status: 500 });
   }
+};
+
+interface SkillInfo {
+  id: string;
+  slug: string;
+  owner_id: string | null;
+  source_type: string;
+  repo_owner: string | null;
+  repo_name: string | null;
+  skill_path: string | null;
+}
+
+/**
+ * Build R2 path for a skill's SKILL.md file
+ */
+function buildR2Path(skill: SkillInfo): string {
+  if (skill.source_type === 'upload') {
+    // For uploaded skills, extract owner from slug (@owner/name)
+    const slugMatch = skill.slug.match(/^@([^/]+)\/(.+)$/);
+    if (slugMatch) {
+      const [, owner, name] = slugMatch;
+      return `skills/${owner}/${name}/SKILL.md`;
+    }
+  }
+
+  // For GitHub-sourced skills
+  const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
+  return `skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/SKILL.md`;
+}
+
+/**
+ * DELETE /api/skills/[slug] - Delete a private skill
+ *
+ * Only the owner can delete a skill, and only uploaded (private) skills can be deleted.
+ * GitHub-sourced skills cannot be deleted through this endpoint.
+ */
+export const DELETE: RequestHandler = async ({ locals, platform, request, params }) => {
+  const db = platform?.env?.DB;
+  const r2 = platform?.env?.R2;
+  const kv = platform?.env?.KV;
+
+  if (!db || !r2) {
+    throw error(500, 'Storage not available');
+  }
+
+  const auth = await getAuthContext(request, locals, db);
+  if (!auth.userId) {
+    throw error(401, 'Authentication required');
+  }
+
+  const { slug } = params;
+  if (!slug) {
+    throw error(400, 'Skill slug is required');
+  }
+
+  // Fetch skill by slug and verify ownership
+  const skill = await db.prepare(`
+    SELECT id, slug, owner_id, source_type, repo_owner, repo_name, skill_path
+    FROM skills WHERE slug = ?
+  `)
+    .bind(slug)
+    .first<SkillInfo>();
+
+  if (!skill) {
+    throw error(404, 'Skill not found');
+  }
+
+  // Only owner can delete
+  const isOwner = await isSkillOwner(skill.id, auth.userId, db);
+  if (!isOwner) {
+    throw error(403, 'Only the owner can delete this skill');
+  }
+
+  // Only allow deletion of uploaded (private) skills
+  if (skill.source_type !== 'upload') {
+    throw error(400, 'Cannot delete GitHub-sourced skills. Remove the SKILL.md from your repository instead.');
+  }
+
+  // Delete from database (cascades handle related tables like skill_categories, skill_tags, etc.)
+  await db.prepare('DELETE FROM skills WHERE id = ?').bind(skill.id).run();
+
+  // Delete R2 files
+  try {
+    const r2Path = buildR2Path(skill);
+    await r2.delete(r2Path);
+  } catch (r2Error) {
+    // Log but don't fail - the DB record is already deleted
+    console.error(`Failed to delete R2 file for skill ${skill.id}:`, r2Error);
+  }
+
+  // Invalidate cache
+  if (kv) {
+    try {
+      await kv.delete(`api:skill:${skill.slug}`);
+      await kv.delete(`skill:${skill.id}`);
+    } catch (kvError) {
+      // Log but don't fail
+      console.error(`Failed to invalidate cache for skill ${skill.id}:`, kvError);
+    }
+  }
+
+  return json({
+    success: true,
+    message: 'Skill deleted successfully',
+  });
 };

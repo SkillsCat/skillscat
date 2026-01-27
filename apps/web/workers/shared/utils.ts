@@ -95,10 +95,68 @@ export function generateId(): string {
 }
 
 /**
- * Generate a URL-friendly slug from owner and repo name
+ * Generate a URL-friendly slug
+ * For multi-skill repos: prefer displayName, fallback to skillPath
+ *
+ * @param owner - Repository owner
+ * @param name - Repository name
+ * @param skillPath - Optional path to skill within repo (e.g., "skills/remotion")
+ * @param displayName - Optional display name from frontmatter
+ * @returns URL-friendly slug
+ *
+ * Examples:
+ * - Root skill: "remotion-dev-remotion"
+ * - Subfolder with displayName: "remotion-dev-skills-remotion-best-practices"
+ * - Subfolder without displayName: "remotion-dev-skills-skills-remotion"
  */
-export function generateSlug(owner: string, name: string): string {
-  return `${owner}-${name}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+export function generateSlug(
+  owner: string,
+  name: string,
+  skillPath?: string,
+  displayName?: string
+): string {
+  let slug = `${owner}-${name}`;
+
+  if (skillPath) {
+    // Normalize: remove leading/trailing slashes
+    const normalizedPath = skillPath.replace(/^\/|\/$/g, '');
+
+    if (displayName) {
+      // Use displayName (from frontmatter) - normalize to URL-friendly format
+      const normalizedDisplayName = displayName
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+      slug = `${slug}-${normalizedDisplayName}`;
+    } else {
+      // Fallback to full path (replace slashes with dashes)
+      const pathSlug = normalizedPath.replace(/\//g, '-');
+      slug = `${slug}-${pathSlug}`;
+    }
+  }
+
+  return slug.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
+}
+
+/**
+ * Check if a slug already exists in the database
+ * Used for collision detection when generating slugs
+ */
+export async function checkSlugCollision(
+  db: D1Database,
+  slug: string,
+  excludeSkillId?: string
+): Promise<boolean> {
+  const query = excludeSkillId
+    ? 'SELECT id FROM skills WHERE slug = ? AND id != ? LIMIT 1'
+    : 'SELECT id FROM skills WHERE slug = ? LIMIT 1';
+
+  const result = excludeSkillId
+    ? await db.prepare(query).bind(slug, excludeSkillId).first()
+    : await db.prepare(query).bind(slug).first();
+
+  return result !== null;
 }
 
 /**

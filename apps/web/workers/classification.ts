@@ -31,6 +31,8 @@ interface ClassificationMessageWithMeta extends ClassificationMessage {
   stars?: number;
   topics?: string[];
   description?: string;
+  tags?: string[]; // Tags from SKILL.md frontmatter for classification hints
+  frontmatterCategories?: string[]; // Direct categories from frontmatter
 }
 
 /**
@@ -72,16 +74,49 @@ function determineClassificationMethod(
   return 'keyword';
 }
 
-function buildClassificationPrompt(skillMdContent: string): string {
+/**
+ * Try to match frontmatter categories directly to valid category slugs
+ * This is the cheapest classification method - no AI or keyword matching needed
+ * Returns null if no valid categories found, triggering fallback to AI/keyword
+ */
+function tryDirectCategoryMatch(
+  frontmatterCategories: string[] | undefined
+): ClassificationResult | null {
+  if (!frontmatterCategories || frontmatterCategories.length === 0) {
+    return null;
+  }
+
+  const validSlugs = getCategorySlugs();
+  const validCategories = frontmatterCategories
+    .filter(cat => validSlugs.includes(cat.toLowerCase()))
+    .slice(0, 3);
+
+  if (validCategories.length === 0) {
+    return null; // No valid categories, fall back to AI/keyword
+  }
+
+  return {
+    categories: validCategories,
+    confidence: 1.0, // Author-specified categories have highest confidence
+    reasoning: 'Directly matched from SKILL.md frontmatter',
+  };
+}
+
+function buildClassificationPrompt(skillMdContent: string, tags?: string[]): string {
   const categoriesDescription = CATEGORIES.map(
     (c) => `- ${c.slug}: ${c.name} - ${c.description} (keywords: ${c.keywords.join(', ')})`
   ).join('\n');
+
+  let tagsHint = '';
+  if (tags && tags.length > 0) {
+    tagsHint = `\n\nAuthor-provided tags (use as hints for classification): ${tags.join(', ')}\n`;
+  }
 
   return `You are a skill classifier for Claude Code skills. Analyze the following SKILL.md content and classify it into 1-3 most relevant categories.
 
 Available categories:
 ${categoriesDescription}
-
+${tagsHint}
 SKILL.md content:
 ---
 ${skillMdContent.slice(0, 4000)}
@@ -219,7 +254,7 @@ async function callDeepSeek(
   return parseClassificationResult(content);
 }
 
-function classifyByKeywords(content: string): ClassificationResult {
+function classifyByKeywords(content: string, tags?: string[]): ClassificationResult {
   const contentLower = content.toLowerCase();
   const scores: Record<string, number> = {};
 
@@ -231,6 +266,14 @@ function classifyByKeywords(content: string): ClassificationResult {
       if (matches) {
         score += matches.length;
       }
+      // Boost score if tag matches category keyword
+      if (tags?.some((tag) => tag.toLowerCase() === keyword.toLowerCase())) {
+        score += 3; // Significant boost for tag match
+      }
+    }
+    // Also check if any tag directly matches the category slug
+    if (tags?.some((tag) => tag.toLowerCase() === category.slug.toLowerCase())) {
+      score += 5; // Strong boost for direct category match
     }
     if (score > 0) {
       scores[category.slug] = score;
@@ -266,9 +309,10 @@ function classifyByKeywords(content: string): ClassificationResult {
  */
 async function classifyWithAI(
   skillMdContent: string,
-  env: ClassificationEnv
+  env: ClassificationEnv,
+  tags?: string[]
 ): Promise<ClassificationResult> {
-  const prompt = buildClassificationPrompt(skillMdContent);
+  const prompt = buildClassificationPrompt(skillMdContent, tags);
   const freeModels = getFreeModels(env);
   const primaryModel = env.AI_MODEL || freeModels[0];
 
@@ -318,7 +362,7 @@ async function classifyWithAI(
 
   // 3. Final fallback to keyword classification
   console.log('[Fallback] All AI providers failed, using keyword classification');
-  return classifyByKeywords(skillMdContent);
+  return classifyByKeywords(skillMdContent, tags);
 }
 
 async function saveClassification(
@@ -365,6 +409,7 @@ async function recordClassificationMetric(
     ai: (existing?.ai || 0) + (method === 'ai' ? 1 : 0),
     keyword: (existing?.keyword || 0) + (method === 'keyword' ? 1 : 0),
     skipped: (existing?.skipped || 0) + (method === 'skipped' ? 1 : 0),
+    direct: (existing?.direct || 0) + (method === 'direct' ? 1 : 0),
     total: (existing?.total || 0) + 1,
   };
 
@@ -377,9 +422,39 @@ async function processMessage(
   message: ClassificationMessageWithMeta,
   env: ClassificationEnv
 ): Promise<void> {
-  const { skillId, repoOwner, repoName, skillMdPath, stars = 0, topics = [], description = '' } = message;
+  const { skillId, repoOwner, repoName, skillMdPath, stars = 0, topics = [], description = '', tags = [], frontmatterCategories } = message;
 
   log.log(`Processing skill: ${skillId} (${repoOwner}/${repoName})`, JSON.stringify(message));
+  if (tags.length > 0) {
+    log.log(`Tags from frontmatter: ${tags.join(', ')}`);
+  }
+  if (frontmatterCategories && frontmatterCategories.length > 0) {
+    log.log(`Frontmatter categories: ${frontmatterCategories.join(', ')}`);
+  }
+
+  // Try direct category match first (cheapest - no AI or keyword matching needed)
+  const directMatch = tryDirectCategoryMatch(frontmatterCategories);
+  if (directMatch) {
+    log.log(`Direct category match for ${skillId}: ${directMatch.categories.join(', ')}`);
+
+    // Record metric for direct classification
+    try {
+      await recordClassificationMetric(env, 'direct');
+      log.log(`Metric recorded for ${skillId}: direct`);
+    } catch (metricError) {
+      log.error(`Failed to record metric for ${skillId}:`, metricError);
+    }
+
+    // Save classification and return early
+    try {
+      await saveClassification(skillId, directMatch, 'direct', env);
+      log.log(`Successfully saved direct classification for skill: ${skillId}, categories: ${directMatch.categories.join(', ')}`);
+    } catch (saveError) {
+      log.error(`Failed to save direct classification for ${skillId}:`, saveError);
+      throw saveError;
+    }
+    return;
+  }
 
   // Determine classification method based on repo metadata
   const method = determineClassificationMethod(repoOwner, stars, topics, description);
@@ -425,10 +500,10 @@ async function processMessage(
 
   if (method === 'ai') {
     log.log(`Starting AI classification for ${skillId}`);
-    result = await classifyWithAI(skillMdContent, env);
+    result = await classifyWithAI(skillMdContent, env, tags);
   } else {
     log.log(`Starting keyword classification for ${skillId}`);
-    result = classifyByKeywords(skillMdContent);
+    result = classifyByKeywords(skillMdContent, tags);
   }
 
   log.log(

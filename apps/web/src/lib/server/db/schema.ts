@@ -148,6 +148,16 @@ export const skillCategories = sqliteTable('skill_categories', {
   index('skill_categories_category_idx').on(table.categorySlug)
 ]);
 
+// ========== Skill Tags (from SKILL.md frontmatter) ==========
+export const skillTags = sqliteTable('skill_tags', {
+  skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  tag: text('tag').notNull(), // Normalized lowercase tag from frontmatter
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  primaryKey({ columns: [table.skillId, table.tag] }),
+  index('skill_tags_tag_idx').on(table.tag)
+]);
+
 // ========== Favorites ==========
 export const favorites = sqliteTable('favorites', {
   userId: text('user_id').notNull(),
@@ -218,6 +228,8 @@ export type NewApiToken = typeof apiTokens.$inferInsert;
 export type ContentHash = typeof contentHashes.$inferSelect;
 export type NewContentHash = typeof contentHashes.$inferInsert;
 export type SkillCategory = typeof skillCategories.$inferSelect;
+export type SkillTag = typeof skillTags.$inferSelect;
+export type NewSkillTag = typeof skillTags.$inferInsert;
 export type Favorite = typeof favorites.$inferSelect;
 export type UserAction = typeof userActions.$inferSelect;
 export type DeviceCode = typeof deviceCodes.$inferSelect;

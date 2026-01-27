@@ -330,7 +330,9 @@ export async function getSkillBySlug(
       const slugParts = skillData.slug.replace(/^@/, '').split('/');
       r2Path = `skills/${slugParts[0]}/${slugParts[1] || skillData.name}/SKILL.md`;
     } else {
-      r2Path = `skills/${skillData.repo_owner}/${skillData.repo_name}/SKILL.md`;
+      // Include skill_path in R2 path for multi-skill repos
+      const skillPathPart = skillData.skill_path ? `/${skillData.skill_path}` : '';
+      r2Path = `skills/${skillData.repo_owner}/${skillData.repo_name}${skillPathPart}/SKILL.md`;
     }
 
     try {

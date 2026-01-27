@@ -24,10 +24,80 @@ function generateSlug(owner: string, name: string): string {
   return `@${owner}/${safeName}`;
 }
 
+interface SkillFrontmatter {
+  name?: string;
+  description?: string;
+  category?: string;
+  categories?: string;
+  keywords?: string;
+}
+
 /**
- * Validate SKILL.md content
+ * Parse YAML frontmatter from SKILL.md content
  */
-function validateSkillMd(content: string): { valid: boolean; error?: string; name?: string; description?: string } {
+function parseSkillFrontmatter(content: string): { frontmatter: SkillFrontmatter | null; body: string } {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!match) {
+    return { frontmatter: null, body: content };
+  }
+
+  const yamlContent = match[1];
+  const body = match[2];
+  const frontmatter: SkillFrontmatter = {};
+
+  // Parse name
+  const nameMatch = yamlContent.match(/^name:\s*(.+)$/m);
+  if (nameMatch) frontmatter.name = nameMatch[1].trim();
+
+  // Parse description
+  const descMatch = yamlContent.match(/^description:\s*(.+)$/m);
+  if (descMatch) frontmatter.description = descMatch[1].trim();
+
+  // Parse category (single)
+  const categoryMatch = yamlContent.match(/^category:\s*(.+)$/m);
+  if (categoryMatch) frontmatter.category = categoryMatch[1].trim();
+
+  // Parse categories (multiple)
+  const categoriesMatch = yamlContent.match(/^categories:\s*(.+)$/m);
+  if (categoriesMatch) frontmatter.categories = categoriesMatch[1].trim();
+
+  // Parse keywords
+  const keywordsMatch = yamlContent.match(/^keywords:\s*(.+)$/m);
+  if (keywordsMatch) frontmatter.keywords = keywordsMatch[1].trim();
+
+  return { frontmatter, body };
+}
+
+/**
+ * Extract categories from frontmatter
+ */
+function extractCategories(frontmatter: SkillFrontmatter | null): string[] {
+  if (!frontmatter) return [];
+
+  const categories: string[] = [];
+
+  if (frontmatter.category) {
+    categories.push(...frontmatter.category.split(',').map(c => c.trim().toLowerCase()));
+  }
+
+  if (frontmatter.categories) {
+    categories.push(...frontmatter.categories.split(',').map(c => c.trim().toLowerCase()));
+  }
+
+  return [...new Set(categories)].filter(Boolean);
+}
+
+/**
+ * Validate SKILL.md content and extract metadata
+ */
+function validateSkillMd(content: string): {
+  valid: boolean;
+  error?: string;
+  name?: string;
+  description?: string;
+  frontmatter?: SkillFrontmatter | null;
+  categories?: string[];
+} {
   if (!content || content.length < 10) {
     return { valid: false, error: 'SKILL.md content is too short' };
   }
@@ -41,16 +111,124 @@ function validateSkillMd(content: string): { valid: boolean; error?: string; nam
     return { valid: false, error: 'SKILL.md contains binary content' };
   }
 
-  // Extract name from first heading
-  const titleMatch = content.match(/^#\s+(.+)$/m);
-  const name = titleMatch ? titleMatch[1].trim() : undefined;
+  // Parse frontmatter
+  const { frontmatter, body } = parseSkillFrontmatter(content);
 
-  // Extract description from first paragraph after heading
-  const descMatch = content.match(/^#.+\n+(.+?)(?:\n\n|\n#|$)/s);
-  const description = descMatch ? descMatch[1].trim().slice(0, 500) : undefined;
+  // Use frontmatter name/description if available
+  let name = frontmatter?.name;
+  let description = frontmatter?.description;
 
-  return { valid: true, name, description };
+  // Fallback: extract from markdown content
+  if (!name) {
+    const titleMatch = body.match(/^#\s+(.+)$/m);
+    name = titleMatch ? titleMatch[1].trim() : undefined;
+  }
+
+  if (!description) {
+    const descMatch = body.match(/^#.+\n+(.+?)(?:\n\n|\n#|$)/s);
+    description = descMatch ? descMatch[1].trim().slice(0, 500) : undefined;
+  }
+
+  // Extract categories from frontmatter
+  const categories = extractCategories(frontmatter);
+
+  return { valid: true, name, description, frontmatter, categories };
 }
+
+/**
+ * GET /api/skills/upload/preview - Preview skill metadata before publishing
+ * Query params: content (base64 encoded SKILL.md content), org (optional)
+ */
+export const GET: RequestHandler = async ({ locals, platform, request, url }) => {
+  const db = platform?.env?.DB;
+
+  if (!db) {
+    throw error(500, 'Database not available');
+  }
+
+  const auth = await getAuthContext(request, locals, db);
+  if (!auth.userId || !auth.user) {
+    throw error(401, 'Authentication required');
+  }
+
+  // Get content from query params (base64 encoded)
+  const contentBase64 = url.searchParams.get('content');
+  const orgSlug = url.searchParams.get('org');
+
+  if (!contentBase64) {
+    throw error(400, 'content parameter is required (base64 encoded SKILL.md)');
+  }
+
+  // Decode content
+  let skillMdContent: string;
+  try {
+    skillMdContent = atob(contentBase64);
+  } catch {
+    throw error(400, 'Invalid base64 content');
+  }
+
+  // Validate content
+  const validation = validateSkillMd(skillMdContent);
+  if (!validation.valid) {
+    throw error(400, validation.error!);
+  }
+
+  // Get username for slug
+  const user = await db.prepare(`
+    SELECT name FROM user WHERE id = ?
+  `)
+    .bind(auth.userId)
+    .first<{ name: string }>();
+
+  const username = user?.name || auth.userId.slice(0, 8);
+
+  // Determine owner context
+  let slugOwner = username;
+
+  if (orgSlug) {
+    const org = await db.prepare(`
+      SELECT o.id, o.slug FROM organizations o
+      INNER JOIN org_members om ON o.id = om.org_id
+      WHERE o.slug = ? AND om.user_id = ?
+    `)
+      .bind(orgSlug, auth.userId)
+      .first<{ id: string; slug: string }>();
+
+    if (!org) {
+      throw error(403, 'You are not a member of this organization');
+    }
+
+    slugOwner = org.slug;
+  }
+
+  // Generate preview slug
+  const skillName = validation.name || 'untitled-skill';
+  const slug = generateSlug(slugOwner, skillName);
+
+  // Check for duplicate slug
+  const existingSlug = await db.prepare(`
+    SELECT id FROM skills WHERE slug = ?
+  `)
+    .bind(slug)
+    .first();
+
+  const warnings: string[] = [];
+  if (existingSlug) {
+    warnings.push(`A skill with slug ${slug} already exists. Publishing will fail.`);
+  }
+
+  return json({
+    success: true,
+    preview: {
+      name: skillName,
+      slug,
+      description: validation.description || null,
+      categories: validation.categories || [],
+      owner: slugOwner,
+    },
+    warnings,
+  });
+};
 
 /**
  * POST /api/skills/upload - Upload a private skill
@@ -185,6 +363,9 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     success: true,
     skillId,
     slug,
+    name: skillName,
+    description: description || validation.description || null,
+    categories: validation.categories || [],
     message: 'Skill uploaded successfully',
   });
 };
