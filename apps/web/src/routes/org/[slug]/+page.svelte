@@ -131,9 +131,9 @@
       <section class="section">
         <h2>Settings</h2>
         <div class="settings-actions">
-          <button class="btn-secondary">Invite Member</button>
+          <button class="px-6 py-3 rounded-lg font-medium cursor-pointer border-none bg-card text-foreground border border-border">Invite Member</button>
           {#if !org.verified}
-            <button class="btn-primary">Verify with GitHub</button>
+            <button class="px-6 py-3 rounded-lg font-medium cursor-pointer border-none bg-primary text-white">Verify with GitHub</button>
           {/if}
         </div>
       </section>
@@ -255,25 +255,6 @@
   .settings-actions {
     display: flex;
     gap: 0.75rem;
-  }
-
-  .btn-primary, .btn-secondary {
-    padding: 0.75rem 1.5rem;
-    border-radius: 0.5rem;
-    font-weight: 500;
-    cursor: pointer;
-    border: none;
-  }
-
-  .btn-primary {
-    background: var(--primary);
-    color: white;
-  }
-
-  .btn-secondary {
-    background: var(--card);
-    color: var(--foreground);
-    border: 1px solid var(--border);
   }
 
   .loading, .error {

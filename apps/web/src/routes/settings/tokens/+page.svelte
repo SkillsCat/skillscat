@@ -159,7 +159,7 @@
         </div>
       </div>
 
-      <button type="submit" class="btn-primary" disabled={creating || !newTokenName.trim()}>
+      <button type="submit" class="px-6 py-3 bg-primary text-white border-none rounded-lg font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" disabled={creating || !newTokenName.trim()}>
         {creating ? 'Creating...' : 'Create Token'}
       </button>
     </form>
@@ -264,21 +264,6 @@
     align-items: center;
     gap: 0.5rem;
     font-weight: normal;
-  }
-
-  .btn-primary {
-    padding: 0.75rem 1.5rem;
-    background: var(--primary);
-    color: white;
-    border: none;
-    border-radius: 0.5rem;
-    font-weight: 500;
-    cursor: pointer;
-  }
-
-  .btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 
   .btn-danger {

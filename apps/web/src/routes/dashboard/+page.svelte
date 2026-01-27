@@ -87,7 +87,7 @@
     <section class="section">
       <div class="section-header">
         <h2>My Skills</h2>
-        <a href="/submit" class="btn-primary">Upload Skill</a>
+        <a href="/submit" class="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-white no-underline">Upload Skill</a>
       </div>
       {#if skills.length === 0}
         <p class="empty">No skills yet. Upload your first skill!</p>
@@ -109,7 +109,7 @@
     <section class="section">
       <div class="section-header">
         <h2>API Tokens</h2>
-        <a href="/settings/tokens" class="btn-secondary">Manage Tokens</a>
+        <a href="/settings/tokens" class="px-4 py-2 rounded-lg text-sm font-medium bg-card text-foreground border border-border no-underline">Manage Tokens</a>
       </div>
       <p class="token-count">{tokens.length} active token{tokens.length !== 1 ? 's' : ''}</p>
     </section>
@@ -117,7 +117,7 @@
     <section class="section">
       <div class="section-header">
         <h2>Organizations</h2>
-        <button class="btn-secondary">Create Organization</button>
+        <button class="px-4 py-2 rounded-lg text-sm font-medium bg-card text-foreground border border-border cursor-pointer">Create Organization</button>
       </div>
       {#if orgs.length === 0}
         <p class="empty">Not a member of any organizations.</p>
@@ -171,27 +171,6 @@
   h2 {
     font-size: 1.25rem;
     font-weight: 600;
-  }
-
-  .btn-primary, .btn-secondary {
-    padding: 0.5rem 1rem;
-    border-radius: 0.5rem;
-    font-size: 0.875rem;
-    font-weight: 500;
-    text-decoration: none;
-    cursor: pointer;
-    border: none;
-  }
-
-  .btn-primary {
-    background: var(--primary);
-    color: white;
-  }
-
-  .btn-secondary {
-    background: var(--card);
-    color: var(--foreground);
-    border: 1px solid var(--border);
   }
 
   .empty {
