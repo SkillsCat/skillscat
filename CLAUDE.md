@@ -190,6 +190,45 @@ Preview 模式会合并所有配置文件启动完整项目。
 - 自定义样式使用 CSS 变量
 - 遵循移动优先响应式设计
 
+### Button 组件使用
+
+Button 组件位于 `$lib/components/ui/Button.svelte`，支持以下属性：
+
+```svelte
+<Button
+  variant="cute"      // 'primary' | 'secondary' | 'ghost' | 'outline' | 'cute'
+  size="md"           // 'sm' | 'md' | 'lg'
+  href="/path"        // 可选，有 href 时渲染为 <a> 标签
+  onclick={handler}   // 可选，点击事件
+  disabled={false}    // 可选，禁用状态
+>
+  Button Text
+</Button>
+```
+
+**Variant 说明：**
+
+| Variant | 效果 | 使用场景 |
+|---------|------|----------|
+| `cute` | 3D 底部阴影，按下时下沉 | **主要 CTA 按钮**（推荐） |
+| `primary` | 对角阴影，悬停时浮起 | 次要强调按钮 |
+| `outline` | 边框 + 对角阴影 | 次要操作按钮 |
+| `secondary` | 浅色背景，微弱阴影 | 辅助操作 |
+| `ghost` | 透明背景 | 导航链接、图标按钮 |
+
+**推荐组合：**
+
+```svelte
+<!-- 主要操作 + 次要操作 -->
+<Button variant="cute" href="/">Go Home</Button>
+<Button variant="outline" onclick={goBack}>Go Back</Button>
+
+<!-- 导航栏提交按钮 -->
+<Button variant="cute" size="sm" onclick={submit}>
+  <Icon /> Submit
+</Button>
+```
+
 ## 环境变量
 
 在 `apps/web/` 目录下创建 `.dev.vars` 文件 (不提交)，或运行 `pnpm init:project` 自动生成:

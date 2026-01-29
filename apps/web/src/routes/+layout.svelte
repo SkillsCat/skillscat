@@ -67,6 +67,7 @@
     border-radius: 50%;
     backface-visibility: hidden;
     transform: translateZ(0);
+    will-change: transform, filter;
   }
 
   /*

@@ -8,6 +8,13 @@
       "when": 1769541149881,
       "tag": "0000_parched_bulldozer",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1769612260716,
+      "tag": "0001_volatile_vision",
+      "breakpoints": true
     }
   ]
 }

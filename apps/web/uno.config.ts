@@ -10,6 +10,19 @@ export default defineConfig({
     })
   ],
   transformers: [transformerDirectives()],
+  safelist: [
+    // Grid classes used dynamically in Grid.svelte
+    'grid',
+    'grid-cols-1',
+    'sm:grid-cols-2',
+    'lg:grid-cols-3',
+    'xl:grid-cols-4',
+    'gap-4',
+    'gap-5',
+    'gap-6',
+    'gap-8',
+    'gap-10'
+  ],
   theme: {
     colors: {
       // 语义化颜色 - 使用 CSS 变量

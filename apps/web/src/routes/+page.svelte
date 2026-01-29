@@ -62,7 +62,7 @@
         <HugeiconsIcon icon={Fire03Icon} size={20} strokeWidth={2} />
       {/snippet}
       {#if data.trending.length > 0}
-        <Grid cols={4}>
+        <Grid cols={3} gap="xl">
           {#each data.trending as skill (skill.id)}
             <SkillCard {skill} />
           {/each}
@@ -85,7 +85,7 @@
         <HugeiconsIcon icon={Notification01Icon} size={20} strokeWidth={2} />
       {/snippet}
       {#if data.recent.length > 0}
-        <Grid cols={4}>
+        <Grid cols={3} gap="xl">
           {#each data.recent as skill (skill.id)}
             <SkillCard {skill} />
           {/each}
@@ -108,7 +108,7 @@
         <HugeiconsIcon icon={StarIcon} size={20} strokeWidth={2} />
       {/snippet}
       {#if data.top.length > 0}
-        <Grid cols={4}>
+        <Grid cols={3} gap="xl">
           {#each data.top as skill (skill.id)}
             <SkillCard {skill} />
           {/each}

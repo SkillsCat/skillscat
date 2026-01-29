@@ -1,6 +1,57 @@
 import { sqliteTable, text, integer, real, primaryKey, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
+// ========== Better Auth Tables ==========
+export const user = sqliteTable('user', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  emailVerified: integer('email_verified', { mode: 'boolean' }).notNull(),
+  image: text('image'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const session = sqliteTable('session', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  token: text('token').notNull().unique(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (table) => [
+  index('session_user_idx').on(table.userId),
+]);
+
+export const account = sqliteTable('account', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  accountId: text('account_id').notNull(),
+  providerId: text('provider_id').notNull(),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp' }),
+  refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp' }),
+  scope: text('scope'),
+  idToken: text('id_token'),
+  password: text('password'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (table) => [
+  index('account_user_idx').on(table.userId),
+]);
+
+export const verification = sqliteTable('verification', {
+  id: text('id').primaryKey(),
+  identifier: text('identifier').notNull(),
+  value: text('value').notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }),
+});
+
 // ========== Organizations ==========
 export const organizations = sqliteTable('organizations', {
   id: text('id').primaryKey(),
@@ -218,6 +269,12 @@ export const refreshTokens = sqliteTable('refresh_tokens', {
 ]);
 
 // ========== Types Export ==========
+// Better Auth types
+export type AuthUser = typeof user.$inferSelect;
+export type AuthSession = typeof session.$inferSelect;
+export type AuthAccount = typeof account.$inferSelect;
+export type AuthVerification = typeof verification.$inferSelect;
+// Application types
 export type Organization = typeof organizations.$inferSelect;
 export type NewOrganization = typeof organizations.$inferInsert;
 export type OrgMember = typeof orgMembers.$inferSelect;
