@@ -34,6 +34,7 @@ export interface SkillDetail extends SkillCardData {
   lastCommitAt: number | null;
   createdAt: number;
   indexedAt: number;
+  license?: string | null;
   // Author info
   authorUsername?: string;
   authorDisplayName?: string;

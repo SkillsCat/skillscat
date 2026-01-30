@@ -8,7 +8,7 @@
   import { LoginDialog } from '$lib/components';
   import { fly, fade } from 'svelte/transition';
   import { HugeiconsIcon } from '@hugeicons/svelte';
-  import { ArrowDown01Icon, FavouriteIcon, Settings01Icon, Logout01Icon, Login03Icon } from '@hugeicons/core-free-icons';
+  import { ArrowDown01Icon, FavouriteIcon, Settings01Icon, Logout01Icon, Login03Icon, SparklesIcon } from '@hugeicons/core-free-icons';
 
   const session = useSession();
 
@@ -56,6 +56,11 @@
                 <DropdownMenu.Separator class="dropdown-separator" />
 
                 <DropdownMenu.Group>
+                  <a href="/settings/skills" class="dropdown-item">
+                    <HugeiconsIcon icon={SparklesIcon} size={16} />
+                    My Skills
+                  </a>
+
                   <a href="/favorites" class="dropdown-item">
                     <HugeiconsIcon icon={FavouriteIcon} size={16} />
                     My Favorites

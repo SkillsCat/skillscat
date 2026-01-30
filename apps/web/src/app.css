@@ -63,7 +63,7 @@
   --border-emphasis: oklch(82% 0.025 85);
 
   /* ===== 手绘风格边框 ===== */
-  --border-sketch: oklch(72% 0.18 55);
+  --border-sketch: oklch(78% 0.08 55);
 
   /* ===== 圆角系统 (更圆润) ===== */
   --radius: 0.75rem;
@@ -178,7 +178,7 @@
   --border-emphasis: oklch(38% 0.025 85);
 
   /* ===== 手绘风格边框 ===== */
-  --border-sketch: oklch(75% 0.16 55);
+  --border-sketch: oklch(65% 0.12 55);
 
   /* ===== 阴影系统 (暗色模式 - 右下偏移) ===== */
   --shadow-sm: 2px 2px 8px -2px rgba(0, 0, 0, 0.3);

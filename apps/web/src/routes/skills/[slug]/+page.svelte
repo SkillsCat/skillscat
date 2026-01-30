@@ -1,7 +1,8 @@
 <script lang="ts">
   import { CopyButton, Button, Section, Grid, SkillCard, SkillCardCompact, EmptyState } from '$lib/components';
   import { getCategoryBySlug } from '$lib/constants/categories';
-  import type { SkillDetail, SkillCardData } from '$lib/types';
+  import { marked } from 'marked';
+  import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
 
   interface Props {
     data: {
@@ -13,6 +14,156 @@
   }
 
   let { data }: Props = $props();
+
+  // Shiki highlighter (lazy loaded)
+  let highlighter: any = $state(null);
+  let highlightedReadme = $state('');
+
+  // Load shiki on mount
+  $effect(() => {
+    if (data.skill?.readme && !highlighter) {
+      loadShiki();
+    }
+  });
+
+  async function loadShiki() {
+    try {
+      const { createHighlighter } = await import('shiki');
+      highlighter = await createHighlighter({
+        themes: ['github-dark', 'github-light'],
+        langs: [
+          'javascript', 'typescript', 'python', 'bash', 'json', 'markdown', 'yaml', 'html', 'css',
+          'shell', 'plaintext', 'go', 'rust', 'powershell', 'bat', 'sql', 'toml', 'xml', 'jsx', 'tsx',
+          'svelte', 'vue', 'c', 'cpp', 'java', 'kotlin', 'swift', 'ruby', 'php', 'dockerfile'
+        ]
+      });
+      await highlightReadme();
+    } catch (e) {
+      console.error('Failed to load shiki:', e);
+    }
+  }
+
+  // Strip frontmatter from markdown
+  function stripFrontmatter(content: string): string {
+    const frontmatterRegex = /^---\s*\n[\s\S]*?\n---\s*\n/;
+    return content.replace(frontmatterRegex, '');
+  }
+
+  // Custom marked renderer with shiki highlighting
+  async function highlightReadme() {
+    if (!data.skill?.readme || !highlighter) return;
+
+    const strippedReadme = stripFrontmatter(data.skill.readme);
+
+    const renderer = new marked.Renderer();
+
+    renderer.code = function({ text, lang }: { text: string; lang?: string }) {
+      const language = lang || 'plaintext';
+      // Extract filename if present (e.g., "js:filename.js" or just "filename.js")
+      let filename = '';
+      let actualLang = language;
+
+      if (language.includes(':')) {
+        const parts = language.split(':');
+        actualLang = parts[0];
+        filename = parts[1];
+      } else if (language.includes('.')) {
+        // If it looks like a filename, extract extension
+        filename = language;
+        const ext = language.split('.').pop()?.toLowerCase() || '';
+        const extToLang: Record<string, string> = {
+          // JavaScript variants
+          'js': 'javascript',
+          'mjs': 'javascript',
+          'cjs': 'javascript',
+          'jsx': 'jsx',
+          // TypeScript variants
+          'ts': 'typescript',
+          'mts': 'typescript',
+          'cts': 'typescript',
+          'tsx': 'tsx',
+          // Python
+          'py': 'python',
+          'pyw': 'python',
+          'pyi': 'python',
+          // Rust
+          'rs': 'rust',
+          // Go
+          'go': 'go',
+          // Shell/Bash
+          'sh': 'bash',
+          'bash': 'bash',
+          'zsh': 'bash',
+          // PowerShell
+          'ps1': 'powershell',
+          'psm1': 'powershell',
+          'psd1': 'powershell',
+          // Windows batch/cmd
+          'bat': 'bat',
+          'cmd': 'bat',
+          // Config files
+          'yml': 'yaml',
+          'yaml': 'yaml',
+          'toml': 'toml',
+          'json': 'json',
+          'jsonc': 'json',
+          // Markup
+          'md': 'markdown',
+          'mdx': 'markdown',
+          'html': 'html',
+          'htm': 'html',
+          'xml': 'xml',
+          'svg': 'xml',
+          // Styles
+          'css': 'css',
+          'scss': 'css',
+          'sass': 'css',
+          'less': 'css',
+          // Other languages
+          'sql': 'sql',
+          'c': 'c',
+          'h': 'c',
+          'cpp': 'cpp',
+          'cc': 'cpp',
+          'cxx': 'cpp',
+          'hpp': 'cpp',
+          'java': 'java',
+          'kt': 'kotlin',
+          'kts': 'kotlin',
+          'swift': 'swift',
+          'rb': 'ruby',
+          'php': 'php',
+          'svelte': 'svelte',
+          'vue': 'vue',
+          'dockerfile': 'dockerfile',
+        };
+        actualLang = extToLang[ext] || ext || 'plaintext';
+      }
+
+      try {
+        const supportedLangs = highlighter.getLoadedLanguages();
+        const langToUse = supportedLangs.includes(actualLang) ? actualLang : 'plaintext';
+        const codeHtml = highlighter.codeToHtml(text, {
+          lang: langToUse,
+          themes: { light: 'github-light', dark: 'github-dark' }
+        });
+
+        if (filename) {
+          return `<div class="code-block-wrapper"><div class="code-block-header"><span>${filename}</span></div>${codeHtml}</div>`;
+        }
+        return codeHtml;
+      } catch {
+        const escapedText = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        if (filename) {
+          return `<div class="code-block-wrapper"><div class="code-block-header"><span>${filename}</span></div><pre><code class="language-${actualLang}">${escapedText}</code></pre></div>`;
+        }
+        return `<pre><code class="language-${actualLang}">${escapedText}</code></pre>`;
+      }
+    };
+
+    marked.setOptions({ renderer });
+    highlightedReadme = await marked.parse(strippedReadme);
+  }
 
   // Determine the install identifier based on skill type
   const skillIdentifier = $derived(() => {
@@ -46,6 +197,62 @@
   let selectedInstaller = $state('skillscat');
   const currentCommand = $derived(installCommands.find(c => c.name === selectedInstaller)?.command || '');
 
+  // Fallback rendered README (without shiki)
+  const fallbackReadme = $derived(() => {
+    if (!data.skill?.readme) return '';
+    const stripped = stripFrontmatter(data.skill.readme);
+    return marked.parse(stripped, { async: false });
+  });
+
+  // Use highlighted version if available, otherwise fallback
+  const renderedReadme = $derived(highlightedReadme || fallbackReadme());
+
+  // File browser state
+  let expandedFolders = $state<Set<string>>(new Set());
+  let selectedFile = $state<string | null>(null);
+
+  function toggleFolder(path: string) {
+    const newSet = new Set(expandedFolders);
+    if (newSet.has(path)) {
+      newSet.delete(path);
+    } else {
+      newSet.add(path);
+    }
+    expandedFolders = newSet;
+  }
+
+  function selectFile(path: string) {
+    selectedFile = path;
+  }
+
+  function getFileIcon(node: FileNode): string {
+    if (node.type === 'directory') {
+      return expandedFolders.has(node.path) ? '📂' : '📁';
+    }
+    const ext = node.name.split('.').pop()?.toLowerCase();
+    switch (ext) {
+      case 'md': return '📝';
+      case 'js':
+      case 'ts':
+      case 'jsx':
+      case 'tsx': return '📜';
+      case 'json': return '📋';
+      case 'css':
+      case 'scss': return '🎨';
+      case 'html': return '🌐';
+      case 'py': return '🐍';
+      case 'sh': return '⚙️';
+      default: return '📄';
+    }
+  }
+
+  function formatFileSize(bytes?: number): string {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
   function formatRelativeTime(timestamp: number): string {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
     if (seconds < 60) return 'just now';
@@ -63,6 +270,40 @@
       case 'unlisted': return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400';
       default: return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
     }
+  }
+
+  // Get author profile URL
+  function getAuthorProfileUrl(): string {
+    if (!data.skill) return '#';
+    if (data.skill.orgSlug) return `/org/${data.skill.orgSlug}`;
+    if (data.skill.ownerName) return `/u/${data.skill.ownerName}`;
+    if (data.skill.authorUsername) return `/u/${data.skill.authorUsername}`;
+    return `https://github.com/${data.skill.repoOwner}`;
+  }
+
+  // Get author avatar URL
+  function getAuthorAvatarUrl(): string {
+    if (!data.skill) return '';
+    if (data.skill.orgAvatar) return data.skill.orgAvatar;
+    if (data.skill.ownerAvatar) return data.skill.ownerAvatar;
+    if (data.skill.authorAvatar) return data.skill.authorAvatar;
+    return `https://github.com/${data.skill.repoOwner}.png`;
+  }
+
+  // Get author display name
+  function getAuthorDisplayName(): string {
+    if (!data.skill) return '';
+    if (data.skill.orgName) return data.skill.orgName;
+    if (data.skill.ownerName) return data.skill.ownerName;
+    if (data.skill.authorDisplayName) return data.skill.authorDisplayName;
+    if (data.skill.authorUsername) return data.skill.authorUsername;
+    return data.skill.repoOwner;
+  }
+
+  // Check if author link is external
+  function isAuthorExternal(): boolean {
+    if (!data.skill) return false;
+    return !data.skill.orgSlug && !data.skill.ownerName && !data.skill.authorUsername;
   }
 </script>
 
@@ -94,141 +335,190 @@
       <!-- Main Content -->
       <div class="lg:col-span-2 space-y-8">
         <!-- Header -->
-        <div class="card">
-          <div class="flex items-start gap-4">
-            <!-- Avatar: show org avatar, owner avatar, or GitHub avatar -->
-            {#if data.skill.orgAvatar}
-              <img
-                src={data.skill.orgAvatar}
-                alt={data.skill.orgName}
-                class="w-16 h-16 rounded-xl border-2 border-border"
-              />
-            {:else if data.skill.ownerAvatar}
-              <img
-                src={data.skill.ownerAvatar}
-                alt={data.skill.ownerName}
-                class="w-16 h-16 rounded-xl border-2 border-border"
-              />
-            {:else if data.skill.repoOwner}
-              <img
-                src={`https://github.com/${data.skill.repoOwner}.png`}
-                alt={data.skill.repoOwner}
-                class="w-16 h-16 rounded-xl border-2 border-border"
-              />
-            {:else}
-              <div class="w-16 h-16 rounded-xl border-2 border-border bg-primary flex items-center justify-center text-white text-2xl font-bold">
-                {data.skill.name[0].toUpperCase()}
-              </div>
-            {/if}
+        <div class="card skill-header">
+          <!-- Top row: Avatar + Title + Badges -->
+          <div class="flex items-start gap-4 mb-4">
+            <!-- Avatar: clickable, links to author profile -->
+            <a
+              href={getAuthorProfileUrl()}
+              target={isAuthorExternal() ? '_blank' : undefined}
+              rel={isAuthorExternal() ? 'noopener noreferrer' : undefined}
+              class="avatar-link flex-shrink-0"
+            >
+              {#if data.skill.orgAvatar}
+                <img
+                  src={data.skill.orgAvatar}
+                  alt={data.skill.orgName}
+                  class="w-14 h-14 rounded-xl border-2 border-border"
+                />
+              {:else if data.skill.ownerAvatar}
+                <img
+                  src={data.skill.ownerAvatar}
+                  alt={data.skill.ownerName}
+                  class="w-14 h-14 rounded-xl border-2 border-border"
+                />
+              {:else if data.skill.repoOwner}
+                <img
+                  src={`https://github.com/${data.skill.repoOwner}.png`}
+                  alt={data.skill.repoOwner}
+                  class="w-14 h-14 rounded-xl border-2 border-border"
+                />
+              {:else}
+                <div class="w-14 h-14 rounded-xl border-2 border-border bg-primary flex items-center justify-center text-white text-xl font-bold">
+                  {data.skill.name[0].toUpperCase()}
+                </div>
+              {/if}
+            </a>
+
+            <!-- Title and badges -->
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2 mb-1">
-                <h1 class="text-2xl md:text-3xl font-bold text-fg">{data.skill.name}</h1>
-                <!-- Visibility Badge -->
-                <span class="px-2 py-0.5 text-xs font-medium rounded-full {getVisibilityColor(data.skill.visibility)}">
-                  {data.skill.visibility}
-                </span>
+              <div class="flex items-center gap-2 flex-wrap mb-1">
+                <h1 class="skill-title-inline">{data.skill.name}</h1>
+                <!-- Only show non-public visibility badges -->
+                {#if data.skill.visibility !== 'public'}
+                  <span class="px-2.5 py-1 text-xs font-semibold rounded-full {getVisibilityColor(data.skill.visibility)}">
+                    {data.skill.visibility}
+                  </span>
+                {/if}
                 {#if data.skill.sourceType === 'upload'}
-                  <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                  <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
                     uploaded
                   </span>
                 {/if}
               </div>
-              <p class="text-fg-muted mb-3">{data.skill.description || 'No description'}</p>
-              <div class="flex flex-wrap items-center gap-4 text-sm">
-                <!-- Owner/Org link -->
-                {#if data.skill.orgSlug}
-                  <a
-                    href="/org/{data.skill.orgSlug}"
-                    class="flex items-center gap-1.5 text-fg-muted hover:text-primary transition-colors"
-                  >
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                    </svg>
-                    {data.skill.orgName}
-                  </a>
-                {:else if data.skill.ownerName}
-                  <a
-                    href="/u/{data.skill.ownerName}"
-                    class="flex items-center gap-1.5 text-fg-muted hover:text-primary transition-colors"
-                  >
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                    </svg>
-                    {data.skill.ownerName}
-                  </a>
-                {:else if data.skill.repoOwner}
-                  <a
-                    href="https://github.com/{data.skill.repoOwner}"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="flex items-center gap-1.5 text-fg-muted hover:text-primary transition-colors"
-                  >
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                    </svg>
-                    {data.skill.repoOwner}
-                  </a>
-                {/if}
-                <!-- Stars (only for GitHub skills) -->
-                {#if data.skill.sourceType === 'github'}
-                  <span class="flex items-center gap-1 text-fg-muted">
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 .587l3.668 7.568 8.332 1.151-6.064 5.828 1.48 8.279-7.416-3.967-7.417 3.967 1.481-8.279-6.064-5.828 8.332-1.151z"/>
-                    </svg>
-                    {data.skill.stars.toLocaleString()}
-                  </span>
-                  {#if data.skill.forks}
-                    <span class="flex items-center gap-1 text-fg-muted">
-                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                      </svg>
-                      {data.skill.forks}
-                    </span>
-                  {/if}
-                {/if}
-                <span class="text-fg-muted">
-                  Updated {formatRelativeTime(data.skill.updatedAt)}
-                </span>
-              </div>
+              <!-- Description -->
+              <p class="skill-description-inline">{data.skill.description || 'No description provided'}</p>
             </div>
           </div>
-        </div>
 
-        <!-- Installation -->
-        <div class="card">
-          <h2 class="text-lg font-semibold text-fg mb-4">Installation</h2>
-
-          <!-- CLI Selector -->
-          <div class="flex gap-2 mb-4">
-            {#each installCommands as installer (installer.name)}
-              <button
-                class="install-tab"
-                class:install-tab-active={selectedInstaller === installer.name}
-                onclick={() => selectedInstaller = installer.name}
+          <!-- Meta row -->
+          <div class="skill-meta">
+            <!-- Owner/Org link -->
+            {#if data.skill.orgSlug}
+              <a
+                href="/org/{data.skill.orgSlug}"
+                class="skill-meta-item"
               >
-                {installer.label}
-              </button>
-            {/each}
-          </div>
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+                {data.skill.orgName}
+              </a>
+            {:else if data.skill.ownerName}
+              <a
+                href="/u/{data.skill.ownerName}"
+                class="skill-meta-item"
+              >
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                {data.skill.ownerName}
+              </a>
+            {:else if data.skill.repoOwner}
+              <a
+                href="https://github.com/{data.skill.repoOwner}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="skill-meta-item"
+              >
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                </svg>
+                {data.skill.repoOwner}
+              </a>
+            {/if}
 
-          <!-- Command -->
-          <div class="flex items-center gap-3 p-3 bg-bg-subtle rounded-lg font-mono text-sm">
-            <code class="flex-1 text-fg overflow-x-auto">{currentCommand}</code>
-            <CopyButton text={currentCommand} />
-          </div>
+            <!-- Stars and Forks together -->
+            {#if data.skill.sourceType === 'github'}
+              <span class="skill-meta-item">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 .587l3.668 7.568 8.332 1.151-6.064 5.828 1.48 8.279-7.416-3.967-7.417 3.967 1.481-8.279-6.064-5.828 8.332-1.151z"/>
+                </svg>
+                {data.skill.stars.toLocaleString()}
+              </span>
+              {#if data.skill.forks}
+                <span class="skill-meta-item">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                  </svg>
+                  {data.skill.forks}
+                </span>
+              {/if}
+            {/if}
 
-          <!-- Description -->
-          <p class="mt-2 text-xs text-fg-muted">
-            {installCommands.find(c => c.name === selectedInstaller)?.description}
-          </p>
+            <!-- License -->
+            {#if data.skill.license}
+              <span class="skill-meta-item">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+                {data.skill.license}
+              </span>
+            {/if}
+
+            <span class="skill-meta-item">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Updated {formatRelativeTime(data.skill.updatedAt)}
+            </span>
+          </div>
         </div>
+
+        <!-- File Browser -->
+        {#if data.skill.fileStructure && data.skill.fileStructure.length > 0}
+          <div class="card">
+            <h2 class="text-lg font-semibold text-fg mb-4">Files</h2>
+            <div class="file-browser">
+              {#snippet renderFileTree(nodes: FileNode[], depth: number = 0)}
+                {#each nodes as node (node.path)}
+                  <div class="file-item" style="padding-left: {depth * 1.25}rem">
+                    {#if node.type === 'directory'}
+                      <button
+                        class="file-row"
+                        onclick={() => toggleFolder(node.path)}
+                      >
+                        <span class="file-icon">{getFileIcon(node)}</span>
+                        <span class="file-name">{node.name}</span>
+                        <svg
+                          class="w-4 h-4 text-fg-muted transition-transform {expandedFolders.has(node.path) ? 'rotate-90' : ''}"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                      {#if expandedFolders.has(node.path) && node.children}
+                        {@render renderFileTree(node.children, depth + 1)}
+                      {/if}
+                    {:else}
+                      <button
+                        class="file-row"
+                        class:file-row-selected={selectedFile === node.path}
+                        onclick={() => selectFile(node.path)}
+                      >
+                        <span class="file-icon">{getFileIcon(node)}</span>
+                        <span class="file-name">{node.name}</span>
+                        {#if node.size}
+                          <span class="file-size">{formatFileSize(node.size)}</span>
+                        {/if}
+                      </button>
+                    {/if}
+                  </div>
+                {/each}
+              {/snippet}
+              {@render renderFileTree(data.skill.fileStructure)}
+            </div>
+          </div>
+        {/if}
 
         <!-- README -->
         {#if data.skill.readme}
           <div class="card">
             <h2 class="text-lg font-semibold text-fg mb-4">README</h2>
-            <div class="prose prose-sm max-w-none text-fg">
-              <pre class="whitespace-pre-wrap text-sm bg-bg-subtle p-4 rounded-lg overflow-x-auto">{data.skill.readme}</pre>
+            <div class="prose-readme">
+              {@html renderedReadme}
             </div>
           </div>
         {/if}
@@ -243,8 +533,11 @@
                 {#if category}
                   <a
                     href="/category/{categorySlug}"
-                    class="tag hover:bg-primary-subtle hover:text-primary transition-colors"
+                    class="category-tag"
                   >
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                    </svg>
                     {category.name}
                   </a>
                 {/if}
@@ -259,30 +552,50 @@
         <!-- Actions -->
         <div class="card">
           <div class="space-y-3">
-            <Button variant="cute" class="w-full">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <a href="/api/skills/{data.skill.slug}/download" class="download-btn" download>
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
-              Install Skill
-            </Button>
+              Download Skill
+            </a>
             {#if data.skill.githubUrl}
-              <Button variant="outline" href={data.skill.githubUrl} class="w-full">
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <a href={data.skill.githubUrl} target="_blank" rel="noopener noreferrer" class="github-btn">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
                 </svg>
                 View on GitHub
-              </Button>
-            {/if}
-            {#if data.isOwner}
-              <Button variant="secondary" href="/dashboard" class="w-full">
-                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                Manage Skill
-              </Button>
+              </a>
             {/if}
           </div>
+        </div>
+
+        <!-- Install by CLI -->
+        <div class="card">
+          <h3 class="font-semibold text-fg mb-4">Install by CLI</h3>
+
+          <!-- CLI Selector -->
+          <div class="flex flex-wrap gap-2 mb-4">
+            {#each installCommands as installer (installer.name)}
+              <button
+                class="install-tab"
+                class:install-tab-active={selectedInstaller === installer.name}
+                onclick={() => selectedInstaller = installer.name}
+              >
+                {installer.label}
+              </button>
+            {/each}
+          </div>
+
+          <!-- Command -->
+          <div class="command-box">
+            <code class="command-text"><span class="command-prompt">$</span> {currentCommand}</code>
+            <CopyButton text={currentCommand} size="sm" />
+          </div>
+
+          <!-- Description -->
+          <p class="mt-3 text-xs text-fg-muted">
+            {installCommands.find(c => c.name === selectedInstaller)?.description}
+          </p>
         </div>
 
         <!-- Private Skill Notice -->
@@ -304,41 +617,6 @@
             </div>
           </div>
         {/if}
-
-        <!-- Stats -->
-        <div class="card">
-          <h3 class="font-semibold text-fg mb-4">Information</h3>
-          <dl class="space-y-3 text-sm">
-            <div class="flex justify-between">
-              <dt class="text-fg-muted">Visibility</dt>
-              <dd class="font-medium text-fg capitalize">{data.skill.visibility}</dd>
-            </div>
-            <div class="flex justify-between">
-              <dt class="text-fg-muted">Source</dt>
-              <dd class="font-medium text-fg capitalize">{data.skill.sourceType}</dd>
-            </div>
-            {#if data.skill.sourceType === 'github'}
-              <div class="flex justify-between">
-                <dt class="text-fg-muted">Stars</dt>
-                <dd class="font-medium text-fg">{data.skill.stars.toLocaleString()}</dd>
-              </div>
-              {#if data.skill.forks}
-                <div class="flex justify-between">
-                  <dt class="text-fg-muted">Forks</dt>
-                  <dd class="font-medium text-fg">{data.skill.forks}</dd>
-                </div>
-              {/if}
-            {/if}
-            <div class="flex justify-between">
-              <dt class="text-fg-muted">Last Updated</dt>
-              <dd class="font-medium text-fg">{formatRelativeTime(data.skill.updatedAt)}</dd>
-            </div>
-            <div class="flex justify-between">
-              <dt class="text-fg-muted">Indexed</dt>
-              <dd class="font-medium text-fg">{formatRelativeTime(data.skill.indexedAt)}</dd>
-            </div>
-          </dl>
-        </div>
 
         <!-- Related Skills -->
         {#if data.relatedSkills.length > 0}
@@ -381,6 +659,250 @@
 {/if}
 
 <style>
+  /* Skill Header Styles */
+  .skill-header {
+    padding: 1.5rem;
+  }
+
+  .avatar-link {
+    display: block;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+  }
+
+  .avatar-link:hover {
+    transform: scale(1.05);
+    opacity: 0.9;
+  }
+
+  .avatar-link img,
+  .avatar-link > div {
+    transition: border-color 0.2s ease;
+  }
+
+  .avatar-link:hover img,
+  .avatar-link:hover > div {
+    border-color: var(--primary);
+  }
+
+  .skill-title-inline {
+    font-size: clamp(1.5rem, 3.5vw, 1.875rem);
+    font-weight: 800;
+    color: var(--fg);
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  .skill-description-inline {
+    font-size: 0.9375rem;
+    color: var(--fg-muted);
+    line-height: 1.5;
+    margin-top: 0.25rem;
+  }
+
+  .skill-title {
+    font-size: clamp(1.75rem, 4vw, 2.25rem);
+    font-weight: 800;
+    color: var(--fg);
+    line-height: 1.2;
+    margin-bottom: 0.75rem;
+    letter-spacing: -0.02em;
+  }
+
+  .skill-description {
+    font-size: 1.0625rem;
+    color: var(--fg-muted);
+    line-height: 1.6;
+    margin-bottom: 1.25rem;
+  }
+
+  .skill-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .skill-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.875rem;
+    color: var(--fg-muted);
+    text-decoration: none;
+    transition: color 0.15s ease;
+  }
+
+  a.skill-meta-item:hover {
+    color: var(--primary);
+  }
+
+  /* File Browser Styles */
+  .file-browser {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-subtle);
+  }
+
+  .file-item {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .file-item:last-child {
+    border-bottom: none;
+  }
+
+  .file-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.625rem 0.75rem;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    font-size: 0.875rem;
+    color: var(--fg);
+    transition: background-color 0.15s ease;
+  }
+
+  .file-row:hover {
+    background: var(--bg-muted);
+  }
+
+  .file-row-selected {
+    background: var(--primary-subtle);
+    color: var(--primary);
+  }
+
+  .file-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+  }
+
+  .file-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .file-size {
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+    flex-shrink: 0;
+  }
+
+  /* Download Button */
+  .download-btn {
+    --btn-shadow-offset: 4px;
+    --btn-shadow-color: oklch(50% 0.22 55);
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.875rem 1.25rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: #ffffff;
+    background-color: var(--primary);
+    border: none;
+    border-radius: var(--radius-full);
+    box-shadow: 0 var(--btn-shadow-offset) 0 0 var(--btn-shadow-color);
+    cursor: pointer;
+    text-decoration: none;
+    transform: translateY(0);
+    transition:
+      transform 0.1s ease,
+      box-shadow 0.1s ease,
+      background-color 0.15s ease;
+  }
+
+  .download-btn:hover {
+    --btn-shadow-offset: 6px;
+    background-color: var(--primary-hover);
+    transform: translateY(-2px);
+  }
+
+  .download-btn:active {
+    --btn-shadow-offset: 1px;
+    transform: translateY(3px);
+  }
+
+  :root.dark .download-btn {
+    --btn-shadow-color: oklch(40% 0.20 55);
+  }
+
+  /* Category Tags */
+  .category-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--fg);
+    background: var(--bg-subtle);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-full);
+    text-decoration: none;
+    transition: all 0.2s ease;
+  }
+
+  .category-tag:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: var(--primary-subtle);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px -4px rgba(0, 0, 0, 0.1);
+  }
+
+  .github-btn {
+    --gh-shadow-offset: 3px;
+    --gh-bg: #24292e;
+    --gh-bg-hover: #2f363d;
+    --gh-shadow: #1b1f23;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem 1.25rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: #ffffff;
+    background-color: var(--gh-bg);
+    border: none;
+    border-radius: var(--radius-full);
+    box-shadow: 0 var(--gh-shadow-offset) 0 0 var(--gh-shadow);
+    cursor: pointer;
+    text-decoration: none;
+    transform: translateY(0);
+    transition:
+      transform 0.1s ease,
+      box-shadow 0.1s ease,
+      background-color 0.15s ease;
+  }
+
+  .github-btn:hover {
+    --gh-shadow-offset: 4px;
+    background-color: var(--gh-bg-hover);
+    transform: translateY(-1px);
+  }
+
+  .github-btn:active {
+    --gh-shadow-offset: 1px;
+    transform: translateY(2px);
+  }
+
   .install-tab {
     padding: 0.625rem 1rem;
     min-height: 44px;
@@ -400,13 +922,278 @@
   }
 
   .install-tab-active {
-    color: var(--primary-foreground);
+    color: #ffffff;
     background: var(--primary);
     border-color: var(--primary);
   }
 
   .install-tab-active:hover {
-    color: var(--primary-foreground);
+    color: #ffffff;
+  }
+
+  /* Command Box Styles */
+  .command-box {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-emphasis);
+    border-radius: var(--radius-lg);
+    border: 2px solid var(--border);
+    font-family: var(--font-mono);
+  }
+
+  .command-text {
+    flex: 1;
+    color: var(--fg);
+    font-size: 0.8125rem;
+    overflow-x: auto;
+    white-space: nowrap;
+    line-height: 1.5;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .command-text::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  .command-text::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .command-text::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+  }
+
+  .command-text::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-muted);
+  }
+
+  .command-prompt {
+    color: var(--primary);
+    font-weight: 700;
+    user-select: none;
+    margin-right: 0.5rem;
+  }
+
+  /* README Markdown Styles */
+  .prose-readme {
+    color: var(--fg);
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    padding: 0.5rem;
+  }
+
+  .prose-readme :global(> *:first-child) {
+    margin-top: 0;
+  }
+
+  .prose-readme :global(> *:last-child) {
+    margin-bottom: 0;
+  }
+
+  .prose-readme :global(h1),
+  .prose-readme :global(h2),
+  .prose-readme :global(h3),
+  .prose-readme :global(h4),
+  .prose-readme :global(h5),
+  .prose-readme :global(h6) {
+    color: var(--fg);
+    font-weight: 600;
+    margin-top: 1.75em;
+    margin-bottom: 0.75em;
+    line-height: 1.3;
+  }
+
+  .prose-readme :global(h1) { font-size: 1.5rem; }
+  .prose-readme :global(h2) { font-size: 1.25rem; }
+  .prose-readme :global(h3) { font-size: 1.125rem; }
+
+  .prose-readme :global(p) {
+    margin-bottom: 1.25em;
+  }
+
+  .prose-readme :global(a) {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .prose-readme :global(a:hover) {
+    color: var(--primary-hover);
+  }
+
+  .prose-readme :global(code) {
+    background: var(--bg-emphasis);
+    padding: 0.2rem 0.4rem;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    border: 1px solid var(--border);
+  }
+
+  .prose-readme :global(pre) {
+    background: var(--bg-emphasis);
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius-md);
+    overflow-x: auto;
+    margin: 1.5em 0;
+    border: 1px solid var(--border);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .prose-readme :global(pre::-webkit-scrollbar) {
+    height: 6px;
+  }
+
+  .prose-readme :global(pre::-webkit-scrollbar-track) {
+    background: transparent;
+  }
+
+  .prose-readme :global(pre::-webkit-scrollbar-thumb) {
+    background: var(--border);
+    border-radius: 3px;
+  }
+
+  .prose-readme :global(pre::-webkit-scrollbar-thumb:hover) {
+    background: var(--fg-muted);
+  }
+
+  .prose-readme :global(pre code) {
+    background: transparent;
+    padding: 0;
+    font-size: 0.8125rem;
+    line-height: 1.7;
+    border: none;
+  }
+
+  /* Shiki code block styles */
+  .prose-readme :global(.shiki) {
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius-md);
+    overflow-x: auto;
+    margin: 1.5em 0;
+    border: 1px solid var(--border);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .prose-readme :global(.shiki::-webkit-scrollbar) {
+    height: 6px;
+  }
+
+  .prose-readme :global(.shiki::-webkit-scrollbar-track) {
+    background: transparent;
+  }
+
+  .prose-readme :global(.shiki::-webkit-scrollbar-thumb) {
+    background: var(--border);
+    border-radius: 3px;
+  }
+
+  .prose-readme :global(.shiki::-webkit-scrollbar-thumb:hover) {
+    background: var(--fg-muted);
+  }
+
+  .prose-readme :global(.shiki code) {
+    background: transparent;
+    padding: 0;
+    font-size: 0.8125rem;
+    line-height: 1.7;
+    border: none;
+  }
+
+  /* Code block with filename header */
+  .prose-readme :global(.code-block-wrapper) {
+    margin: 1.5em 0;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .prose-readme :global(.code-block-header) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    background: var(--bg-muted);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+    font-weight: 500;
+  }
+
+  .prose-readme :global(.code-block-wrapper .shiki),
+  .prose-readme :global(.code-block-wrapper pre) {
+    margin: 0;
+    border: none;
+    border-radius: 0;
+  }
+
+  /* Light/dark mode for shiki */
+  :root:not(.dark) .prose-readme :global(.shiki),
+  :root:not(.dark) .prose-readme :global(.shiki span) {
+    color: var(--shiki-light) !important;
+    background-color: var(--shiki-light-bg) !important;
+  }
+
+  :root.dark .prose-readme :global(.shiki),
+  :root.dark .prose-readme :global(.shiki span) {
+    color: var(--shiki-dark) !important;
+    background-color: var(--shiki-dark-bg) !important;
+  }
+
+  .prose-readme :global(ul),
+  .prose-readme :global(ol) {
+    margin: 1em 0;
+    padding-left: 1.5em;
+  }
+
+  .prose-readme :global(li) {
+    margin-bottom: 0.5em;
+  }
+
+  .prose-readme :global(blockquote) {
+    border-left: 4px solid var(--primary);
+    padding-left: 1rem;
+    margin: 1em 0;
+    color: var(--fg-muted);
+    font-style: italic;
+  }
+
+  .prose-readme :global(hr) {
+    border: none;
+    border-top: 2px solid var(--border);
+    margin: 2em 0;
+  }
+
+  .prose-readme :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+  }
+
+  .prose-readme :global(th),
+  .prose-readme :global(td) {
+    border: 1px solid var(--border);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+  }
+
+  .prose-readme :global(th) {
+    background: var(--bg-subtle);
+    font-weight: 600;
+  }
+
+  .prose-readme :global(img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius-md);
+    margin: 1em 0;
   }
 
   /* Not Found Page Styles */

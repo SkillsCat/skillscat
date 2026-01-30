@@ -15,22 +15,25 @@ export const GET: RequestHandler = async ({ params, platform }) => {
     throw error(400, 'Username is required');
   }
 
-  // Find user by name (username)
+  // Try to find user by:
+  // 1. GitHub account_id (username from GitHub OAuth)
+  // 2. User name (display name)
   const user = await db.prepare(`
     SELECT u.id, u.name, u.email, u.image, u.created_at as joinedAt,
-           a.provider_account_id as githubId
+           a.account_id as githubUsername
     FROM user u
     LEFT JOIN account a ON u.id = a.user_id AND a.provider_id = 'github'
-    WHERE u.name = ?
+    WHERE a.account_id = ? OR u.name = ?
+    LIMIT 1
   `)
-    .bind(username)
+    .bind(username, username)
     .first<{
       id: string;
       name: string;
       email: string | null;
       image: string | null;
       joinedAt: number;
-      githubId: string | null;
+      githubUsername: string | null;
     }>();
 
   if (!user) {
@@ -68,20 +71,13 @@ export const GET: RequestHandler = async ({ params, platform }) => {
   const skills = skillsResult.results || [];
   const totalStars = skills.reduce((sum, s) => sum + (s.stars || 0), 0);
 
-  // Get GitHub username if available
-  let githubUsername: string | null = null;
-  if (user.githubId) {
-    // The name field usually contains the GitHub username for GitHub OAuth users
-    githubUsername = user.name;
-  }
-
   return json({
     user: {
       id: user.id,
       name: user.name,
       image: user.image,
       bio: null, // Could add bio field to user table later
-      githubUsername,
+      githubUsername: user.githubUsername,
       skillCount: skills.length,
       totalStars,
       joinedAt: user.joinedAt,

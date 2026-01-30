@@ -93,8 +93,8 @@
 
   .skill-card-compact:hover {
     border-color: var(--border-sketch);
-    transform: translateX(4px);
-    box-shadow: -4px 4px 0 0 var(--border-sketch);
+    transform: translateY(-2px) translateX(-2px);
+    box-shadow: 4px 4px 0 0 var(--border-sketch);
   }
 
   .avatar-wrapper {

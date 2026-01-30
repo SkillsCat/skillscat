@@ -125,7 +125,7 @@
       </div>
 
       <!-- Skills Grid -->
-      <Grid cols={4}>
+      <Grid cols={3}>
         {#each filteredSkills as skill (skill.id)}
           <SkillCard {skill} />
         {/each}
