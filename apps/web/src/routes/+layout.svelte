@@ -16,6 +16,28 @@
     window.addEventListener('scroll', handleScroll, { passive: true });
     handleScroll();
 
+    // 注册 Service Worker (仅生产环境)
+    const isDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    if (!isDev && 'serviceWorker' in navigator) {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((registration) => {
+          registration.addEventListener('updatefound', () => {
+            const newWorker = registration.installing;
+            if (newWorker) {
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  console.log('[SW] New version available');
+                }
+              });
+            }
+          });
+        })
+        .catch((error) => {
+          console.error('[SW] Registration failed:', error);
+        });
+    }
+
     return () => {
       window.removeEventListener('scroll', handleScroll);
     };

@@ -5,7 +5,7 @@
  * - 检查仓库是否包含 SKILL.md
  * - 获取仓库元数据
  * - 存储到 D1 数据库
- * - 缓存 SKILL.md 到 R2
+ * - 缓存 SKILL.md 及目录下所有文本文件到 R2
  * - 发送到 classification 队列
  */
 
@@ -17,6 +17,10 @@ import type {
   GitHubContent,
   MessageBatch,
   ExecutionContext,
+  GitHubTreeItem,
+  GitHubTreeResponse,
+  DirectoryFile,
+  FileStructure,
 } from './shared/types';
 import {
   isInDotFolder,
@@ -28,9 +32,19 @@ import {
   checkSlugCollision,
   decodeBase64,
   createLogger,
+  isTextFile,
+  decodeBase64ToUtf8,
 } from './shared/utils';
 
 const log = createLogger('Indexing');
+
+// ============================================
+// Configuration Constants
+// ============================================
+
+const MAX_FILES = 50;              // 最大文件数
+const MAX_FILE_SIZE = 512 * 1024;  // 单文件最大 512KB
+const MAX_TOTAL_SIZE = 5 * 1024 * 1024; // 总大小最大 5MB
 
 // ============================================
 // YAML Frontmatter Parsing
@@ -196,6 +210,259 @@ async function storeContentHashes(
     .bind(crypto.randomUUID(), skillId, normalizedHash, now)
     .run();
 }
+
+// ============================================
+// Commit SHA & Directory Indexing Functions
+// ============================================
+
+/**
+ * Get the latest commit SHA from GitHub repository
+ */
+async function getLatestCommitSha(
+  owner: string,
+  name: string,
+  env: IndexingEnv
+): Promise<{ sha: string; branch: string } | null> {
+  // Get repository info (includes default branch)
+  const repo = await githubFetch<GitHubRepo>(getRepoApiUrl(owner, name), {
+    token: env.GITHUB_TOKEN,
+    apiVersion: env.GITHUB_API_VERSION,
+    userAgent: 'SkillsCat-Indexing-Worker/1.0',
+  });
+
+  if (!repo) return null;
+
+  const branch = repo.default_branch;
+
+  // Get latest commit
+  const commitUrl = `https://api.github.com/repos/${owner}/${name}/commits/${branch}`;
+  const commitInfo = await githubFetch<{ sha: string }>(commitUrl, {
+    token: env.GITHUB_TOKEN,
+    apiVersion: env.GITHUB_API_VERSION,
+    userAgent: 'SkillsCat-Indexing-Worker/1.0',
+  });
+
+  if (!commitInfo) return null;
+
+  return { sha: commitInfo.sha, branch };
+}
+
+/**
+ * Get stored commit SHA from database
+ */
+async function getStoredCommitSha(
+  owner: string,
+  name: string,
+  skillPath: string | null,
+  env: IndexingEnv
+): Promise<string | null> {
+  const normalizedPath = skillPath || '';
+
+  const result = await env.DB.prepare(`
+    SELECT commit_sha FROM skills
+    WHERE repo_owner = ? AND repo_name = ? AND (skill_path = ? OR (skill_path IS NULL AND ? = ''))
+    LIMIT 1
+  `)
+    .bind(owner, name, normalizedPath, normalizedPath)
+    .first<{ commit_sha: string | null }>();
+
+  return result?.commit_sha || null;
+}
+
+/**
+ * Check if skill needs update based on commit SHA
+ */
+async function needsUpdate(
+  owner: string,
+  name: string,
+  skillPath: string | null,
+  latestCommitSha: string,
+  forceReindex: boolean,
+  env: IndexingEnv
+): Promise<boolean> {
+  if (forceReindex) {
+    log.log(`Force reindex requested for ${owner}/${name}`);
+    return true;
+  }
+
+  const storedSha = await getStoredCommitSha(owner, name, skillPath, env);
+
+  if (!storedSha) {
+    log.log(`No stored commit SHA for ${owner}/${name}, needs full index`);
+    return true;
+  }
+
+  if (storedSha !== latestCommitSha) {
+    log.log(`Commit SHA changed: ${storedSha} -> ${latestCommitSha}`);
+    return true;
+  }
+
+  log.log(`Commit SHA unchanged: ${latestCommitSha}, skipping content fetch`);
+  return false;
+}
+
+/**
+ * Fetch all files from skill directory using GitHub Tree API
+ */
+async function fetchDirectoryFiles(
+  owner: string,
+  name: string,
+  branch: string,
+  skillPath: string | null,
+  env: IndexingEnv
+): Promise<{ files: DirectoryFile[]; textContents: Map<string, string> }> {
+  const treeUrl = `https://api.github.com/repos/${owner}/${name}/git/trees/${branch}?recursive=1`;
+  const treeData = await githubFetch<GitHubTreeResponse>(treeUrl, {
+    token: env.GITHUB_TOKEN,
+    apiVersion: env.GITHUB_API_VERSION,
+    userAgent: 'SkillsCat-Indexing-Worker/1.0',
+  });
+
+  if (!treeData) {
+    throw new Error('Failed to fetch repository tree');
+  }
+
+  const prefix = skillPath ? `${skillPath}/` : '';
+  const files: DirectoryFile[] = [];
+  const textContents = new Map<string, string>();
+
+  let fileCount = 0;
+  let totalSize = 0;
+
+  for (const item of treeData.tree) {
+    if (fileCount >= MAX_FILES) {
+      log.log(`Reached max file limit (${MAX_FILES})`);
+      break;
+    }
+
+    if (item.type !== 'blob') continue;
+
+    // Filter by skill path prefix
+    let relativePath: string;
+    if (prefix) {
+      if (!item.path.startsWith(prefix)) continue;
+      relativePath = item.path.slice(prefix.length);
+    } else {
+      // Root skill: only include SKILL.md
+      if (item.path !== 'SKILL.md' && item.path !== 'skill.md') continue;
+      relativePath = item.path;
+    }
+
+    // Skip files in dot folders
+    if (isInDotFolder(relativePath)) continue;
+
+    const fileSize = item.size || 0;
+
+    // Skip files larger than max size
+    if (fileSize > MAX_FILE_SIZE) {
+      log.log(`Skipping large file: ${relativePath} (${fileSize} bytes)`);
+      continue;
+    }
+
+    // Check total size limit
+    if (totalSize + fileSize > MAX_TOTAL_SIZE) {
+      log.log(`Reached total size limit (${MAX_TOTAL_SIZE})`);
+      break;
+    }
+
+    const isText = isTextFile(relativePath);
+
+    const fileInfo: DirectoryFile = {
+      path: relativePath,
+      sha: item.sha,
+      size: fileSize,
+      type: isText ? 'text' : 'binary',
+    };
+
+    files.push(fileInfo);
+    fileCount++;
+    totalSize += fileSize;
+
+    // Fetch content for text files only
+    if (isText) {
+      const blobUrl = `https://api.github.com/repos/${owner}/${name}/git/blobs/${item.sha}`;
+      const blobData = await githubFetch<{ content: string; encoding: string }>(blobUrl, {
+        token: env.GITHUB_TOKEN,
+        apiVersion: env.GITHUB_API_VERSION,
+        userAgent: 'SkillsCat-Indexing-Worker/1.0',
+      });
+
+      if (blobData && blobData.content) {
+        try {
+          const content = decodeBase64ToUtf8(blobData.content);
+          textContents.set(relativePath, content);
+        } catch (err) {
+          log.warn(`Failed to decode content for ${relativePath}:`, err);
+        }
+      }
+    }
+  }
+
+  log.log(`Fetched ${files.length} files (${textContents.size} text, ${files.length - textContents.size} binary), total size: ${totalSize} bytes`);
+
+  return { files, textContents };
+}
+
+/**
+ * Cache directory files to R2
+ */
+async function cacheDirectoryFiles(
+  skillId: string,
+  owner: string,
+  name: string,
+  skillPath: string | null,
+  textContents: Map<string, string>,
+  commitSha: string,
+  env: IndexingEnv
+): Promise<void> {
+  const pathPart = skillPath ? `/${skillPath}` : '';
+  const r2Prefix = `skills/${owner}/${name}${pathPart}/`;
+
+  for (const [relativePath, content] of textContents) {
+    const r2Path = `${r2Prefix}${relativePath}`;
+
+    await env.R2.put(r2Path, content, {
+      httpMetadata: {
+        contentType: 'text/plain',
+      },
+      customMetadata: {
+        skillId,
+        commitSha,
+        indexedAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  log.log(`Cached ${textContents.size} text files to R2 with prefix: ${r2Prefix}`);
+}
+
+/**
+ * Update skill metadata with commit SHA and file structure
+ */
+async function updateSkillMetadata(
+  skillId: string,
+  commitSha: string,
+  fileStructure: FileStructure,
+  env: IndexingEnv
+): Promise<void> {
+  const now = Date.now();
+
+  await env.DB.prepare(`
+    UPDATE skills SET
+      commit_sha = ?,
+      file_structure = ?,
+      updated_at = ?
+    WHERE id = ?
+  `)
+    .bind(commitSha, JSON.stringify(fileStructure), now, skillId)
+    .run();
+
+  log.log(`Updated skill metadata: ${skillId}, commitSha: ${commitSha}, files: ${fileStructure.files.length}`);
+}
+
+// ============================================
+// Repository & Skill Functions
+// ============================================
 
 async function getRepoInfo(
   owner: string,
@@ -402,41 +669,6 @@ async function updateSkill(
   return result?.id || null;
 }
 
-async function cacheSkillMd(
-  skillId: string,
-  owner: string,
-  name: string,
-  skillMd: GitHubContent,
-  env: IndexingEnv,
-  skillPath?: string
-): Promise<string> {
-  // Include skill path in R2 path for multi-skill repos
-  const pathPart = skillPath ? `/${skillPath}` : '';
-  const r2Path = `skills/${owner}/${name}${pathPart}/SKILL.md`;
-
-  let content = '';
-  if (skillMd.content) {
-    content = decodeBase64(skillMd.content);
-  } else if (skillMd.download_url) {
-    const response = await fetch(skillMd.download_url);
-    content = await response.text();
-  }
-
-  await env.R2.put(r2Path, content, {
-    httpMetadata: {
-      contentType: 'text/markdown',
-    },
-    customMetadata: {
-      skillId,
-      sha: skillMd.sha,
-      indexedAt: new Date().toISOString(),
-      skillPath: skillPath || '',
-    },
-  });
-
-  return r2Path;
-}
-
 /**
  * Save skill tags from frontmatter to the database
  */
@@ -505,11 +737,12 @@ async function processMessage(
   message: IndexingMessage,
   env: IndexingEnv
 ): Promise<void> {
-  const { repoOwner, repoName, skillPath } = message;
+  const { repoOwner, repoName, skillPath, forceReindex } = message;
   const source = message.submittedBy ? 'user-submit' : 'github-events';
 
   log.log(`Processing repo: ${repoOwner}/${repoName} (source: ${source}, skillPath: ${skillPath || 'root'})`, JSON.stringify(message));
 
+  // Step 1: Get repository info
   const repo = await getRepoInfo(repoOwner, repoName, env);
   if (!repo) {
     log.log(`Repo not found: ${repoOwner}/${repoName}`);
@@ -523,7 +756,36 @@ async function processMessage(
 
   log.log(`Repo info fetched: ${repoOwner}/${repoName}, stars: ${repo.stargazers_count}, fork: ${repo.fork}`);
 
-  // Use skillPath when fetching SKILL.md
+  // Step 2: Get latest commit SHA
+  const latestCommit = await getLatestCommitSha(repoOwner, repoName, env);
+  if (!latestCommit) {
+    log.log(`Failed to get latest commit SHA: ${repoOwner}/${repoName}`);
+    return;
+  }
+
+  log.log(`Latest commit: ${latestCommit.sha} (branch: ${latestCommit.branch})`);
+
+  // Step 3: Check if update is needed
+  const exists = await skillExists(repoOwner, repoName, skillPath || null, env);
+  const shouldFetchContent = await needsUpdate(
+    repoOwner,
+    repoName,
+    skillPath || null,
+    latestCommit.sha,
+    forceReindex || false,
+    env
+  );
+
+  // If skill exists and no content update needed, just update stars/forks
+  if (exists && !shouldFetchContent) {
+    const updatedId = await updateSkill(repoOwner, repoName, skillPath || null, repo, env);
+    if (updatedId) {
+      log.log(`Updated stars/forks only for skill: ${updatedId}`);
+    }
+    return;
+  }
+
+  // Step 4: Verify SKILL.md exists
   const skillMd = await getSkillMd(repoOwner, repoName, env, skillPath);
   if (!skillMd) {
     log.log(`No SKILL.md found: ${repoOwner}/${repoName}${skillPath ? `/${skillPath}` : ''}`);
@@ -532,32 +794,58 @@ async function processMessage(
 
   log.log(`SKILL.md found: ${repoOwner}/${repoName}, path: ${skillMd.path}`);
 
-  // Get SKILL.md content for anti-abuse check and frontmatter parsing
-  let skillMdContent = '';
-  if (skillMd.content) {
-    skillMdContent = decodeBase64(skillMd.content);
-  } else if (skillMd.download_url) {
-    const response = await fetch(skillMd.download_url);
-    skillMdContent = await response.text();
+  // Step 5: Fetch all files from directory using Tree API
+  let directoryFiles: DirectoryFile[] = [];
+  let textContents = new Map<string, string>();
+
+  try {
+    const result = await fetchDirectoryFiles(
+      repoOwner,
+      repoName,
+      latestCommit.branch,
+      skillPath || null,
+      env
+    );
+    directoryFiles = result.files;
+    textContents = result.textContents;
+  } catch (err) {
+    log.error(`Failed to fetch directory files: ${repoOwner}/${repoName}`, err);
+    // Fallback: just use SKILL.md content
+    let skillMdContent = '';
+    if (skillMd.content) {
+      skillMdContent = decodeBase64(skillMd.content);
+    } else if (skillMd.download_url) {
+      const response = await fetch(skillMd.download_url);
+      skillMdContent = await response.text();
+    }
+    textContents.set('SKILL.md', skillMdContent);
+    directoryFiles = [{
+      path: 'SKILL.md',
+      sha: skillMd.sha,
+      size: skillMdContent.length,
+      type: 'text',
+    }];
+  }
+
+  // Get SKILL.md content for parsing
+  const skillMdContent = textContents.get('SKILL.md') || textContents.get('skill.md') || '';
+  if (!skillMdContent) {
+    log.error(`SKILL.md content not found in fetched files`);
+    return;
   }
 
   log.log(`SKILL.md content length: ${skillMdContent.length} chars`);
 
-  // Parse YAML frontmatter
+  // Step 6: Parse YAML frontmatter
   const { frontmatter } = parseSkillFrontmatter(skillMdContent);
   if (frontmatter) {
     log.log(`Frontmatter parsed: name=${frontmatter.name}, description=${frontmatter.description?.slice(0, 50)}..., tags=${frontmatter.metadata?.tags}`);
   }
 
-  // Compute content hashes
+  // Step 7: Anti-abuse check
   const fullHash = await computeHash(skillMdContent);
   const normalizedHash = await computeHash(normalizeContent(skillMdContent));
 
-  // Check existence with skillPath
-  const exists = await skillExists(repoOwner, repoName, skillPath || null, env);
-  log.log(`Skill exists in DB: ${exists}`);
-
-  // Anti-abuse check for new skills with low stars
   if (!exists && repo.stargazers_count < 100) {
     const duplicate = await checkForDuplicate(normalizedHash, env, 1000);
     if (duplicate.isDuplicate) {
@@ -566,6 +854,7 @@ async function processMessage(
     }
   }
 
+  // Step 8: Create or update skill record
   let skillId: string;
 
   if (exists) {
@@ -600,17 +889,36 @@ async function processMessage(
     log.log(`Frontmatter categories extracted: ${frontmatterCategories.join(', ')}`);
   }
 
-  // Cache SKILL.md to R2 (include skillPath in R2 path)
-  let r2Path: string;
+  // Step 9: Cache all text files to R2
+  const pathPart = skillPath ? `/${skillPath}` : '';
+  const r2Path = `skills/${repoOwner}/${repoName}${pathPart}/SKILL.md`;
+
   try {
-    r2Path = await cacheSkillMd(skillId, repoOwner, repoName, skillMd, env, skillPath);
-    log.log(`Cached SKILL.md to R2: ${r2Path}`);
+    await cacheDirectoryFiles(
+      skillId,
+      repoOwner,
+      repoName,
+      skillPath || null,
+      textContents,
+      latestCommit.sha,
+      env
+    );
+    log.log(`Cached ${textContents.size} files to R2`);
   } catch (r2Error) {
-    log.error(`Failed to cache SKILL.md to R2: ${repoOwner}/${repoName}`, r2Error);
+    log.error(`Failed to cache files to R2: ${repoOwner}/${repoName}`, r2Error);
     throw r2Error;
   }
 
-  // Send to classification queue with tags and frontmatter categories
+  // Step 10: Update commit_sha and file_structure
+  const fileStructure: FileStructure = {
+    commitSha: latestCommit.sha,
+    indexedAt: new Date().toISOString(),
+    files: directoryFiles,
+  };
+
+  await updateSkillMetadata(skillId, latestCommit.sha, fileStructure, env);
+
+  // Step 11: Send to classification queue
   const classificationMessage: ClassificationMessage & { tags?: string[] } = {
     type: 'classify',
     skillId,

@@ -1,95 +1,51 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { Button } from '$lib/components';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
-  import { SadDizzyIcon, Home01Icon, ArrowLeft01Icon } from '@hugeicons/core-free-icons';
+  import { ErrorState } from '$lib/components';
+
+  // 根据状态码获取默认标题
+  function getDefaultTitle(status: number): string {
+    switch (status) {
+      case 400: return 'Bad Request';
+      case 401: return 'Unauthorized';
+      case 403: return 'Forbidden';
+      case 404: return 'Page Not Found';
+      case 500: return 'Server Error';
+      case 502: return 'Bad Gateway';
+      case 503: return 'Service Unavailable';
+      default: return 'Something went wrong';
+    }
+  }
+
+  // 根据状态码获取默认消息
+  function getDefaultMessage(status: number): string {
+    switch (status) {
+      case 400: return 'The request could not be understood by the server.';
+      case 401: return 'You need to be logged in to access this page.';
+      case 403: return "You don't have permission to access this page.";
+      case 404: return "The page you're looking for doesn't exist or has been moved.";
+      case 500: return 'An unexpected error occurred on the server.';
+      case 502: return 'The server received an invalid response.';
+      case 503: return 'The service is temporarily unavailable. Please try again later.';
+      default: return 'An unexpected error occurred.';
+    }
+  }
+
+  const status = $derived($page.status);
+  const title = $derived(getDefaultTitle(status));
+  const message = $derived($page.error?.message || getDefaultMessage(status));
 </script>
 
 <svelte:head>
-  <title>{$page.status} - SkillsCat</title>
+  <title>{status} - SkillsCat</title>
 </svelte:head>
 
-<div class="error-page">
-  <div class="error-content">
-    <div class="error-icon">
-      <HugeiconsIcon icon={SadDizzyIcon} size={80} strokeWidth={1.5} />
-    </div>
-
-    <h1 class="error-code">{$page.status}</h1>
-
-    <p class="error-message">
-      {#if $page.status === 404}
-        Oops! This page doesn't exist.
-      {:else}
-        Something went wrong.
-      {/if}
-    </p>
-
-    {#if $page.error?.message}
-      <p class="error-detail">{$page.error.message}</p>
-    {/if}
-
-    <div class="error-actions">
-      <Button variant="cute" href="/">
-        <HugeiconsIcon icon={Home01Icon} size={18} strokeWidth={2} />
-        Go Home
-      </Button>
-      <Button variant="outline" onclick={() => history.back()}>
-        <HugeiconsIcon icon={ArrowLeft01Icon} size={18} strokeWidth={2} />
-        Go Back
-      </Button>
-    </div>
-  </div>
-</div>
-
-<style>
-  .error-page {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: calc(100vh - 12rem);
-    padding: 2rem;
-  }
-
-  .error-content {
-    text-align: center;
-    max-width: 28rem;
-  }
-
-  .error-icon {
-    color: var(--fg-muted);
-    margin-bottom: 1.5rem;
-    opacity: 0.6;
-  }
-
-  .error-code {
-    font-size: clamp(4rem, 10vw, 8rem);
-    font-weight: 900;
-    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    line-height: 1;
-    margin-bottom: 1rem;
-  }
-
-  .error-message {
-    font-size: 1.25rem;
-    color: var(--fg);
-    font-weight: 600;
-    margin-bottom: 0.5rem;
-  }
-
-  .error-detail {
-    font-size: 0.875rem;
-    color: var(--fg-muted);
-    margin-bottom: 2rem;
-  }
-
-  .error-actions {
-    display: flex;
-    gap: 1rem;
-    justify-content: center;
-    flex-wrap: wrap;
-  }
-</style>
+<ErrorState
+  code={status}
+  {title}
+  {message}
+  fullPage
+  primaryActionText="Go Home"
+  primaryActionHref="/"
+  secondaryActionText="Go Back"
+  secondaryActionClick={() => history.back()}
+/>

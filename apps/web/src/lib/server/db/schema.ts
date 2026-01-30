@@ -97,6 +97,7 @@ export const skills = sqliteTable('skills', {
   starSnapshots: text('star_snapshots'), // JSON: [{d, s}]
   trendingScore: real('trending_score').default(0),
   fileStructure: text('file_structure'), // JSON
+  commitSha: text('commit_sha'), // 存储最新索引的 commit SHA
   readme: text('readme'),
   lastCommitAt: integer('last_commit_at'),
   // New fields for private skills

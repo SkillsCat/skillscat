@@ -3,6 +3,46 @@
  */
 
 // ============================================
+// Text File Detection
+// ============================================
+
+// Text file extensions that we should include
+export const TEXT_EXTENSIONS = new Set([
+  'md', 'txt', 'json', 'yaml', 'yml', 'toml',
+  'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs',
+  'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cpp', 'h', 'hpp',
+  'html', 'css', 'scss', 'less', 'sass',
+  'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd',
+  'xml', 'svg', 'sql', 'graphql', 'gql',
+  'env', 'gitignore', 'dockerignore', 'editorconfig',
+  'svelte', 'vue', 'astro'
+]);
+
+/**
+ * Check if a file is a text file based on extension
+ */
+export function isTextFile(path: string): boolean {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  if (!ext || TEXT_EXTENSIONS.has(ext)) return true;
+  const fileName = path.split('/').pop()?.toLowerCase() || '';
+  if (['dockerfile', 'makefile', 'readme', 'license', 'changelog'].includes(fileName)) return true;
+  return false;
+}
+
+/**
+ * Decode base64 content to UTF-8 string (handles non-ASCII characters)
+ */
+export function decodeBase64ToUtf8(base64: string): string {
+  const cleanBase64 = base64.replace(/\n/g, '');
+  const binaryString = atob(cleanBase64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+// ============================================
 // Path Utilities
 // ============================================
 

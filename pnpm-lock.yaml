@@ -91,6 +91,9 @@ importers:
       drizzle-kit:
         specifier: ^0.31.8
         version: 0.31.8
+      esbuild:
+        specifier: ^0.27.2
+        version: 0.27.2
       svelte:
         specifier: ^5.48.2
         version: 5.48.2

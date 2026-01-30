@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "dba5b93c-c9b8-4ccb-98e3-685c2946fa92",
+  "id": "adce867a-ce8d-4ba9-af49-ca97cc43ef33",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -1295,6 +1295,13 @@
         },
         "file_structure": {
           "name": "file_structure",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "commit_sha": {
+          "name": "commit_sha",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

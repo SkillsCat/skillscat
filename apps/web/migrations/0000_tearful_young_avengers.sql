@@ -190,6 +190,7 @@ CREATE TABLE `skills` (
 	`star_snapshots` text,
 	`trending_score` real DEFAULT 0,
 	`file_structure` text,
+	`commit_sha` text,
 	`readme` text,
 	`last_commit_at` integer,
 	`visibility` text DEFAULT 'public' NOT NULL,

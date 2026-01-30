@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CopyButton, Button, Section, Grid, SkillCard, SkillCardCompact, EmptyState, toast } from '$lib/components';
+  import { CopyButton, Button, Section, Grid, SkillCard, SkillCardCompact, EmptyState, ErrorState, toast } from '$lib/components';
   import { getCategoryBySlug } from '$lib/constants/categories';
   import { marked } from 'marked';
   import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
@@ -815,28 +815,14 @@
   </div>
 {:else}
   <!-- Not Found -->
-  <div class="not-found-page">
-    <div class="not-found-content">
-      <div class="not-found-icon">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      </div>
-      <h1 class="not-found-code">404</h1>
-      <h2 class="not-found-title">Skill Not Found</h2>
-      <p class="not-found-message">
-        {data.error || "The skill you're looking for doesn't exist or has been removed."}
-      </p>
-      <div class="not-found-actions">
-        <Button variant="cute" href="/trending">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
-          </svg>
-          Browse Skills
-        </Button>
-      </div>
-    </div>
-  </div>
+  <ErrorState
+    code={404}
+    title="Skill Not Found"
+    message={data.error || "The skill you're looking for doesn't exist or has been removed."}
+    fullPage
+    primaryActionText="Browse Skills"
+    primaryActionHref="/trending"
+  />
 {/if}
 
 <style>
@@ -1470,70 +1456,6 @@
     height: auto;
     border-radius: var(--radius-md);
     margin: 1em 0;
-  }
-
-  /* Not Found Page Styles */
-  .not-found-page {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: calc(100vh - 12rem);
-    padding: 2rem;
-  }
-
-  .not-found-content {
-    text-align: center;
-    max-width: 28rem;
-  }
-
-  .not-found-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 5rem;
-    height: 5rem;
-    margin: 0 auto 1.5rem;
-    background: linear-gradient(135deg, var(--primary-subtle) 0%, rgba(var(--accent-rgb), 0.1) 100%);
-    border: 2px solid var(--primary);
-    border-radius: var(--radius-xl);
-    color: var(--primary);
-  }
-
-  .not-found-icon svg {
-    width: 2.5rem;
-    height: 2.5rem;
-  }
-
-  .not-found-code {
-    font-size: clamp(4rem, 10vw, 7rem);
-    font-weight: 900;
-    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    line-height: 1;
-    margin-bottom: 0.5rem;
-  }
-
-  .not-found-title {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--fg);
-    margin-bottom: 0.75rem;
-  }
-
-  .not-found-message {
-    font-size: 0.9375rem;
-    color: var(--fg-muted);
-    margin-bottom: 2rem;
-    line-height: 1.6;
-  }
-
-  .not-found-actions {
-    display: flex;
-    gap: 1rem;
-    justify-content: center;
-    flex-wrap: wrap;
   }
 
   /* SKILL.md Content Card Styles */

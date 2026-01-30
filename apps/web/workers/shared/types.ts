@@ -96,6 +96,42 @@ export interface IndexingMessage {
   skillPath?: string;
   submittedBy?: string;
   submittedAt?: string;
+  // Force reindex flag
+  forceReindex?: boolean;
+}
+
+// ============================================
+// Directory Indexing Types
+// ============================================
+
+// 目录文件信息
+export interface DirectoryFile {
+  path: string;           // 相对于 skill 目录的路径
+  sha: string;            // 文件 SHA
+  size: number;           // 文件大小
+  type: 'text' | 'binary'; // 文件类型
+}
+
+// 目录结构（存储到 file_structure 字段）
+export interface FileStructure {
+  commitSha: string;      // 索引时的 commit SHA
+  indexedAt: string;      // 索引时间
+  files: DirectoryFile[]; // 文件列表
+}
+
+// GitHub Tree API 响应
+export interface GitHubTreeItem {
+  path: string;
+  type: 'blob' | 'tree';
+  sha: string;
+  size?: number;
+  mode: string;
+}
+
+export interface GitHubTreeResponse {
+  sha: string;
+  tree: GitHubTreeItem[];
+  truncated: boolean;
 }
 
 export interface ClassificationMessage {

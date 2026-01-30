@@ -364,6 +364,42 @@ body {
   color: #ffffff;
 }
 
+/* ===== Button - Cute Secondary variant (GitHub-like) ===== */
+.btn-cute-secondary {
+  --btn-shadow-offset: 4px;
+  --btn-shadow-color: oklch(70% 0.02 85);
+
+  position: relative;
+  background-color: var(--bg-subtle);
+  color: var(--fg);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-full);
+  box-shadow: 0 var(--btn-shadow-offset) 0 0 var(--btn-shadow-color);
+  transform: translateY(0);
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.1s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.btn-cute-secondary:hover:not(:disabled) {
+  --btn-shadow-offset: 6px;
+  background-color: var(--bg-muted);
+  border-color: var(--border-emphasis);
+  transform: translateY(-2px);
+}
+
+.btn-cute-secondary:active:not(:disabled) {
+  --btn-shadow-offset: 1px;
+  transform: translateY(3px);
+}
+
+/* Dark mode adjustments for cute secondary button */
+:root.dark .btn-cute-secondary {
+  --btn-shadow-color: oklch(25% 0.02 85);
+}
+
 /* Button Sizes */
 .btn-sm {
   padding: 0.5rem 1rem;
