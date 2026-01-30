@@ -39,10 +39,21 @@ export const load: PageServerLoad = async ({ params, platform, locals }) => {
       10
     );
 
+    // Check if user has bookmarked this skill
+    let isBookmarked = false;
+    if (userId && env.DB) {
+      const bookmark = await env.DB.prepare(
+        'SELECT 1 FROM favorites WHERE user_id = ? AND skill_id = ?'
+      ).bind(userId, skill.id).first();
+      isBookmarked = !!bookmark;
+    }
+
     return {
       skill,
       relatedSkills,
       isOwner: skill.ownerId === userId,
+      isBookmarked,
+      isAuthenticated: !!userId,
     };
   } catch (error) {
     console.error('Error loading skill:', error);

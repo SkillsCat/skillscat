@@ -26,10 +26,10 @@
   });
 
   const navItems = [
-    { href: '/settings/skills', label: 'Skills', icon: SparklesIcon },
-    { href: '/settings/organizations', label: 'Organizations', icon: Building06Icon },
-    { href: '/settings/tokens', label: 'API Tokens', icon: Key01Icon },
-    { href: '/settings/account', label: 'Account', icon: UserCircleIcon },
+    { href: '/user/skills', label: 'Skills', icon: SparklesIcon },
+    { href: '/user/organizations', label: 'Organizations', icon: Building06Icon },
+    { href: '/user/tokens', label: 'API Tokens', icon: Key01Icon },
+    { href: '/user/account', label: 'Account', icon: UserCircleIcon },
   ];
 
   function isActive(href: string): boolean {

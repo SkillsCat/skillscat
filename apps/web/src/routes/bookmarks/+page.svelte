@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Grid, SkillCard, EmptyState, SearchBox } from '$lib/components';
   import { HugeiconsIcon } from '@hugeicons/svelte';
-  import { SecurityLockIcon, Search01Icon, FavouriteIcon } from '@hugeicons/core-free-icons';
+  import { SecurityLockIcon, Search01Icon, Bookmark02Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
 
   interface Props {
@@ -15,7 +15,7 @@
 
   let searchQuery = $state('');
 
-  const filteredFavorites = $derived(
+  const filteredBookmarks = $derived(
     searchQuery
       ? data.favorites.filter(
           (s) =>
@@ -27,8 +27,8 @@
 </script>
 
 <svelte:head>
-  <title>My Favorites - SkillsCat</title>
-  <meta name="description" content="Your saved Claude Code skills collection." />
+  <title>Bookmarks - SkillsCat</title>
+  <meta name="description" content="Your bookmarked Claude Code skills collection." />
 </svelte:head>
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -36,19 +36,19 @@
   <div class="mb-8">
     <h1 class="page-title">
       <span class="page-title-icon">
-        <HugeiconsIcon icon={FavouriteIcon} strokeWidth={2} />
+        <HugeiconsIcon icon={Bookmark02Icon} strokeWidth={2} />
       </span>
-      My Favorites
+      Bookmarks
     </h1>
     <p class="text-fg-muted">
-      Your saved Claude Code skills
+      Your bookmarked Claude Code skills
     </p>
   </div>
 
   {#if !data.isAuthenticated}
     <EmptyState
-      title="Sign in to view favorites"
-      description="You need to be signed in to save and view your favorite skills."
+      title="Sign in to view bookmarks"
+      description="You need to be signed in to save and view your bookmarked skills."
       actionText="Sign In"
       actionHref="/api/auth/signin"
     >
@@ -60,27 +60,27 @@
     <!-- Search -->
     <div class="mb-8 max-w-md">
       <SearchBox
-        placeholder="Filter favorites..."
+        placeholder="Filter bookmarks..."
         bind:value={searchQuery}
       />
     </div>
 
     <!-- Results count -->
     <div class="mb-6 text-sm text-fg-muted">
-      {filteredFavorites.length} of {data.favorites.length} favorites
+      {filteredBookmarks.length} of {data.favorites.length} bookmarks
     </div>
 
-    <!-- Favorites Grid -->
-    <Grid cols={4}>
-      {#each filteredFavorites as skill (skill.id)}
+    <!-- Bookmarks Grid -->
+    <Grid cols={3}>
+      {#each filteredBookmarks as skill (skill.id)}
         <SkillCard {skill} />
       {/each}
     </Grid>
 
-    {#if filteredFavorites.length === 0 && searchQuery}
+    {#if filteredBookmarks.length === 0 && searchQuery}
       <EmptyState
         title="No matches"
-        description={`No favorites found matching "${searchQuery}"`}
+        description={`No bookmarks found matching "${searchQuery}"`}
       >
         {#snippet icon()}
           <HugeiconsIcon icon={Search01Icon} size={40} strokeWidth={1.5} />
@@ -89,13 +89,13 @@
     {/if}
   {:else}
     <EmptyState
-      title="No favorites yet"
-      description="Start exploring and save skills you like!"
+      title="No bookmarks yet"
+      description="Start exploring and bookmark skills you like!"
       actionText="Browse Skills"
       actionHref="/trending"
     >
       {#snippet icon()}
-        <HugeiconsIcon icon={FavouriteIcon} size={40} strokeWidth={1.5} />
+        <HugeiconsIcon icon={Bookmark02Icon} size={40} strokeWidth={1.5} />
       {/snippet}
     </EmptyState>
   {/if}

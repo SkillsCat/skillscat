@@ -2,9 +2,9 @@
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
 
-  // Redirect to skills page as the default settings view
+  // Redirect to skills page as the default user view
   onMount(() => {
-    goto('/settings/skills', { replaceState: true });
+    goto('/user/skills', { replaceState: true });
   });
 </script>
 
@@ -13,7 +13,7 @@
 </svelte:head>
 
 <div class="redirect-message">
-  <p>Redirecting to settings...</p>
+  <p>Redirecting...</p>
 </div>
 
 <style>

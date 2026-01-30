@@ -77,15 +77,15 @@
       {/if}
 
       <!-- Meta -->
-      <div class="mt-3 flex items-center gap-4">
+      <div class="mt-3 flex items-center gap-2">
         <!-- Stars -->
-        <span class="meta-badge">
+        <span class="meta-badge meta-badge-stars">
           <HugeiconsIcon icon={StarIcon} size={14} strokeWidth={2} />
           {formatNumber(skill.stars)}
         </span>
 
         <!-- Updated -->
-        <span class="meta-badge">
+        <span class="meta-badge meta-badge-time">
           <HugeiconsIcon icon={Clock01Icon} size={14} strokeWidth={2} />
           {formatRelativeTime(skill.updatedAt)}
         </span>
@@ -108,21 +108,26 @@
     content: '';
     position: absolute;
     inset: -3px;
-    border: 3px solid var(--border-sketch);
+    border: 3px solid transparent;
     border-radius: 1rem;
-    opacity: 0.15;
-    transform: rotate(-0.5deg);
+    background: linear-gradient(135deg, var(--primary), var(--accent)) border-box;
+    -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0;
     pointer-events: none;
-    transition: opacity 0.25s ease;
+    transition: opacity 0.3s ease;
   }
 
   .skill-card:hover {
     transform: translateY(-6px) rotate(0.5deg);
     box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.12);
+    border-color: transparent;
   }
 
   .skill-card:hover::before {
-    opacity: 0.3;
+    opacity: 1;
   }
 
   .avatar-wrapper {
@@ -137,8 +142,8 @@
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
-    padding: 0.375rem 0.75rem;
-    font-size: 0.8125rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
     font-weight: 600;
     color: var(--fg-muted);
     background: var(--bg-muted);
@@ -146,8 +151,21 @@
     transition: all 0.2s ease;
   }
 
-  .skill-card:hover .meta-badge {
+  .meta-badge-stars {
+    color: var(--fg-muted);
+  }
+
+  .meta-badge-time {
+    color: var(--fg-muted);
+    opacity: 0.8;
+  }
+
+  .skill-card:hover .meta-badge-stars {
     background: var(--primary-subtle);
     color: var(--primary);
+  }
+
+  .skill-card:hover .meta-badge-time {
+    opacity: 1;
   }
 </style>

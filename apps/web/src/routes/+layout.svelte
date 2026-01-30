@@ -1,6 +1,6 @@
 <script lang="ts">
   import '../app.css';
-  import { Navbar, Footer } from '$lib/components';
+  import { Navbar, Footer, Toast } from '$lib/components';
   import { onMount } from 'svelte';
 
   let { children } = $props();
@@ -44,6 +44,9 @@
 
     <Footer />
   </div>
+
+  <!-- Global Toast Container -->
+  <Toast />
 </div>
 
 <style>

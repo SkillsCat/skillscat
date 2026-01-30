@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from '$lib/components';
+  import { CopyButton } from '$lib/components';
 
   interface Skill {
     id: string;
@@ -56,7 +56,23 @@
       <h1>My Skills</h1>
       <p class="description">Manage your uploaded and indexed skills.</p>
     </div>
-    <Button variant="cute" href="/submit">Upload Skill</Button>
+  </div>
+
+  <!-- CLI Upload Hint -->
+  <div class="cli-hint">
+    <div class="cli-hint-icon">
+      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+    </div>
+    <div class="cli-hint-content">
+      <p class="cli-hint-title">Upload skills via CLI</p>
+      <p class="cli-hint-text">Use the SkillsCat CLI to publish your skills:</p>
+      <div class="cli-command">
+        <code>npx skillscat publish</code>
+        <CopyButton text="npx skillscat publish" size="sm" />
+      </div>
+    </div>
   </div>
 
   {#if loading}
@@ -67,7 +83,7 @@
   {:else if error}
     <div class="error-state">
       <p>{error}</p>
-      <Button variant="outline" onclick={loadSkills}>Try Again</Button>
+      <button class="retry-btn" onclick={loadSkills}>Try Again</button>
     </div>
   {:else if skills.length === 0}
     <div class="empty-state">
@@ -77,8 +93,7 @@
         </svg>
       </div>
       <h3>No skills yet</h3>
-      <p>Upload your first skill to get started.</p>
-      <Button variant="cute" href="/submit">Upload Skill</Button>
+      <p>Use the CLI above to publish your first skill.</p>
     </div>
   {:else}
     <div class="skills-list">
@@ -122,7 +137,7 @@
     justify-content: space-between;
     align-items: flex-start;
     gap: 1rem;
-    margin-bottom: 2rem;
+    margin-bottom: 1.5rem;
   }
 
   h1 {
@@ -134,6 +149,59 @@
   .description {
     color: var(--muted-foreground);
     font-size: 0.9375rem;
+  }
+
+  /* CLI Hint */
+  .cli-hint {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: var(--primary-subtle);
+    border: 2px solid var(--primary);
+    border-radius: var(--radius-lg);
+    margin-bottom: 1.5rem;
+  }
+
+  .cli-hint-icon {
+    display: flex;
+    align-items: flex-start;
+    padding-top: 0.125rem;
+    color: var(--primary);
+    flex-shrink: 0;
+  }
+
+  .cli-hint-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .cli-hint-title {
+    font-weight: 600;
+    color: var(--foreground);
+    margin-bottom: 0.25rem;
+  }
+
+  .cli-hint-text {
+    font-size: 0.875rem;
+    color: var(--muted-foreground);
+    margin-bottom: 0.75rem;
+  }
+
+  .cli-command {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    width: fit-content;
+  }
+
+  .cli-command code {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--foreground);
   }
 
   .loading-state,
@@ -172,6 +240,23 @@
     margin-bottom: 1rem;
   }
 
+  .retry-btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--foreground);
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .retry-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+
   .empty-icon {
     color: var(--muted-foreground);
     opacity: 0.5;
@@ -186,7 +271,6 @@
 
   .empty-state p {
     color: var(--muted-foreground);
-    margin-bottom: 1.5rem;
   }
 
   .skills-list {

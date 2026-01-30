@@ -3,6 +3,7 @@ export { default as Button } from './ui/Button.svelte';
 export { default as Input } from './ui/Input.svelte';
 export { default as CopyButton } from './ui/CopyButton.svelte';
 export { default as ThemeToggle } from './ui/ThemeToggle.svelte';
+export { default as Toast, toast, dismissToast } from './ui/Toast.svelte';
 
 // Layout Components
 export { default as Navbar } from './layout/Navbar.svelte';

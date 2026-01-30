@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { CopyButton, Button, Section, Grid, SkillCard, SkillCardCompact, EmptyState } from '$lib/components';
+  import { CopyButton, Button, Section, Grid, SkillCard, SkillCardCompact, EmptyState, toast } from '$lib/components';
   import { getCategoryBySlug } from '$lib/constants/categories';
   import { marked } from 'marked';
   import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
+  import type { Highlighter } from 'shiki';
 
   interface Props {
     data: {
@@ -10,13 +11,51 @@
       relatedSkills: SkillCardData[];
       error?: string;
       isOwner?: boolean;
+      isBookmarked?: boolean;
+      isAuthenticated?: boolean;
     };
   }
 
   let { data }: Props = $props();
 
+  // Bookmark state - use local state that syncs with server data
+  let bookmarkOverride = $state<boolean | null>(null);
+  let isBookmarking = $state(false);
+  const isAuthenticated = $derived(data.isAuthenticated ?? false);
+  const isBookmarked = $derived(bookmarkOverride ?? data.isBookmarked ?? false);
+
+  async function handleBookmark() {
+    if (!data.skill || isBookmarking) return;
+    isBookmarking = true;
+
+    try {
+      const currentState = isBookmarked;
+      const method = currentState ? 'DELETE' : 'POST';
+      const response = await fetch('/api/favorites', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skillId: data.skill.id })
+      });
+
+      if (response.ok) {
+        bookmarkOverride = !currentState;
+        toast(
+          !currentState ? 'Added to bookmarks' : 'Removed from bookmarks',
+          'success'
+        );
+      } else {
+        toast('Failed to update bookmark', 'error');
+      }
+    } catch (err) {
+      console.error('Bookmark failed:', err);
+      toast('Failed to update bookmark', 'error');
+    } finally {
+      isBookmarking = false;
+    }
+  }
+
   // Shiki highlighter (lazy loaded)
-  let highlighter: any = $state(null);
+  let highlighter = $state<Highlighter | null>(null);
   let highlightedReadme = $state('');
 
   // Load shiki on mount
@@ -141,9 +180,9 @@
       }
 
       try {
-        const supportedLangs = highlighter.getLoadedLanguages();
+        const supportedLangs = highlighter!.getLoadedLanguages();
         const langToUse = supportedLangs.includes(actualLang) ? actualLang : 'plaintext';
-        const codeHtml = highlighter.codeToHtml(text, {
+        const codeHtml = highlighter!.codeToHtml(text, {
           lang: langToUse,
           themes: { light: 'github-light', dark: 'github-dark' }
         });
@@ -196,6 +235,86 @@
 
   let selectedInstaller = $state('skillscat');
   const currentCommand = $derived(installCommands.find(c => c.name === selectedInstaller)?.command || '');
+
+  // Download state
+  let isDownloading = $state(false);
+  let downloadSuccess = $state(false);
+
+  // Download skill files
+  async function handleDownload() {
+    if (!data.skill || isDownloading) return;
+    isDownloading = true;
+
+    try {
+      // Check if File System Access API is supported
+      if ('showDirectoryPicker' in window) {
+        try {
+          const dirHandle = await (window as unknown as { showDirectoryPicker: (options: { mode: string; startIn: string }) => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker({
+            mode: 'readwrite',
+            startIn: 'documents'
+          });
+
+          // Fetch all files
+          const response = await fetch(`/api/skills/${data.skill.slug}/files`);
+          if (!response.ok) {
+            if (response.status === 429) {
+              toast('Too many requests. Please wait a moment.', 'warning');
+              return;
+            }
+            throw new Error('Failed to fetch files');
+          }
+          const { folderName, files } = await response.json() as { folderName: string; files: Array<{ path: string; content: string }> };
+
+          // Create skill folder
+          const skillDir = await dirHandle.getDirectoryHandle(folderName, { create: true });
+
+          // Write all files
+          for (const file of files) {
+            // Handle subdirectories
+            let targetDir: FileSystemDirectoryHandle = skillDir;
+            const pathParts = file.path.split('/');
+            const fileName = pathParts.pop();
+
+            // Skip if no filename
+            if (!fileName) continue;
+
+            for (const part of pathParts) {
+              if (part) {
+                targetDir = await targetDir.getDirectoryHandle(part, { create: true });
+              }
+            }
+
+            const fileHandle = await targetDir.getFileHandle(fileName, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(file.content);
+            await writable.close();
+          }
+
+          // Show success - both button state and toast
+          downloadSuccess = true;
+          toast(`${data.skill.name} installed successfully!`, 'success');
+          setTimeout(() => downloadSuccess = false, 3000);
+        } catch (err: unknown) {
+          // User cancelled the directory picker - not an error
+          if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
+            return;
+          }
+          console.error('Download failed:', err);
+          fallbackDownload();
+        }
+      } else {
+        fallbackDownload();
+      }
+    } finally {
+      isDownloading = false;
+    }
+  }
+
+  // Fallback to zip download
+  function fallbackDownload() {
+    if (!data.skill) return;
+    window.location.href = `/api/skills/${data.skill.slug}/download`;
+  }
 
   // Fallback rendered README (without shiki)
   const fallbackReadme = $derived(() => {
@@ -305,6 +424,34 @@
     if (!data.skill) return false;
     return !data.skill.orgSlug && !data.skill.ownerName && !data.skill.authorUsername;
   }
+
+  // Highlight command syntax
+  function highlightCommand(command: string): string {
+    // Parse: $ npx skillscat add owner/repo
+    // or: $ npx add-skill owner/repo
+    const parts = command.split(' ');
+    const highlighted: string[] = [];
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (part === 'npx') {
+        highlighted.push(`<span class="cmd-npx">${part}</span>`);
+      } else if (part === 'skillscat' || part === 'add-skill') {
+        highlighted.push(`<span class="cmd-tool">${part}</span>`);
+      } else if (part === 'add') {
+        highlighted.push(`<span class="cmd-action">${part}</span>`);
+      } else if (part.includes('/')) {
+        // owner/repo format
+        highlighted.push(`<span class="cmd-repo">${part}</span>`);
+      } else {
+        highlighted.push(`<span class="cmd-default">${part}</span>`);
+      }
+    }
+
+    return highlighted.join(' ');
+  }
+
+  const highlightedCommand = $derived(highlightCommand(currentCommand));
 </script>
 
 <svelte:head>
@@ -336,8 +483,8 @@
       <div class="lg:col-span-2 space-y-8">
         <!-- Header -->
         <div class="card skill-header">
-          <!-- Top row: Avatar + Title + Badges -->
-          <div class="flex items-start gap-4 mb-4">
+          <!-- Top row: Avatar + Title -->
+          <div class="flex items-center gap-3 mb-3">
             <!-- Avatar: clickable, links to author profile -->
             <a
               href={getAuthorProfileUrl()}
@@ -349,50 +496,63 @@
                 <img
                   src={data.skill.orgAvatar}
                   alt={data.skill.orgName}
-                  class="w-14 h-14 rounded-xl border-2 border-border"
+                  class="w-12 h-12 rounded-xl border-2 border-border"
                 />
               {:else if data.skill.ownerAvatar}
                 <img
                   src={data.skill.ownerAvatar}
                   alt={data.skill.ownerName}
-                  class="w-14 h-14 rounded-xl border-2 border-border"
+                  class="w-12 h-12 rounded-xl border-2 border-border"
                 />
               {:else if data.skill.repoOwner}
                 <img
                   src={`https://github.com/${data.skill.repoOwner}.png`}
                   alt={data.skill.repoOwner}
-                  class="w-14 h-14 rounded-xl border-2 border-border"
+                  class="w-12 h-12 rounded-xl border-2 border-border"
                 />
               {:else}
-                <div class="w-14 h-14 rounded-xl border-2 border-border bg-primary flex items-center justify-center text-white text-xl font-bold">
+                <div class="w-12 h-12 rounded-xl border-2 border-border bg-primary flex items-center justify-center text-white text-lg font-bold">
                   {data.skill.name[0].toUpperCase()}
                 </div>
               {/if}
             </a>
 
-            <!-- Title and badges -->
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2 flex-wrap mb-1">
-                <h1 class="skill-title-inline">{data.skill.name}</h1>
-                <!-- Only show non-public visibility badges -->
-                {#if data.skill.visibility !== 'public'}
-                  <span class="px-2.5 py-1 text-xs font-semibold rounded-full {getVisibilityColor(data.skill.visibility)}">
-                    {data.skill.visibility}
-                  </span>
-                {/if}
-                {#if data.skill.sourceType === 'upload'}
-                  <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                    uploaded
-                  </span>
-                {/if}
-              </div>
-              <!-- Description -->
-              <p class="skill-description-inline">{data.skill.description || 'No description provided'}</p>
+            <!-- Title + Bookmark -->
+            <div class="flex-1 min-w-0 flex items-center gap-3">
+              <h1 class="skill-title-inline flex-1">{data.skill.name}</h1>
+              {#if isAuthenticated}
+                <button
+                  class="bookmark-btn"
+                  class:bookmarked={isBookmarked}
+                  onclick={handleBookmark}
+                  disabled={isBookmarking}
+                  aria-label={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
+                >
+                  <svg class="w-6 h-6" fill={isBookmarked ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                  </svg>
+                </button>
+              {/if}
             </div>
           </div>
 
-          <!-- Meta row -->
+          <!-- Description (full width) -->
+          <p class="skill-description-full">{data.skill.description || 'No description provided'}</p>
+
+          <!-- Meta row with badges -->
           <div class="skill-meta">
+            <!-- Badges first -->
+            {#if data.skill.visibility !== 'public'}
+              <span class="px-2.5 py-1 text-xs font-semibold rounded-full {getVisibilityColor(data.skill.visibility)}">
+                {data.skill.visibility}
+              </span>
+            {/if}
+            {#if data.skill.sourceType === 'upload'}
+              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                uploaded
+              </span>
+            {/if}
+
             <!-- Owner/Org link -->
             {#if data.skill.orgSlug}
               <a
@@ -465,8 +625,22 @@
           </div>
         </div>
 
-        <!-- File Browser -->
-        {#if data.skill.fileStructure && data.skill.fileStructure.length > 0}
+        <!-- SKILL.md Content (priority over File Browser) -->
+        {#if data.skill.readme}
+          <div class="card skill-content-card">
+            <div class="skill-content-header">
+              <svg class="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span class="skill-content-title">SKILL.md</span>
+            </div>
+            <div class="skill-content-divider"></div>
+            <div class="prose-readme">
+              {@html renderedReadme}
+            </div>
+          </div>
+        {:else if data.skill.fileStructure && data.skill.fileStructure.length > 0}
+          <!-- File Browser (only show when no readme) -->
           <div class="card">
             <h2 class="text-lg font-semibold text-fg mb-4">Files</h2>
             <div class="file-browser">
@@ -513,16 +687,6 @@
           </div>
         {/if}
 
-        <!-- README -->
-        {#if data.skill.readme}
-          <div class="card">
-            <h2 class="text-lg font-semibold text-fg mb-4">README</h2>
-            <div class="prose-readme">
-              {@html renderedReadme}
-            </div>
-          </div>
-        {/if}
-
         <!-- Categories -->
         {#if data.skill.categories?.length}
           <div class="card">
@@ -552,12 +716,25 @@
         <!-- Actions -->
         <div class="card">
           <div class="space-y-3">
-            <a href="/api/skills/{data.skill.slug}/download" class="download-btn" download>
-              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              Download Skill
-            </a>
+            <button onclick={handleDownload} class="download-btn" disabled={isDownloading}>
+              {#if downloadSuccess}
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+                Installed!
+              {:else if isDownloading}
+                <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Installing...
+              {:else}
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download Skill
+              {/if}
+            </button>
             {#if data.skill.githubUrl}
               <a href={data.skill.githubUrl} target="_blank" rel="noopener noreferrer" class="github-btn">
                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -573,27 +750,31 @@
         <div class="card">
           <h3 class="font-semibold text-fg mb-4">Install by CLI</h3>
 
-          <!-- CLI Selector -->
-          <div class="flex flex-wrap gap-2 mb-4">
+          <!-- CLI Switcher -->
+          <div class="cli-switcher">
             {#each installCommands as installer (installer.name)}
               <button
-                class="install-tab"
-                class:install-tab-active={selectedInstaller === installer.name}
+                class="cli-switcher-btn"
+                class:active={selectedInstaller === installer.name}
                 onclick={() => selectedInstaller = installer.name}
               >
                 {installer.label}
               </button>
             {/each}
+            <div
+              class="cli-switcher-indicator"
+              style="transform: translateX({installCommands.findIndex(c => c.name === selectedInstaller) * 100}%)"
+            ></div>
           </div>
 
           <!-- Command -->
           <div class="command-box">
-            <code class="command-text"><span class="command-prompt">$</span> {currentCommand}</code>
+            <code class="command-text">{@html highlightedCommand}</code>
             <CopyButton text={currentCommand} size="sm" />
           </div>
 
           <!-- Description -->
-          <p class="mt-3 text-xs text-fg-muted">
+          <p class="command-description">
             {installCommands.find(c => c.name === selectedInstaller)?.description}
           </p>
         </div>
@@ -637,7 +818,7 @@
   <div class="not-found-page">
     <div class="not-found-content">
       <div class="not-found-icon">
-        <svg class="w-20 h-20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       </div>
@@ -692,11 +873,52 @@
     letter-spacing: -0.02em;
   }
 
+  /* Bookmark Button */
+  .bookmark-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    color: var(--fg-muted);
+    background: var(--bg-subtle);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .bookmark-btn:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: var(--primary-subtle);
+  }
+
+  .bookmark-btn.bookmarked {
+    color: var(--primary);
+    background: var(--primary-subtle);
+    border-color: var(--primary);
+  }
+
+  .bookmark-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .skill-description-inline {
     font-size: 0.9375rem;
     color: var(--fg-muted);
     line-height: 1.5;
     margin-top: 0.25rem;
+  }
+
+  .skill-description-full {
+    font-size: 0.9375rem;
+    color: var(--fg-muted);
+    line-height: 1.6;
+    margin-bottom: 1rem;
   }
 
   .skill-title {
@@ -840,6 +1062,16 @@
     --btn-shadow-color: oklch(40% 0.20 55);
   }
 
+  .download-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+
+  .download-btn:disabled:hover {
+    transform: translateY(0);
+    --btn-shadow-offset: 4px;
+  }
+
   /* Category Tags */
   .category-tag {
     display: inline-flex;
@@ -903,32 +1135,56 @@
     transform: translateY(2px);
   }
 
-  .install-tab {
-    padding: 0.625rem 1rem;
-    min-height: 44px;
-    font-size: 0.875rem;
+  /* CLI Switcher */
+  .cli-switcher {
+    --switcher-shadow: 3px;
+    position: relative;
+    display: inline-flex;
+    padding: 4px;
+    background: var(--bg-subtle);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-full);
+    margin-bottom: 1rem;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
+  }
+
+  .cli-switcher-btn {
+    position: relative;
+    z-index: 1;
+    padding: 0.5rem 1rem;
+    font-size: 0.8125rem;
     font-weight: 600;
     color: var(--muted-foreground);
     background: transparent;
-    border: 2px solid var(--border);
+    border: none;
     border-radius: var(--radius-full);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: color 0.2s ease;
+    white-space: nowrap;
   }
 
-  .install-tab:hover {
-    color: var(--primary);
-    border-color: var(--primary);
+  .cli-switcher-btn:hover {
+    color: var(--foreground);
   }
 
-  .install-tab-active {
-    color: #ffffff;
+  .cli-switcher-btn.active {
+    color: white;
+  }
+
+  .cli-switcher-indicator {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: calc(50% - 4px);
+    height: calc(100% - 8px);
     background: var(--primary);
-    border-color: var(--primary);
+    border-radius: var(--radius-full);
+    box-shadow: 0 var(--switcher-shadow) 0 0 oklch(50% 0.22 55);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  .install-tab-active:hover {
-    color: #ffffff;
+  :root.dark .cli-switcher-indicator {
+    box-shadow: 0 var(--switcher-shadow) 0 0 oklch(40% 0.20 55);
   }
 
   /* Command Box Styles */
@@ -937,10 +1193,15 @@
     align-items: center;
     gap: 0.75rem;
     padding: 0.75rem 1rem;
-    background: var(--bg-emphasis);
+    background: var(--bg);
     border-radius: var(--radius-lg);
     border: 2px solid var(--border);
     font-family: var(--font-mono);
+  }
+
+  :root:not(.dark) .command-box {
+    background: #fafafa;
+    border-color: #e5e5e5;
   }
 
   .command-text {
@@ -950,32 +1211,47 @@
     overflow-x: auto;
     white-space: nowrap;
     line-height: 1.5;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
+    /* Hide scrollbar */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
 
   .command-text::-webkit-scrollbar {
-    height: 4px;
+    display: none;
   }
 
-  .command-text::-webkit-scrollbar-track {
-    background: transparent;
+  /* Command syntax highlighting */
+  .command-text :global(.cmd-npx) {
+    color: var(--accent);
+    font-weight: 600;
   }
 
-  .command-text::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 2px;
+  .command-text :global(.cmd-tool) {
+    color: var(--fg);
+    font-weight: 500;
   }
 
-  .command-text::-webkit-scrollbar-thumb:hover {
-    background: var(--fg-muted);
-  }
-
-  .command-prompt {
+  .command-text :global(.cmd-action) {
     color: var(--primary);
-    font-weight: 700;
-    user-select: none;
-    margin-right: 0.5rem;
+    font-weight: 600;
+  }
+
+  .command-text :global(.cmd-repo) {
+    color: var(--fg-muted);
+  }
+
+  .command-text :global(.cmd-default) {
+    color: var(--fg);
+  }
+
+  /* Command Description */
+  .command-description {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+    line-height: 1.5;
   }
 
   /* README Markdown Styles */
@@ -1211,11 +1487,21 @@
   }
 
   .not-found-icon {
-    color: var(--fg-muted);
-    margin-bottom: 1rem;
-    opacity: 0.5;
     display: flex;
+    align-items: center;
     justify-content: center;
+    width: 5rem;
+    height: 5rem;
+    margin: 0 auto 1.5rem;
+    background: linear-gradient(135deg, var(--primary-subtle) 0%, rgba(var(--accent-rgb), 0.1) 100%);
+    border: 2px solid var(--primary);
+    border-radius: var(--radius-xl);
+    color: var(--primary);
+  }
+
+  .not-found-icon svg {
+    width: 2.5rem;
+    height: 2.5rem;
   }
 
   .not-found-code {
@@ -1248,5 +1534,72 @@
     gap: 1rem;
     justify-content: center;
     flex-wrap: wrap;
+  }
+
+  /* SKILL.md Content Card Styles */
+  .skill-content-card {
+    padding: 2rem;
+  }
+
+  .skill-content-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .skill-content-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--fg);
+    font-family: var(--font-mono);
+  }
+
+  .skill-content-divider {
+    height: 2px;
+    background: linear-gradient(90deg, var(--primary) 0%, transparent 100%);
+    margin-bottom: 1.5rem;
+    border-radius: 1px;
+  }
+
+  /* Mobile Responsive Styles */
+  @media (max-width: 640px) {
+    .skill-header {
+      padding: 1.25rem;
+    }
+
+    .skill-title-inline {
+      font-size: 1.25rem;
+    }
+
+    .skill-description-full {
+      font-size: 0.875rem;
+    }
+
+    .skill-meta {
+      gap: 0.75rem;
+    }
+
+    .skill-meta-item {
+      font-size: 0.8125rem;
+    }
+
+    .command-box {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.5rem;
+    }
+
+    .command-text {
+      padding-bottom: 0.5rem;
+    }
+
+    .skill-content-card {
+      padding: 1.25rem;
+    }
+
+    .skill-content-divider {
+      margin-bottom: 1rem;
+    }
   }
 </style>
