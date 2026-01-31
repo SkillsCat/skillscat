@@ -149,10 +149,19 @@ async function callOpenRouter(
     throw new Error(`OpenRouter API error: ${response.status} - ${error}`);
   }
 
-  const data: OpenRouterResponse = await response.json();
-  const content = data.choices[0]?.message?.content;
+  const data = await response.json() as Record<string, unknown>;
+
+  // Log full response for debugging if structure is unexpected
+  if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
+    console.error(`[OpenRouter] Unexpected response structure:`, JSON.stringify(data));
+    throw new Error(`OpenRouter returned unexpected response: ${JSON.stringify(data).slice(0, 500)}`);
+  }
+
+  const typedData = data as unknown as OpenRouterResponse;
+  const content = typedData.choices[0]?.message?.content;
 
   if (!content) {
+    console.error(`[OpenRouter] No content in response:`, JSON.stringify(data));
     throw new Error('No content in OpenRouter response');
   }
 
@@ -229,10 +238,19 @@ async function callDeepSeek(
     throw new Error(`DeepSeek API error: ${response.status} - ${error}`);
   }
 
-  const data = (await response.json()) as OpenRouterResponse;
-  const content = data.choices[0]?.message?.content;
+  const data = await response.json() as Record<string, unknown>;
+
+  // Log full response for debugging if structure is unexpected
+  if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
+    console.error(`[DeepSeek] Unexpected response structure:`, JSON.stringify(data));
+    throw new Error(`DeepSeek returned unexpected response: ${JSON.stringify(data).slice(0, 500)}`);
+  }
+
+  const typedData = data as unknown as OpenRouterResponse;
+  const content = typedData.choices[0]?.message?.content;
 
   if (!content) {
+    console.error(`[DeepSeek] No content in response:`, JSON.stringify(data));
     throw new Error('No content in DeepSeek response');
   }
 
