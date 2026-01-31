@@ -116,7 +116,17 @@ export interface DirectoryFile {
 export interface FileStructure {
   commitSha: string;      // 索引时的 commit SHA
   indexedAt: string;      // 索引时间
-  files: DirectoryFile[]; // 文件列表
+  files: DirectoryFile[]; // 扁平文件列表 (用于 R2 缓存查找)
+  fileTree: FileNode[];   // 树形结构 (用于前端展示)
+}
+
+// 文件树节点 (用于前端展示)
+export interface FileNode {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  size?: number;
+  children?: FileNode[];
 }
 
 // GitHub Tree API 响应

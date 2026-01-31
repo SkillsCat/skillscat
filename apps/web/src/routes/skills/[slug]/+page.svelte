@@ -65,6 +65,26 @@
     }
   });
 
+  // Handle clicks on relative file links in markdown content
+  $effect(() => {
+    function handleFileLinkClick(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      const fileLink = target.closest('.file-link[data-file-path]') as HTMLElement | null;
+      if (fileLink) {
+        e.preventDefault();
+        const filePath = fileLink.dataset.filePath;
+        if (filePath) {
+          navigateToFile(filePath);
+        }
+      }
+    }
+
+    document.addEventListener('click', handleFileLinkClick);
+    return () => {
+      document.removeEventListener('click', handleFileLinkClick);
+    };
+  });
+
   async function loadShiki() {
     try {
       const { createHighlighter } = await import('shiki');
@@ -95,6 +115,27 @@
     const strippedReadme = stripFrontmatter(data.skill.readme);
 
     const renderer = new marked.Renderer();
+
+    // Custom link renderer for relative file links
+    renderer.link = function({ href, text }: { href: string; text: string }) {
+      if (!href) return text;
+
+      // Check if it's a relative link (not http, https, #, or mailto)
+      const isRelativeLink = href && !href.startsWith('http://') && !href.startsWith('https://') && !href.startsWith('#') && !href.startsWith('mailto:');
+
+      if (isRelativeLink) {
+        // Relative link - make it clickable to navigate to file
+        const escapedHref = href.replace(/"/g, '&quot;');
+        const escapedText = typeof text === 'string' ? text : String(text);
+        return `<a href="#" class="file-link" data-file-path="${escapedHref}">${escapedText}</a>`;
+      }
+
+      // External link or anchor - normal handling
+      if (href.startsWith('#')) {
+        return `<a href="${href}">${text}</a>`;
+      }
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+    };
 
     renderer.code = function({ text, lang }: { text: string; lang?: string }) {
       const language = lang || 'plaintext';
@@ -329,6 +370,10 @@
   // File browser state
   let expandedFolders = $state<Set<string>>(new Set());
   let selectedFile = $state<string | null>(null);
+  let fileContent = $state<string | null>(null);
+  let fileLoading = $state(false);
+  let fileError = $state<string | null>(null);
+  let highlightedFileContent = $state<string>('');
 
   function toggleFolder(path: string) {
     const newSet = new Set(expandedFolders);
@@ -340,28 +385,205 @@
     expandedFolders = newSet;
   }
 
-  function selectFile(path: string) {
+  async function selectFile(path: string) {
+    if (selectedFile === path) return;
     selectedFile = path;
+    fileContent = null;
+    fileError = null;
+    highlightedFileContent = '';
+
+    // Check if it's a binary file
+    if (isBinaryFile(path)) {
+      fileLoading = false;
+      fileError = 'binary';
+      return;
+    }
+
+    fileLoading = true;
+
+    try {
+      const res = await fetch(`/api/skills/${data.skill?.slug}/file?path=${encodeURIComponent(path)}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: 'Failed to load file' })) as { message?: string };
+        throw new Error(err.message || 'Failed to load file');
+      }
+      const result = await res.json() as { path: string; content: string };
+      fileContent = result.content;
+
+      // Highlight the content if shiki is loaded
+      if (highlighter && fileContent) {
+        const ext = path.split('.').pop()?.toLowerCase() || 'plaintext';
+        const langMap: Record<string, string> = {
+          'js': 'javascript', 'ts': 'typescript', 'py': 'python',
+          'sh': 'bash', 'yml': 'yaml', 'md': 'markdown'
+        };
+        const lang = langMap[ext] || ext;
+        try {
+          highlightedFileContent = highlighter.codeToHtml(fileContent, {
+            lang,
+            themes: { light: 'github-light', dark: 'github-dark' }
+          });
+        } catch {
+          // Language not supported, show plain text
+          highlightedFileContent = '';
+        }
+      }
+    } catch (err) {
+      fileError = err instanceof Error ? err.message : 'Failed to load file';
+    } finally {
+      fileLoading = false;
+    }
   }
 
-  function getFileIcon(node: FileNode): string {
-    if (node.type === 'directory') {
-      return expandedFolders.has(node.path) ? '📂' : '📁';
+  // Expand parent folders for a given file path
+  function expandParentFolders(filePath: string) {
+    const parts = filePath.split('/');
+    const newSet = new Set(expandedFolders);
+    let currentPath = '';
+    for (let i = 0; i < parts.length - 1; i++) {
+      currentPath = currentPath ? `${currentPath}/${parts[i]}` : parts[i];
+      newSet.add(currentPath);
     }
-    const ext = node.name.split('.').pop()?.toLowerCase();
+    expandedFolders = newSet;
+  }
+
+  // Navigate to a file from a relative link
+  function navigateToFile(relativePath: string) {
+    if (!data.skill?.fileStructure) return;
+
+    // Normalize the path (remove leading ./)
+    let normalizedPath = relativePath.replace(/^\.\//, '');
+
+    // Find the file in the file structure
+    function findFile(nodes: FileNode[], targetPath: string): FileNode | null {
+      for (const node of nodes) {
+        if (node.path === targetPath || node.path.endsWith('/' + targetPath) || node.path === targetPath.replace(/^\//, '')) {
+          return node;
+        }
+        if (node.children) {
+          const found = findFile(node.children, targetPath);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+
+    const file = findFile(data.skill.fileStructure, normalizedPath);
+    if (file) {
+      expandParentFolders(file.path);
+      selectFile(file.path);
+
+      // Scroll to the file in the file browser after DOM updates
+      requestAnimationFrame(() => {
+        const fileElement = document.querySelector(`[data-file-path="${file.path}"]`);
+        if (fileElement) {
+          fileElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      });
+    }
+  }
+
+  // Binary file extensions that cannot be previewed
+  const BINARY_EXTENSIONS = new Set([
+    'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp',
+    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+    'zip', 'tar', 'gz', 'rar', '7z',
+    'mp3', 'mp4', 'wav', 'avi', 'mov', 'mkv', 'webm',
+    'exe', 'dll', 'so', 'dylib',
+    'woff', 'woff2', 'ttf', 'otf', 'eot'
+  ]);
+
+  function isBinaryFile(path: string): boolean {
+    const ext = path.split('.').pop()?.toLowerCase() || '';
+    return BINARY_EXTENSIONS.has(ext);
+  }
+
+  // SVG icons for different file types (VS Code style)
+  function getFileIconSvg(node: FileNode): string {
+    if (node.type === 'directory') {
+      const isExpanded = expandedFolders.has(node.path);
+      return isExpanded
+        ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M2 10h20"/></svg>`
+        : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
+    }
+
+    const ext = node.name.split('.').pop()?.toLowerCase() || '';
+    const name = node.name.toLowerCase();
+
+    // Special files
+    if (name === 'skill.md' || name === 'readme.md') {
+      return `<svg viewBox="0 0 24 24" fill="none" stroke="#519aba" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>`;
+    }
+
+    // By extension
     switch (ext) {
-      case 'md': return '📝';
+      case 'md':
+      case 'mdx':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#519aba" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>`;
       case 'js':
+      case 'mjs':
+      case 'cjs':
+        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#f7df1e"/><text x="12" y="17" font-size="10" font-weight="bold" fill="#000" text-anchor="middle">JS</text></svg>`;
       case 'ts':
+      case 'mts':
+      case 'cts':
+        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#3178c6"/><text x="12" y="17" font-size="10" font-weight="bold" fill="#fff" text-anchor="middle">TS</text></svg>`;
       case 'jsx':
-      case 'tsx': return '📜';
-      case 'json': return '📋';
+        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#61dafb"/><text x="12" y="17" font-size="9" font-weight="bold" fill="#000" text-anchor="middle">JSX</text></svg>`;
+      case 'tsx':
+        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#3178c6"/><text x="12" y="17" font-size="9" font-weight="bold" fill="#fff" text-anchor="middle">TSX</text></svg>`;
+      case 'json':
+      case 'jsonc':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#cbcb41" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h2"/><path d="M8 17h2"/><path d="M14 13h2"/><path d="M14 17h2"/></svg>`;
       case 'css':
-      case 'scss': return '🎨';
-      case 'html': return '🌐';
-      case 'py': return '🐍';
-      case 'sh': return '⚙️';
-      default: return '📄';
+        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#264de4"/><text x="12" y="17" font-size="9" font-weight="bold" fill="#fff" text-anchor="middle">CSS</text></svg>`;
+      case 'scss':
+      case 'sass':
+        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#cc6699"/><text x="12" y="17" font-size="8" font-weight="bold" fill="#fff" text-anchor="middle">SCSS</text></svg>`;
+      case 'html':
+      case 'htm':
+        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#e34c26"/><text x="12" y="17" font-size="8" font-weight="bold" fill="#fff" text-anchor="middle">HTML</text></svg>`;
+      case 'py':
+      case 'pyw':
+      case 'pyi':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#3572a5" stroke-width="2"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>`;
+      case 'sh':
+      case 'bash':
+      case 'zsh':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#4eaa25" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 15l3-3-3-3"/><path d="M13 15h4"/></svg>`;
+      case 'yaml':
+      case 'yml':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#cb171e" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13l2 2 2-2"/><path d="M12 15v3"/></svg>`;
+      case 'toml':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#9c4121" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>`;
+      case 'env':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#ecd53f" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><circle cx="12" cy="14" r="3"/></svg>`;
+      case 'svg':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#ffb13b" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg>`;
+      case 'png':
+      case 'jpg':
+      case 'jpeg':
+      case 'gif':
+      case 'webp':
+      case 'ico':
+      case 'bmp':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#a074c4" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`;
+      case 'go':
+        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#00add8"/><text x="12" y="17" font-size="10" font-weight="bold" fill="#fff" text-anchor="middle">GO</text></svg>`;
+      case 'rs':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#dea584" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><circle cx="12" cy="14" r="3"/></svg>`;
+      case 'svelte':
+        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#ff3e00"/><text x="12" y="17" font-size="8" font-weight="bold" fill="#fff" text-anchor="middle">SVE</text></svg>`;
+      case 'vue':
+        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#42b883"/><text x="12" y="17" font-size="8" font-weight="bold" fill="#fff" text-anchor="middle">VUE</text></svg>`;
+      case 'dockerfile':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#2496ed" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 13h2v2H7z"/><path d="M11 13h2v2h-2z"/><path d="M15 13h2v2h-2z"/><path d="M11 9h2v2h-2z"/></svg>`;
+      case 'gitignore':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#f05032" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6"/><path d="M15 9l-6 6"/></svg>`;
+      case 'lock':
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
+      default:
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
     }
   }
 
@@ -625,37 +847,25 @@
           </div>
         </div>
 
-        <!-- SKILL.md Content (priority over File Browser) -->
-        {#if data.skill.readme}
-          <div class="card skill-content-card">
-            <div class="skill-content-header">
-              <svg class="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <span class="skill-content-title">SKILL.md</span>
-            </div>
-            <div class="skill-content-divider"></div>
-            <div class="prose-readme">
-              {@html renderedReadme}
-            </div>
-          </div>
-        {:else if data.skill.fileStructure && data.skill.fileStructure.length > 0}
-          <!-- File Browser (only show when no readme) -->
+        <!-- File Browser (show above SKILL.md when files exist) -->
+        {#if data.skill.fileStructure && data.skill.fileStructure.length > 0}
           <div class="card">
             <h2 class="text-lg font-semibold text-fg mb-4">Files</h2>
             <div class="file-browser">
               {#snippet renderFileTree(nodes: FileNode[], depth: number = 0)}
                 {#each nodes as node (node.path)}
-                  <div class="file-item" style="padding-left: {depth * 1.25}rem">
+                  <div class="file-item" style="padding-left: {Math.min(depth, 8) * 1.25}rem">
                     {#if node.type === 'directory'}
                       <button
                         class="file-row"
                         onclick={() => toggleFolder(node.path)}
+                        title={node.path}
+                        data-file-path={node.path}
                       >
-                        <span class="file-icon">{getFileIcon(node)}</span>
+                        <span class="file-icon">{@html getFileIconSvg(node)}</span>
                         <span class="file-name">{node.name}</span>
                         <svg
-                          class="w-4 h-4 text-fg-muted transition-transform {expandedFolders.has(node.path) ? 'rotate-90' : ''}"
+                          class="w-4 h-4 text-fg-muted transition-transform flex-shrink-0 {expandedFolders.has(node.path) ? 'rotate-90' : ''}"
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -671,8 +881,10 @@
                         class="file-row"
                         class:file-row-selected={selectedFile === node.path}
                         onclick={() => selectFile(node.path)}
+                        title={node.path}
+                        data-file-path={node.path}
                       >
-                        <span class="file-icon">{getFileIcon(node)}</span>
+                        <span class="file-icon">{@html getFileIconSvg(node)}</span>
                         <span class="file-name">{node.name}</span>
                         {#if node.size}
                           <span class="file-size">{formatFileSize(node.size)}</span>
@@ -683,6 +895,68 @@
                 {/each}
               {/snippet}
               {@render renderFileTree(data.skill.fileStructure)}
+            </div>
+
+            <!-- File Content Viewer -->
+            {#if selectedFile}
+              <div class="file-content-viewer">
+                <div class="file-content-header">
+                  <span class="file-content-path">{selectedFile}</span>
+                  {#if fileContent}
+                    <CopyButton text={fileContent} size="sm" />
+                  {/if}
+                </div>
+                <div class="file-content-body">
+                  {#if fileLoading}
+                    <div class="file-loading">
+                      <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>Loading...</span>
+                    </div>
+                  {:else if fileError === 'binary'}
+                    <div class="file-unsupported">
+                      <svg class="file-unsupported-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span class="file-unsupported-text">Binary file - preview not available</span>
+                      <span class="file-unsupported-hint">Download the skill to view this file</span>
+                    </div>
+                  {:else if fileError}
+                    <div class="file-error">
+                      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span>{fileError}</span>
+                    </div>
+                  {:else if fileContent}
+                    {#if highlightedFileContent}
+                      <div class="file-code-highlighted">
+                        {@html highlightedFileContent}
+                      </div>
+                    {:else}
+                      <pre class="file-code-plain"><code>{fileContent}</code></pre>
+                    {/if}
+                  {/if}
+                </div>
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        <!-- SKILL.md Content -->
+        {#if data.skill.readme}
+          <div class="card skill-content-card">
+            <div class="skill-content-header">
+              <svg class="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span class="skill-content-title">SKILL.md</span>
+            </div>
+            <div class="skill-content-divider"></div>
+            <div class="prose-readme">
+              {@html renderedReadme}
             </div>
           </div>
         {/if}
@@ -949,7 +1223,7 @@
   /* File Browser Styles */
   .file-browser {
     max-height: 400px;
-    overflow-y: auto;
+    overflow: auto;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--bg-subtle);
@@ -957,6 +1231,8 @@
 
   .file-item {
     border-bottom: 1px solid var(--border);
+    max-width: 100%;
+    overflow: hidden;
   }
 
   .file-item:last-child {
@@ -968,6 +1244,7 @@
     align-items: center;
     gap: 0.5rem;
     width: 100%;
+    max-width: 100%;
     padding: 0.625rem 0.75rem;
     background: transparent;
     border: none;
@@ -976,6 +1253,7 @@
     font-size: 0.875rem;
     color: var(--fg);
     transition: background-color 0.15s ease;
+    overflow: hidden;
   }
 
   .file-row:hover {
@@ -988,8 +1266,18 @@
   }
 
   .file-icon {
-    font-size: 1rem;
+    width: 1rem;
+    height: 1rem;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fg-muted);
+  }
+
+  .file-icon :global(svg) {
+    width: 100%;
+    height: 100%;
   }
 
   .file-name {
@@ -1004,6 +1292,130 @@
     font-size: 0.75rem;
     color: var(--fg-muted);
     flex-shrink: 0;
+  }
+
+  /* File Content Viewer */
+  .file-content-viewer {
+    margin-top: 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .file-content-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-muted);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .file-content-path {
+    font-size: 0.8125rem;
+    font-family: var(--font-mono);
+    color: var(--fg-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .file-content-body {
+    min-height: 120px;
+    max-height: 500px;
+    overflow: auto;
+    background: var(--bg-subtle);
+  }
+
+  :root.dark .file-content-body {
+    background: #0d1117;
+  }
+
+  .file-loading,
+  .file-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 120px;
+    padding: 2rem;
+    color: var(--fg-muted);
+    font-size: 0.875rem;
+  }
+
+  .file-error {
+    color: var(--error);
+  }
+
+  /* Binary file unsupported preview */
+  .file-unsupported {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 120px;
+    padding: 2.5rem 1.5rem;
+    text-align: center;
+  }
+
+  .file-unsupported-icon {
+    width: 3rem;
+    height: 3rem;
+    color: var(--fg-muted);
+    opacity: 0.6;
+  }
+
+  .file-unsupported-text {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--fg-muted);
+  }
+
+  .file-unsupported-hint {
+    font-size: 0.8125rem;
+    color: var(--fg-muted);
+    opacity: 0.7;
+  }
+
+  .file-code-highlighted {
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+
+  .file-code-highlighted :global(pre) {
+    margin: 0;
+    padding: 1rem;
+    background: transparent !important;
+    overflow-x: auto;
+  }
+
+  .file-code-highlighted :global(code) {
+    font-family: var(--font-mono);
+  }
+
+  /* Dark mode: use GitHub dark theme background */
+  :root.dark .file-code-highlighted :global(.shiki),
+  :root.dark .file-code-highlighted :global(pre) {
+    background: #0d1117 !important;
+  }
+
+  :root.dark .file-code-highlighted :global(.shiki span) {
+    color: var(--shiki-dark) !important;
+  }
+
+  .file-code-plain {
+    margin: 0;
+    padding: 1rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .file-code-plain code {
+    font-family: var(--font-mono);
+    color: var(--fg);
   }
 
   /* Download Button */
@@ -1287,6 +1699,21 @@
     color: var(--primary-hover);
   }
 
+  /* Relative file links in markdown */
+  .prose-readme :global(.file-link) {
+    color: var(--primary);
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    transition: color 0.15s ease, text-decoration-color 0.15s ease;
+  }
+
+  .prose-readme :global(.file-link:hover) {
+    color: var(--primary-hover);
+    text-decoration-style: solid;
+  }
+
   .prose-readme :global(code) {
     background: var(--bg-emphasis);
     padding: 0.2rem 0.4rem;
@@ -1403,10 +1830,12 @@
     background-color: var(--shiki-light-bg) !important;
   }
 
-  :root.dark .prose-readme :global(.shiki),
+  :root.dark .prose-readme :global(.shiki) {
+    background-color: #0d1117 !important;
+  }
+
   :root.dark .prose-readme :global(.shiki span) {
     color: var(--shiki-dark) !important;
-    background-color: var(--shiki-dark-bg) !important;
   }
 
   .prose-readme :global(ul),

@@ -245,3 +245,71 @@ export function createLogger(prefix: string): Logger {
     },
   };
 }
+
+// ============================================
+// File Tree Utilities
+// ============================================
+
+import type { FileNode, DirectoryFile } from './types';
+
+/**
+ * Convert flat file list to tree structure for frontend display
+ */
+export function buildFileTree(files: DirectoryFile[]): FileNode[] {
+  const root: FileNode[] = [];
+  const nodeMap = new Map<string, FileNode>();
+
+  // Sort files by path to ensure parent directories are processed first
+  const sortedFiles = [...files].sort((a, b) => a.path.localeCompare(b.path));
+
+  for (const file of sortedFiles) {
+    const parts = file.path.split('/');
+    let currentPath = '';
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isLast = i === parts.length - 1;
+      const parentPath = currentPath;
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+
+      if (!nodeMap.has(currentPath)) {
+        const node: FileNode = {
+          name: part,
+          path: currentPath,
+          type: isLast ? 'file' : 'directory',
+          ...(isLast && file.size ? { size: file.size } : {}),
+        };
+
+        nodeMap.set(currentPath, node);
+
+        if (parentPath) {
+          const parent = nodeMap.get(parentPath);
+          if (parent) {
+            if (!parent.children) parent.children = [];
+            parent.children.push(node);
+          }
+        } else {
+          root.push(node);
+        }
+      }
+    }
+  }
+
+  // Sort children: directories first, then files, alphabetically
+  function sortChildren(nodes: FileNode[]) {
+    nodes.sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === 'directory' ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+    for (const node of nodes) {
+      if (node.children) {
+        sortChildren(node.children);
+      }
+    }
+  }
+
+  sortChildren(root);
+  return root;
+}

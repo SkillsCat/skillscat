@@ -34,6 +34,7 @@ import {
   createLogger,
   isTextFile,
   decodeBase64ToUtf8,
+  buildFileTree,
 } from './shared/utils';
 
 const log = createLogger('Indexing');
@@ -914,6 +915,7 @@ async function processMessage(
     commitSha: latestCommit.sha,
     indexedAt: new Date().toISOString(),
     files: directoryFiles,
+    fileTree: buildFileTree(directoryFiles),
   };
 
   await updateSkillMetadata(skillId, latestCommit.sha, fileStructure, env);

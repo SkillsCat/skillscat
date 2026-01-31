@@ -82,11 +82,14 @@ export const GET: RequestHandler = async ({ params, platform }) => {
           return null;
         }
 
-        // Parse file structure JSON
+        // Parse file structure JSON (use pre-built fileTree)
         let fileStructure: FileNode[] | null = null;
         if (row.fileStructure) {
           try {
-            fileStructure = JSON.parse(row.fileStructure);
+            const parsed = JSON.parse(row.fileStructure);
+            if (parsed.fileTree && Array.isArray(parsed.fileTree)) {
+              fileStructure = parsed.fileTree;
+            }
           } catch {
             // Invalid JSON, leave as null
           }

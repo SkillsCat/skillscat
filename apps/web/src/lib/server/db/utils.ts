@@ -345,11 +345,20 @@ export async function getSkillBySlug(
     }
   }
 
-  // 解析文件结构
-  let fileStructure = [];
+  // 解析文件结构 (直接使用预构建的 fileTree)
+  let fileStructure: Array<{
+    name: string;
+    path: string;
+    type: 'file' | 'directory';
+    size?: number;
+    children?: any[];
+  }> = [];
   try {
     if (skillData.file_structure) {
-      fileStructure = JSON.parse(skillData.file_structure);
+      const parsed = JSON.parse(skillData.file_structure);
+      if (parsed.fileTree && Array.isArray(parsed.fileTree)) {
+        fileStructure = parsed.fileTree;
+      }
     }
   } catch {}
 
