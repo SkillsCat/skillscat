@@ -78,6 +78,7 @@ export interface TrendingEnv extends BaseEnv {
   TRENDING_STAR_WEIGHT?: string;
   TRENDING_FORK_WEIGHT?: string;
   TRENDING_VIEW_WEIGHT?: string;
+  CLASSIFICATION_QUEUE?: Queue<ClassificationMessage>; // For reclassification
 }
 
 // ============================================
@@ -256,7 +257,7 @@ export interface GitHubRepoData {
 // ============================================
 
 export type SkillTier = 'hot' | 'warm' | 'cool' | 'cold' | 'archived';
-export type ClassificationMethod = 'ai' | 'keyword' | 'skipped' | 'direct';
+export type ClassificationMethod = 'ai' | 'keyword' | 'direct';
 
 export interface SkillRecord {
   id: string;

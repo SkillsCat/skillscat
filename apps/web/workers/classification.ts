@@ -1,10 +1,10 @@
 /**
  * Classification Worker
  *
- * Cost-optimized skill classification with admission threshold:
+ * Cost-optimized skill classification:
  * - AI classification for high-quality repos (stars>=100 or known orgs)
- * - Keyword-based for repos with sufficient metadata
- * - Skip classification for low-quality repos
+ * - Keyword-based for all other repos (never skip)
+ * - Supports reclassification when repos grow to AI threshold
  *
  * Expected to reduce AI API calls by ~85%
  */
@@ -33,17 +33,17 @@ interface ClassificationMessageWithMeta extends ClassificationMessage {
   description?: string;
   tags?: string[]; // Tags from SKILL.md frontmatter for classification hints
   frontmatterCategories?: string[]; // Direct categories from frontmatter
+  isReclassification?: boolean; // Flag for reclassification (stars grew to AI threshold)
 }
 
 /**
  * Determine the classification method based on repo metadata
- * This is the core cost optimization logic
+ * Simplified logic: only stars and known orgs matter
+ * Never skip classification - all skills get at least keyword classification
  */
 function determineClassificationMethod(
   repoOwner: string,
-  stars: number,
-  topics: string[],
-  description: string | null
+  stars: number
 ): ClassificationMethod {
   // High-quality repos always get AI classification
   if (stars >= 100) {
@@ -55,22 +55,7 @@ function determineClassificationMethod(
     return 'ai';
   }
 
-  // Repos with sufficient metadata can use keyword classification
-  if (topics.length >= 2) {
-    return 'keyword';
-  }
-
-  // Repos with good description can use keyword classification
-  if (description && description.length > 50) {
-    return 'keyword';
-  }
-
-  // Low-quality repos: skip classification entirely
-  if (stars < 10 && topics.length === 0 && (!description || description.length < 20)) {
-    return 'skipped';
-  }
-
-  // Default to keyword classification
+  // All other repos get keyword classification (never skip)
   return 'keyword';
 }
 
@@ -407,7 +392,6 @@ async function recordClassificationMetric(
   const updated = {
     ai: (existing?.ai || 0) + (method === 'ai' ? 1 : 0),
     keyword: (existing?.keyword || 0) + (method === 'keyword' ? 1 : 0),
-    skipped: (existing?.skipped || 0) + (method === 'skipped' ? 1 : 0),
     direct: (existing?.direct || 0) + (method === 'direct' ? 1 : 0),
     total: (existing?.total || 0) + 1,
   };
@@ -421,9 +405,9 @@ async function processMessage(
   message: ClassificationMessageWithMeta,
   env: ClassificationEnv
 ): Promise<void> {
-  const { skillId, repoOwner, repoName, skillMdPath, stars = 0, topics = [], description = '', tags = [], frontmatterCategories } = message;
+  const { skillId, repoOwner, repoName, skillMdPath, stars = 0, tags = [], frontmatterCategories, isReclassification } = message;
 
-  log.log(`Processing skill: ${skillId} (${repoOwner}/${repoName})`, JSON.stringify(message));
+  log.log(`Processing skill: ${skillId} (${repoOwner}/${repoName})${isReclassification ? ' [RECLASSIFICATION]' : ''}`, JSON.stringify(message));
   if (tags.length > 0) {
     log.log(`Tags from frontmatter: ${tags.join(', ')}`);
   }
@@ -431,33 +415,37 @@ async function processMessage(
     log.log(`Frontmatter categories: ${frontmatterCategories.join(', ')}`);
   }
 
-  // Try direct category match first (cheapest - no AI or keyword matching needed)
-  const directMatch = tryDirectCategoryMatch(frontmatterCategories);
-  if (directMatch) {
-    log.log(`Direct category match for ${skillId}: ${directMatch.categories.join(', ')}`);
+  // For reclassification, skip direct match and force AI classification
+  if (!isReclassification) {
+    // Try direct category match first (cheapest - no AI or keyword matching needed)
+    const directMatch = tryDirectCategoryMatch(frontmatterCategories);
+    if (directMatch) {
+      log.log(`Direct category match for ${skillId}: ${directMatch.categories.join(', ')}`);
 
-    // Record metric for direct classification
-    try {
-      await recordClassificationMetric(env, 'direct');
-      log.log(`Metric recorded for ${skillId}: direct`);
-    } catch (metricError) {
-      log.error(`Failed to record metric for ${skillId}:`, metricError);
-    }
+      // Record metric for direct classification
+      try {
+        await recordClassificationMetric(env, 'direct');
+        log.log(`Metric recorded for ${skillId}: direct`);
+      } catch (metricError) {
+        log.error(`Failed to record metric for ${skillId}:`, metricError);
+      }
 
-    // Save classification and return early
-    try {
-      await saveClassification(skillId, directMatch, 'direct', env);
-      log.log(`Successfully saved direct classification for skill: ${skillId}, categories: ${directMatch.categories.join(', ')}`);
-    } catch (saveError) {
-      log.error(`Failed to save direct classification for ${skillId}:`, saveError);
-      throw saveError;
+      // Save classification and return early
+      try {
+        await saveClassification(skillId, directMatch, 'direct', env);
+        log.log(`Successfully saved direct classification for skill: ${skillId}, categories: ${directMatch.categories.join(', ')}`);
+      } catch (saveError) {
+        log.error(`Failed to save direct classification for ${skillId}:`, saveError);
+        throw saveError;
+      }
+      return;
     }
-    return;
   }
 
   // Determine classification method based on repo metadata
-  const method = determineClassificationMethod(repoOwner, stars, topics, description);
-  log.log(`Method for ${skillId}: ${method} (stars: ${stars}, topics: ${topics.length}, desc length: ${description?.length || 0})`);
+  // For reclassification, always use AI
+  const method = isReclassification ? 'ai' : determineClassificationMethod(repoOwner, stars);
+  log.log(`Method for ${skillId}: ${method} (stars: ${stars}${isReclassification ? ', reclassification' : ''})`);
 
   // Record metric
   try {
@@ -466,22 +454,6 @@ async function processMessage(
   } catch (metricError) {
     log.error(`Failed to record metric for ${skillId}:`, metricError);
     // Don't fail the whole process for metric errors
-  }
-
-  // Skip classification for low-quality repos
-  if (method === 'skipped') {
-    log.log(`Skipping classification for low-quality repo: ${skillId}`);
-    const now = Date.now();
-    try {
-      await env.DB.prepare('UPDATE skills SET classification_method = ?, updated_at = ? WHERE id = ?')
-        .bind('skipped', now, skillId)
-        .run();
-      log.log(`Updated skill as skipped: ${skillId}`);
-    } catch (dbError) {
-      log.error(`Failed to update skill as skipped: ${skillId}`, dbError);
-      throw dbError;
-    }
-    return;
   }
 
   // Get SKILL.md content

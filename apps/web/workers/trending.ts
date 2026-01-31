@@ -18,12 +18,14 @@ import type {
   SkillListItem,
   SkillTier,
   GitHubGraphQLRepoData,
+  ClassificationMessage,
 } from './shared/types';
 import { TIER_CONFIG } from './shared/types';
 
 const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql';
 const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
+const AI_CLASSIFICATION_THRESHOLD = 100; // Stars threshold for AI classification
 
 export function calculateTrendingScore(skill: {
   stars: number;
@@ -328,12 +330,13 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
 /**
  * Update skills by tier - only processes skills where next_update_at < now
  * This replaces the old recalculateAllScores() which read ALL skills
+ * Returns both count and list of updated skill IDs for reclassification detection
  */
 async function updateSkillsByTier(
   env: TrendingEnv,
   tiers: SkillTier[],
   limit: number
-): Promise<number> {
+): Promise<{ count: number; updatedIds: string[] }> {
   const now = Date.now();
   const tierPlaceholders = tiers.map(() => '?').join(',');
 
@@ -352,13 +355,14 @@ async function updateSkillsByTier(
     .all<SkillRecord>();
 
   if (skills.results.length === 0) {
-    return 0;
+    return { count: 0, updatedIds: [] };
   }
 
   console.log(`Processing ${skills.results.length} skills from tiers: ${tiers.join(', ')}`);
 
   // Process in batches of BATCH_SIZE for GraphQL
   let totalUpdated = 0;
+  const allUpdatedIds: string[] = [];
 
   for (let i = 0; i < skills.results.length; i += BATCH_SIZE) {
     const batch = skills.results.slice(i, i + BATCH_SIZE);
@@ -439,10 +443,73 @@ async function updateSkillsByTier(
 
       await env.DB.batch(statements);
       totalUpdated += updates.length;
+      allUpdatedIds.push(...updates.map(u => u.id));
     }
   }
 
-  return totalUpdated;
+  return { count: totalUpdated, updatedIds: allUpdatedIds };
+}
+
+/**
+ * Detect skills that need AI reclassification
+ * Triggers when:
+ * - Stars grew from < 100 to >= 100
+ * - Current classification_method is 'keyword' (not 'ai' or 'direct')
+ */
+async function detectReclassificationNeeded(
+  env: TrendingEnv,
+  updatedSkillIds: string[]
+): Promise<number> {
+  if (!env.CLASSIFICATION_QUEUE || updatedSkillIds.length === 0) {
+    return 0;
+  }
+
+  // Find skills that crossed the AI threshold and need reclassification
+  const placeholders = updatedSkillIds.map(() => '?').join(',');
+  const skills = await env.DB.prepare(`
+    SELECT id, repo_owner, repo_name, skill_path, stars, classification_method
+    FROM skills
+    WHERE id IN (${placeholders})
+      AND stars >= ?
+      AND classification_method = 'keyword'
+  `)
+    .bind(...updatedSkillIds, AI_CLASSIFICATION_THRESHOLD)
+    .all<{
+      id: string;
+      repo_owner: string;
+      repo_name: string;
+      skill_path: string | null;
+      stars: number;
+      classification_method: string;
+    }>();
+
+  if (skills.results.length === 0) {
+    return 0;
+  }
+
+  console.log(`Found ${skills.results.length} skills needing AI reclassification`);
+
+  // Queue reclassification messages
+  for (const skill of skills.results) {
+    const skillMdPath = skill.skill_path
+      ? `skills/${skill.repo_owner}/${skill.repo_name}/${skill.skill_path}/SKILL.md`
+      : `skills/${skill.repo_owner}/${skill.repo_name}/SKILL.md`;
+
+    const message: ClassificationMessage & { stars: number; isReclassification: boolean } = {
+      type: 'classify',
+      skillId: skill.id,
+      repoOwner: skill.repo_owner,
+      repoName: skill.repo_name,
+      skillMdPath,
+      stars: skill.stars,
+      isReclassification: true,
+    };
+
+    await env.CLASSIFICATION_QUEUE.send(message);
+    console.log(`Queued reclassification for ${skill.id} (stars: ${skill.stars})`);
+  }
+
+  return skills.results.length;
 }
 
 async function regenerateListCaches(env: TrendingEnv): Promise<void> {
@@ -541,32 +608,44 @@ export default {
   ): Promise<void> {
     console.log('Trending Worker triggered at:', new Date().toISOString());
 
+    // Collect all updated skill IDs for reclassification detection
+    const allUpdatedIds: string[] = [];
+
     // 1. Process user-marked skills first (highest priority)
     const markedUpdates = await updateMarkedSkills(env);
     console.log(`Updated ${markedUpdates} marked skills`);
 
     // 2. Update hot tier skills (every 6 hours, but check every hour)
-    const hotUpdates = await updateSkillsByTier(env, ['hot'], MAX_SKILLS_PER_RUN);
-    console.log(`Updated ${hotUpdates} hot tier skills`);
+    const hotResult = await updateSkillsByTier(env, ['hot'], MAX_SKILLS_PER_RUN);
+    console.log(`Updated ${hotResult.count} hot tier skills`);
+    allUpdatedIds.push(...hotResult.updatedIds);
 
     // 3. Update warm tier skills (every 24 hours)
-    const warmUpdates = await updateSkillsByTier(env, ['warm'], MAX_SKILLS_PER_RUN);
-    console.log(`Updated ${warmUpdates} warm tier skills`);
+    const warmResult = await updateSkillsByTier(env, ['warm'], MAX_SKILLS_PER_RUN);
+    console.log(`Updated ${warmResult.count} warm tier skills`);
+    allUpdatedIds.push(...warmResult.updatedIds);
 
     // 4. Update cool tier skills (every 7 days, but process some each hour)
-    const coolUpdates = await updateSkillsByTier(env, ['cool'], Math.floor(MAX_SKILLS_PER_RUN / 4));
-    console.log(`Updated ${coolUpdates} cool tier skills`);
+    const coolResult = await updateSkillsByTier(env, ['cool'], Math.floor(MAX_SKILLS_PER_RUN / 4));
+    console.log(`Updated ${coolResult.count} cool tier skills`);
+    allUpdatedIds.push(...coolResult.updatedIds);
 
-    // 5. Regenerate list caches
+    // 5. Detect skills needing AI reclassification (stars crossed threshold)
+    const reclassifications = await detectReclassificationNeeded(env, allUpdatedIds);
+    if (reclassifications > 0) {
+      console.log(`Queued ${reclassifications} skills for AI reclassification`);
+    }
+
+    // 6. Regenerate list caches
     await regenerateListCaches(env);
 
-    // 6. Record metrics
-    const totalBatches = Math.ceil((markedUpdates + hotUpdates + warmUpdates + coolUpdates) / BATCH_SIZE);
+    // 7. Record metrics
+    const totalBatches = Math.ceil((markedUpdates + hotResult.count + warmResult.count + coolResult.count) / BATCH_SIZE);
     await recordMetrics(env, {
       markedUpdates,
-      hotUpdates,
-      warmUpdates,
-      coolUpdates,
+      hotUpdates: hotResult.count,
+      warmUpdates: warmResult.count,
+      coolUpdates: coolResult.count,
       githubApiCalls: totalBatches,
     });
 
