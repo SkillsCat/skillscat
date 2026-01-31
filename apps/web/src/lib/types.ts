@@ -7,6 +7,8 @@ export interface ApiResponse<T> {
     total?: number;
     cursor?: string;
     hasMore?: boolean;
+    page?: number;
+    totalPages?: number;
   };
 }
 

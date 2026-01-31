@@ -1,14 +1,17 @@
 import type { PageServerLoad } from './$types';
 import { getCategoryBySlug } from '$lib/constants/categories';
-import { getSkillsByCategory } from '$lib/server/db/utils';
+import { getSkillsByCategoryPaginated } from '$lib/server/db/utils';
 
-export const load: PageServerLoad = async ({ params, platform }) => {
+const ITEMS_PER_PAGE = 24;
+
+export const load: PageServerLoad = async ({ params, url, platform }) => {
   const category = getCategoryBySlug(params.slug);
 
   if (!category) {
     return {
       category: null,
       skills: [],
+      pagination: null,
     };
   }
 
@@ -17,10 +20,19 @@ export const load: PageServerLoad = async ({ params, platform }) => {
     R2: platform?.env?.R2,
   };
 
-  const { skills } = await getSkillsByCategory(env, params.slug, 100);
+  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+  const { skills, total } = await getSkillsByCategoryPaginated(env, params.slug, page, ITEMS_PER_PAGE);
+  const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
 
   return {
     category,
     skills,
+    pagination: {
+      currentPage: page,
+      totalPages,
+      totalItems: total,
+      itemsPerPage: ITEMS_PER_PAGE,
+      baseUrl: `/category/${params.slug}`,
+    },
   };
 };

@@ -14,8 +14,11 @@ export const handle: Handle = async ({ event, resolve }) => {
     return resolve(event);
   }
 
-  // Create auth instance with runtime environment
-  const auth = createAuth(env);
+  // Get base URL from request
+  const baseURL = `${event.url.protocol}//${event.url.host}`;
+
+  // Create auth instance with runtime environment and base URL
+  const auth = createAuth(env, baseURL);
 
   // Set up auth function on locals for use in endpoints and server load functions
   event.locals.auth = async () => {

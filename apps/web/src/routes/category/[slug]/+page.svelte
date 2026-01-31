@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SearchBox, Grid, SkillCard, EmptyState, ErrorState } from '$lib/components';
+  import { SearchBox, Grid, SkillCard, EmptyState, ErrorState, Pagination } from '$lib/components';
   import type { Category } from '$lib/constants/categories';
   import type { SkillCardData } from '$lib/types';
   import { HugeiconsIcon } from '@hugeicons/svelte';
@@ -29,10 +29,19 @@
     AlertCircleIcon
   } from '@hugeicons/core-free-icons';
 
+  interface PaginationData {
+    currentPage: number;
+    totalPages: number;
+    totalItems: number;
+    itemsPerPage: number;
+    baseUrl: string;
+  }
+
   interface Props {
     data: {
       category: Category | null;
       skills: SkillCardData[];
+      pagination: PaginationData | null;
     };
   }
 
@@ -73,11 +82,15 @@
         )
       : data.skills
   );
+
+  // Calculate display counts
+  const startItem = $derived(data.pagination ? (data.pagination.currentPage - 1) * data.pagination.itemsPerPage + 1 : 1);
+  const endItem = $derived(data.pagination ? Math.min(data.pagination.currentPage * data.pagination.itemsPerPage, data.pagination.totalItems) : data.skills.length);
 </script>
 
 <svelte:head>
   {#if data.category}
-    <title>{data.category.name} Skills - SkillsCat</title>
+    <title>{data.category.name} Skills{data.pagination && data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat</title>
     <meta name="description" content="{data.category.description}. Browse Claude Code skills in this category." />
   {:else}
     <title>Category Not Found - SkillsCat</title>
@@ -121,7 +134,13 @@
 
       <!-- Results count -->
       <div class="mb-6 text-sm text-fg-muted">
-        Showing {filteredSkills.length} of {data.skills.length} skills
+        {#if searchQuery}
+          Showing {filteredSkills.length} of {data.skills.length} skills on this page
+        {:else if data.pagination}
+          Showing {startItem}-{endItem} of {data.pagination.totalItems} skills
+        {:else}
+          Showing {filteredSkills.length} of {data.skills.length} skills
+        {/if}
       </div>
 
       <!-- Skills Grid -->
@@ -140,6 +159,17 @@
             <HugeiconsIcon icon={Search01Icon} size={40} strokeWidth={1.5} />
           {/snippet}
         </EmptyState>
+      {/if}
+
+      <!-- Pagination -->
+      {#if data.pagination && !searchQuery}
+        <Pagination
+          currentPage={data.pagination.currentPage}
+          totalPages={data.pagination.totalPages}
+          totalItems={data.pagination.totalItems}
+          itemsPerPage={data.pagination.itemsPerPage}
+          baseUrl={data.pagination.baseUrl}
+        />
       {/if}
     {:else}
       <EmptyState

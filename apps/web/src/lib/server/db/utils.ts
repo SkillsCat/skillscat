@@ -74,6 +74,50 @@ export async function getTrendingSkills(
 }
 
 /**
+ * 获取 trending skills (分页版本)
+ */
+export async function getTrendingSkillsPaginated(
+  env: DbEnv,
+  page: number = 1,
+  limit: number = 24
+): Promise<{ skills: SkillCardData[]; total: number }> {
+  if (!env.DB) return { skills: [], total: 0 };
+
+  const offset = (page - 1) * limit;
+
+  const result = await env.DB.prepare(`
+    SELECT
+      s.id,
+      s.name,
+      s.slug,
+      s.description,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.stars,
+      s.forks,
+      s.trending_score as trendingScore,
+      s.updated_at as updatedAt,
+      a.avatar_url as authorAvatar
+    FROM skills s
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    ORDER BY s.trending_score DESC
+    LIMIT ? OFFSET ?
+  `)
+    .bind(limit, offset)
+    .all();
+
+  const countResult = await env.DB.prepare('SELECT COUNT(*) as total FROM skills')
+    .first<{ total: number }>();
+
+  const skills = await addCategoriesToSkills(env.DB, result.results as any[]);
+
+  return {
+    skills,
+    total: countResult?.total || 0,
+  };
+}
+
+/**
  * 获取最近添加的 skills
  */
 export async function getRecentSkills(
@@ -104,13 +148,57 @@ export async function getRecentSkills(
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
-    ORDER BY s.indexed_at DESC
+    ORDER BY COALESCE(s.last_commit_at, s.indexed_at) DESC
     LIMIT ?
   `)
     .bind(limit)
     .all();
 
   return addCategoriesToSkills(env.DB, result.results as any[]);
+}
+
+/**
+ * 获取最近添加的 skills (分页版本)
+ */
+export async function getRecentSkillsPaginated(
+  env: DbEnv,
+  page: number = 1,
+  limit: number = 24
+): Promise<{ skills: SkillCardData[]; total: number }> {
+  if (!env.DB) return { skills: [], total: 0 };
+
+  const offset = (page - 1) * limit;
+
+  const result = await env.DB.prepare(`
+    SELECT
+      s.id,
+      s.name,
+      s.slug,
+      s.description,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.stars,
+      s.forks,
+      s.trending_score as trendingScore,
+      s.updated_at as updatedAt,
+      a.avatar_url as authorAvatar
+    FROM skills s
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    ORDER BY COALESCE(s.last_commit_at, s.indexed_at) DESC
+    LIMIT ? OFFSET ?
+  `)
+    .bind(limit, offset)
+    .all();
+
+  const countResult = await env.DB.prepare('SELECT COUNT(*) as total FROM skills')
+    .first<{ total: number }>();
+
+  const skills = await addCategoriesToSkills(env.DB, result.results as any[]);
+
+  return {
+    skills,
+    total: countResult?.total || 0,
+  };
 }
 
 /**
@@ -151,6 +239,50 @@ export async function getTopSkills(
     .all();
 
   return addCategoriesToSkills(env.DB, result.results as any[]);
+}
+
+/**
+ * 获取 top skills (分页版本)
+ */
+export async function getTopSkillsPaginated(
+  env: DbEnv,
+  page: number = 1,
+  limit: number = 24
+): Promise<{ skills: SkillCardData[]; total: number }> {
+  if (!env.DB) return { skills: [], total: 0 };
+
+  const offset = (page - 1) * limit;
+
+  const result = await env.DB.prepare(`
+    SELECT
+      s.id,
+      s.name,
+      s.slug,
+      s.description,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.stars,
+      s.forks,
+      s.trending_score as trendingScore,
+      s.updated_at as updatedAt,
+      a.avatar_url as authorAvatar
+    FROM skills s
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    ORDER BY s.stars DESC
+    LIMIT ? OFFSET ?
+  `)
+    .bind(limit, offset)
+    .all();
+
+  const countResult = await env.DB.prepare('SELECT COUNT(*) as total FROM skills')
+    .first<{ total: number }>();
+
+  const skills = await addCategoriesToSkills(env.DB, result.results as any[]);
+
+  return {
+    skills,
+    total: countResult?.total || 0,
+  };
 }
 
 /**
@@ -199,6 +331,19 @@ export async function getSkillsByCategory(
     skills,
     total: countResult?.total || 0,
   };
+}
+
+/**
+ * 获取分类下的 skills (分页版本)
+ */
+export async function getSkillsByCategoryPaginated(
+  env: DbEnv,
+  categorySlug: string,
+  page: number = 1,
+  limit: number = 24
+): Promise<{ skills: SkillCardData[]; total: number }> {
+  const offset = (page - 1) * limit;
+  return getSkillsByCategory(env, categorySlug, limit, offset);
 }
 
 /**

@@ -4,9 +4,18 @@
   import { Fire03Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
 
+  interface PaginationData {
+    currentPage: number;
+    totalPages: number;
+    totalItems: number;
+    itemsPerPage: number;
+    baseUrl: string;
+  }
+
   interface Props {
     data: {
       skills: SkillCardData[];
+      pagination: PaginationData;
     };
   }
 
@@ -14,7 +23,7 @@
 </script>
 
 <svelte:head>
-  <title>Trending Skills - SkillsCat</title>
+  <title>Trending Skills{data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat</title>
   <meta name="description" content="Discover the hottest trending Claude Code skills right now." />
 </svelte:head>
 
@@ -23,6 +32,7 @@
   description="The hottest skills gaining momentum in the community right now."
   skills={data.skills}
   emptyMessage="No trending skills yet"
+  pagination={data.pagination}
 >
   {#snippet icon()}
     <HugeiconsIcon icon={Fire03Icon} strokeWidth={2} />

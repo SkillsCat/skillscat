@@ -10,10 +10,11 @@ export interface AuthEnv {
   GITHUB_CLIENT_SECRET: string;
 }
 
-export function createAuth(env: AuthEnv) {
+export function createAuth(env: AuthEnv, baseURL?: string) {
   const db = drizzle(env.DB, { schema });
 
   return betterAuth({
+    baseURL: baseURL || 'https://skills.cat',
     database: drizzleAdapter(db, {
       provider: 'sqlite',
       schema: {
@@ -43,7 +44,7 @@ export function createAuth(env: AuthEnv) {
     },
     trustedOrigins: [
       'http://localhost:5173',
-      'https://skillscat.com'
+      'https://skills.cat'
     ]
   });
 }

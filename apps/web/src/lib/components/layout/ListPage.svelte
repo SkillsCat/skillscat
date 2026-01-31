@@ -1,9 +1,17 @@
 <script lang="ts">
-  import { SearchBox, Grid, SkillCard, EmptyState } from '$lib/components';
+  import { SearchBox, Grid, SkillCard, EmptyState, Pagination } from '$lib/components';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { Search01Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
   import type { Snippet } from 'svelte';
+
+  interface PaginationData {
+    currentPage: number;
+    totalPages: number;
+    totalItems: number;
+    itemsPerPage: number;
+    baseUrl: string;
+  }
 
   interface Props {
     title: string;
@@ -11,9 +19,10 @@
     description: string;
     skills: SkillCardData[];
     emptyMessage?: string;
+    pagination?: PaginationData;
   }
 
-  let { title, icon, description, skills, emptyMessage = 'No skills found' }: Props = $props();
+  let { title, icon, description, skills, emptyMessage = 'No skills found', pagination }: Props = $props();
   let searchQuery = $state('');
 
   const filteredSkills = $derived(
@@ -25,6 +34,12 @@
         )
       : skills
   );
+
+  // Calculate display counts
+  const showingCount = $derived(filteredSkills.length);
+  const totalCount = $derived(pagination ? pagination.totalItems : skills.length);
+  const startItem = $derived(pagination ? (pagination.currentPage - 1) * pagination.itemsPerPage + 1 : 1);
+  const endItem = $derived(pagination ? Math.min(pagination.currentPage * pagination.itemsPerPage, pagination.totalItems) : skills.length);
 </script>
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -50,7 +65,13 @@
 
     <!-- Results count -->
     <div class="mb-6 text-sm text-fg-muted">
-      Showing {filteredSkills.length} of {skills.length} skills
+      {#if searchQuery}
+        Showing {showingCount} of {skills.length} skills on this page
+      {:else if pagination}
+        Showing {startItem}-{endItem} of {totalCount} skills
+      {:else}
+        Showing {showingCount} of {totalCount} skills
+      {/if}
     </div>
 
     <!-- Skills Grid -->
@@ -69,6 +90,17 @@
           <HugeiconsIcon icon={Search01Icon} size={40} strokeWidth={1.5} />
         {/snippet}
       </EmptyState>
+    {/if}
+
+    <!-- Pagination -->
+    {#if pagination && !searchQuery}
+      <Pagination
+        currentPage={pagination.currentPage}
+        totalPages={pagination.totalPages}
+        totalItems={pagination.totalItems}
+        itemsPerPage={pagination.itemsPerPage}
+        baseUrl={pagination.baseUrl}
+      />
     {/if}
   {:else}
     <EmptyState

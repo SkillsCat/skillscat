@@ -249,6 +249,44 @@ async function getLatestCommitSha(
 }
 
 /**
+ * Get the latest commit date for a specific path in the repository
+ * This returns the date of the most recent commit that modified files in that path
+ */
+async function getLastCommitDate(
+  owner: string,
+  name: string,
+  skillPath: string | null,
+  env: IndexingEnv
+): Promise<number | null> {
+  // Build the path parameter - if skillPath is provided, use it; otherwise use root
+  const pathParam = skillPath ? `&path=${encodeURIComponent(skillPath)}` : '';
+  const commitsUrl = `https://api.github.com/repos/${owner}/${name}/commits?per_page=1${pathParam}`;
+
+  const commits = await githubFetch<Array<{
+    sha: string;
+    commit: {
+      committer: {
+        date: string;
+      };
+    };
+  }>>(commitsUrl, {
+    token: env.GITHUB_TOKEN,
+    apiVersion: env.GITHUB_API_VERSION,
+    userAgent: 'SkillsCat-Indexing-Worker/1.0',
+  });
+
+  if (!commits || commits.length === 0) {
+    log.log(`No commits found for path: ${skillPath || 'root'}`);
+    return null;
+  }
+
+  const commitDate = new Date(commits[0].commit.committer.date).getTime();
+  log.log(`Last commit date for ${skillPath || 'root'}: ${commits[0].commit.committer.date} (${commitDate})`);
+
+  return commitDate;
+}
+
+/**
  * Get stored commit SHA from database
  */
 async function getStoredCommitSha(
@@ -438,12 +476,13 @@ async function cacheDirectoryFiles(
 }
 
 /**
- * Update skill metadata with commit SHA and file structure
+ * Update skill metadata with commit SHA, file structure, and last commit date
  */
 async function updateSkillMetadata(
   skillId: string,
   commitSha: string,
   fileStructure: FileStructure,
+  lastCommitAt: number | null,
   env: IndexingEnv
 ): Promise<void> {
   const now = Date.now();
@@ -452,13 +491,14 @@ async function updateSkillMetadata(
     UPDATE skills SET
       commit_sha = ?,
       file_structure = ?,
+      last_commit_at = ?,
       updated_at = ?
     WHERE id = ?
   `)
-    .bind(commitSha, JSON.stringify(fileStructure), now, skillId)
+    .bind(commitSha, JSON.stringify(fileStructure), lastCommitAt, now, skillId)
     .run();
 
-  log.log(`Updated skill metadata: ${skillId}, commitSha: ${commitSha}, files: ${fileStructure.files.length}`);
+  log.log(`Updated skill metadata: ${skillId}, commitSha: ${commitSha}, files: ${fileStructure.files.length}, lastCommitAt: ${lastCommitAt}`);
 }
 
 // ============================================
@@ -910,7 +950,10 @@ async function processMessage(
     throw r2Error;
   }
 
-  // Step 10: Update commit_sha and file_structure
+  // Step 10: Get last commit date for the skill path
+  const lastCommitAt = await getLastCommitDate(repoOwner, repoName, skillPath || null, env);
+
+  // Step 11: Update commit_sha, file_structure, and last_commit_at
   const fileStructure: FileStructure = {
     commitSha: latestCommit.sha,
     indexedAt: new Date().toISOString(),
@@ -918,9 +961,9 @@ async function processMessage(
     fileTree: buildFileTree(directoryFiles),
   };
 
-  await updateSkillMetadata(skillId, latestCommit.sha, fileStructure, env);
+  await updateSkillMetadata(skillId, latestCommit.sha, fileStructure, lastCommitAt, env);
 
-  // Step 11: Send to classification queue
+  // Step 12: Send to classification queue
   const classificationMessage: ClassificationMessage & { tags?: string[] } = {
     type: 'classify',
     skillId,

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@10.28.1",
+  "packageManager": "pnpm@10.28.2",
   "scripts": {
     "init:project": "node scripts/init.mjs",
     "init:local": "node scripts/init.mjs --local",

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { ErrorState, EmptyState, SkillCard, Grid, Section } from '$lib/components';
 
   interface UserProfile {
     id: string;
@@ -10,6 +11,8 @@
     skillCount: number;
     totalStars: number;
     joinedAt: number;
+    isRegistered?: boolean;
+    type?: 'User' | 'Organization';
   }
 
   interface Skill {
@@ -22,44 +25,20 @@
     updatedAt: number;
   }
 
-  let profile = $state<UserProfile | null>(null);
-  let skills = $state<Skill[]>([]);
-  let loading = $state(true);
-  let error = $state<string | null>(null);
+  interface Props {
+    data: {
+      profile: UserProfile | null;
+      skills: Skill[];
+      error?: string;
+    };
+  }
+
+  let { data }: Props = $props();
 
   const username = $derived($page.params.username);
-
-  $effect(() => {
-    if (username) {
-      loadProfile();
-    }
-  });
-
-  async function loadProfile() {
-    loading = true;
-    error = null;
-
-    try {
-      const res = await fetch(`/api/users/${encodeURIComponent(username ?? '')}`);
-
-      if (!res.ok) {
-        if (res.status === 404) {
-          error = 'User not found';
-        } else {
-          error = 'Failed to load profile';
-        }
-        return;
-      }
-
-      const data = await res.json() as { user?: UserProfile; skills?: Skill[] };
-      profile = data.user ?? null;
-      skills = data.skills || [];
-    } catch {
-      error = 'Failed to load profile';
-    } finally {
-      loading = false;
-    }
-  }
+  const profile = $derived(data.profile);
+  const skills = $derived(data.skills);
+  const error = $derived(data.error);
 
   function formatDate(timestamp: number): string {
     return new Date(timestamp).toLocaleDateString('en-US', {
@@ -89,17 +68,14 @@
 </svelte:head>
 
 <div class="profile-page">
-  {#if loading}
-    <div class="loading">
-      <div class="loading-spinner"></div>
-      <p>Loading profile...</p>
-    </div>
-  {:else if error}
-    <div class="error-container">
-      <h1>404</h1>
-      <p>{error}</p>
-      <a href="/" class="back-link">Back to Home</a>
-    </div>
+  {#if error}
+    <ErrorState
+      code="404"
+      title="User Not Found"
+      message={error}
+      primaryActionText="Go Home"
+      primaryActionHref="/"
+    />
   {:else if profile}
     <header class="profile-header">
       <div class="profile-avatar-container">
@@ -114,7 +90,12 @@
 
       <div class="profile-info">
         <h1 class="profile-name">{profile.name || username}</h1>
-        <p class="profile-username">@{username}</p>
+        <p class="profile-username">
+          @{username}
+          {#if profile.type === 'Organization'}
+            <span class="profile-type-badge">Organization</span>
+          {/if}
+        </p>
 
         {#if profile.bio}
           <p class="profile-bio">{profile.bio}</p>
@@ -150,46 +131,32 @@
       </div>
     </header>
 
-    <section class="skills-section">
-      <h2>Public Skills</h2>
-
+    <Section title="Public Skills">
       {#if skills.length === 0}
-        <div class="empty-skills">
-          <p>No public skills yet.</p>
-        </div>
+        <EmptyState
+          emoji="📦"
+          title="No Skills Yet"
+          description="This user hasn't published any skills yet."
+        />
       {:else}
-        <div class="skills-grid">
+        <Grid>
           {#each skills as skill}
-            <a href="/skills/{skill.slug}" class="skill-card">
-              <div class="skill-header">
-                <h3 class="skill-name">{skill.name}</h3>
-                <div class="skill-stars">
-                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                  </svg>
-                  {skill.stars}
-                </div>
-              </div>
-
-              {#if skill.description}
-                <p class="skill-description">{skill.description}</p>
-              {/if}
-
-              <div class="skill-footer">
-                {#if skill.categories.length > 0}
-                  <div class="skill-categories">
-                    {#each skill.categories.slice(0, 2) as category}
-                      <span class="category-tag">{category}</span>
-                    {/each}
-                  </div>
-                {/if}
-                <span class="skill-updated">Updated {timeAgo(skill.updatedAt)}</span>
-              </div>
-            </a>
+            <SkillCard
+              skill={{
+                id: skill.id,
+                name: skill.name,
+                slug: skill.slug,
+                description: skill.description,
+                repoOwner: profile.githubUsername || username || '',
+                stars: skill.stars,
+                updatedAt: skill.updatedAt,
+                authorAvatar: profile.image || undefined,
+              }}
+            />
           {/each}
-        </div>
+        </Grid>
       {/if}
-    </section>
+    </Section>
   {/if}
 </div>
 
@@ -198,55 +165,6 @@
     max-width: 900px;
     margin: 0 auto;
     padding: 2rem 1rem;
-  }
-
-  .loading {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 4rem;
-    color: var(--muted-foreground);
-  }
-
-  .loading-spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid var(--border);
-    border-top-color: var(--primary);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin-bottom: 1rem;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .error-container {
-    text-align: center;
-    padding: 4rem;
-  }
-
-  .error-container h1 {
-    font-size: 4rem;
-    font-weight: 700;
-    color: var(--muted-foreground);
-    margin-bottom: 0.5rem;
-  }
-
-  .error-container p {
-    color: var(--muted-foreground);
-    margin-bottom: 1.5rem;
-  }
-
-  .back-link {
-    color: var(--primary);
-    text-decoration: none;
-  }
-
-  .back-link:hover {
-    text-decoration: underline;
   }
 
   .profile-header {
@@ -291,6 +209,18 @@
   .profile-username {
     color: var(--muted-foreground);
     margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .profile-type-badge {
+    font-size: 0.75rem;
+    padding: 0.125rem 0.5rem;
+    background: var(--muted);
+    color: var(--muted-foreground);
+    border-radius: 9999px;
+    font-weight: 500;
   }
 
   .profile-bio {
@@ -339,103 +269,5 @@
 
   .github-link:hover {
     color: var(--primary);
-  }
-
-  .skills-section h2 {
-    font-size: 1.25rem;
-    font-weight: 600;
-    margin-bottom: 1.5rem;
-  }
-
-  .empty-skills {
-    text-align: center;
-    padding: 3rem;
-    background: var(--card);
-    border-radius: 0.75rem;
-    border: 1px solid var(--border);
-    color: var(--muted-foreground);
-  }
-
-  .skills-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 1rem;
-  }
-
-  .skill-card {
-    display: flex;
-    flex-direction: column;
-    padding: 1.25rem;
-    background: var(--card);
-    border-radius: 0.75rem;
-    border: 2px solid var(--border);
-    text-decoration: none;
-    color: inherit;
-    transition: border-color 0.15s, transform 0.15s;
-  }
-
-  .skill-card:hover {
-    border-color: var(--primary);
-    transform: translateY(-2px);
-  }
-
-  .skill-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 0.5rem;
-  }
-
-  .skill-name {
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--foreground);
-  }
-
-  .skill-stars {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    font-size: 0.875rem;
-    color: var(--muted-foreground);
-  }
-
-  .skill-description {
-    font-size: 0.875rem;
-    color: var(--muted-foreground);
-    line-height: 1.5;
-    margin-bottom: 0.75rem;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .skill-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: auto;
-    padding-top: 0.75rem;
-    border-top: 1px solid var(--border);
-  }
-
-  .skill-categories {
-    display: flex;
-    gap: 0.375rem;
-  }
-
-  .category-tag {
-    font-size: 0.75rem;
-    padding: 0.25rem 0.5rem;
-    background: var(--primary-subtle, rgba(var(--primary-rgb), 0.1));
-    color: var(--primary);
-    border-radius: 0.25rem;
-  }
-
-  .skill-updated {
-    font-size: 0.75rem;
-    color: var(--muted-foreground);
   }
 </style>
