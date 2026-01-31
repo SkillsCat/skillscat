@@ -622,6 +622,16 @@
     return `https://github.com/${data.skill.repoOwner}`;
   }
 
+  // Get author display name for breadcrumb
+  function getAuthorDisplayName(): string {
+    if (!data.skill) return '';
+    if (data.skill.orgName) return data.skill.orgName;
+    if (data.skill.ownerName) return data.skill.ownerName;
+    if (data.skill.authorDisplayName) return data.skill.authorDisplayName;
+    if (data.skill.authorUsername) return data.skill.authorUsername;
+    return data.skill.repoOwner || '';
+  }
+
   // Get author avatar URL
   function getAuthorAvatarUrl(): string {
     if (!data.skill) return '';
@@ -629,16 +639,6 @@
     if (data.skill.ownerAvatar) return data.skill.ownerAvatar;
     if (data.skill.authorAvatar) return data.skill.authorAvatar;
     return `https://github.com/${data.skill.repoOwner}.png`;
-  }
-
-  // Get author display name
-  function getAuthorDisplayName(): string {
-    if (!data.skill) return '';
-    if (data.skill.orgName) return data.skill.orgName;
-    if (data.skill.ownerName) return data.skill.ownerName;
-    if (data.skill.authorDisplayName) return data.skill.authorDisplayName;
-    if (data.skill.authorUsername) return data.skill.authorUsername;
-    return data.skill.repoOwner;
   }
 
   // Check if author link is external
@@ -695,6 +695,17 @@
         <li><a href="/" class="hover:text-primary transition-colors">Home</a></li>
         <li>/</li>
         <li><a href="/trending" class="hover:text-primary transition-colors">Skills</a></li>
+        <li>/</li>
+        <li>
+          <a
+            href={getAuthorProfileUrl()}
+            target={isAuthorExternal() ? '_blank' : undefined}
+            rel={isAuthorExternal() ? 'noopener noreferrer' : undefined}
+            class="hover:text-primary transition-colors"
+          >
+            {getAuthorDisplayName()}
+          </a>
+        </li>
         <li>/</li>
         <li class="text-fg font-medium">{data.skill.name}</li>
       </ol>
@@ -854,7 +865,7 @@
             <div class="file-browser">
               {#snippet renderFileTree(nodes: FileNode[], depth: number = 0)}
                 {#each nodes as node (node.path)}
-                  <div class="file-item" style="padding-left: {Math.min(depth, 8) * 1.25}rem">
+                  <div class="file-item" style="padding-left: {Math.min(depth, 8) * 0.75}rem">
                     {#if node.type === 'directory'}
                       <button
                         class="file-row"
@@ -1381,6 +1392,8 @@
   .file-code-highlighted {
     font-size: 0.8125rem;
     line-height: 1.6;
+    tab-size: 2;
+    -moz-tab-size: 2;
   }
 
   .file-code-highlighted :global(pre) {
@@ -1411,6 +1424,8 @@
     line-height: 1.6;
     overflow-x: auto;
     white-space: pre;
+    tab-size: 2;
+    -moz-tab-size: 2;
   }
 
   .file-code-plain code {
@@ -1535,34 +1550,39 @@
 
   /* CLI Switcher */
   .cli-switcher {
-    --switcher-shadow: 3px;
+    --switcher-padding: 2px;
+    --switcher-shadow: 2px;
     position: relative;
-    display: inline-flex;
-    padding: 4px;
+    display: flex;
+    padding: var(--switcher-padding);
     background: var(--bg-subtle);
     border: 2px solid var(--border);
-    border-radius: var(--radius-full);
+    border-radius: 9999px;
     margin-bottom: 1rem;
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
   }
 
   .cli-switcher-btn {
     position: relative;
     z-index: 1;
-    padding: 0.5rem 1rem;
-    font-size: 0.8125rem;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.3125rem 0.75rem;
+    font-size: 0.75rem;
     font-weight: 600;
-    color: var(--muted-foreground);
+    color: var(--fg-muted);
     background: transparent;
     border: none;
-    border-radius: var(--radius-full);
+    border-radius: 9999px;
     cursor: pointer;
     transition: color 0.2s ease;
     white-space: nowrap;
   }
 
   .cli-switcher-btn:hover {
-    color: var(--foreground);
+    color: var(--fg);
   }
 
   .cli-switcher-btn.active {
@@ -1571,12 +1591,12 @@
 
   .cli-switcher-indicator {
     position: absolute;
-    top: 4px;
-    left: 4px;
-    width: calc(50% - 4px);
-    height: calc(100% - 8px);
+    top: var(--switcher-padding);
+    bottom: var(--switcher-padding);
+    left: var(--switcher-padding);
+    width: calc(50% - var(--switcher-padding));
     background: var(--primary);
-    border-radius: var(--radius-full);
+    border-radius: 9999px;
     box-shadow: 0 var(--switcher-shadow) 0 0 oklch(50% 0.22 55);
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
