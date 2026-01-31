@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { StatsBanner, Section, Grid, SkillCard, EmptyState } from '$lib/components';
+  import { Section, Grid, SkillCard, EmptyState } from '$lib/components';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import {
     Fire03Icon,
@@ -35,24 +35,17 @@
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     <!-- Hero Section -->
     <div class="hero-section">
-      <div class="text-center mb-16 relative z-10">
-        <!-- Stats Capsule -->
-        <div class="mb-6">
-          <StatsBanner count={data.stats.totalSkills} />
-        </div>
+      <div class="hero-card">
+        <!-- Decorative circles -->
+        <div class="hero-circle hero-circle-yellow"></div>
+        <div class="hero-circle hero-circle-blue"></div>
 
-        <h1 class="hero-title">
-          <span class="hero-title-line">Find & Share</span>
-          <span class="hero-title-highlight">
-            Open Source Agent Skills
-            <svg class="hand-drawn-underline" viewBox="0 0 300 20" preserveAspectRatio="none">
-              <path d="M5 12 Q 30 5, 60 12 T 120 10 T 180 14 T 240 10 T 295 12" stroke="currentColor" stroke-width="4" fill="none" stroke-linecap="round"/>
-            </svg>
-          </span>
-        </h1>
-        <p class="hero-subtitle">
-          For Claude Code • Codex • Cursor • and more...
-        </p>
+        <div class="hero-content">
+          <h1 class="hero-title">Supercharge your Agent with community skills.</h1>
+          <p class="hero-subtitle">
+            Browse over {data.stats.totalSkills}+ skills to extend agent capabilities.
+          </p>
+        </div>
       </div>
     </div>
 
@@ -134,55 +127,78 @@
 
   .hero-section {
     position: relative;
-    margin-bottom: 4rem;
+    margin-bottom: 2.5rem;
   }
 
-  /* Hero Title */
-  .hero-title {
+  .hero-card {
+    background: var(--bg);
+    border: 2px solid var(--fg);
+    border-radius: 0.75rem;
+    padding: 2rem;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
-  }
-
-  .hero-title-line {
-    font-size: clamp(1.75rem, 4vw + 0.5rem, 3.5rem);
-    font-weight: 800;
-    color: var(--fg);
-    line-height: 1.2;
-    letter-spacing: -0.02em;
-  }
-
-  .hero-title-highlight {
-    font-size: clamp(1.75rem, 4vw + 0.5rem, 4rem);
-    font-weight: 900;
-    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    line-height: 1.1;
-    letter-spacing: -0.03em;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 2rem;
     position: relative;
-    display: inline-block;
+    overflow: hidden;
+    box-shadow: 4px 4px 0 var(--fg);
   }
 
-  .hand-drawn-underline {
+  @media (min-width: 768px) {
+    .hero-card {
+      flex-direction: row;
+      padding: 2rem 3rem;
+    }
+  }
+
+  /* Decorative circles */
+  .hero-circle {
     position: absolute;
-    bottom: -8px;
-    left: 5%;
-    width: 90%;
-    height: 16px;
-    color: var(--primary);
-    opacity: 0.6;
+    border: 2px solid var(--fg);
+    border-radius: 9999px;
+    z-index: 0;
+  }
+
+  .hero-circle-yellow {
+    width: 8rem;
+    height: 8rem;
+    background: var(--primary);
+    top: 0;
+    right: 0;
+    margin-right: -2.5rem;
+    margin-top: -2.5rem;
+  }
+
+  .hero-circle-blue {
+    width: 6rem;
+    height: 6rem;
+    background: var(--accent);
+    bottom: 0;
+    left: 0;
+    margin-left: -2.5rem;
+    margin-bottom: -2.5rem;
+  }
+
+  .hero-content {
+    position: relative;
+    z-index: 10;
+    max-width: 42rem;
+  }
+
+  .hero-title {
+    font-family: var(--font-display, inherit);
+    font-weight: 700;
+    font-size: clamp(1.75rem, 4vw + 0.5rem, 3rem);
+    line-height: 1.2;
+    margin-bottom: 1rem;
+    color: var(--fg);
   }
 
   .hero-subtitle {
-    font-size: clamp(1rem, 1.5vw + 0.5rem, 1.375rem);
+    font-size: clamp(1rem, 1.5vw + 0.5rem, 1.125rem);
     color: var(--fg-muted);
     font-weight: 500;
-    max-width: 36rem;
-    margin: 0 auto;
     line-height: 1.6;
   }
 </style>
