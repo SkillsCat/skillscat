@@ -14,13 +14,21 @@
 </script>
 
 <a href="/" class="logo-link">
-  <img
-    src="/favicon-64x64.png"
-    alt="SkillsCat"
-    width={sizes[size].icon}
-    height={sizes[size].icon}
-    class="logo-icon"
-  />
+  <!-- Squircle clip path for logo -->
+  <svg width="0" height="0" class="absolute">
+    <clipPath id="logo-squircle" clipPathUnits="objectBoundingBox">
+      <path d="M 0,0.5 C 0,0 0,0 0.5,0 S 1,0 1,0.5 1,1 0.5,1 0,1 0,0.5" />
+    </clipPath>
+  </svg>
+  <div class="logo-wrapper">
+    <img
+      src="/favicon-64x64.png"
+      alt="SkillsCat"
+      width={sizes[size].icon}
+      height={sizes[size].icon}
+      class="logo-icon"
+    />
+  </div>
   {#if showText}
     <span class="logo-text {sizes[size].text}">SkillsCat</span>
   {/if}
@@ -39,18 +47,23 @@
     opacity: 0.8;
   }
 
+  .logo-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 0.5rem;
+  }
+
+  :global(.dark) .logo-wrapper {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
   .logo-icon {
     flex-shrink: 0;
-    filter: drop-shadow(1px 1px 1px rgba(0, 0, 0, 0.15));
-    transition: filter 0.15s ease, transform 0.15s ease;
-  }
-
-  :global(.dark) .logo-icon {
-    filter: brightness(0.85) drop-shadow(1px 1px 1px rgba(0, 0, 0, 0.3));
-  }
-
-  .logo-link:hover .logo-icon {
-    transform: scale(1.05) rotate(-3deg);
+    display: block;
+    clip-path: url(#logo-squircle);
+    border-radius: 22%; /* Fallback for unsupported browsers */
   }
 
   .logo-text {

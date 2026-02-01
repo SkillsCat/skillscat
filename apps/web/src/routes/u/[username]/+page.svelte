@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { ErrorState, EmptyState, SkillCard, Grid, Section } from '$lib/components';
+  import { ErrorState, EmptyState, SkillCard, Grid, Section, Button } from '$lib/components';
 
   interface UserProfile {
     id: string;
@@ -67,6 +67,13 @@
   <meta name="description" content="View {profile?.name || username}'s skills on SkillsCat" />
 </svelte:head>
 
+<!-- Squircle clip path for avatars -->
+<svg width="0" height="0" class="absolute">
+  <clipPath id="squircle" clipPathUnits="objectBoundingBox">
+    <path d="M 0,0.5 C 0,0 0,0 0.5,0 S 1,0 1,0.5 1,1 0.5,1 0,1 0,0.5" />
+  </clipPath>
+</svg>
+
 <div class="profile-page">
   {#if error}
     <ErrorState
@@ -89,13 +96,29 @@
       </div>
 
       <div class="profile-info">
-        <h1 class="profile-name">{profile.name || username}</h1>
-        <p class="profile-username">
-          @{username}
-          {#if profile.type === 'Organization'}
-            <span class="profile-type-badge">Organization</span>
+        <div class="profile-name-row">
+          <div class="profile-name-left">
+            <h1 class="profile-name">{profile.name || username}</h1>
+            <p class="profile-username">
+              @{username}
+              {#if profile.type === 'Organization'}
+                <span class="profile-type-badge">Organization</span>
+              {/if}
+            </p>
+          </div>
+          {#if profile.githubUsername}
+            <Button
+              variant="cute"
+              size="sm"
+              href="https://github.com/{profile.githubUsername}"
+            >
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+              </svg>
+              GitHub
+            </Button>
           {/if}
-        </p>
+        </div>
 
         {#if profile.bio}
           <p class="profile-bio">{profile.bio}</p>
@@ -110,23 +133,10 @@
             <span class="stat-value">{profile.totalStars}</span>
             <span class="stat-label">Total Stars</span>
           </div>
-        </div>
-
-        <div class="profile-meta">
-          {#if profile.githubUsername}
-            <a
-              href="https://github.com/{profile.githubUsername}"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="github-link"
-            >
-              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-              </svg>
-              {profile.githubUsername}
-            </a>
-          {/if}
-          <span class="joined-date">Joined {formatDate(profile.joinedAt)}</span>
+          <div class="stat">
+            <span class="stat-value">{formatDate(profile.joinedAt)}</span>
+            <span class="stat-label">Joined</span>
+          </div>
         </div>
       </div>
     </header>
@@ -139,7 +149,7 @@
           description="This user hasn't published any skills yet."
         />
       {:else}
-        <Grid>
+        <Grid cols={3}>
           {#each skills as skill}
             <SkillCard
               skill={{
@@ -151,7 +161,9 @@
                 stars: skill.stars,
                 updatedAt: skill.updatedAt,
                 authorAvatar: profile.image || undefined,
+                categories: skill.categories,
               }}
+              hideAvatar
             />
           {/each}
         </Grid>
@@ -162,7 +174,7 @@
 
 <style>
   .profile-page {
-    max-width: 900px;
+    max-width: 1200px;
     margin: 0 auto;
     padding: 2rem 1rem;
   }
@@ -186,7 +198,8 @@
   .profile-avatar, .profile-avatar-placeholder {
     width: 120px;
     height: 120px;
-    border-radius: 50%;
+    clip-path: url(#squircle);
+    border-radius: 22%; /* Fallback for unsupported browsers */
     flex-shrink: 0;
   }
 
@@ -200,6 +213,32 @@
     font-weight: 700;
   }
 
+  .profile-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .profile-name-row {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+  }
+
+  @media (max-width: 640px) {
+    .profile-name-row {
+      flex-direction: column;
+      align-items: center;
+    }
+  }
+
+  .profile-name-left {
+    display: flex;
+    flex-direction: column;
+  }
+
   .profile-name {
     font-size: 1.75rem;
     font-weight: 700;
@@ -208,10 +247,15 @@
 
   .profile-username {
     color: var(--muted-foreground);
-    margin-bottom: 0.75rem;
     display: flex;
     align-items: center;
     gap: 0.5rem;
+  }
+
+  @media (max-width: 640px) {
+    .profile-username {
+      justify-content: center;
+    }
   }
 
   .profile-type-badge {
@@ -232,7 +276,7 @@
   .profile-stats {
     display: flex;
     gap: 2rem;
-    margin-bottom: 1rem;
+    flex-wrap: wrap;
   }
 
   .stat {
@@ -249,25 +293,5 @@
   .stat-label {
     font-size: 0.875rem;
     color: var(--muted-foreground);
-  }
-
-  .profile-meta {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    font-size: 0.875rem;
-    color: var(--muted-foreground);
-  }
-
-  .github-link {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    color: var(--foreground);
-    text-decoration: none;
-  }
-
-  .github-link:hover {
-    color: var(--primary);
   }
 </style>

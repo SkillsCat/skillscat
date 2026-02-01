@@ -1,6 +1,7 @@
 <script lang="ts">
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { UserCircleIcon, StarIcon, Clock01Icon } from '@hugeicons/core-free-icons';
+  import { getCategoryBySlug } from '$lib/constants/categories';
 
   interface Props {
     skill: {
@@ -12,10 +13,12 @@
       stars: number;
       updatedAt: number;
       authorAvatar?: string;
+      categories?: string[];
     };
+    hideAvatar?: boolean;
   }
 
-  let { skill }: Props = $props();
+  let { skill, hideAvatar = false }: Props = $props();
 
   function formatNumber(num: number): string {
     if (num >= 1000) {
@@ -41,21 +44,23 @@
   class="skill-card group block"
 >
   <div class="flex items-start gap-4">
-    <!-- Author Avatar -->
-    <div class="flex-shrink-0 avatar-wrapper">
-      {#if skill.authorAvatar}
-        <img
-          src={skill.authorAvatar}
-          alt={skill.repoOwner}
-          class="w-12 h-12 rounded-full bg-bg-muted border-3 border-border-sketch"
-        />
-      {:else}
-        <div class="w-12 h-12 rounded-full bg-primary-subtle border-3 border-border-sketch
-                    flex items-center justify-center text-primary">
-          <HugeiconsIcon icon={UserCircleIcon} size={24} strokeWidth={2} />
-        </div>
-      {/if}
-    </div>
+    {#if !hideAvatar}
+      <!-- Author Avatar -->
+      <div class="flex-shrink-0 avatar-wrapper">
+        {#if skill.authorAvatar}
+          <img
+            src={skill.authorAvatar}
+            alt={skill.repoOwner}
+            class="w-12 h-12 rounded-full bg-bg-muted border-3 border-border-sketch"
+          />
+        {:else}
+          <div class="w-12 h-12 rounded-full bg-primary-subtle border-3 border-border-sketch
+                      flex items-center justify-center text-primary">
+            <HugeiconsIcon icon={UserCircleIcon} size={24} strokeWidth={2} />
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <!-- Content -->
     <div class="flex-1 min-w-0">
@@ -77,7 +82,14 @@
       {/if}
 
       <!-- Meta -->
-      <div class="mt-3 flex items-center gap-2">
+      <div class="meta-row mt-3 flex items-center gap-2">
+        <!-- Categories -->
+        {#if skill.categories && skill.categories.length > 0}
+          {#each skill.categories.slice(0, 1) as category}
+            <span class="meta-badge meta-badge-category">{getCategoryBySlug(category)?.name || category}</span>
+          {/each}
+        {/if}
+
         <!-- Stars -->
         <span class="meta-badge meta-badge-stars">
           <HugeiconsIcon icon={StarIcon} size={14} strokeWidth={2} />
@@ -155,6 +167,11 @@
     color: var(--fg-muted);
   }
 
+  .meta-badge-category {
+    background: var(--primary-subtle);
+    color: var(--primary);
+  }
+
   .meta-badge-time {
     color: var(--fg-muted);
     opacity: 0.8;
@@ -167,5 +184,23 @@
 
   .skill-card:hover .meta-badge-time {
     opacity: 1;
+  }
+
+  .meta-row {
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .meta-badge-category,
+  .meta-badge-stars {
+    flex-shrink: 0;
+  }
+
+  .meta-badge-time {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

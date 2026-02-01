@@ -17,7 +17,6 @@ import type {
   GitHubContent,
   MessageBatch,
   ExecutionContext,
-  GitHubTreeItem,
   GitHubTreeResponse,
   DirectoryFile,
   FileStructure,

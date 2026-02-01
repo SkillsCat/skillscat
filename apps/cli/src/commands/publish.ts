@@ -1,7 +1,7 @@
 import pc from 'picocolors';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
-import { isAuthenticated, getToken } from '../utils/auth.js';
+import { isAuthenticated, getValidToken } from '../utils/auth.js';
 import { REGISTRY_URL } from '../utils/paths.js';
 import { box, prompt, warn } from '../utils/ui.js';
 
@@ -46,12 +46,13 @@ async function getPreview(content: string, org?: string): Promise<PreviewRespons
     params.append('org', org);
   }
 
+  const token = await getValidToken();
   const response = await fetch(
     `${REGISTRY_URL.replace('/api/registry', '')}/api/skills/upload?${params.toString()}`,
     {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${getToken()}`,
+        'Authorization': `Bearer ${token}`,
       },
     }
   );
@@ -149,10 +150,11 @@ export async function publish(skillPath: string, options: PublishOptions): Promi
       formData.append('description', options.description);
     }
 
+    const uploadToken = await getValidToken();
     const response = await fetch(`${REGISTRY_URL.replace('/api/registry', '')}/api/skills/upload`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${getToken()}`,
+        'Authorization': `Bearer ${uploadToken}`,
       },
       body: formData,
     });

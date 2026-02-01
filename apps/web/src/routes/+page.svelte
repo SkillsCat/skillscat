@@ -131,8 +131,8 @@
   }
 
   .hero-card {
-    background: var(--bg);
-    border: 2px solid var(--fg);
+    background: var(--card);
+    border: 2px solid var(--border-sketch);
     border-radius: 0.75rem;
     padding: 2rem;
     display: flex;
@@ -142,7 +142,7 @@
     gap: 2rem;
     position: relative;
     overflow: hidden;
-    box-shadow: 4px 4px 0 var(--fg);
+    box-shadow: 4px 4px 0 var(--border-sketch);
   }
 
   @media (min-width: 768px) {
@@ -155,9 +155,13 @@
   /* Decorative circles */
   .hero-circle {
     position: absolute;
-    border: 2px solid var(--fg);
+    border: 2px solid var(--border-sketch);
     border-radius: 9999px;
     z-index: 0;
+  }
+
+  :global(.dark) .hero-circle {
+    border: none;
   }
 
   .hero-circle-yellow {
@@ -192,7 +196,7 @@
     font-size: clamp(1.75rem, 4vw + 0.5rem, 3rem);
     line-height: 1.2;
     margin-bottom: 1rem;
-    color: var(--fg);
+    color: var(--card-foreground);
   }
 
   .hero-subtitle {
