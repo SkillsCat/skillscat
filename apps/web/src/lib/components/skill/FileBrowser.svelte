@@ -36,7 +36,9 @@
     if (node.type === 'dir') {
       toggleDir(node.path);
     }
-    onSelect?.(node.path, node.type);
+    // Toggle selection: clicking selected file unselects it
+    const newPath = selectedPath === node.path ? '' : node.path;
+    onSelect?.(newPath, node.type);
   }
 
   function formatSize(bytes?: number): string {

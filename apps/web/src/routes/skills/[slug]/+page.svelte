@@ -1859,10 +1859,16 @@
     color: var(--shiki-dark) !important;
   }
 
-  .prose-readme :global(ul),
+  .prose-readme :global(ul) {
+    margin: 1em 0;
+    padding-left: 1.5em;
+    list-style-type: disc;
+  }
+
   .prose-readme :global(ol) {
     margin: 1em 0;
     padding-left: 1.5em;
+    list-style-type: decimal;
   }
 
   .prose-readme :global(li) {

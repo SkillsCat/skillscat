@@ -69,6 +69,62 @@ interface ParsedSkillMd {
 }
 
 /**
+ * Parse YAML multi-line block scalar (| or >) and format for display
+ * Joins all lines with spaces and removes extra whitespace
+ */
+function parseYamlBlockScalar(yamlContent: string, key: string): string | null {
+  // Match the key followed by | or > (with optional modifiers like |-, >+, etc.)
+  const blockMatch = yamlContent.match(new RegExp(`^${key}:\\s*([|>][-+]?)\\s*$`, 'm'));
+  if (!blockMatch) return null;
+
+  const keyLineIndex = yamlContent.indexOf(blockMatch[0]);
+  const afterKey = yamlContent.slice(keyLineIndex + blockMatch[0].length);
+
+  // Find all indented lines that follow
+  const lines = afterKey.split('\n');
+  const contentLines: string[] = [];
+  let baseIndent: number | null = null;
+
+  for (const line of lines) {
+    // Empty lines are preserved in block scalars
+    if (line.trim() === '') {
+      if (baseIndent !== null) {
+        contentLines.push('');
+      }
+      continue;
+    }
+
+    // Check indentation
+    const indent = line.match(/^(\s*)/)?.[1].length || 0;
+
+    // First non-empty line sets the base indentation
+    if (baseIndent === null) {
+      if (indent === 0) break; // No indentation means end of block
+      baseIndent = indent;
+      contentLines.push(line.slice(baseIndent));
+      continue;
+    }
+
+    // If line has less indentation than base, block ends
+    if (indent < baseIndent) break;
+
+    // Add line with base indentation removed
+    contentLines.push(line.slice(baseIndent));
+  }
+
+  if (contentLines.length === 0) return null;
+
+  // Handle different block scalar types
+  // For display purposes, always join lines with spaces and clean up
+  return contentLines
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Parse YAML frontmatter from SKILL.md content
  * Supports format:
  * ---
@@ -97,9 +153,14 @@ function parseSkillFrontmatter(content: string): ParsedSkillMd {
   const nameMatch = yamlContent.match(/^name:\s*(.+)$/m);
   if (nameMatch) frontmatter.name = nameMatch[1].trim();
 
-  // Parse description
-  const descMatch = yamlContent.match(/^description:\s*(.+)$/m);
-  if (descMatch) frontmatter.description = descMatch[1].trim();
+  // Parse description (supports multi-line block scalars)
+  const blockDesc = parseYamlBlockScalar(yamlContent, 'description');
+  if (blockDesc) {
+    frontmatter.description = blockDesc;
+  } else {
+    const descMatch = yamlContent.match(/^description:\s*(.+)$/m);
+    if (descMatch) frontmatter.description = descMatch[1].trim();
+  }
 
   // Parse category (single, root level)
   const categoryMatch = yamlContent.match(/^category:\s*(.+)$/m);

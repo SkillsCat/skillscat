@@ -78,11 +78,18 @@
     text-decoration: underline;
   }
 
-  .markdown-body :global(ul),
+  .markdown-body :global(ul) {
+    margin-top: 0;
+    margin-bottom: 1em;
+    padding-left: 2em;
+    list-style-type: disc;
+  }
+
   .markdown-body :global(ol) {
     margin-top: 0;
     margin-bottom: 1em;
     padding-left: 2em;
+    list-style-type: decimal;
   }
 
   .markdown-body :global(li) {
