@@ -17,6 +17,7 @@
   let error = $state<string | null>(null);
   let showCreateDialog = $state(false);
   let creating = $state(false);
+  let createError = $state<string | null>(null);
   let newOrgName = $state('');
   let newOrgSlug = $state('');
 
@@ -46,6 +47,7 @@
     if (!newOrgName.trim() || !newOrgSlug.trim()) return;
 
     creating = true;
+    createError = null;
     try {
       const res = await fetch('/api/orgs', {
         method: 'POST',
@@ -60,13 +62,14 @@
         showCreateDialog = false;
         newOrgName = '';
         newOrgSlug = '';
+        createError = null;
         await loadOrgs();
       } else {
-        const data = await res.json() as { error?: string };
-        error = data.error || 'Failed to create organization';
+        const data = await res.json() as { error?: string; message?: string };
+        createError = data.error || data.message || 'Failed to create organization';
       }
     } catch {
-      error = 'Failed to create organization';
+      createError = 'Failed to create organization';
     } finally {
       creating = false;
     }
@@ -162,10 +165,15 @@
 <!-- Create Organization Dialog -->
 {#if showCreateDialog}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div class="dialog-overlay" role="presentation" onclick={() => showCreateDialog = false}>
+  <div class="dialog-overlay" role="presentation" onclick={() => { showCreateDialog = false; createError = null; }}>
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="create-org-title" tabindex="-1" onclick={(e) => e.stopPropagation()}>
       <h2 id="create-org-title">Create Organization</h2>
       <form onsubmit={(e) => { e.preventDefault(); createOrg(); }}>
+        {#if createError}
+          <div class="form-error">
+            {createError}
+          </div>
+        {/if}
         <div class="form-group">
           <label for="org-name">Organization Name</label>
           <input
@@ -191,7 +199,7 @@
           </div>
         </div>
         <div class="dialog-actions">
-          <Button variant="ghost" onclick={() => showCreateDialog = false} disabled={creating}>
+          <Button variant="ghost" onclick={() => { showCreateDialog = false; createError = null; }} disabled={creating}>
             Cancel
           </Button>
           <Button variant="cute" disabled={creating || !newOrgName.trim() || !newOrgSlug.trim()}>
@@ -458,6 +466,16 @@
     justify-content: flex-end;
     gap: 0.75rem;
     margin-top: 1.5rem;
+  }
+
+  .form-error {
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: var(--radius-md);
+    color: #ef4444;
+    font-size: 0.875rem;
   }
 
   @media (max-width: 640px) {

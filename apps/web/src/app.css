@@ -400,6 +400,40 @@ body {
   --btn-shadow-color: oklch(25% 0.02 85);
 }
 
+/* ===== Button - Danger variant (Destructive Cute) ===== */
+.btn-danger {
+  --btn-shadow-offset: 4px;
+  --btn-shadow-color: oklch(45% 0.20 25);
+
+  position: relative;
+  background-color: var(--destructive);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-full);
+  box-shadow: 0 var(--btn-shadow-offset) 0 0 var(--btn-shadow-color);
+  transform: translateY(0);
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.1s ease,
+    background-color 0.15s ease;
+}
+
+.btn-danger:hover:not(:disabled) {
+  --btn-shadow-offset: 6px;
+  background-color: oklch(55% 0.22 25);
+  transform: translateY(-2px);
+}
+
+.btn-danger:active:not(:disabled) {
+  --btn-shadow-offset: 1px;
+  transform: translateY(3px);
+}
+
+/* Dark mode adjustments for danger button */
+:root.dark .btn-danger {
+  --btn-shadow-color: oklch(35% 0.18 25);
+}
+
 /* Button Sizes */
 .btn-sm {
   padding: 0.5rem 1rem;

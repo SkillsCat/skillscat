@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Checkbox } from 'bits-ui';
-  import { Button, CopyButton, toast } from '$lib/components';
+  import { Button, CopyButton, toast, ConfirmDialog } from '$lib/components';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { Key01Icon, Delete02Icon, Tick02Icon, Copy01Icon } from '@hugeicons/core-free-icons';
 
@@ -34,6 +34,11 @@
   let createdToken = $state<string | null>(null);
   let creating = $state(false);
   let copiedToken = $state(false);
+
+  // Revoke dialog state
+  let showRevokeDialog = $state(false);
+  let tokenToRevoke = $state<Token | null>(null);
+  let revoking = $state(false);
 
   $effect(() => {
     loadTokens();
@@ -85,18 +90,33 @@
     }
   }
 
-  async function revokeToken(id: string) {
-    if (!confirm('Are you sure you want to revoke this token? This action cannot be undone.')) return;
+  async function revokeToken(token: Token) {
+    tokenToRevoke = token;
+    showRevokeDialog = true;
+  }
 
+  async function confirmRevoke() {
+    if (!tokenToRevoke) return;
+
+    revoking = true;
     try {
-      const res = await fetch(`/api/tokens/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/tokens/${tokenToRevoke.id}`, { method: 'DELETE' });
       if (res.ok) {
         toast('Token revoked successfully', 'success');
+        showRevokeDialog = false;
+        tokenToRevoke = null;
         await loadTokens();
       }
     } catch {
       error = 'Failed to revoke token';
+    } finally {
+      revoking = false;
     }
+  }
+
+  function cancelRevoke() {
+    showRevokeDialog = false;
+    tokenToRevoke = null;
   }
 
   function formatDate(timestamp: number | null): string {
@@ -263,7 +283,7 @@
                 {/if}
               </div>
             </div>
-            <button class="revoke-btn" onclick={() => revokeToken(token.id)} title="Revoke token">
+            <button class="revoke-btn" onclick={() => revokeToken(token)} title="Revoke token">
               <HugeiconsIcon icon={Delete02Icon} size={18} />
             </button>
           </div>
@@ -279,6 +299,17 @@
     </div>
   {/if}
 </div>
+
+<!-- Revoke Token Confirmation Dialog -->
+<ConfirmDialog
+  open={showRevokeDialog}
+  title="Revoke Token"
+  description={`Are you sure you want to revoke "${tokenToRevoke?.name}"? This action cannot be undone and any applications using this token will stop working.`}
+  confirmText="Revoke Token"
+  onConfirm={confirmRevoke}
+  onCancel={cancelRevoke}
+  loading={revoking}
+/>
 
 <style>
   .tokens-page {
@@ -456,7 +487,7 @@
 
   :global(.scope-checkbox) {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 0.75rem;
     padding: 0.875rem 1rem;
     background: var(--background);

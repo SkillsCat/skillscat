@@ -6,7 +6,7 @@
   import type { Snippet } from 'svelte';
 
   interface Props {
-    variant?: 'primary' | 'secondary' | 'ghost' | 'outline' | 'cute' | 'cute-secondary';
+    variant?: 'primary' | 'secondary' | 'ghost' | 'outline' | 'cute' | 'cute-secondary' | 'danger';
     size?: 'sm' | 'md' | 'lg';
     href?: string;
     children: Snippet;
@@ -33,7 +33,8 @@
     ghost: 'btn-ghost',
     outline: 'btn-outline',
     cute: 'btn-cute',
-    'cute-secondary': 'btn-cute-secondary'
+    'cute-secondary': 'btn-cute-secondary',
+    danger: 'btn-danger'
   };
 
   const sizeClasses: Record<string, string> = {

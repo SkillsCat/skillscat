@@ -2,6 +2,27 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 /**
+ * Check if a name exists on GitHub (as user or organization)
+ */
+async function checkGitHubNameExists(name: string, githubToken: string): Promise<boolean> {
+  try {
+    // Check if it's a user or org on GitHub
+    const response = await fetch(`https://api.github.com/users/${name}`, {
+      headers: {
+        'Authorization': `Bearer ${githubToken}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'SkillsCat',
+      },
+    });
+    // 200 means the name exists, 404 means it doesn't
+    return response.status === 200;
+  } catch {
+    // On error, allow creation (fail open)
+    return false;
+  }
+}
+
+/**
  * POST /api/orgs - Create a new organization
  */
 export const POST: RequestHandler = async ({ locals, platform, request }) => {
@@ -44,6 +65,15 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 
   if (existing) {
     throw error(409, 'An organization with this name already exists');
+  }
+
+  // Check if name exists on GitHub
+  const githubToken = platform?.env?.GITHUB_TOKEN;
+  if (githubToken) {
+    const existsOnGitHub = await checkGitHubNameExists(slug, githubToken);
+    if (existsOnGitHub) {
+      throw error(409, 'This name is already taken on GitHub');
+    }
   }
 
   const orgId = crypto.randomUUID();

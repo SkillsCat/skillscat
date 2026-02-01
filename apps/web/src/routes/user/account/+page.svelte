@@ -9,7 +9,7 @@
   let deleting = $state(false);
 
   async function handleDeleteAccount() {
-    if (deleteConfirmText !== 'DELETE') return;
+    if (!$session.data?.user?.name || deleteConfirmText !== $session.data.user.name) return;
 
     deleting = true;
     try {
@@ -48,6 +48,12 @@
         <div class="profile-info">
           <h3 class="profile-name">{$session.data.user.name}</h3>
           <p class="profile-email">{$session.data.user.email}</p>
+          <a href="/u/{$session.data.user.name}" class="profile-link">
+            View Public Profile
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
         </div>
       </div>
     {/if}
@@ -85,7 +91,7 @@
           Permanently delete your account and all associated data. This action cannot be undone.
         </p>
       </div>
-      <Button variant="outline" onclick={() => showDeleteConfirm = true}>
+      <Button variant="danger" onclick={() => showDeleteConfirm = true}>
         Delete Account
       </Button>
     </div>
@@ -99,21 +105,24 @@
     <div class="dialog danger-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" tabindex="-1" onclick={(e) => e.stopPropagation()}>
       <h2 id="delete-dialog-title">Delete Account</h2>
       <p class="dialog-warning">
-        This will permanently delete your account, including:
+        This will permanently delete:
       </p>
       <ul class="delete-list">
-        <li>All your uploaded skills</li>
-        <li>Your API tokens</li>
-        <li>Your organization memberships</li>
+        <li>Your API tokens and sessions</li>
         <li>Your favorites and preferences</li>
+        <li>Your private skills</li>
+        <li>Your organization memberships</li>
       </ul>
+      <p class="dialog-note">
+        <strong>Note:</strong> Your public skills will remain visible but unlinked from your account. If you sign in again with the same GitHub account, they will be restored to your account.
+      </p>
       <p class="dialog-confirm-text">
-        Type <strong>DELETE</strong> to confirm:
+        Type your username <strong>{$session.data?.user?.name}</strong> to confirm:
       </p>
       <input
         type="text"
         bind:value={deleteConfirmText}
-        placeholder="DELETE"
+        placeholder={$session.data?.user?.name || ''}
         class="confirm-input"
         disabled={deleting}
       />
@@ -124,7 +133,7 @@
         <button
           class="delete-btn"
           onclick={handleDeleteAccount}
-          disabled={deleting || deleteConfirmText !== 'DELETE'}
+          disabled={deleting || deleteConfirmText !== $session.data?.user?.name}
         >
           {deleting ? 'Deleting...' : 'Delete Account'}
         </button>
@@ -198,6 +207,22 @@
   .profile-email {
     font-size: 0.875rem;
     color: var(--muted-foreground);
+  }
+
+  .profile-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--primary);
+    text-decoration: none;
+    transition: opacity 0.15s ease;
+  }
+
+  .profile-link:hover {
+    opacity: 0.8;
   }
 
   .connected-accounts {
@@ -332,6 +357,20 @@
 
   .delete-list li {
     margin-bottom: 0.25rem;
+  }
+
+  .dialog-note {
+    font-size: 0.8125rem;
+    color: var(--muted-foreground);
+    background: var(--muted);
+    padding: 0.75rem;
+    border-radius: var(--radius-md);
+    margin-bottom: 1rem;
+    line-height: 1.5;
+  }
+
+  .dialog-note strong {
+    color: var(--foreground);
   }
 
   .dialog-confirm-text {
