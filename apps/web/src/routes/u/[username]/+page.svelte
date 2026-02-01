@@ -88,9 +88,11 @@
       <div class="profile-avatar-container">
         {#if profile.image}
           <img src={profile.image} alt={profile.name} class="profile-avatar" />
+        {:else if username}
+          <img src={`https://avatars.githubusercontent.com/${username}?s=240`} alt={profile.name} loading="lazy" class="profile-avatar" />
         {:else}
           <div class="profile-avatar-placeholder">
-            {(profile.name || username || 'U')[0].toUpperCase()}
+            {(profile.name || 'U')[0].toUpperCase()}
           </div>
         {/if}
       </div>

@@ -638,7 +638,7 @@
     if (data.skill.orgAvatar) return data.skill.orgAvatar;
     if (data.skill.ownerAvatar) return data.skill.ownerAvatar;
     if (data.skill.authorAvatar) return data.skill.authorAvatar;
-    return `https://github.com/${data.skill.repoOwner}.png`;
+    return `https://avatars.githubusercontent.com/${data.skill.repoOwner}?s=96`;
   }
 
   // Check if author link is external
@@ -725,7 +725,7 @@
               rel={isAuthorExternal() ? 'noopener noreferrer' : undefined}
               class="avatar-link flex-shrink-0"
             >
-              {#if data.skill.orgAvatar}
+                          {#if data.skill.orgAvatar}
                 <img
                   src={data.skill.orgAvatar}
                   alt={data.skill.orgName}
@@ -739,8 +739,9 @@
                 />
               {:else if data.skill.repoOwner}
                 <img
-                  src={`https://github.com/${data.skill.repoOwner}.png`}
+                  src={`https://avatars.githubusercontent.com/${data.skill.repoOwner}?s=96`}
                   alt={data.skill.repoOwner}
+                  loading="lazy"
                   class="w-12 h-12 rounded-xl border-2 border-border"
                 />
               {:else}

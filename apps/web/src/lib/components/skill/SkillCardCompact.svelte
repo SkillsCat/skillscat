@@ -16,6 +16,11 @@
 
   let { skill }: Props = $props();
 
+  // Use GitHub avatar URL directly - cached by service worker
+  const avatarUrl = $derived(
+    skill.authorAvatar || `https://avatars.githubusercontent.com/${skill.repoOwner}?s=80`
+  );
+
   function formatNumber(num: number): string {
     if (num >= 1000) {
       return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
@@ -41,18 +46,12 @@
 >
   <!-- Avatar -->
   <div class="flex-shrink-0 avatar-wrapper">
-    {#if skill.authorAvatar}
-      <img
-        src={skill.authorAvatar}
-        alt={skill.repoOwner}
-        class="w-10 h-10 rounded-full bg-bg-muted border-2 border-border-sketch"
-      />
-    {:else}
-      <div class="w-10 h-10 rounded-full bg-primary-subtle border-2 border-border-sketch
-                  flex items-center justify-center text-primary font-bold text-sm">
-        {skill.repoOwner.charAt(0).toUpperCase()}
-      </div>
-    {/if}
+    <img
+      src={avatarUrl}
+      alt={skill.repoOwner}
+      loading="lazy"
+      class="w-10 h-10 rounded-full bg-bg-muted border-2 border-border-sketch"
+    />
   </div>
 
   <!-- Content -->

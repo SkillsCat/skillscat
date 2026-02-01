@@ -26,7 +26,7 @@
       class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-bg-muted transition-colors"
     >
       <img
-        src={$session.data.user.image || `https://github.com/${$session.data.user.name}.png`}
+        src={$session.data.user.image || `https://avatars.githubusercontent.com/${$session.data.user.name}?s=64`}
         alt={$session.data.user.name || 'User'}
         class="w-8 h-8 rounded-full"
       />

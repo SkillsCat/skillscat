@@ -41,7 +41,7 @@
     {#if $session.data?.user}
       <div class="profile-card">
         <img
-          src={$session.data.user.image || `https://github.com/${$session.data.user.name}.png`}
+          src={$session.data.user.image || `https://avatars.githubusercontent.com/${$session.data.user.name}?s=160`}
           alt={$session.data.user.name || 'User'}
           class="profile-avatar"
         />

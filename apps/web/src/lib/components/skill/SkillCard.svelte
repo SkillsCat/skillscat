@@ -1,6 +1,6 @@
 <script lang="ts">
   import { HugeiconsIcon } from '@hugeicons/svelte';
-  import { UserCircleIcon, StarIcon, Clock01Icon } from '@hugeicons/core-free-icons';
+  import { StarIcon, Clock01Icon } from '@hugeicons/core-free-icons';
   import { getCategoryBySlug } from '$lib/constants/categories';
 
   interface Props {
@@ -19,6 +19,11 @@
   }
 
   let { skill, hideAvatar = false }: Props = $props();
+
+  // Use GitHub avatar URL directly - cached by service worker
+  const avatarUrl = $derived(
+    skill.authorAvatar || `https://avatars.githubusercontent.com/${skill.repoOwner}?s=96`
+  );
 
   function formatNumber(num: number): string {
     if (num >= 1000) {
@@ -47,18 +52,12 @@
     {#if !hideAvatar}
       <!-- Author Avatar -->
       <div class="flex-shrink-0 avatar-wrapper">
-        {#if skill.authorAvatar}
-          <img
-            src={skill.authorAvatar}
-            alt={skill.repoOwner}
-            class="w-12 h-12 rounded-full bg-bg-muted border-3 border-border-sketch"
-          />
-        {:else}
-          <div class="w-12 h-12 rounded-full bg-primary-subtle border-3 border-border-sketch
-                      flex items-center justify-center text-primary">
-            <HugeiconsIcon icon={UserCircleIcon} size={24} strokeWidth={2} />
-          </div>
-        {/if}
+        <img
+          src={avatarUrl}
+          alt={skill.repoOwner}
+          loading="lazy"
+          class="w-12 h-12 rounded-full bg-bg-muted border-3 border-border-sketch"
+        />
       </div>
     {/if}
 
