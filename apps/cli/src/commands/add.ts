@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
-import { dirname, join } from 'path';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import pc from 'picocolors';
 import { parseSource } from '../utils/source.js';
 import { discoverSkills } from '../utils/git.js';

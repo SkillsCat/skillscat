@@ -1,6 +1,6 @@
-import { homedir, hostname, platform, release } from 'os';
-import { join } from 'path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { homedir, hostname, platform, release } from 'node:os';
+import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { REGISTRY_URL } from './paths.js';
 
 const CONFIG_DIR = join(homedir(), '.skillscat');

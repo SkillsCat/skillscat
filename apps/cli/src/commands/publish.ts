@@ -1,6 +1,6 @@
 import pc from 'picocolors';
-import { readFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { isAuthenticated, getValidToken } from '../utils/auth.js';
 import { REGISTRY_URL } from '../utils/paths.js';
 import { box, prompt, warn } from '../utils/ui.js';

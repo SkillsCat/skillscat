@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
-import { dirname, join } from 'path';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import pc from 'picocolors';
 import { AGENTS, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents.js';
 import { getInstalledSkills, recordInstallation, type InstalledSkill } from '../utils/db.js';

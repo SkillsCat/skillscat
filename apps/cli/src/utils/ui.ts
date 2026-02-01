@@ -1,5 +1,5 @@
 import pc from 'picocolors';
-import * as readline from 'readline';
+import * as readline from 'node:readline';
 
 export function success(message: string): void {
   console.log(pc.green('✔') + ' ' + message);
