@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { Checkbox } from 'bits-ui';
+  import { Checkbox, Select } from 'bits-ui';
   import { Button, CopyButton, toast, ConfirmDialog } from '$lib/components';
   import { HugeiconsIcon } from '@hugeicons/svelte';
-  import { Key01Icon, Delete02Icon, Tick02Icon, Copy01Icon } from '@hugeicons/core-free-icons';
+  import { Key01Icon, Delete02Icon, Tick02Icon, Copy01Icon, ArrowDown01Icon } from '@hugeicons/core-free-icons';
 
   interface Token {
     id: string;
@@ -26,11 +26,21 @@
     { id: 'publish', label: 'Publish', description: 'Upload new skills' },
   ];
 
+  const expirationOptions = [
+    { value: 7, label: '7 days' },
+    { value: 30, label: '30 days' },
+    { value: 90, label: '90 days' },
+    { value: 180, label: '180 days' },
+    { value: 365, label: '1 year' },
+    { value: null, label: 'No expiration' },
+  ];
+
   let tokens = $state<Token[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let newTokenName = $state('');
   let newTokenScopes = $state<string[]>(['read']);
+  let newTokenExpiration = $state<number | null>(90);
   let createdToken = $state<string | null>(null);
   let creating = $state(false);
   let copiedToken = $state(false);
@@ -70,6 +80,7 @@
         body: JSON.stringify({
           name: newTokenName,
           scopes: newTokenScopes,
+          expiresInDays: newTokenExpiration,
         }),
       });
 
@@ -78,6 +89,7 @@
         createdToken = data.token ?? null;
         newTokenName = '';
         newTokenScopes = ['read'];
+        newTokenExpiration = 90;
         await loadTokens();
       } else {
         const data = await res.json() as { error?: string };
@@ -137,6 +149,22 @@
     return formatDate(timestamp);
   }
 
+  function isExpiringSoon(expiresAt: number | null): boolean {
+    if (!expiresAt) return false;
+    const daysUntilExpiry = (expiresAt - Date.now()) / (1000 * 60 * 60 * 24);
+    return daysUntilExpiry <= 7 && daysUntilExpiry > 0;
+  }
+
+  function formatExpiration(expiresAt: number | null): string {
+    if (!expiresAt) return 'Never expires';
+    const now = Date.now();
+    if (expiresAt < now) return 'Expired';
+    const daysUntilExpiry = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
+    if (daysUntilExpiry <= 1) return 'Expires today';
+    if (daysUntilExpiry <= 7) return `Expires in ${daysUntilExpiry} days`;
+    return `Expires ${formatDate(expiresAt)}`;
+  }
+
   function toggleScope(scope: string) {
     if (newTokenScopes.includes(scope)) {
       newTokenScopes = newTokenScopes.filter(s => s !== scope);
@@ -186,14 +214,16 @@
       </div>
       <div class="token-display">
         <code>{createdToken}</code>
-        <button class="copy-btn" onclick={copyToken}>
+        <Button variant="cute" size="sm" onclick={copyToken}>
           <HugeiconsIcon icon={copiedToken ? Tick02Icon : Copy01Icon} size={16} />
           {copiedToken ? 'Copied!' : 'Copy'}
-        </button>
+        </Button>
       </div>
-      <Button variant="outline" onclick={() => { createdToken = null; }}>
-        Done
-      </Button>
+      <div class="success-actions">
+        <Button variant="cute-secondary" size="sm" onclick={() => { createdToken = null; }}>
+          Done
+        </Button>
+      </div>
     </div>
   {/if}
 
@@ -239,9 +269,37 @@
         </div>
       </div>
 
-      <Button variant="cute" type="submit" disabled={creating || !newTokenName.trim() || newTokenScopes.length === 0}>
-        {creating ? 'Creating...' : 'Create Token'}
-      </Button>
+      <div class="form-group">
+        <span class="form-label">Expiration</span>
+        <Select.Root
+          type="single"
+          value={String(newTokenExpiration)}
+          onValueChange={(v) => { newTokenExpiration = v === 'null' ? null : Number(v); }}
+          disabled={creating}
+        >
+          <Select.Trigger class="select-trigger">
+            <span class="select-value">
+              {expirationOptions.find(o => String(o.value) === String(newTokenExpiration))?.label || 'Select...'}
+            </span>
+            <HugeiconsIcon icon={ArrowDown01Icon} size={16} class="select-icon" />
+          </Select.Trigger>
+          <Select.Portal>
+            <Select.Content class="select-content" sideOffset={4}>
+              {#each expirationOptions as option}
+                <Select.Item value={String(option.value)} class="select-item">
+                  {option.label}
+                </Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Portal>
+        </Select.Root>
+      </div>
+
+      <div class="form-actions">
+        <Button variant="cute" type="submit" disabled={creating || !newTokenName.trim() || newTokenScopes.length === 0}>
+          {creating ? 'Creating...' : 'Create Token'}
+        </Button>
+      </div>
     </form>
   </section>
 
@@ -281,10 +339,12 @@
                   <span class="separator">•</span>
                   <span>Last used {formatRelativeTime(token.lastUsedAt)}</span>
                 {/if}
+                <span class="separator">•</span>
+                <span class:expiring-soon={isExpiringSoon(token.expiresAt)}>{formatExpiration(token.expiresAt)}</span>
               </div>
             </div>
-            <button class="revoke-btn" onclick={() => revokeToken(token)} title="Revoke token">
-              <HugeiconsIcon icon={Delete02Icon} size={18} />
+            <button class="delete-btn" onclick={() => revokeToken(token)} aria-label="Revoke token">
+              <HugeiconsIcon icon={Delete02Icon} size={16} />
             </button>
           </div>
         {/each}
@@ -349,13 +409,14 @@
     font-size: 0.9375rem;
   }
 
-  /* Token Created Success */
+  /* Token Created Success - Cute Style */
   .token-created-card {
     padding: 1.5rem;
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(34, 197, 94, 0.02) 100%);
-    border: 2px solid rgba(34, 197, 94, 0.3);
+    background: var(--card);
+    border: 3px solid #22c55e;
     border-radius: var(--radius-lg);
     margin-bottom: 2rem;
+    box-shadow: 4px 4px 0 0 oklch(55% 0.18 145);
   }
 
   .success-header {
@@ -369,18 +430,19 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    background: rgba(34, 197, 94, 0.2);
+    width: 2.5rem;
+    height: 2.5rem;
+    background: #22c55e;
     border-radius: var(--radius-full);
-    color: #22c55e;
+    color: white;
     flex-shrink: 0;
+    box-shadow: 2px 2px 0 0 oklch(55% 0.18 145);
   }
 
   .success-header h3 {
     font-size: 1rem;
     font-weight: 600;
-    color: #22c55e;
+    color: var(--foreground);
     margin-bottom: 0.125rem;
   }
 
@@ -395,7 +457,7 @@
     gap: 0.75rem;
     padding: 0.75rem 1rem;
     background: var(--background);
-    border: 1px solid var(--border);
+    border: 2px solid var(--border);
     border-radius: var(--radius-md);
     margin-bottom: 1rem;
   }
@@ -408,25 +470,9 @@
     word-break: break-all;
   }
 
-  .copy-btn {
+  .success-actions {
     display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    padding: 0.375rem 0.75rem;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--primary);
-    background: var(--primary-subtle);
-    border: 1px solid var(--primary);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all 0.15s ease;
-    flex-shrink: 0;
-  }
-
-  .copy-btn:hover {
-    background: var(--primary);
-    color: white;
+    justify-content: flex-end;
   }
 
   /* Sections */
@@ -466,34 +512,126 @@
     background: var(--background);
     border: 2px solid var(--border);
     border-radius: var(--radius-md);
-    transition: border-color 0.15s ease;
+    box-shadow: 0 3px 0 0 oklch(75% 0.02 85);
+    transition: all 0.15s ease;
   }
 
   input[type="text"]:focus {
     outline: none;
     border-color: var(--primary);
+    box-shadow: 0 1px 0 0 var(--primary);
+    transform: translateY(2px);
   }
 
   input[type="text"]::placeholder {
     color: var(--muted-foreground);
   }
 
+  /* Select Component - Bits UI */
+  :global(.select-trigger) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    font-size: 0.9375rem;
+    color: var(--foreground);
+    background: var(--background);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    box-shadow: 0 3px 0 0 oklch(75% 0.02 85);
+    transition: all 0.15s ease;
+  }
+
+  :global(.select-trigger:hover) {
+    border-color: var(--primary);
+  }
+
+  :global(.select-trigger[data-state="open"]) {
+    border-color: var(--primary);
+    box-shadow: 0 1px 0 0 var(--primary);
+    transform: translateY(2px);
+  }
+
+  :global(.select-trigger[data-disabled]) {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .select-value {
+    flex: 1;
+    text-align: left;
+  }
+
+  :global(.select-icon) {
+    color: var(--muted-foreground);
+    transition: transform 0.15s ease;
+    flex-shrink: 0;
+  }
+
+  :global(.select-trigger[data-state="open"] .select-icon) {
+    transform: rotate(180deg);
+  }
+
+  :global(.select-content) {
+    width: var(--bits-select-trigger-width);
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 0 0 oklch(75% 0.02 85);
+    padding: 0.375rem;
+    z-index: 100;
+  }
+
+  :global(.select-item) {
+    display: flex;
+    align-items: center;
+    padding: 0.625rem 0.75rem;
+    font-size: 0.9375rem;
+    color: var(--foreground);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.1s ease;
+  }
+
+  :global(.select-item:hover),
+  :global(.select-item[data-highlighted]) {
+    background: var(--muted);
+  }
+
+  :global(.select-item[data-state="checked"]) {
+    background: var(--primary-subtle);
+    color: var(--primary);
+    font-weight: 500;
+  }
+
+  /* Dark mode for select */
+  :global(:root.dark .select-trigger) {
+    box-shadow: 0 3px 0 0 oklch(25% 0.02 85);
+  }
+
+  :global(:root.dark .select-content) {
+    box-shadow: 0 4px 0 0 oklch(25% 0.02 85);
+  }
+
   /* Scopes Grid */
   .scopes-grid {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.75rem;
   }
 
   :global(.scope-checkbox) {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.75rem;
     padding: 0.875rem 1rem;
     background: var(--background);
     border: 2px solid var(--border);
     border-radius: var(--radius-md);
     cursor: pointer;
+    box-shadow: 0 3px 0 0 oklch(75% 0.02 85);
     transition: all 0.15s ease;
   }
 
@@ -504,6 +642,7 @@
   :global(.scope-checkbox[data-state="checked"]) {
     border-color: var(--primary);
     background: var(--primary-subtle);
+    box-shadow: 0 3px 0 0 oklch(50% 0.22 55);
   }
 
   .checkbox-indicator {
@@ -512,6 +651,7 @@
     justify-content: center;
     width: 1.25rem;
     height: 1.25rem;
+    margin-top: 0.125rem;
     background: var(--background);
     border: 2px solid var(--border);
     border-radius: var(--radius-sm);
@@ -529,17 +669,26 @@
     display: flex;
     flex-direction: column;
     gap: 0.125rem;
+    text-align: left;
   }
 
   .scope-label {
     font-size: 0.9375rem;
     font-weight: 500;
     color: var(--foreground);
+    text-align: left;
   }
 
   .scope-description {
     font-size: 0.8125rem;
     color: var(--muted-foreground);
+    text-align: left;
+  }
+
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 0.5rem;
   }
 
   /* Loading & Empty States */
@@ -663,25 +812,50 @@
     opacity: 0.5;
   }
 
-  .revoke-btn {
+  .expiring-soon {
+    color: #f59e0b;
+    font-weight: 500;
+  }
+
+  /* Delete Button - Square */
+  .delete-btn {
     display: flex;
     align-items: center;
     justify-content: center;
     width: 2.25rem;
     height: 2.25rem;
-    color: var(--muted-foreground);
-    background: transparent;
-    border: 1px solid transparent;
+    background: var(--background);
+    color: var(--destructive);
+    border: 2px solid var(--destructive);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all 0.15s ease;
+    box-shadow: 0 3px 0 0 oklch(45% 0.20 25);
+    transition: all 0.1s ease;
     flex-shrink: 0;
   }
 
-  .revoke-btn:hover {
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.1);
-    border-color: rgba(239, 68, 68, 0.2);
+  .delete-btn:hover {
+    background: var(--destructive);
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 0 0 oklch(45% 0.20 25);
+  }
+
+  .delete-btn:active {
+    transform: translateY(2px);
+    box-shadow: 0 1px 0 0 oklch(45% 0.20 25);
+  }
+
+  :global(:root.dark) .delete-btn {
+    box-shadow: 0 3px 0 0 oklch(35% 0.18 25);
+  }
+
+  :global(:root.dark) .delete-btn:hover {
+    box-shadow: 0 5px 0 0 oklch(35% 0.18 25);
+  }
+
+  :global(:root.dark) .delete-btn:active {
+    box-shadow: 0 1px 0 0 oklch(35% 0.18 25);
   }
 
   /* Error Toast */
@@ -712,6 +886,15 @@
 
   .error-toast button:hover {
     background: rgba(239, 68, 68, 0.1);
+  }
+
+  /* Dark mode for success card */
+  :global(:root.dark) .token-created-card {
+    box-shadow: 4px 4px 0 0 oklch(45% 0.15 145);
+  }
+
+  :global(:root.dark) .success-icon {
+    box-shadow: 2px 2px 0 0 oklch(45% 0.15 145);
   }
 
   /* Responsive */

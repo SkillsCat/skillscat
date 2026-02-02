@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from '$lib/components';
+  import { Button, Avatar } from '$lib/components';
   import { useSession, signOut } from '$lib/auth-client';
 
   const session = useSession();
@@ -40,21 +40,23 @@
     <h2>Profile</h2>
     {#if $session.data?.user}
       <div class="profile-card">
-        <img
-          src={$session.data.user.image || `https://avatars.githubusercontent.com/${$session.data.user.name}?s=160`}
+        <Avatar
+          src={$session.data.user.image}
+          fallback={$session.data.user.name}
           alt={$session.data.user.name || 'User'}
-          class="profile-avatar"
+          size="lg"
+          useGithubFallback
         />
         <div class="profile-info">
           <h3 class="profile-name">{$session.data.user.name}</h3>
           <p class="profile-email">{$session.data.user.email}</p>
-          <a href="/u/{$session.data.user.name}" class="profile-link">
-            View Public Profile
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
-          </a>
         </div>
+        <Button variant="cute" size="sm" href="/u/{$session.data.user.name}">
+          View Public Profile
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+        </Button>
       </div>
     {/if}
   </section>
@@ -85,15 +87,15 @@
   <section class="section danger-section">
     <h2>Danger Zone</h2>
     <div class="danger-card">
-      <div class="danger-info">
+      <div class="danger-content">
         <h4>Delete Account</h4>
         <p>
           Permanently delete your account and all associated data. This action cannot be undone.
+          <Button variant="danger" size="sm" onclick={() => showDeleteConfirm = true}>
+            Delete Account
+          </Button>
         </p>
       </div>
-      <Button variant="danger" onclick={() => showDeleteConfirm = true}>
-        Delete Account
-      </Button>
     </div>
   </section>
 </div>
@@ -191,11 +193,9 @@
     border-radius: var(--radius-md);
   }
 
-  .profile-avatar {
-    width: 4rem;
-    height: 4rem;
-    border-radius: 50%;
-    border: 2px solid var(--border);
+  .profile-info {
+    flex: 1;
+    min-width: 0;
   }
 
   .profile-name {
@@ -207,22 +207,6 @@
   .profile-email {
     font-size: 0.875rem;
     color: var(--muted-foreground);
-  }
-
-  .profile-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    margin-top: 0.5rem;
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--primary);
-    text-decoration: none;
-    transition: opacity 0.15s ease;
-  }
-
-  .profile-link:hover {
-    opacity: 0.8;
   }
 
   .connected-accounts {
@@ -280,6 +264,8 @@
   .account-status.connected {
     background: rgba(34, 197, 94, 0.1);
     color: #22c55e;
+    border: 2px solid #22c55e;
+    box-shadow: 2px 2px 0 0 oklch(55% 0.18 145);
   }
 
   .danger-section {
@@ -291,25 +277,28 @@
   }
 
   .danger-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
     padding: 1rem;
     background: rgba(239, 68, 68, 0.05);
     border: 1px solid rgba(239, 68, 68, 0.2);
     border-radius: var(--radius-md);
   }
 
-  .danger-info h4 {
+  .danger-content h4 {
     font-size: 0.9375rem;
     font-weight: 600;
     margin-bottom: 0.25rem;
   }
 
-  .danger-info p {
+  .danger-content p {
     font-size: 0.8125rem;
     color: var(--muted-foreground);
+    display: inline;
+  }
+
+  .danger-content :global(.btn) {
+    display: inline-flex;
+    margin-left: 0.5rem;
+    vertical-align: middle;
   }
 
   /* Dialog */
@@ -419,12 +408,5 @@
   .delete-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-
-  @media (max-width: 640px) {
-    .danger-card {
-      flex-direction: column;
-      align-items: stretch;
-    }
   }
 </style>

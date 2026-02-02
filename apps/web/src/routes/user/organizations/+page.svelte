@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from '$lib/components';
+  import { Avatar, Button, ErrorState } from '$lib/components';
 
   interface Org {
     id: string;
@@ -110,10 +110,14 @@
       <p>Loading organizations...</p>
     </div>
   {:else if error}
-    <div class="error-state">
-      <p>{error}</p>
-      <Button variant="outline" onclick={loadOrgs}>Try Again</Button>
-    </div>
+    <ErrorState
+      title="Failed to Load"
+      message={error}
+      primaryActionText="Try Again"
+      primaryActionClick={loadOrgs}
+      secondaryActionText="Go Back"
+      secondaryActionClick={() => history.back()}
+    />
   {:else if orgs.length === 0}
     <div class="empty-state">
       <div class="empty-icon">
@@ -131,13 +135,12 @@
     <div class="orgs-list">
       {#each orgs as org (org.id)}
         <a href="/org/{org.slug}" class="org-card">
-          <div class="org-avatar">
-            {#if org.avatar}
-              <img src={org.avatar} alt={org.displayName || org.name} />
-            {:else}
-              <span>{(org.displayName || org.name)[0].toUpperCase()}</span>
-            {/if}
-          </div>
+          <Avatar
+            src={org.avatar}
+            alt={org.displayName || org.name}
+            fallback={org.displayName || org.name}
+            size="md"
+          />
           <div class="org-info">
             <div class="org-header">
               <h3 class="org-name">{org.displayName || org.name}</h3>
@@ -202,7 +205,7 @@
           <Button variant="ghost" onclick={() => { showCreateDialog = false; createError = null; }} disabled={creating}>
             Cancel
           </Button>
-          <Button variant="cute" disabled={creating || !newOrgName.trim() || !newOrgSlug.trim()}>
+          <Button variant="cute" type="submit" disabled={creating || !newOrgName.trim() || !newOrgSlug.trim()}>
             {creating ? 'Creating...' : 'Create'}
           </Button>
         </div>
@@ -236,7 +239,6 @@
   }
 
   .loading-state,
-  .error-state,
   .empty-state {
     display: flex;
     flex-direction: column;
@@ -261,14 +263,6 @@
 
   @keyframes spin {
     to { transform: rotate(360deg); }
-  }
-
-  .error-state {
-    color: var(--destructive);
-  }
-
-  .error-state p {
-    margin-bottom: 1rem;
   }
 
   .empty-icon {
@@ -300,40 +294,23 @@
     gap: 1rem;
     padding: 1.25rem;
     background: var(--card);
-    border: 1px solid var(--border);
+    border: 2px solid var(--border);
     border-radius: var(--radius-lg);
     text-decoration: none;
     color: inherit;
+    box-shadow: 0 4px 0 0 var(--border);
     transition: all 0.15s ease;
   }
 
   .org-card:hover {
     border-color: var(--primary);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 6px 0 0 var(--primary);
+    transform: translateY(-2px);
   }
 
-  .org-avatar {
-    width: 3rem;
-    height: 3rem;
-    border-radius: var(--radius-md);
-    background: var(--primary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    overflow: hidden;
-  }
-
-  .org-avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .org-avatar span {
-    color: white;
-    font-size: 1.25rem;
-    font-weight: 600;
+  .org-card:active {
+    box-shadow: 0 1px 0 0 var(--primary);
+    transform: translateY(3px);
   }
 
   .org-info {

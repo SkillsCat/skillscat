@@ -2,6 +2,7 @@
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { StarIcon, Clock01Icon } from '@hugeicons/core-free-icons';
   import { getCategoryBySlug } from '$lib/constants/categories';
+  import { Avatar } from '$lib/components';
 
   interface Props {
     skill: {
@@ -19,11 +20,6 @@
   }
 
   let { skill, hideAvatar = false }: Props = $props();
-
-  // Use GitHub avatar URL directly - cached by service worker
-  const avatarUrl = $derived(
-    skill.authorAvatar || `https://avatars.githubusercontent.com/${skill.repoOwner}?s=96`
-  );
 
   function formatNumber(num: number): string {
     if (num >= 1000) {
@@ -52,11 +48,12 @@
     {#if !hideAvatar}
       <!-- Author Avatar -->
       <div class="flex-shrink-0 avatar-wrapper">
-        <img
-          src={avatarUrl}
+        <Avatar
+          src={skill.authorAvatar}
+          fallback={skill.repoOwner}
           alt={skill.repoOwner}
-          loading="lazy"
-          class="w-12 h-12 rounded-full bg-bg-muted border-3 border-border-sketch"
+          size="md"
+          useGithubFallback
         />
       </div>
     {/if}

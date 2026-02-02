@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CopyButton, Button, Section, Grid, SkillCard, SkillCardCompact, EmptyState, ErrorState, toast } from '$lib/components';
+  import { CopyButton, Button, Section, Grid, SkillCard, SkillCardCompact, EmptyState, ErrorState, toast, Avatar } from '$lib/components';
   import { getCategoryBySlug } from '$lib/constants/categories';
   import { marked } from 'marked';
   import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
@@ -725,30 +725,13 @@
               rel={isAuthorExternal() ? 'noopener noreferrer' : undefined}
               class="avatar-link flex-shrink-0"
             >
-                          {#if data.skill.orgAvatar}
-                <img
-                  src={data.skill.orgAvatar}
-                  alt={data.skill.orgName}
-                  class="w-12 h-12 rounded-xl border-2 border-border"
-                />
-              {:else if data.skill.ownerAvatar}
-                <img
-                  src={data.skill.ownerAvatar}
-                  alt={data.skill.ownerName}
-                  class="w-12 h-12 rounded-xl border-2 border-border"
-                />
-              {:else if data.skill.repoOwner}
-                <img
-                  src={`https://avatars.githubusercontent.com/${data.skill.repoOwner}?s=96`}
-                  alt={data.skill.repoOwner}
-                  loading="lazy"
-                  class="w-12 h-12 rounded-xl border-2 border-border"
-                />
-              {:else}
-                <div class="w-12 h-12 rounded-xl border-2 border-border bg-primary flex items-center justify-center text-white text-lg font-bold">
-                  {data.skill.name[0].toUpperCase()}
-                </div>
-              {/if}
+              <Avatar
+                src={getAuthorAvatarUrl()}
+                alt={getAuthorDisplayName()}
+                fallback={data.skill.repoOwner}
+                size="md"
+                useGithubFallback
+              />
             </a>
 
             <!-- Title + Bookmark -->
@@ -1125,16 +1108,6 @@
   .avatar-link:hover {
     transform: scale(1.05);
     opacity: 0.9;
-  }
-
-  .avatar-link img,
-  .avatar-link > div {
-    transition: border-color 0.2s ease;
-  }
-
-  .avatar-link:hover img,
-  .avatar-link:hover > div {
-    border-color: var(--primary);
   }
 
   .skill-title-inline {

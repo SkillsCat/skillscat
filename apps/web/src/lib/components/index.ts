@@ -31,9 +31,14 @@ export { default as EmptyState } from './feedback/EmptyState.svelte';
 export { default as ErrorState } from './feedback/ErrorState.svelte';
 
 // Common Components
+export { default as Avatar } from './common/Avatar.svelte';
 export { default as Logo } from './common/Logo.svelte';
 export { default as SearchBox } from './common/SearchBox.svelte';
 export { default as UserMenu } from './common/UserMenu.svelte';
 export { default as StatsBanner } from './common/StatsBanner.svelte';
 export { default as StatItem } from './common/StatItem.svelte';
 export { default as SEO } from './common/SEO.svelte';
+
+// Settings Components
+export { default as SettingsSection } from './settings/SettingsSection.svelte';
+export { default as SkillsList } from './settings/SkillsList.svelte';

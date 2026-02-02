@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { ErrorState, EmptyState, SkillCard, Grid, Section, Button } from '$lib/components';
+  import { ErrorState, EmptyState, SkillCard, Grid, Section, Button, Avatar } from '$lib/components';
 
   interface UserProfile {
     id: string;
@@ -67,13 +67,6 @@
   <meta name="description" content="View {profile?.name || username}'s skills on SkillsCat" />
 </svelte:head>
 
-<!-- Squircle clip path for avatars -->
-<svg width="0" height="0" class="absolute">
-  <clipPath id="squircle" clipPathUnits="objectBoundingBox">
-    <path d="M 0,0.5 C 0,0 0,0 0.5,0 S 1,0 1,0.5 1,1 0.5,1 0,1 0,0.5" />
-  </clipPath>
-</svg>
-
 <div class="profile-page">
   {#if error}
     <ErrorState
@@ -85,16 +78,15 @@
     />
   {:else if profile}
     <header class="profile-header">
-      <div class="profile-avatar-container">
-        {#if profile.image}
-          <img src={profile.image} alt={profile.name} class="profile-avatar" />
-        {:else if username}
-          <img src={`https://avatars.githubusercontent.com/${username}?s=240`} alt={profile.name} loading="lazy" class="profile-avatar" />
-        {:else}
-          <div class="profile-avatar-placeholder">
-            {(profile.name || 'U')[0].toUpperCase()}
-          </div>
-        {/if}
+      <div class="profile-avatar-wrapper">
+        <Avatar
+          src={profile.image}
+          fallback={username}
+          alt={profile.name}
+          size="xl"
+          shadow
+          useGithubFallback
+        />
       </div>
 
       <div class="profile-info">
@@ -135,10 +127,12 @@
             <span class="stat-value">{profile.totalStars}</span>
             <span class="stat-label">Total Stars</span>
           </div>
-          <div class="stat">
-            <span class="stat-value">{formatDate(profile.joinedAt)}</span>
-            <span class="stat-label">Joined</span>
-          </div>
+          {#if profile.joinedAt && profile.joinedAt > 0}
+            <div class="stat">
+              <span class="stat-value">{formatDate(profile.joinedAt)}</span>
+              <span class="stat-label">Joined</span>
+            </div>
+          {/if}
         </div>
       </div>
     </header>
@@ -197,22 +191,8 @@
     }
   }
 
-  .profile-avatar, .profile-avatar-placeholder {
-    width: 120px;
-    height: 120px;
-    clip-path: url(#squircle);
-    border-radius: 22%; /* Fallback for unsupported browsers */
+  .profile-avatar-wrapper {
     flex-shrink: 0;
-  }
-
-  .profile-avatar-placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(135deg, var(--primary), var(--primary-dark, var(--primary)));
-    color: white;
-    font-size: 3rem;
-    font-weight: 700;
   }
 
   .profile-info {
