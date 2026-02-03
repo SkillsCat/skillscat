@@ -1,6 +1,6 @@
 <script lang="ts">
-  type Size = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
-  type Shape = 'circle' | 'squircle';
+  type Size = "xs" | "sm" | "md" | "lg" | "xl";
+  type Shape = "circle" | "squircle";
 
   interface Props {
     src?: string | null;
@@ -17,13 +17,13 @@
 
   let {
     src = null,
-    alt = '',
+    alt = "",
     fallback = null,
-    size = 'md',
-    shape = 'squircle',
+    size = "md",
+    shape = "squircle",
     border = true,
     shadow = false,
-    class: className = '',
+    class: className = "",
     useGithubFallback = false,
   }: Props = $props();
 
@@ -38,13 +38,14 @@
   };
 
   const imageUrl = $derived(
-    src || (useGithubFallback && fallback
-      ? `https://avatars.githubusercontent.com/${fallback}?s=${sizeMap[size].github}`
-      : null)
+    src ||
+      (useGithubFallback && fallback
+        ? `https://avatars.githubusercontent.com/${fallback}?s=${sizeMap[size].github}`
+        : null),
   );
 
   const placeholder = $derived(
-    alt ? alt[0].toUpperCase() : fallback?.[0]?.toUpperCase() || '?'
+    alt ? alt[0].toUpperCase() : fallback?.[0]?.toUpperCase() || "?",
   );
 
   // Reset error state when src changes
@@ -66,7 +67,9 @@
       {alt}
       loading="lazy"
       class="avatar-image"
-      onerror={() => { imageError = true; }}
+      onerror={() => {
+        imageError = true;
+      }}
     />
   {:else}
     <div class="avatar-placeholder">{placeholder}</div>
@@ -102,7 +105,11 @@
   }
 
   .avatar-container.border {
-    border: 2px solid color-mix(in oklch, var(--fg) 15%, transparent);
+    border: 2px solid color-mix(in oklch, var(--fg) 12%, transparent);
+  }
+
+  :global(.dark) .avatar-container.border {
+    border-color: color-mix(in oklch, var(--fg) 8%, transparent);
   }
 
   .avatar-container.size-xl.border {

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { page } from '$app/stores';
-  import { Avatar, Button, ErrorState } from '$lib/components';
+  import { page } from "$app/stores";
+  import { Avatar, Button, ErrorState } from "$lib/components";
 
   interface Org {
     id: string;
@@ -27,21 +27,23 @@
     name: string;
     slug: string;
     description: string;
-    visibility: 'public' | 'private' | 'unlisted';
+    visibility: "public" | "private" | "unlisted";
     stars: number;
   }
 
-  type Tab = 'skills' | 'members';
+  type Tab = "skills" | "members";
 
   let org = $state<Org | null>(null);
   let members = $state<Member[]>([]);
   let skills = $state<Skill[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let activeTab = $state<Tab>('skills');
+  let activeTab = $state<Tab>("skills");
 
   const slug = $derived($page.params.slug);
-  const isAdmin = $derived(org?.userRole && ['owner', 'admin'].includes(org.userRole));
+  const isAdmin = $derived(
+    org?.userRole && ["owner", "admin"].includes(org.userRole),
+  );
 
   $effect(() => {
     if (slug) {
@@ -61,24 +63,24 @@
       ]);
 
       if (orgRes.ok) {
-        const data = await orgRes.json() as { organization?: Org };
+        const data = (await orgRes.json()) as { organization?: Org };
         org = data.organization ?? null;
       } else {
-        error = 'Organization not found';
+        error = "Organization not found";
         return;
       }
 
       if (membersRes.ok) {
-        const data = await membersRes.json() as { members?: Member[] };
+        const data = (await membersRes.json()) as { members?: Member[] };
         members = data.members || [];
       }
 
       if (skillsRes.ok) {
-        const data = await skillsRes.json() as { skills?: Skill[] };
+        const data = (await skillsRes.json()) as { skills?: Skill[] };
         skills = data.skills || [];
       }
     } catch {
-      error = 'Failed to load organization';
+      error = "Failed to load organization";
     } finally {
       loading = false;
     }
@@ -121,7 +123,7 @@
             {#if org.verified}
               <span class="verified-badge" title="Verified Organization">
                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </span>
             {/if}
@@ -131,18 +133,34 @@
             <p class="org-description">{org.description}</p>
           {/if}
           <div class="org-stats">
-            <span>{org.memberCount} member{org.memberCount !== 1 ? 's' : ''}</span>
+            <span
+              >{org.memberCount} member{org.memberCount !== 1 ? "s" : ""}</span
+            >
             <span class="separator">·</span>
-            <span>{org.skillCount} skill{org.skillCount !== 1 ? 's' : ''}</span>
+            <span>{org.skillCount} skill{org.skillCount !== 1 ? "s" : ""}</span>
           </div>
         </div>
       </div>
       {#if isAdmin}
         <div class="header-actions">
           <Button variant="cute" size="sm" href="/org/{slug}/settings">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <svg
+              class="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
             </svg>
             Settings
           </Button>
@@ -154,22 +172,42 @@
     <div class="tabs">
       <button
         class="tab"
-        class:active={activeTab === 'skills'}
-        onclick={() => activeTab = 'skills'}
+        class:active={activeTab === "skills"}
+        onclick={() => (activeTab = "skills")}
       >
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+        <svg
+          class="w-4 h-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+          />
         </svg>
         Skills
         <span class="tab-count">{skills.length}</span>
       </button>
       <button
         class="tab"
-        class:active={activeTab === 'members'}
-        onclick={() => activeTab = 'members'}
+        class:active={activeTab === "members"}
+        onclick={() => (activeTab = "members")}
       >
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+        <svg
+          class="w-4 h-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+          />
         </svg>
         Members
         <span class="tab-count">{members.length}</span>
@@ -178,7 +216,7 @@
 
     <!-- Tab Content -->
     <div class="tab-content">
-      {#if activeTab === 'skills'}
+      {#if activeTab === "skills"}
         <!-- Skills Tab -->
         {#if skills.length > 0}
           <div class="skills-grid">
@@ -190,8 +228,14 @@
                 {/if}
                 <div class="skill-meta">
                   <span class="stars">
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 .587l3.668 7.568 8.332 1.151-6.064 5.828 1.48 8.279-7.416-3.967-7.417 3.967 1.481-8.279-6.064-5.828 8.332-1.151z"/>
+                    <svg
+                      class="w-4 h-4"
+                      fill="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M12 .587l3.668 7.568 8.332 1.151-6.064 5.828 1.48 8.279-7.416-3.967-7.417 3.967 1.481-8.279-6.064-5.828 8.332-1.151z"
+                      />
                     </svg>
                     {skill.stars}
                   </span>
@@ -201,8 +245,18 @@
           </div>
         {:else}
           <div class="empty-state">
-            <svg class="empty-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            <svg
+              class="empty-icon"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+              />
             </svg>
             <h3>No skills yet</h3>
             <p>This organization hasn't published any skills.</p>
@@ -230,8 +284,18 @@
           </div>
         {:else}
           <div class="empty-state">
-            <svg class="empty-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+            <svg
+              class="empty-icon"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+              />
             </svg>
             <h3>No members</h3>
             <p>This organization has no public members.</p>
@@ -314,38 +378,45 @@
     flex-shrink: 0;
   }
 
-  /* Tabs */
+  /* Tabs - Cute Style */
   .tabs {
     display: flex;
-    gap: 0.5rem;
+    gap: 0.75rem;
     margin-bottom: 1.5rem;
-    border-bottom: 2px solid var(--border);
-    padding-bottom: 0;
   }
 
-  .tab {
+  .tabs button {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.75rem 1.25rem;
     font-size: 0.9375rem;
-    font-weight: 500;
+    font-weight: 600;
     color: var(--muted-foreground);
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-lg);
     cursor: pointer;
+    box-shadow: 0 3px 0 0 oklch(75% 0.02 85);
     transition: all 0.15s ease;
+    transform: translateY(0);
   }
 
-  .tab:hover {
+  :global(.dark) .tabs button {
+    box-shadow: 0 3px 0 0 oklch(25% 0.02 85);
+  }
+
+  .tabs button:hover {
     color: var(--foreground);
+    border-color: var(--primary);
   }
 
-  .tab.active {
+  .tabs button.active {
     color: var(--primary);
-    border-bottom-color: var(--primary);
+    border-color: var(--primary);
+    background: var(--primary-subtle);
+    box-shadow: 0 1px 0 0 var(--primary);
+    transform: translateY(2px);
   }
 
   .tab-count {
@@ -354,11 +425,12 @@
     padding: 0.125rem 0.5rem;
     background: var(--muted);
     border-radius: var(--radius-full);
+    transition: all 0.15s ease;
   }
 
-  .tab.active .tab-count {
-    background: var(--primary-subtle);
-    color: var(--primary);
+  .tabs button.active .tab-count {
+    background: var(--primary);
+    color: white;
   }
 
   /* Tab Content */
@@ -512,7 +584,9 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   @media (max-width: 640px) {
@@ -541,12 +615,14 @@
     .tabs {
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
+      flex-wrap: nowrap;
     }
 
-    .tab {
+    .tabs button {
       padding: 0.625rem 1rem;
       font-size: 0.875rem;
       white-space: nowrap;
+      flex-shrink: 0;
     }
 
     .skills-grid {

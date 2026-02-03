@@ -1,13 +1,16 @@
 <script lang="ts">
-  import { page } from '$app/stores';
-  import { Avatar, Button, SettingsSection, ErrorState } from '$lib/components';
+  import { page } from "$app/stores";
+  import { Avatar, Button, SettingsSection, ErrorState } from "$lib/components";
+  import { Select } from "bits-ui";
+  import { HugeiconsIcon } from "@hugeicons/svelte";
+  import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 
   interface Member {
     userId: string;
     name: string;
     email: string;
     image: string;
-    role: 'owner' | 'admin' | 'member';
+    role: "owner" | "admin" | "member";
     joinedAt: number;
   }
 
@@ -15,75 +18,74 @@
     userRole: string | null;
   }
 
+  interface Props {
+    data: {
+      org: Org;
+      members: Member[];
+    };
+  }
+
+  let { data }: Props = $props();
+
+  // Local state that syncs with server data but can be mutated
   let members = $state<Member[]>([]);
   let org = $state<Org | null>(null);
-  let loading = $state(true);
-  let error = $state<string | null>(null);
+
+  // Sync server data to local state on initial load and navigation
+  $effect(() => {
+    members = data.members;
+    org = data.org;
+  });
 
   // Invite dialog state
   let showInviteDialog = $state(false);
-  let inviteUsername = $state('');
-  let inviteRole = $state<'admin' | 'member'>('member');
+  let inviteUsername = $state("");
+  let inviteRole = $state<"admin" | "member">("member");
   let inviting = $state(false);
   let inviteError = $state<string | null>(null);
   let inviteSuccess = $state<string | null>(null);
 
   const slug = $derived($page.params.slug);
-  const isOwner = $derived(org?.userRole === 'owner');
-  const isAdmin = $derived(org?.userRole === 'owner' || org?.userRole === 'admin');
+  const isOwner = $derived(org?.userRole === "owner");
+  const isAdmin = $derived(
+    org?.userRole === "owner" || org?.userRole === "admin",
+  );
 
-  $effect(() => {
-    if (slug) {
-      loadData();
-    }
-  });
-
-  async function loadData() {
-    loading = true;
-    error = null;
+  // Reload data after mutations
+  async function reloadMembers() {
     try {
-      const [orgRes, membersRes] = await Promise.all([
-        fetch(`/api/orgs/${slug}`),
-        fetch(`/api/orgs/${slug}/members`),
-      ]);
-
-      if (orgRes.ok) {
-        const data = await orgRes.json() as { organization?: Org };
-        org = data.organization ?? null;
-      }
-
-      if (membersRes.ok) {
-        const data = await membersRes.json() as { members?: Member[] };
+      const res = await fetch(`/api/orgs/${slug}/members`);
+      if (res.ok) {
+        const data = (await res.json()) as { members?: Member[] };
         members = data.members || [];
-      } else {
-        error = 'Failed to load members';
       }
     } catch {
-      error = 'Failed to load members';
-    } finally {
-      loading = false;
+      // Silent fail on reload
     }
   }
 
   function formatDate(timestamp: number): string {
-    return new Date(timestamp).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
+    return new Date(timestamp).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     });
   }
 
   function getRoleBadgeClass(role: string): string {
     switch (role) {
-      case 'owner': return 'role-owner';
-      case 'admin': return 'role-admin';
-      default: return 'role-member';
+      case "owner":
+        return "role-owner";
+      case "admin":
+        return "role-admin";
+      default:
+        return "role-member";
     }
   }
 
   function openInviteDialog() {
-    inviteUsername = '';
-    inviteRole = 'member';
+    inviteUsername = "";
+    inviteRole = "member";
     inviteError = null;
     inviteSuccess = null;
     showInviteDialog = true;
@@ -91,8 +93,8 @@
 
   function closeInviteDialog() {
     showInviteDialog = false;
-    inviteUsername = '';
-    inviteRole = 'member';
+    inviteUsername = "";
+    inviteRole = "member";
     inviteError = null;
     inviteSuccess = null;
   }
@@ -106,24 +108,24 @@
 
     try {
       const res = await fetch(`/api/orgs/${slug}/members`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           githubUsername: inviteUsername.trim(),
           role: inviteRole,
         }),
       });
 
-      const data = await res.json() as { message?: string };
+      const data = (await res.json()) as { message?: string };
 
       if (res.ok) {
-        inviteSuccess = data.message || 'Invitation sent successfully';
-        inviteUsername = '';
+        inviteSuccess = data.message || "Invitation sent successfully";
+        inviteUsername = "";
       } else {
-        inviteError = data.message || 'Failed to send invitation';
+        inviteError = data.message || "Failed to send invitation";
       }
     } catch {
-      inviteError = 'Failed to send invitation';
+      inviteError = "Failed to send invitation";
     } finally {
       inviting = false;
     }
@@ -138,33 +140,42 @@
     </div>
     {#if isAdmin}
       <Button variant="cute" size="sm" onclick={openInviteDialog}>
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+        <svg
+          class="w-4 h-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M12 4.5v15m7.5-7.5h-15"
+          />
         </svg>
         Invite Member
       </Button>
     {/if}
   </div>
 
-  <SettingsSection title="Organization Members" description="People who have access to this organization.">
-    {#if loading}
-      <div class="loading-state">
-        <div class="loading-spinner"></div>
-        <p>Loading members...</p>
-      </div>
-    {:else if error}
-      <ErrorState
-        title="Failed to Load"
-        message={error}
-        primaryActionText="Try Again"
-        primaryActionClick={loadData}
-        secondaryActionText="Go Back"
-        secondaryActionClick={() => history.back()}
-      />
-    {:else if members.length === 0}
+  <SettingsSection
+    title="Organization Members"
+    description="People who have access to this organization."
+  >
+    {#if members.length === 0}
       <div class="empty-state">
-        <svg class="empty-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+        <svg
+          class="empty-icon"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          stroke-width="1.5"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"
+          />
         </svg>
         <h3>No members</h3>
         <p>Invite members to collaborate on this organization.</p>
@@ -183,16 +194,28 @@
             <div class="member-info">
               <div class="member-header">
                 <a href="/u/{member.name}" class="member-name">{member.name}</a>
-                <span class="role-badge {getRoleBadgeClass(member.role)}">{member.role}</span>
+                <span class="role-badge {getRoleBadgeClass(member.role)}"
+                  >{member.role}</span
+                >
               </div>
               <p class="member-email">{member.email}</p>
               <p class="member-joined">Joined {formatDate(member.joinedAt)}</p>
             </div>
-            {#if isOwner && member.role !== 'owner'}
+            {#if isOwner && member.role !== "owner"}
               <div class="member-actions">
                 <Button variant="ghost" size="sm">
-                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+                  <svg
+                    class="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z"
+                    />
                   </svg>
                 </Button>
               </div>
@@ -208,10 +231,18 @@
 {#if showInviteDialog}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="dialog-overlay" role="presentation" onclick={closeInviteDialog}>
-    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="invite-dialog-title" tabindex="-1" onclick={(e) => e.stopPropagation()}>
+    <div
+      class="dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="invite-dialog-title"
+      tabindex="-1"
+      onclick={(e) => e.stopPropagation()}
+    >
       <h2 id="invite-dialog-title">Invite Member</h2>
       <p class="dialog-description">
-        Invite a user by their GitHub username. They will receive a notification to accept or decline.
+        Invite a user by their GitHub username.<br />
+        They will receive a notification to accept or decline.
       </p>
 
       <div class="form-group">
@@ -231,10 +262,33 @@
 
       <div class="form-group">
         <label for="invite-role">Role</label>
-        <select id="invite-role" bind:value={inviteRole} class="role-select" disabled={inviting}>
-          <option value="member">Member</option>
-          <option value="admin">Admin</option>
-        </select>
+        <Select.Root
+          type="single"
+          value={inviteRole}
+          onValueChange={(v) => {
+            inviteRole = v as "admin" | "member";
+          }}
+          disabled={inviting}
+        >
+          <Select.Trigger class="select-trigger">
+            <span class="select-value">
+              {inviteRole === "member" ? "Member" : "Admin"}
+            </span>
+            <HugeiconsIcon
+              icon={ArrowDown01Icon}
+              size={16}
+              class="select-icon"
+            />
+          </Select.Trigger>
+          <Select.Portal>
+            <Select.Content class="select-content" sideOffset={4}>
+              <Select.Item value="member" class="select-item"
+                >Member</Select.Item
+              >
+              <Select.Item value="admin" class="select-item">Admin</Select.Item>
+            </Select.Content>
+          </Select.Portal>
+        </Select.Root>
       </div>
 
       {#if inviteError}
@@ -249,8 +303,12 @@
         <Button variant="ghost" onclick={closeInviteDialog} disabled={inviting}>
           Cancel
         </Button>
-        <Button variant="cute" onclick={handleInvite} disabled={inviting || !inviteUsername.trim()}>
-          {inviting ? 'Sending...' : 'Send Invitation'}
+        <Button
+          variant="cute"
+          onclick={handleInvite}
+          disabled={inviting || !inviteUsername.trim()}
+        >
+          {inviting ? "Sending..." : "Send Invitation"}
         </Button>
       </div>
     </div>
@@ -305,7 +363,9 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .empty-icon {
@@ -462,6 +522,7 @@
     font-size: 0.875rem;
     color: var(--muted-foreground);
     margin-bottom: 1.5rem;
+    text-align: left;
   }
 
   .form-group {
@@ -491,6 +552,10 @@
     transform: translateY(2px);
   }
 
+  :global(.dark) .input-wrapper {
+    box-shadow: 0 3px 0 0 oklch(25% 0.02 85);
+  }
+
   .input-prefix {
     padding-left: 0.75rem;
     color: var(--muted-foreground);
@@ -508,24 +573,91 @@
     outline: none;
   }
 
-  .role-select {
+  /* Select Component - Bits UI */
+  :global(.select-trigger) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     width: 100%;
-    padding: 0.75rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.9375rem;
+    color: var(--foreground);
+    background: var(--background);
     border: 2px solid var(--border);
     border-radius: var(--radius-md);
-    background: var(--background);
-    color: var(--foreground);
-    font-size: 0.9375rem;
-    box-shadow: 0 3px 0 0 oklch(75% 0.02 85);
     cursor: pointer;
+    box-shadow: 0 3px 0 0 oklch(75% 0.02 85);
     transition: all 0.15s ease;
   }
 
-  .role-select:focus {
-    outline: none;
+  :global(.select-trigger:hover) {
+    border-color: var(--primary);
+  }
+
+  :global(.select-trigger[data-state="open"]) {
     border-color: var(--primary);
     box-shadow: 0 1px 0 0 var(--primary);
     transform: translateY(2px);
+  }
+
+  :global(.select-trigger[data-disabled]) {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  :global(.dark .select-trigger) {
+    box-shadow: 0 3px 0 0 oklch(25% 0.02 85);
+  }
+
+  .select-value {
+    flex: 1;
+    text-align: left;
+  }
+
+  :global(.select-icon) {
+    color: var(--muted-foreground);
+    transition: transform 0.15s ease;
+    flex-shrink: 0;
+  }
+
+  :global(.select-trigger[data-state="open"] .select-icon) {
+    transform: rotate(180deg);
+  }
+
+  :global(.select-content) {
+    width: var(--bits-select-trigger-width);
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 0 0 oklch(75% 0.02 85);
+    padding: 0.375rem;
+    z-index: 100;
+  }
+
+  :global(.dark .select-content) {
+    box-shadow: 0 4px 0 0 oklch(25% 0.02 85);
+  }
+
+  :global(.select-item) {
+    display: flex;
+    align-items: center;
+    padding: 0.625rem 0.75rem;
+    font-size: 0.9375rem;
+    color: var(--foreground);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.1s ease;
+  }
+
+  :global(.select-item:hover),
+  :global(.select-item[data-highlighted]) {
+    background: var(--muted);
+  }
+
+  :global(.select-item[data-state="checked"]) {
+    background: var(--primary-subtle);
+    color: var(--primary);
+    font-weight: 500;
   }
 
   .invite-error {

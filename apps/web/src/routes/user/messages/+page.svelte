@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { Button, SettingsSection, ErrorState, Avatar } from '$lib/components';
+  import { Button, SettingsSection, ErrorState, Avatar } from "$lib/components";
+  import { HugeiconsIcon } from "@hugeicons/svelte";
+  import {
+    Building04Icon,
+    SparklesIcon,
+    MailOpen01Icon,
+    MailMinus01Icon,
+  } from "@hugeicons/core-free-icons";
 
   interface OrgInviteMetadata {
     orgId: string;
@@ -7,7 +14,7 @@
     orgName: string;
     inviterId: string;
     inviterName: string;
-    role: 'admin' | 'member';
+    role: "admin" | "member";
   }
 
   interface Notification {
@@ -35,29 +42,29 @@
     loading = true;
     error = null;
     try {
-      const res = await fetch('/api/notifications');
+      const res = await fetch("/api/notifications");
       if (res.ok) {
-        const data = await res.json() as { notifications: Notification[] };
+        const data = (await res.json()) as { notifications: Notification[] };
         notifications = data.notifications;
         // Mark unread as read
         markAllAsRead();
       } else {
-        error = 'Failed to load messages';
+        error = "Failed to load messages";
       }
     } catch {
-      error = 'Failed to load messages';
+      error = "Failed to load messages";
     } finally {
       loading = false;
     }
   }
 
   async function markAllAsRead() {
-    const unread = notifications.filter(n => !n.read);
+    const unread = notifications.filter((n) => !n.read);
     for (const n of unread) {
       try {
         await fetch(`/api/notifications/${n.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ read: true }),
         });
       } catch {
@@ -72,18 +79,20 @@
     processingIds = new Set([...processingIds, notification.id]);
     try {
       const res = await fetch(`/api/notifications/${notification.id}/accept`, {
-        method: 'POST',
+        method: "POST",
       });
       if (res.ok) {
         // Update local state
-        notifications = notifications.map(n =>
-          n.id === notification.id ? { ...n, processed: true } : n
+        notifications = notifications.map((n) =>
+          n.id === notification.id ? { ...n, processed: true } : n,
         );
       }
     } catch {
       // Silently fail
     } finally {
-      processingIds = new Set([...processingIds].filter(id => id !== notification.id));
+      processingIds = new Set(
+        [...processingIds].filter((id) => id !== notification.id),
+      );
     }
   }
 
@@ -93,18 +102,20 @@
     processingIds = new Set([...processingIds, notification.id]);
     try {
       const res = await fetch(`/api/notifications/${notification.id}/reject`, {
-        method: 'POST',
+        method: "POST",
       });
       if (res.ok) {
         // Update local state
-        notifications = notifications.map(n =>
-          n.id === notification.id ? { ...n, processed: true } : n
+        notifications = notifications.map((n) =>
+          n.id === notification.id ? { ...n, processed: true } : n,
         );
       }
     } catch {
       // Silently fail
     } finally {
-      processingIds = new Set([...processingIds].filter(id => id !== notification.id));
+      processingIds = new Set(
+        [...processingIds].filter((id) => id !== notification.id),
+      );
     }
   }
 
@@ -119,14 +130,17 @@
     if (days > 0) return `${days}d ago`;
     if (hours > 0) return `${hours}h ago`;
     if (minutes > 0) return `${minutes}m ago`;
-    return 'Just now';
+    return "Just now";
   }
 
-  function getNotificationIcon(type: string): string {
+  function getNotificationIcon(type: string) {
     switch (type) {
-      case 'org_invite': return '🏢';
-      case 'skill_shared': return '✨';
-      default: return '📬';
+      case "org_invite":
+        return Building04Icon;
+      case "skill_shared":
+        return SparklesIcon;
+      default:
+        return MailOpen01Icon;
     }
   }
 </script>
@@ -137,7 +151,10 @@
     <p class="description">View your notifications and invitations.</p>
   </div>
 
-  <SettingsSection title="All Messages" description="Your notifications and organization invitations.">
+  <SettingsSection
+    title="All Messages"
+    description="Your notifications and organization invitations."
+  >
     {#if loading}
       <div class="loading-state">
         <div class="loading-spinner"></div>
@@ -152,26 +169,34 @@
       />
     {:else if notifications.length === 0}
       <div class="empty-state">
-        <span class="empty-icon">📭</span>
+        <div class="empty-icon">
+          <HugeiconsIcon icon={MailMinus01Icon} size={48} />
+        </div>
         <h3>No messages</h3>
         <p>You don't have any notifications yet.</p>
       </div>
     {:else}
       <div class="notifications-list">
         {#each notifications as notification (notification.id)}
-          <div class="notification-card" class:notification-unread={!notification.read} class:notification-processed={notification.processed}>
+          <div
+            class="notification-card"
+            class:notification-unread={!notification.read}
+            class:notification-processed={notification.processed}
+          >
             <div class="notification-icon">
               {getNotificationIcon(notification.type)}
             </div>
             <div class="notification-content">
               <div class="notification-header">
                 <h4 class="notification-title">{notification.title}</h4>
-                <span class="notification-time">{formatRelativeTime(notification.createdAt)}</span>
+                <span class="notification-time"
+                  >{formatRelativeTime(notification.createdAt)}</span
+                >
               </div>
               {#if notification.message}
                 <p class="notification-message">{notification.message}</p>
               {/if}
-              {#if notification.type === 'org_invite' && !notification.processed && notification.metadata}
+              {#if notification.type === "org_invite" && !notification.processed && notification.metadata}
                 <div class="notification-actions">
                   <Button
                     variant="cute"
@@ -179,7 +204,9 @@
                     onclick={() => handleAccept(notification)}
                     disabled={processingIds.has(notification.id)}
                   >
-                    {processingIds.has(notification.id) ? 'Accepting...' : 'Accept'}
+                    {processingIds.has(notification.id)
+                      ? "Accepting..."
+                      : "Accept"}
                   </Button>
                   <Button
                     variant="ghost"
@@ -190,9 +217,9 @@
                     Decline
                   </Button>
                 </div>
-              {:else if notification.type === 'org_invite' && notification.processed}
+              {:else if notification.type === "org_invite" && notification.processed}
                 <p class="notification-status">
-                  {notification.metadata ? 'Invitation processed' : 'Processed'}
+                  {notification.metadata ? "Invitation processed" : "Processed"}
                 </p>
               {/if}
             </div>
@@ -247,11 +274,13 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .empty-icon {
-    font-size: 3rem;
+    color: var(--muted-foreground);
     margin-bottom: 0.75rem;
   }
 
@@ -359,4 +388,3 @@
     }
   }
 </style>
-

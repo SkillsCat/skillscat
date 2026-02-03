@@ -474,17 +474,25 @@
   .confirm-input {
     width: 100%;
     padding: 0.75rem;
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    border: 2px solid rgba(239, 68, 68, 0.3);
     border-radius: var(--radius-md);
     background: var(--background);
     color: var(--foreground);
     font-size: 0.9375rem;
     margin-bottom: 1rem;
+    box-shadow: 0 3px 0 0 oklch(75% 0.02 85);
+    transition: all 0.15s ease;
+  }
+
+  :global(.dark) .confirm-input {
+    box-shadow: 0 3px 0 0 oklch(25% 0.02 85);
   }
 
   .confirm-input:focus {
     outline: none;
     border-color: #ef4444;
+    box-shadow: 0 1px 0 0 #ef4444;
+    transform: translateY(2px);
   }
 
   .dialog-actions {

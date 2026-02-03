@@ -509,6 +509,10 @@
     transition: all 0.15s ease;
   }
 
+  :global(.dark) input[type="text"] {
+    box-shadow: 0 3px 0 0 oklch(25% 0.02 85);
+  }
+
   input[type="text"]:focus {
     outline: none;
     border-color: var(--primary);
@@ -612,6 +616,10 @@
     cursor: pointer;
     box-shadow: 0 3px 0 0 oklch(75% 0.02 85);
     transition: all 0.15s ease;
+  }
+
+  :global(.dark .scope-checkbox) {
+    box-shadow: 0 3px 0 0 oklch(25% 0.02 85);
   }
 
   :global(.scope-checkbox:hover) {
