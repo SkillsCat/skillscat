@@ -106,7 +106,7 @@ program
   .description('Publish a skill to SkillsCat')
   .option('-n, --name <name>', 'Skill name')
   .option('-o, --org <org>', 'Publish under an organization')
-  .option('-p, --public', 'Make the skill public')
+  .option('-p, --private', 'Force private visibility (default: public if org connected to GitHub)')
   .option('-d, --description <desc>', 'Skill description')
   .option('-y, --yes', 'Skip confirmation prompt')
   .action(publish);

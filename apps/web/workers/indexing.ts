@@ -246,7 +246,9 @@ async function checkForDuplicate(
   return { isDuplicate: false };
 }
 
-// Anti-abuse: Store content hashes
+/**
+ * Anti-abuse: Store content hashes
+ */
 async function storeContentHashes(
   skillId: string,
   fullHash: string,
@@ -258,18 +260,83 @@ async function storeContentHashes(
   await env.DB.prepare(`
     INSERT INTO content_hashes (id, skill_id, hash_type, hash_value, created_at)
     VALUES (?, ?, 'full', ?, ?)
-    ON CONFLICT(skill_id, hash_type) DO UPDATE SET hash_value = excluded.hash_value
+    ON CONFLICT(skill_id, hash_type) DO UPDATE SET
+      hash_value = excluded.hash_value
   `)
-    .bind(crypto.randomUUID(), skillId, fullHash, now)
+    .bind(generateId(), skillId, fullHash, now)
     .run();
 
   await env.DB.prepare(`
     INSERT INTO content_hashes (id, skill_id, hash_type, hash_value, created_at)
     VALUES (?, ?, 'normalized', ?, ?)
-    ON CONFLICT(skill_id, hash_type) DO UPDATE SET hash_value = excluded.hash_value
+    ON CONFLICT(skill_id, hash_type) DO UPDATE SET
+      hash_value = excluded.hash_value
   `)
-    .bind(crypto.randomUUID(), skillId, normalizedHash, now)
+    .bind(generateId(), skillId, normalizedHash, now)
     .run();
+}
+
+/**
+ * Curation Conversion: Check if there's a private skill with identical content
+ * If found, convert it to public and return the existing skill ID
+ * This prevents duplicate skills when curating content that users have already published privately
+ */
+async function checkAndConvertPrivateSkill(
+  contentHash: string,
+  env: IndexingEnv
+): Promise<{ converted: boolean; skillId?: string; slug?: string }> {
+  // Find a private skill with the same content hash
+  const existingPrivate = await env.DB.prepare(`
+    SELECT id, slug, owner_id, org_id FROM skills
+    WHERE content_hash = ? AND visibility = 'private'
+    ORDER BY created_at ASC
+    LIMIT 1
+  `)
+    .bind(contentHash)
+    .first<{ id: string; slug: string; owner_id: string | null; org_id: string | null }>();
+
+  if (!existingPrivate) {
+    return { converted: false };
+  }
+
+  const now = Date.now();
+
+  // Convert the private skill to public
+  await env.DB.prepare(`
+    UPDATE skills SET visibility = 'public', updated_at = ?
+    WHERE id = ?
+  `)
+    .bind(now, existingPrivate.id)
+    .run();
+
+  log.log(`Converted private skill to public: ${existingPrivate.slug} (${existingPrivate.id})`);
+
+  // Send notification to the owner if there is one
+  if (existingPrivate.owner_id) {
+    const notificationId = generateId();
+    await env.DB.prepare(`
+      INSERT INTO notifications (id, user_id, type, title, message, metadata, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+      .bind(
+        notificationId,
+        existingPrivate.owner_id,
+        'skill_curated',
+        'Your skill has been curated!',
+        `Your skill "${existingPrivate.slug}" has been converted to public as part of the SkillsCat curation process. Your skill is now discoverable by everyone in the registry.`,
+        JSON.stringify({ skillId: existingPrivate.id, skillSlug: existingPrivate.slug }),
+        now
+      )
+      .run();
+
+    log.log(`Sent curation notification to user ${existingPrivate.owner_id} for skill ${existingPrivate.slug}`);
+  }
+
+  return {
+    converted: true,
+    skillId: existingPrivate.id,
+    slug: existingPrivate.slug
+  };
 }
 
 // ============================================
@@ -967,10 +1034,17 @@ async function processMessage(
     skillId = updatedId;
     log.log(`Updated skill: ${skillId}`);
   } else {
-    const authorId = await upsertAuthor(repo, env);
-    log.log(`Author upserted: ${authorId}`);
-    skillId = await createSkill(repo, skillMd, env, skillPath, frontmatter);
-    log.log(`Created skill: ${skillId}`);
+    // Check if there's a private skill with identical content that should be converted
+    const curationResult = await checkAndConvertPrivateSkill(fullHash, env);
+    if (curationResult.converted && curationResult.skillId) {
+      skillId = curationResult.skillId;
+      log.log(`Curation: Converted private skill to public: ${curationResult.slug} (${skillId})`);
+    } else {
+      const authorId = await upsertAuthor(repo, env);
+      log.log(`Author upserted: ${authorId}`);
+      skillId = await createSkill(repo, skillMd, env, skillPath, frontmatter);
+      log.log(`Created skill: ${skillId}`);
+    }
   }
 
   // Store content hashes for future duplicate detection

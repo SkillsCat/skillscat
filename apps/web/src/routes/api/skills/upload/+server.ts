@@ -185,36 +185,61 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
   // Determine owner context
   let slugOwner = username;
 
+  // Check if org is connected to GitHub (to determine default visibility)
+  let orgConnectedToGithub = false;
+
   if (orgSlug) {
     const org = await db.prepare(`
-      SELECT o.id, o.slug FROM organizations o
+      SELECT o.id, o.slug, o.github_org_id FROM organizations o
       INNER JOIN org_members om ON o.id = om.org_id
       WHERE o.slug = ? AND om.user_id = ?
     `)
       .bind(orgSlug, auth.userId)
-      .first<{ id: string; slug: string }>();
+      .first<{ id: string; slug: string; github_org_id: number | null }>();
 
     if (!org) {
       throw error(403, 'You are not a member of this organization');
     }
 
     slugOwner = org.slug;
+    orgConnectedToGithub = org.github_org_id !== null;
   }
+
+  // Determine suggested visibility
+  // - Org connected to GitHub: default public
+  // - Org not connected: default private
+  // - Personal: default private
+  const suggestedVisibility = orgSlug && orgConnectedToGithub ? 'public' : 'private';
 
   // Generate preview slug
   const skillName = validation.name || 'untitled-skill';
   const slug = generateSlug(slugOwner, skillName);
 
-  // Check for duplicate slug
-  const existingSlug = await db.prepare(`
-    SELECT id FROM skills WHERE slug = ?
+  // Check for duplicate slug and existing public version
+  const existingSkill = await db.prepare(`
+    SELECT id, visibility FROM skills WHERE slug = ?
   `)
     .bind(slug)
-    .first();
+    .first<{ id: string; visibility: string }>();
 
   const warnings: string[] = [];
-  if (existingSlug) {
+  let canPublishPrivate = true;
+
+  if (existingSkill) {
     warnings.push(`A skill with slug ${slug} already exists. Publishing will fail.`);
+  }
+
+  // Check if there's an existing public skill with the same content hash
+  const contentHash = await computeContentHash(skillMdContent);
+  const existingPublicByHash = await db.prepare(`
+    SELECT slug FROM skills WHERE content_hash = ? AND visibility = 'public'
+  `)
+    .bind(contentHash)
+    .first<{ slug: string }>();
+
+  if (existingPublicByHash) {
+    warnings.push(`Identical content exists as public skill ${existingPublicByHash.slug}. Cannot publish as private.`);
+    canPublishPrivate = false;
   }
 
   return json({
@@ -226,6 +251,8 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
       categories: validation.categories || [],
       owner: slugOwner,
     },
+    suggestedVisibility,
+    canPublishPrivate,
     warnings,
   });
 };
@@ -324,6 +351,20 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 
   // Compute content hash
   const contentHash = await computeContentHash(skillMdContent);
+
+  // If publishing as private, check for existing public skills
+  if (visibility === 'private') {
+    // Check by content hash - cannot publish as private if identical public skill exists
+    const existingPublicByHash = await db.prepare(`
+      SELECT slug FROM skills WHERE content_hash = ? AND visibility = 'public'
+    `)
+      .bind(contentHash)
+      .first<{ slug: string }>();
+
+    if (existingPublicByHash) {
+      throw error(409, `Cannot publish as private: identical content exists as public skill ${existingPublicByHash.slug}`);
+    }
+  }
 
   // Store SKILL.md in R2
   const r2Path = `skills/${slugOwner}/${skillName}/SKILL.md`;
