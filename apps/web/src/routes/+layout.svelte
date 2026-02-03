@@ -45,24 +45,28 @@
 </script>
 
 <div class="app-wrapper">
-  <!-- Lava Lamp Background Effect -->
-  <div class="lava-bg">
-    <div class="lava-blob lava-blob-1"></div>
-    <div class="lava-blob lava-blob-2"></div>
-    <div class="lava-blob lava-blob-3"></div>
-    <div class="lava-blob lava-blob-4"></div>
-    <div class="lava-blob lava-blob-5"></div>
-  </div>
-
   <!-- Navbar Background - fades in when scrolled -->
   <div class="navbar-bg" class:navbar-bg-visible={isScrolled}></div>
 
   <div class="app-content">
-    <Navbar />
+    <div class="main-container">
+      <!-- Lava Lamp Background Effect -->
+      <div class="lava-bg">
+        <div class="lava-blob lava-blob-1"></div>
+        <div class="lava-blob lava-blob-2"></div>
+        <div class="lava-blob lava-blob-3"></div>
+        <div class="lava-blob lava-blob-4"></div>
+        <div class="lava-blob lava-blob-5"></div>
+      </div>
 
-    <main class="flex-1">
-      {@render children()}
-    </main>
+      <div class="main-content">
+        <Navbar />
+
+        <main class="flex-1">
+          {@render children()}
+        </main>
+      </div>
+    </div>
 
     <Footer />
   </div>
@@ -80,7 +84,7 @@
 
   /* Lava Lamp Background - Clean, Subtle Design */
   .lava-bg {
-    position: fixed;
+    position: absolute;
     inset: 0;
     overflow: hidden;
     pointer-events: none;
@@ -254,6 +258,38 @@
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+  }
+
+  /* Main Container with Cute Shadow */
+  .main-container {
+    position: relative;
+    background: var(--background);
+    border-radius: 0 0 2rem 2rem;
+    box-shadow: 0 8px 0 0 oklch(88% 0.01 75);
+    margin-bottom: 1rem;
+    min-height: calc(100vh - 4rem);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  :global(.dark) .main-container {
+    box-shadow: 0 8px 0 0 oklch(15% 0.01 75);
+  }
+
+  /* Main Content - above lava background and navbar-bg */
+  .main-content {
+    position: relative;
+    z-index: 46;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+
+  /* Footer Adjustments */
+  .app-content :global(footer) {
+    margin-top: -1.75rem;
+    padding-top: 1.5rem;
   }
 
   /* Responsive */

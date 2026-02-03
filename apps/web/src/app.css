@@ -209,23 +209,53 @@ body {
   min-height: 100vh;
 }
 
-/* ===== 滚动条样式 ===== */
+/* ===== Overlay Scrollbar ===== */
+html {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+
+/* Webkit browsers (Chrome, Safari, Edge) */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--card);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: oklch(70% 0.02 85 / 0.5);
   border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--muted-foreground);
+  background: oklch(60% 0.02 85 / 0.7);
+  background-clip: padding-box;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(70% 0.02 85 / 0.5) transparent;
+}
+
+/* Dark mode scrollbar */
+:root.dark ::-webkit-scrollbar-thumb {
+  background: oklch(40% 0.02 85 / 0.5);
+  background-clip: padding-box;
+}
+
+:root.dark ::-webkit-scrollbar-thumb:hover {
+  background: oklch(50% 0.02 85 / 0.7);
+  background-clip: padding-box;
+}
+
+:root.dark * {
+  scrollbar-color: oklch(40% 0.02 85 / 0.5) transparent;
 }
 
 /* ===== 焦点状态 (无障碍) ===== */

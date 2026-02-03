@@ -8,6 +8,7 @@
     Building06Icon,
     Key01Icon,
     UserCircleIcon,
+    Mail01Icon,
   } from '@hugeicons/core-free-icons';
 
   interface Props {
@@ -17,6 +18,7 @@
   let { children }: Props = $props();
 
   const session = useSession();
+  let unreadCount = $state(0);
 
   // Auth guard - redirect to home if not authenticated
   $effect(() => {
@@ -25,8 +27,28 @@
     }
   });
 
+  // Fetch unread count when session changes
+  $effect(() => {
+    if ($session.data?.user) {
+      fetchUnreadCount();
+    }
+  });
+
+  async function fetchUnreadCount() {
+    try {
+      const res = await fetch('/api/notifications/unread-count');
+      if (res.ok) {
+        const data = await res.json() as { count: number };
+        unreadCount = data.count;
+      }
+    } catch {
+      // Silently fail
+    }
+  }
+
   const navItems = [
     { href: '/user/skills', label: 'Skills', icon: SparklesIcon },
+    { href: '/user/messages', label: 'Messages', icon: Mail01Icon, badge: true },
     { href: '/user/organizations', label: 'Organizations', icon: Building06Icon },
     { href: '/user/tokens', label: 'API Tokens', icon: Key01Icon },
     { href: '/user/account', label: 'Account', icon: UserCircleIcon },
@@ -58,6 +80,9 @@
           >
             <HugeiconsIcon icon={item.icon} size={18} />
             {item.label}
+            {#if item.badge && unreadCount > 0}
+              <span class="nav-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+            {/if}
           </a>
         {/each}
       </nav>
@@ -143,6 +168,20 @@
   .nav-item-active:hover {
     color: var(--primary);
     background: var(--primary-subtle);
+  }
+
+  .nav-badge {
+    margin-left: auto;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 20px;
+    text-align: center;
+    color: white;
+    background: var(--primary);
+    border-radius: 9999px;
   }
 
   .settings-content {

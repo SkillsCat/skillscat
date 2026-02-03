@@ -5,14 +5,36 @@
    */
   import { DropdownMenu } from 'bits-ui';
   import { signOut, useSession } from '$lib/auth-client';
-  import { LoginDialog } from '$lib/components';
+  import { LoginDialog, Avatar } from '$lib/components';
   import { fly, fade } from 'svelte/transition';
   import { HugeiconsIcon } from '@hugeicons/svelte';
-  import { ArrowDown01Icon, Bookmark02Icon, Settings01Icon, Logout01Icon, Login03Icon, SparklesIcon } from '@hugeicons/core-free-icons';
+  import { ArrowDown01Icon, Bookmark02Icon, Settings01Icon, Logout01Icon, Login03Icon, SparklesIcon, Mail01Icon } from '@hugeicons/core-free-icons';
 
   const session = useSession();
 
   let showLoginDialog = $state(false);
+  let unreadCount = $state(0);
+
+  // Fetch unread count when session changes
+  $effect(() => {
+    if ($session.data?.user) {
+      fetchUnreadCount();
+    } else {
+      unreadCount = 0;
+    }
+  });
+
+  async function fetchUnreadCount() {
+    try {
+      const res = await fetch('/api/notifications/unread-count');
+      if (res.ok) {
+        const data = await res.json() as { count: number };
+        unreadCount = data.count;
+      }
+    } catch {
+      // Silently fail
+    }
+  }
 
   function handleSignOut() {
     signOut();
@@ -25,11 +47,19 @@
     <DropdownMenu.Trigger
       class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-bg-muted transition-colors"
     >
-      <img
-        src={$session.data.user.image || `https://avatars.githubusercontent.com/${$session.data.user.name}?s=64`}
-        alt={$session.data.user.name || 'User'}
-        class="w-8 h-8 rounded-full"
-      />
+      <div class="avatar-wrapper">
+        <Avatar
+          src={$session.data.user.image}
+          fallback={$session.data.user.name}
+          alt={$session.data.user.name || 'User'}
+          size="sm"
+          border={false}
+          useGithubFallback
+        />
+        {#if unreadCount > 0}
+          <span class="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+        {/if}
+      </div>
       <HugeiconsIcon icon={ArrowDown01Icon} size={16} className="text-fg-muted" />
     </DropdownMenu.Trigger>
 
@@ -59,6 +89,14 @@
                   <a href="/user/skills" class="dropdown-item">
                     <HugeiconsIcon icon={SparklesIcon} size={16} />
                     My Skills
+                  </a>
+
+                  <a href="/user/messages" class="dropdown-item">
+                    <HugeiconsIcon icon={Mail01Icon} size={16} />
+                    Messages
+                    {#if unreadCount > 0}
+                      <span class="menu-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+                    {/if}
                   </a>
 
                   <a href="/bookmarks" class="dropdown-item">
@@ -99,6 +137,41 @@
 {/if}
 
 <style>
+  .avatar-wrapper {
+    position: relative;
+  }
+
+  .notification-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 18px;
+    text-align: center;
+    color: white;
+    background: #ef4444;
+    border-radius: 9999px;
+    border: 2px solid var(--background);
+  }
+
+  .menu-badge {
+    margin-left: auto;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 20px;
+    text-align: center;
+    color: white;
+    background: var(--primary);
+    border-radius: 9999px;
+  }
+
   .sign-in-btn {
     --btn-shadow-offset: 3px;
     --btn-shadow-color: oklch(50% 0.22 55);

@@ -229,6 +229,67 @@ Button 组件位于 `$lib/components/ui/Button.svelte`，支持以下属性：
 </Button>
 ```
 
+### Cute Style 设计原则
+
+SkillsCat 使用 "Cute Style" 设计语言，核心特征是 3D 底部阴影效果。
+
+**核心特征：**
+
+| 特征 | 说明 |
+|------|------|
+| 3D 底部阴影 | `box-shadow: 0 4px 0 0 [color]` - 纯底部偏移 |
+| 粗边框 | 2-3px 边框，增强视觉层次 |
+| 圆角 | 按钮使用 `border-radius: 9999px`，输入框使用 `1.25rem` |
+| 交互动画 | 悬停上浮 (-2px)，点击下沉 (+3px) |
+
+**阴影状态变化：**
+
+| 状态 | 阴影偏移 | 元素位移 |
+|------|----------|----------|
+| 默认 | 4px | 0 |
+| 悬停 | 6px | -2px (上浮) |
+| 点击 | 1px | +3px (下沉) |
+
+**阴影颜色：**
+- 主色调: `oklch(50% 0.22 55)` (橙色)
+- 中性色: `oklch(75% 0.02 85)` (灰色)
+- 成功色: `oklch(55% 0.18 145)` (绿色)
+- 危险色: `oklch(45% 0.20 25)` (红色)
+
+**应用场景：**
+- 按钮: 使用 `variant="cute"` 或 `variant="cute-secondary"`
+- 输入框: 添加底部阴影，聚焦时下沉
+- 卡片: 悬停时上浮，阴影扩展
+- 标签: 添加边框和小阴影
+
+**示例 - Cute 输入框：**
+```css
+input {
+  border: 2px solid var(--border);
+  box-shadow: 0 3px 0 0 oklch(75% 0.02 85);
+}
+
+input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 1px 0 0 var(--primary);
+  transform: translateY(2px);
+}
+```
+
+**示例 - Cute 卡片：**
+```css
+.card {
+  border: 2px solid var(--border);
+  box-shadow: 0 4px 0 0 var(--border);
+}
+
+.card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 6px 0 0 var(--primary);
+  transform: translateY(-2px);
+}
+```
+
 ## 环境变量
 
 在 `apps/web/` 目录下创建 `.dev.vars` 文件 (不提交)，或运行 `pnpm init:project` 自动生成:

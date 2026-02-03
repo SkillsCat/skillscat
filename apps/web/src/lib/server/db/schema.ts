@@ -170,7 +170,8 @@ export const skillPermissions = sqliteTable('skill_permissions', {
 // ========== API Tokens ==========
 export const apiTokens = sqliteTable('api_tokens', {
   id: text('id').primaryKey(),
-  userId: text('user_id').notNull(),
+  userId: text('user_id'), // Null for org-only tokens
+  orgId: text('org_id').references(() => organizations.id, { onDelete: 'cascade' }), // Null for user-only tokens
   name: text('name').notNull(),
   tokenHash: text('token_hash').notNull().unique(),
   tokenPrefix: text('token_prefix').notNull(), // First 8 chars for identification
@@ -181,6 +182,7 @@ export const apiTokens = sqliteTable('api_tokens', {
   revokedAt: integer('revoked_at', { mode: 'timestamp_ms' })
 }, (table) => [
   index('api_tokens_user_idx').on(table.userId),
+  index('api_tokens_org_idx').on(table.orgId),
   index('api_tokens_hash_idx').on(table.tokenHash)
 ]);
 
@@ -254,6 +256,23 @@ export const deviceCodes = sqliteTable('device_codes', {
   index('device_codes_status_idx').on(table.status)
 ]);
 
+// ========== Notifications ==========
+export const notifications = sqliteTable('notifications', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  type: text('type').notNull(), // 'org_invite', 'skill_shared', etc.
+  title: text('title').notNull(),
+  message: text('message'),
+  metadata: text('metadata'), // JSON: { orgId, orgSlug, orgName, inviterId, inviterName, role }
+  read: integer('read', { mode: 'boolean' }).notNull().default(false),
+  processed: integer('processed', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  processedAt: integer('processed_at', { mode: 'timestamp_ms' }),
+}, (table) => [
+  index('notifications_user_idx').on(table.userId),
+  index('notifications_user_read_idx').on(table.userId, table.read),
+]);
+
 // ========== Refresh Tokens ==========
 export const refreshTokens = sqliteTable('refresh_tokens', {
   id: text('id').primaryKey(),
@@ -299,3 +318,5 @@ export type DeviceCode = typeof deviceCodes.$inferSelect;
 export type NewDeviceCode = typeof deviceCodes.$inferInsert;
 export type RefreshToken = typeof refreshTokens.$inferSelect;
 export type NewRefreshToken = typeof refreshTokens.$inferInsert;
+export type Notification = typeof notifications.$inferSelect;
+export type NewNotification = typeof notifications.$inferInsert;

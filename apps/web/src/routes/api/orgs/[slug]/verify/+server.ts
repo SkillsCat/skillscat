@@ -70,18 +70,27 @@ export const POST: RequestHandler = async ({ locals, platform, params }) => {
     avatar_url: string;
   };
 
-  // Check if user is a member of the GitHub org
-  const memberResponse = await fetch(
-    `${GITHUB_API_BASE}/orgs/${org.name}/members/${session.user.name}`,
+  // Check if user is an admin of the GitHub org using memberships API
+  const membershipResponse = await fetch(
+    `${GITHUB_API_BASE}/orgs/${org.name}/memberships/${session.user.name}`,
     { headers }
   );
 
-  if (memberResponse.status === 404) {
-    throw error(403, `You are not a member of the GitHub organization '${org.name}'`);
+  if (!membershipResponse.ok) {
+    if (membershipResponse.status === 404) {
+      throw error(403, `You are not a member of the GitHub organization '${org.name}'`);
+    }
+    throw error(400, 'Failed to verify organization membership');
   }
 
-  if (!memberResponse.ok && memberResponse.status !== 204) {
-    throw error(400, 'Failed to verify organization membership');
+  const membership = await membershipResponse.json() as { role: string; state: string };
+
+  if (membership.state !== 'active') {
+    throw error(403, `Your membership in '${org.name}' is pending. Please accept the invitation first.`);
+  }
+
+  if (membership.role !== 'admin') {
+    throw error(403, 'You must be an admin or owner of the GitHub organization to connect it');
   }
 
   // Update organization with verification

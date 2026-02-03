@@ -21,6 +21,16 @@
   }
 
   let { data }: Props = $props();
+
+  // Round down to nearest significant figure: 12→10, 123→100, 1234→1000, 12345→12000
+  function roundDownSkillCount(count: number): number {
+    if (count < 10) return count;
+    if (count < 100) return Math.floor(count / 10) * 10;
+    if (count < 1000) return Math.floor(count / 100) * 100;
+    return Math.floor(count / 1000) * 1000;
+  }
+
+  let displayCount = $derived(roundDownSkillCount(data.stats.totalSkills));
 </script>
 
 <svelte:head>
@@ -43,7 +53,7 @@
         <div class="hero-content">
           <h1 class="hero-title">Supercharge your Agent with community skills.</h1>
           <p class="hero-subtitle">
-            Browse over {data.stats.totalSkills}+ skills to extend agent capabilities.
+            Browse over {displayCount} skills to extend agent capabilities.
           </p>
         </div>
       </div>
@@ -155,13 +165,8 @@
   /* Decorative circles */
   .hero-circle {
     position: absolute;
-    border: 2px solid var(--border-sketch);
     border-radius: 9999px;
     z-index: 0;
-  }
-
-  :global(.dark) .hero-circle {
-    border: none;
   }
 
   .hero-circle-yellow {

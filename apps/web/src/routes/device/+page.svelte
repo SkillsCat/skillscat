@@ -1,5 +1,6 @@
 <script lang="ts">
   import { signIn } from '$lib/auth-client';
+  import { Avatar } from '$lib/components';
 
   interface Props {
     data: {
@@ -225,9 +226,14 @@
 
       <div class="user-info">
         <span>Authorizing as</span>
-        {#if data.user.image}
-          <img src={data.user.image} alt="" class="user-avatar" />
-        {/if}
+        <Avatar
+          src={data.user.image}
+          alt={data.user.name || ''}
+          fallback={data.user.name || ''}
+          size="xs"
+          border={false}
+          useGithubFallback
+        />
         <strong>{data.user.name || data.user.email}</strong>
       </div>
 
@@ -284,9 +290,14 @@
 
       <div class="user-info">
         <span>Signed in as</span>
-        {#if data.user.image}
-          <img src={data.user.image} alt="" class="user-avatar" />
-        {/if}
+        <Avatar
+          src={data.user.image}
+          alt={data.user.name || ''}
+          fallback={data.user.name || ''}
+          size="xs"
+          border={false}
+          useGithubFallback
+        />
         <strong>{data.user.name || data.user.email}</strong>
       </div>
     {/if}
@@ -437,12 +448,6 @@
     margin-top: 1.5rem;
     padding-top: 1rem;
     border-top: 1px solid var(--border);
-  }
-
-  .user-avatar {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
   }
 
   .login-button {
