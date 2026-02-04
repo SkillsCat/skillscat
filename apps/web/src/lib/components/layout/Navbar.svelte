@@ -48,7 +48,13 @@
     CheckListIcon,
     CubeIcon,
     Search01Icon,
-    Add01Icon
+    Add01Icon,
+    MoneyBag01Icon,
+    BitcoinIcon,
+    JusticeScale01Icon,
+    MortarboardIcon,
+    GameboyIcon,
+    Calculator01Icon
   } from '@hugeicons/core-free-icons';
 
   let mobileMenuOpen = $state(false);
@@ -95,6 +101,7 @@
     'data-processing': DatabaseExportIcon,
     'analytics': Analytics01Icon,
     'scraping': Search01Icon,
+    'math': Calculator01Icon,
     // AI
     'prompts': AiChat01Icon,
     'embeddings': AiBrain01Icon,
@@ -109,7 +116,13 @@
     'writing': Edit01Icon,
     'email': Mail01Icon,
     'social': Share01Icon,
-    'seo': Search01Icon
+    'seo': Search01Icon,
+    // Lifestyle
+    'finance': MoneyBag01Icon,
+    'web3-crypto': BitcoinIcon,
+    'legal': JusticeScale01Icon,
+    'academic': MortarboardIcon,
+    'game-dev': GameboyIcon
   };
 
   function handleSearch(query: string) {

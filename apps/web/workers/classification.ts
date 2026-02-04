@@ -26,6 +26,15 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_MODEL = 'deepseek-chat';
 
+// Extended classification result with optional suggested category
+interface ExtendedClassificationResult extends ClassificationResult {
+  suggestedCategory?: {
+    slug: string;
+    name: string;
+    description: string;
+  };
+}
+
 // Extended message type with metadata for admission decision
 interface ClassificationMessageWithMeta extends ClassificationMessage {
   stars?: number;
@@ -99,6 +108,11 @@ function buildClassificationPrompt(skillMdContent: string, tags?: string[]): str
 
   return `You are a skill classifier for Claude Code skills. Analyze the following SKILL.md content and classify it into 1-3 most relevant categories.
 
+IMPORTANT RULES:
+1. You MUST always provide at least 1 category - never return an empty categories array
+2. If the skill doesn't fit well into existing categories, you may suggest ONE new secondary category
+3. Suggested categories should be specific and useful for developers (not too broad or too niche)
+
 Available categories:
 ${categoriesDescription}
 ${tagsHint}
@@ -108,12 +122,19 @@ ${skillMdContent.slice(0, 4000)}
 ---
 
 Respond with a JSON object containing:
-- categories: array of category slugs (1-3 items, most relevant first)
+- categories: array of category slugs (1-3 items, most relevant first) - REQUIRED, must have at least 1
 - confidence: number between 0 and 1
 - reasoning: brief explanation of why these categories were chosen
+- suggestedCategory: (OPTIONAL) if no existing category fits well as a secondary category, suggest ONE new category with:
+  - slug: kebab-case slug (e.g., "data-visualization", "code-migration")
+  - name: short display name (e.g., "Data Viz", "Migration")
+  - description: brief description of what this category covers
 
-Example response:
+Example response with existing categories only:
 {"categories": ["git", "automation"], "confidence": 0.85, "reasoning": "This skill automates git commit message generation"}
+
+Example response with suggested category:
+{"categories": ["data-processing"], "confidence": 0.7, "reasoning": "This skill processes scientific data", "suggestedCategory": {"slug": "scientific-computing", "name": "Scientific", "description": "Scientific computing and research tools"}}
 
 Respond ONLY with the JSON object, no other text.`;
 }
@@ -168,7 +189,7 @@ async function callOpenRouter(
   return parseClassificationResult(content);
 }
 
-function parseClassificationResult(content: string): ClassificationResult {
+function parseClassificationResult(content: string): ExtendedClassificationResult {
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     throw new Error('No JSON found in response');
@@ -181,14 +202,42 @@ function parseClassificationResult(content: string): ClassificationResult {
     .filter((slug: string) => validSlugs.includes(slug))
     .slice(0, 3);
 
+  // Ensure at least one category
   if (categories.length === 0) {
     categories.push('productivity');
+  }
+
+  // Parse suggested category if present
+  let suggestedCategory: ExtendedClassificationResult['suggestedCategory'] | undefined;
+  if (result.suggestedCategory && typeof result.suggestedCategory === 'object') {
+    const suggested = result.suggestedCategory;
+    // Validate suggested category format
+    if (
+      typeof suggested.slug === 'string' &&
+      typeof suggested.name === 'string' &&
+      typeof suggested.description === 'string' &&
+      // Validate slug format (kebab-case)
+      /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(suggested.slug) &&
+      // Ensure it doesn't conflict with existing categories
+      !validSlugs.includes(suggested.slug) &&
+      // Reasonable length limits
+      suggested.slug.length <= 50 &&
+      suggested.name.length <= 30 &&
+      suggested.description.length <= 200
+    ) {
+      suggestedCategory = {
+        slug: suggested.slug,
+        name: suggested.name,
+        description: suggested.description
+      };
+    }
   }
 
   return {
     categories,
     confidence: Math.min(1, Math.max(0, result.confidence || 0.5)),
     reasoning: result.reasoning,
+    suggestedCategory
   };
 }
 
@@ -314,7 +363,7 @@ async function classifyWithAI(
   skillMdContent: string,
   env: ClassificationEnv,
   tags?: string[]
-): Promise<ClassificationResult> {
+): Promise<ExtendedClassificationResult> {
   const prompt = buildClassificationPrompt(skillMdContent, tags);
   const freeModels = getFreeModels(env);
   const primaryModel = env.AI_MODEL || freeModels[0];
@@ -370,7 +419,7 @@ async function classifyWithAI(
 
 async function saveClassification(
   skillId: string,
-  result: ClassificationResult,
+  result: ExtendedClassificationResult,
   method: ClassificationMethod,
   env: ClassificationEnv
 ): Promise<void> {
@@ -380,6 +429,48 @@ async function saveClassification(
     .bind(skillId)
     .run();
 
+  // If there's a suggested category, save it to the categories table first
+  if (result.suggestedCategory) {
+    const { slug, name, description } = result.suggestedCategory;
+    const categoryId = `cat_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+
+    try {
+      // Check if category already exists (might have been suggested by another skill)
+      const existing = await env.DB.prepare('SELECT id FROM categories WHERE slug = ?')
+        .bind(slug)
+        .first<{ id: string }>();
+
+      if (!existing) {
+        // Insert new AI-suggested category
+        await env.DB.prepare(`
+          INSERT INTO categories (id, slug, name, description, type, suggested_by_skill_id, skill_count, created_at, updated_at)
+          VALUES (?, ?, ?, ?, 'ai-suggested', ?, 1, ?, ?)
+        `)
+          .bind(categoryId, slug, name, description, skillId, now, now)
+          .run();
+
+        log.log(`Created new AI-suggested category: ${slug} (${name})`);
+      } else {
+        // Increment skill count for existing category
+        await env.DB.prepare('UPDATE categories SET skill_count = skill_count + 1, updated_at = ? WHERE slug = ?')
+          .bind(now, slug)
+          .run();
+      }
+
+      // Add the suggested category to the skill's categories
+      await env.DB.prepare(`
+        INSERT INTO skill_categories (skill_id, category_slug)
+        VALUES (?, ?)
+      `)
+        .bind(skillId, slug)
+        .run();
+    } catch (error) {
+      log.error(`Failed to save suggested category ${slug}:`, error);
+      // Continue with predefined categories even if suggested category fails
+    }
+  }
+
+  // Save predefined categories
   for (let i = 0; i < result.categories.length; i++) {
     const categorySlug = result.categories[i];
 
@@ -485,7 +576,7 @@ async function processMessage(
   const skillMdContent = await r2Object.text();
   log.log(`SKILL.md content length: ${skillMdContent.length} chars`);
 
-  let result: ClassificationResult;
+  let result: ExtendedClassificationResult;
 
   if (method === 'ai') {
     log.log(`Starting AI classification for ${skillId}`);
@@ -498,7 +589,7 @@ async function processMessage(
   log.log(
     `Result for ${skillId}:`,
     result.categories,
-    `(confidence: ${result.confidence}, method: ${method}, reasoning: ${result.reasoning})`
+    `(confidence: ${result.confidence}, method: ${method}, reasoning: ${result.reasoning}${result.suggestedCategory ? `, suggested: ${result.suggestedCategory.slug}` : ''})`
   );
 
   try {

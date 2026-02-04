@@ -4,6 +4,19 @@ import { CATEGORIES, type CategoryWithCount } from '$lib/constants/categories';
 import type { ApiResponse } from '$lib/types';
 import { getCached } from '$lib/server/cache';
 
+interface DynamicCategory {
+  slug: string;
+  name: string;
+  description: string | null;
+  type: string;
+  skillCount: number;
+}
+
+interface CategoriesResponse {
+  categories: CategoryWithCount[];
+  dynamicCategories: DynamicCategory[];
+}
+
 export const GET: RequestHandler = async ({ platform }) => {
   try {
     const db = platform?.env?.DB;
@@ -13,6 +26,7 @@ export const GET: RequestHandler = async ({ platform }) => {
       async () => {
         // Get skill counts from D1 database
         let categoryCounts: Record<string, number> = {};
+        let dynamicCategories: DynamicCategory[] = [];
 
         if (db) {
           try {
@@ -25,6 +39,16 @@ export const GET: RequestHandler = async ({ platform }) => {
             for (const row of result.results || []) {
               categoryCounts[row.category_slug] = row.count;
             }
+
+            // Fetch AI-suggested categories
+            const dynamicResult = await db.prepare(`
+              SELECT slug, name, description, type, skill_count as skillCount
+              FROM categories
+              WHERE type = 'ai-suggested' AND skill_count > 0
+              ORDER BY skill_count DESC
+              LIMIT 50
+            `).all<DynamicCategory>();
+            dynamicCategories = dynamicResult.results || [];
           } catch {
             // Database not available or query failed, use defaults
           }
@@ -35,7 +59,7 @@ export const GET: RequestHandler = async ({ platform }) => {
           skillCount: categoryCounts[cat.slug] || 0
         }));
 
-        return { categories };
+        return { categories, dynamicCategories };
       },
       300
     );
@@ -43,7 +67,7 @@ export const GET: RequestHandler = async ({ platform }) => {
     return json({
       success: true,
       data
-    } satisfies ApiResponse<{ categories: CategoryWithCount[] }>, {
+    } satisfies ApiResponse<CategoriesResponse>, {
       headers: {
         'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
         'X-Cache': hit ? 'HIT' : 'MISS'

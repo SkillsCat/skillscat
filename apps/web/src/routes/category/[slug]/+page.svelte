@@ -26,7 +26,32 @@
     SparklesIcon,
     Search01Icon,
     Sad01Icon,
-    AlertCircleIcon
+    AlertCircleIcon,
+    CloudIcon,
+    FlowIcon,
+    SmartPhone01Icon,
+    AiGenerativeIcon,
+    AiBrain01Icon,
+    AiChat01Icon,
+    Mail01Icon,
+    Share01Icon,
+    Edit01Icon,
+    MessageIcon,
+    LockPasswordIcon,
+    Loading01Icon,
+    Analytics01Icon,
+    ConsoleIcon,
+    DocumentCodeIcon,
+    LayoutIcon,
+    CheckListIcon,
+    CubeIcon,
+    MoneyBag01Icon,
+    BitcoinIcon,
+    JusticeScale01Icon,
+    MortarboardIcon,
+    GameboyIcon,
+    Calculator01Icon,
+    Tag01Icon
   } from '@hugeicons/core-free-icons';
 
   interface PaginationData {
@@ -42,6 +67,7 @@
       category: Category | null;
       skills: SkillCardData[];
       pagination: PaginationData | null;
+      isDynamic: boolean;
     };
   }
 
@@ -63,14 +89,50 @@
     'i18n': EarthIcon,
     'api': Link01Icon,
     'database': Database01Icon,
+    'auth': LockPasswordIcon,
+    'caching': Loading01Icon,
     'data-processing': DatabaseExportIcon,
+    'analytics': Analytics01Icon,
+    'scraping': Search01Icon,
+    'math': Calculator01Icon,
     'ui-components': PaintBrush01Icon,
     'accessibility': AccessIcon,
-    'devops': Settings01Icon,
+    'animation': SparklesIcon,
+    'responsive': SmartPhone01Icon,
+    'ci-cd': FlowIcon,
+    'docker': CubeIcon,
+    'kubernetes': Settings01Icon,
+    'cloud': CloudIcon,
     'monitoring': Activity01Icon,
-    'file-operations': Folder01Icon,
+    'linting': CheckListIcon,
+    'types': DocumentCodeIcon,
+    'comments': MessageIcon,
+    'prompts': AiChat01Icon,
+    'embeddings': AiBrain01Icon,
+    'agents': AiGenerativeIcon,
+    'ml-ops': AiGenerativeIcon,
     'automation': WorkflowSquare01Icon,
+    'file-ops': Folder01Icon,
+    'cli': ConsoleIcon,
+    'templates': LayoutIcon,
+    'writing': Edit01Icon,
+    'email': Mail01Icon,
+    'social': Share01Icon,
+    'seo': Search01Icon,
+    'finance': MoneyBag01Icon,
+    'web3-crypto': BitcoinIcon,
+    'legal': JusticeScale01Icon,
+    'academic': MortarboardIcon,
+    'game-dev': GameboyIcon,
     'productivity': SparklesIcon
+  };
+
+  // Get icon for category, use Tag01Icon for dynamic categories without predefined icon
+  const getCategoryIcon = (slug: string, isDynamic: boolean) => {
+    if (categoryIcons[slug]) {
+      return categoryIcons[slug];
+    }
+    return isDynamic ? Tag01Icon : SparklesIcon;
   };
 
   const filteredSkills = $derived(
@@ -113,12 +175,17 @@
     <!-- Header -->
     <div class="mb-8">
       <div class="flex items-center gap-4 mb-2">
-        <div class="category-icon-large">
-          <HugeiconsIcon icon={categoryIcons[data.category.slug]} size={32} strokeWidth={2} />
+        <div class="category-icon-large" class:category-icon-dynamic={data.isDynamic}>
+          <HugeiconsIcon icon={getCategoryIcon(data.category.slug, data.isDynamic)} size={32} strokeWidth={2} />
         </div>
-        <h1 class="text-3xl md:text-4xl font-bold text-fg">
-          {data.category.name}
-        </h1>
+        <div>
+          <h1 class="text-3xl md:text-4xl font-bold text-fg">
+            {data.category.name}
+          </h1>
+          {#if data.isDynamic}
+            <span class="dynamic-badge">AI Suggested</span>
+          {/if}
+        </div>
       </div>
       <p class="text-fg-muted">{data.category.description}</p>
     </div>
@@ -212,5 +279,24 @@
     border-radius: var(--radius-xl);
     color: var(--primary);
     flex-shrink: 0;
+  }
+
+  .category-icon-dynamic {
+    background: var(--muted);
+    border-color: var(--muted-foreground);
+    color: var(--muted-foreground);
+  }
+
+  .dynamic-badge {
+    display: inline-block;
+    font-size: 0.625rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.125rem 0.5rem;
+    background: var(--primary-subtle);
+    color: var(--primary);
+    border-radius: var(--radius-full);
+    margin-top: 0.25rem;
   }
 </style>

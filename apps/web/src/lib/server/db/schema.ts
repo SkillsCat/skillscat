@@ -201,10 +201,27 @@ export const contentHashes = sqliteTable('content_hashes', {
 // ========== Skill Categories (many-to-many) ==========
 export const skillCategories = sqliteTable('skill_categories', {
   skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
-  categorySlug: text('category_slug').notNull() // References CATEGORIES constant
+  categorySlug: text('category_slug').notNull() // References CATEGORIES constant or categories table
 }, (table) => [
   primaryKey({ columns: [table.skillId, table.categorySlug] }),
   index('skill_categories_category_idx').on(table.categorySlug)
+]);
+
+// ========== Categories (for AI-suggested dynamic categories) ==========
+export const categories = sqliteTable('categories', {
+  id: text('id').primaryKey(),
+  slug: text('slug').notNull().unique(),
+  name: text('name').notNull(),
+  description: text('description'),
+  type: text('type').notNull().default('predefined'), // 'predefined' | 'ai-suggested'
+  parentSection: text('parent_section'), // For predefined: section id (e.g., 'development', 'lifestyle')
+  suggestedBySkillId: text('suggested_by_skill_id').references(() => skills.id, { onDelete: 'set null' }),
+  skillCount: integer('skill_count').notNull().default(0),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  index('categories_type_idx').on(table.type),
+  index('categories_slug_idx').on(table.slug)
 ]);
 
 // ========== Skill Tags (from SKILL.md frontmatter) ==========
@@ -312,6 +329,8 @@ export type NewContentHash = typeof contentHashes.$inferInsert;
 export type SkillCategory = typeof skillCategories.$inferSelect;
 export type SkillTag = typeof skillTags.$inferSelect;
 export type NewSkillTag = typeof skillTags.$inferInsert;
+export type CategoryRecord = typeof categories.$inferSelect;
+export type NewCategoryRecord = typeof categories.$inferInsert;
 export type Favorite = typeof favorites.$inferSelect;
 export type UserAction = typeof userActions.$inferSelect;
 export type DeviceCode = typeof deviceCodes.$inferSelect;

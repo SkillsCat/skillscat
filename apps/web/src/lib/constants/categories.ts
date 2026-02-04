@@ -248,6 +248,12 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
         name: 'Scraping',
         description: 'Web scraping and data extraction',
         keywords: ['scrape', 'crawl', 'extract', 'puppeteer', 'playwright', 'cheerio']
+      },
+      {
+        slug: 'math',
+        name: 'Math',
+        description: 'Mathematical computations, formulas, statistics',
+        keywords: ['math', 'mathematics', 'calculation', 'formula', 'statistics', 'algebra', 'calculus', 'geometry', 'numerical']
       }
     ]
   },
@@ -344,6 +350,44 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
         name: 'SEO',
         description: 'Search engine optimization',
         keywords: ['seo', 'meta', 'keyword', 'search', 'ranking', 'sitemap']
+      }
+    ]
+  },
+
+  // ===== Lifestyle =====
+  {
+    id: 'lifestyle',
+    name: 'Lifestyle',
+    categories: [
+      {
+        slug: 'finance',
+        name: 'Finance',
+        description: 'Personal finance, budgeting, financial tools',
+        keywords: ['finance', 'budget', 'money', 'investment', 'expense', 'accounting', 'tax', 'banking']
+      },
+      {
+        slug: 'web3-crypto',
+        name: 'Web3 & Crypto',
+        description: 'Blockchain, cryptocurrency, Web3 development',
+        keywords: ['web3', 'crypto', 'blockchain', 'ethereum', 'solidity', 'nft', 'defi', 'wallet', 'smart contract']
+      },
+      {
+        slug: 'legal',
+        name: 'Legal',
+        description: 'Legal document generation and compliance',
+        keywords: ['legal', 'law', 'contract', 'compliance', 'policy', 'terms', 'license', 'agreement']
+      },
+      {
+        slug: 'academic',
+        name: 'Academic',
+        description: 'Academic writing, research, citations',
+        keywords: ['academic', 'research', 'paper', 'citation', 'thesis', 'dissertation', 'bibliography', 'scholarly']
+      },
+      {
+        slug: 'game-dev',
+        name: 'Game Dev',
+        description: 'Game development and game engine tools',
+        keywords: ['game', 'gaming', 'unity', 'unreal', 'godot', 'gamedev', 'sprite', 'physics', 'level design']
       }
     ]
   }

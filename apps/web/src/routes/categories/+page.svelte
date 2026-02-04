@@ -41,12 +41,28 @@
     DocumentCodeIcon,
     LayoutIcon,
     CheckListIcon,
-    CubeIcon
+    CubeIcon,
+    MoneyBag01Icon,
+    BitcoinIcon,
+    JusticeScale01Icon,
+    MortarboardIcon,
+    GameboyIcon,
+    Calculator01Icon,
+    Tag01Icon
   } from '@hugeicons/core-free-icons';
+
+  interface DynamicCategory {
+    slug: string;
+    name: string;
+    description: string | null;
+    type: string;
+    skillCount: number;
+  }
 
   interface Props {
     data: {
       categories: CategoryWithCount[];
+      dynamicCategories: DynamicCategory[];
     };
   }
 
@@ -92,6 +108,7 @@
     'data-processing': DatabaseExportIcon,
     'analytics': Analytics01Icon,
     'scraping': Search01Icon,
+    'math': Calculator01Icon,
     // AI
     'prompts': AiChat01Icon,
     'embeddings': AiBrain01Icon,
@@ -106,7 +123,13 @@
     'writing': Edit01Icon,
     'email': Mail01Icon,
     'social': Share01Icon,
-    'seo': Search01Icon
+    'seo': Search01Icon,
+    // Lifestyle
+    'finance': MoneyBag01Icon,
+    'web3-crypto': BitcoinIcon,
+    'legal': JusticeScale01Icon,
+    'academic': MortarboardIcon,
+    'game-dev': GameboyIcon
   };
 
   const filteredCategories = $derived(
@@ -117,6 +140,16 @@
             c.description.toLowerCase().includes(searchQuery.toLowerCase())
         )
       : data.categories
+  );
+
+  const filteredDynamicCategories = $derived(
+    searchQuery
+      ? data.dynamicCategories.filter(
+          (c) =>
+            c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (c.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
+        )
+      : data.dynamicCategories
   );
 
   // Group categories by section for display
@@ -131,6 +164,8 @@
       })
     })).filter(section => section.categories.length > 0);
   });
+
+  const totalCount = $derived(filteredCategories.length + filteredDynamicCategories.length);
 </script>
 
 <svelte:head>
@@ -157,7 +192,7 @@
 
   <!-- Results count -->
   <div class="mb-6 text-sm text-fg-muted">
-    {filteredCategories.length} categories
+    {totalCount} categories
   </div>
 
   <!-- Categories Grid - Grouped by Section -->
@@ -190,7 +225,40 @@
     </div>
   {/each}
 
-  {#if filteredCategories.length === 0}
+  <!-- AI-Suggested Categories Section -->
+  {#if filteredDynamicCategories.length > 0}
+    <div class="section-group">
+      <h2 class="section-title">
+        Community Suggested
+        <span class="section-badge">AI</span>
+      </h2>
+      <div class="categories-grid">
+        {#each filteredDynamicCategories as category (category.slug)}
+          <a
+            href="/category/{category.slug}"
+            class="category-card group"
+          >
+            <div class="category-icon-wrapper category-icon-dynamic">
+              <HugeiconsIcon icon={Tag01Icon} size={24} strokeWidth={2} />
+            </div>
+            <div class="category-content">
+              <h3 class="category-title">
+                {category.name}
+              </h3>
+              <p class="category-description">
+                {category.description || 'AI-suggested category'}
+              </p>
+            </div>
+            <span class="category-count">
+              {category.skillCount}
+            </span>
+          </a>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  {#if totalCount === 0}
     <div class="empty-state">
       <div class="empty-icon">
         <HugeiconsIcon icon={Search01Icon} size={32} strokeWidth={2} />
@@ -212,6 +280,20 @@
     margin-bottom: 1rem;
     padding-bottom: 0.5rem;
     border-bottom: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .section-badge {
+    font-size: 0.625rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.125rem 0.375rem;
+    background: var(--primary-subtle);
+    color: var(--primary);
+    border-radius: var(--radius-full);
   }
 
   .categories-grid {
@@ -292,6 +374,18 @@
     background: var(--primary);
     color: var(--primary-foreground);
     transform: scale(1.1) rotate(5deg);
+  }
+
+  .category-icon-dynamic {
+    background: var(--muted);
+    border-color: var(--muted-foreground);
+    color: var(--muted-foreground);
+  }
+
+  .category-card:hover .category-icon-dynamic {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-foreground);
   }
 
   .category-content {
