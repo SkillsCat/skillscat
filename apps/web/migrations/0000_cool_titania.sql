@@ -18,7 +18,8 @@ CREATE TABLE `account` (
 CREATE INDEX `account_user_idx` ON `account` (`user_id`);--> statement-breakpoint
 CREATE TABLE `api_tokens` (
 	`id` text PRIMARY KEY NOT NULL,
-	`user_id` text NOT NULL,
+	`user_id` text,
+	`org_id` text,
 	`name` text NOT NULL,
 	`token_hash` text NOT NULL,
 	`token_prefix` text NOT NULL,
@@ -26,11 +27,13 @@ CREATE TABLE `api_tokens` (
 	`last_used_at` integer,
 	`expires_at` integer,
 	`created_at` integer DEFAULT (unixepoch() * 1000) NOT NULL,
-	`revoked_at` integer
+	`revoked_at` integer,
+	FOREIGN KEY (`org_id`) REFERENCES `organizations`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `api_tokens_token_hash_unique` ON `api_tokens` (`token_hash`);--> statement-breakpoint
 CREATE INDEX `api_tokens_user_idx` ON `api_tokens` (`user_id`);--> statement-breakpoint
+CREATE INDEX `api_tokens_org_idx` ON `api_tokens` (`org_id`);--> statement-breakpoint
 CREATE INDEX `api_tokens_hash_idx` ON `api_tokens` (`token_hash`);--> statement-breakpoint
 CREATE TABLE `authors` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -50,6 +53,37 @@ CREATE TABLE `authors` (
 CREATE UNIQUE INDEX `authors_github_id_unique` ON `authors` (`github_id`);--> statement-breakpoint
 CREATE INDEX `authors_username_idx` ON `authors` (`username`);--> statement-breakpoint
 CREATE INDEX `authors_user_id_idx` ON `authors` (`user_id`);--> statement-breakpoint
+CREATE TABLE `categories` (
+	`id` text PRIMARY KEY NOT NULL,
+	`slug` text NOT NULL,
+	`name` text NOT NULL,
+	`description` text,
+	`type` text DEFAULT 'predefined' NOT NULL,
+	`parent_section` text,
+	`suggested_by_skill_id` text,
+	`skill_count` integer DEFAULT 0 NOT NULL,
+	`created_at` integer DEFAULT (unixepoch() * 1000) NOT NULL,
+	`updated_at` integer DEFAULT (unixepoch() * 1000) NOT NULL,
+	FOREIGN KEY (`suggested_by_skill_id`) REFERENCES `skills`(`id`) ON UPDATE no action ON DELETE set null
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `categories_slug_unique` ON `categories` (`slug`);--> statement-breakpoint
+CREATE INDEX `categories_type_idx` ON `categories` (`type`);--> statement-breakpoint
+CREATE INDEX `categories_slug_idx` ON `categories` (`slug`);--> statement-breakpoint
+CREATE TABLE `cli_auth_sessions` (
+	`id` text PRIMARY KEY NOT NULL,
+	`callback_url` text NOT NULL,
+	`state` text NOT NULL,
+	`auth_code` text,
+	`user_id` text,
+	`scopes` text DEFAULT '["read","write","publish"]' NOT NULL,
+	`client_info` text,
+	`status` text DEFAULT 'pending' NOT NULL,
+	`expires_at` integer NOT NULL,
+	`created_at` integer DEFAULT (unixepoch() * 1000) NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX `cli_auth_sessions_status_idx` ON `cli_auth_sessions` (`status`);--> statement-breakpoint
 CREATE TABLE `content_hashes` (
 	`id` text PRIMARY KEY NOT NULL,
 	`skill_id` text NOT NULL,
@@ -87,6 +121,22 @@ CREATE TABLE `favorites` (
 	FOREIGN KEY (`skill_id`) REFERENCES `skills`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE TABLE `notifications` (
+	`id` text PRIMARY KEY NOT NULL,
+	`user_id` text NOT NULL,
+	`type` text NOT NULL,
+	`title` text NOT NULL,
+	`message` text,
+	`metadata` text,
+	`read` integer DEFAULT false NOT NULL,
+	`processed` integer DEFAULT false NOT NULL,
+	`created_at` integer DEFAULT (unixepoch() * 1000) NOT NULL,
+	`processed_at` integer,
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `notifications_user_idx` ON `notifications` (`user_id`);--> statement-breakpoint
+CREATE INDEX `notifications_user_read_idx` ON `notifications` (`user_id`,`read`);--> statement-breakpoint
 CREATE TABLE `org_members` (
 	`org_id` text NOT NULL,
 	`user_id` text NOT NULL,

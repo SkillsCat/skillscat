@@ -1,37 +1,20 @@
 import pc from 'picocolors';
-import { setToken, setTokens, isAuthenticated, getUser, getBaseUrl, getClientInfo } from '../utils/auth.js';
+import { setToken, setTokens, isAuthenticated, getUser, getBaseUrl, getClientInfo, generateRandomState, generateCodeVerifier, computeCodeChallenge, initAuthSession, exchangeCodeForTokens } from '../utils/auth.js';
+import { startCallbackServer } from '../utils/callback-server.js';
+import { getResolvedRegistryUrl } from '../utils/paths.js';
+import { spinner, success, error, info, warn, box } from '../utils/ui.js';
 
 interface LoginOptions {
   token?: string;
 }
 
-interface DeviceCodeResponse {
-  device_code: string;
-  user_code: string;
-  verification_uri: string;
-  expires_in: number;
-  interval: number;
-}
-
-interface TokenResponse {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
-  refresh_token: string;
-  refresh_expires_in: number;
-  user: {
-    id: string;
-    name?: string;
-    email?: string;
-    image?: string;
-  };
-}
-
 export async function login(options: LoginOptions): Promise<void> {
   const baseUrl = getBaseUrl();
+  const registryUrl = getResolvedRegistryUrl();
 
   // If token is provided directly, use it
   if (options.token) {
+    const sp = spinner('Validating token...');
     try {
       const response = await fetch(`${baseUrl}/api/tokens`, {
         headers: {
@@ -41,15 +24,18 @@ export async function login(options: LoginOptions): Promise<void> {
       });
 
       if (!response.ok) {
-        console.error(pc.red('Invalid token. Please check your token and try again.'));
+        sp.stop(false);
+        error('Invalid token. Please check your token and try again.');
         process.exit(1);
       }
 
       setToken(options.token);
-      console.log(pc.green('Successfully logged in with API token.'));
+      sp.stop(true);
+      success('Successfully logged in with API token.');
       return;
     } catch {
-      console.error(pc.red('Failed to validate token. Please check your internet connection.'));
+      sp.stop(false);
+      error('Failed to validate token. Please check your internet connection.');
       process.exit(1);
     }
   }
@@ -57,155 +43,129 @@ export async function login(options: LoginOptions): Promise<void> {
   // Check if already authenticated
   if (isAuthenticated()) {
     const user = getUser();
-    console.log(pc.yellow(`Already logged in${user?.name ? ` as ${user.name}` : ''}.`));
-    console.log(pc.dim('Run `skillscat logout` to sign out first.'));
+    warn(`Already logged in${user?.name ? ` as ${user.name}` : ''}.`);
+    info('Run `skillscat logout` to sign out first.');
     return;
   }
 
-  // Device Authorization Flow
-  console.log(pc.cyan('Starting device authorization...'));
-  console.log();
+  // OAuth-style callback flow
+  let initSpinner = spinner('Starting authorization...');
 
-  // Step 1: Request device code
-  let deviceCode: DeviceCodeResponse;
+  // Step 1: Generate state, PKCE verifier/challenge, and start local callback server
+  const state = generateRandomState();
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = computeCodeChallenge(codeVerifier);
+  let callbackServer;
+
   try {
-    const response = await fetch(`${baseUrl}/api/device/code`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_info: getClientInfo() }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    deviceCode = await response.json() as DeviceCodeResponse;
-  } catch (error) {
-    console.error(pc.red('Failed to start device authorization.'));
-    console.error(pc.dim('Please check your internet connection and try again.'));
+    callbackServer = await startCallbackServer(state);
+  } catch (err) {
+    initSpinner.stop(false);
+    error('Failed to start local server for authorization.');
+    info('Please ensure ports 9876-9886 are available.');
     process.exit(1);
   }
 
-  // Step 2: Display instructions
-  console.log(pc.bold('To complete authentication:'));
+  const callbackUrl = `http://localhost:${callbackServer.port}/callback`;
+  const clientInfo = getClientInfo();
+
+  // Step 2: Initialize auth session with server (including PKCE)
+  let session;
+  try {
+    session = await initAuthSession(registryUrl, callbackUrl, state, clientInfo, {
+      codeChallenge,
+      codeChallengeMethod: 'S256',
+    });
+    initSpinner.stop(true);
+  } catch (err) {
+    initSpinner.stop(false);
+    callbackServer.close();
+    error('Failed to initialize authorization session.');
+    if (err instanceof Error) {
+      console.log(pc.dim(`Error: ${err.message}`));
+    }
+    process.exit(1);
+  }
+
+  // Step 3: Open browser to authorization page
+  const authUrl = `${registryUrl}/auth/login?session=${encodeURIComponent(session.session_id)}`;
+
   console.log();
-  console.log(`  1. Visit: ${pc.cyan(deviceCode.verification_uri)}`);
-  console.log(`  2. Enter code: ${pc.bold(pc.yellow(deviceCode.user_code))}`);
+  box(authUrl, 'Authorize in Browser');
   console.log();
 
   // Try to open browser
   const { exec } = await import('child_process');
-  const platform = process.platform;
-  const openCommand = platform === 'darwin' ? 'open' :
-                      platform === 'win32' ? 'start' : 'xdg-open';
+  const platformName = process.platform;
+  const openCommand = platformName === 'darwin' ? 'open' :
+                      platformName === 'win32' ? 'start' : 'xdg-open';
 
-  const authUrl = `${deviceCode.verification_uri}?code=${encodeURIComponent(deviceCode.user_code)}`;
-
-  exec(`${openCommand} "${authUrl}"`, (error) => {
-    if (!error) {
-      console.log(pc.dim('Browser opened automatically.'));
+  exec(`${openCommand} "${authUrl}"`, (err) => {
+    if (!err) {
+      info('Browser opened automatically');
     }
   });
 
-  console.log(pc.dim('Waiting for authorization...'));
-  console.log(pc.dim('Press Ctrl+C to cancel.'));
-  console.log();
-
-  // Step 3: Poll for token
-  const pollInterval = (deviceCode.interval || 5) * 1000;
-  const expiresAt = Date.now() + deviceCode.expires_in * 1000;
-  let lastStatus = '';
+  const waitSpinner = spinner('Waiting for authorization... (Press Ctrl+C to cancel)');
 
   // Handle Ctrl+C gracefully
   let cancelled = false;
   const cleanup = () => {
     cancelled = true;
+    waitSpinner.stop(false);
+    callbackServer.close();
     console.log();
-    console.log(pc.yellow('Authorization cancelled.'));
+    warn('Authorization cancelled.');
     process.exit(0);
   };
   process.on('SIGINT', cleanup);
 
-  while (!cancelled && Date.now() < expiresAt) {
-    await sleep(pollInterval);
+  // Step 4: Wait for callback
+  try {
+    const result = await callbackServer.waitForCallback();
+    waitSpinner.stop(true);
 
-    if (cancelled) break;
+    // Step 5: Exchange code for tokens (with PKCE verifier)
+    const exchangeSpinner = spinner('Exchanging authorization code...');
 
-    try {
-      const response = await fetch(`${baseUrl}/api/device/token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_code: deviceCode.device_code }),
-      });
+    const tokens = await exchangeCodeForTokens(registryUrl, result.code, session.session_id, codeVerifier);
 
-      const data = await response.json() as TokenResponse | { error: string };
+    const now = Date.now();
+    setTokens({
+      accessToken: tokens.access_token,
+      accessTokenExpiresAt: now + tokens.expires_in * 1000,
+      refreshToken: tokens.refresh_token,
+      refreshTokenExpiresAt: now + tokens.refresh_expires_in * 1000,
+      user: tokens.user,
+    });
 
-      if ('error' in data) {
-        if (data.error === 'authorization_pending') {
-          if (lastStatus !== 'pending') {
-            lastStatus = 'pending';
-          }
-          // Show a spinner-like indicator
-          process.stdout.write('.');
-          continue;
-        }
-
-        if (data.error === 'slow_down') {
-          // Server asked us to slow down
-          await sleep(5000);
-          continue;
-        }
-
-        if (data.error === 'expired_token') {
-          console.log();
-          console.error(pc.red('Authorization expired. Please try again.'));
-          process.exit(1);
-        }
-
-        if (data.error === 'access_denied') {
-          console.log();
-          console.error(pc.red('Authorization denied.'));
-          process.exit(1);
-        }
-
-        console.log();
-        console.error(pc.red(`Authorization failed: ${data.error}`));
-        process.exit(1);
-      }
-
-      // Success!
-      console.log();
-      console.log();
-
-      const now = Date.now();
-      setTokens({
-        accessToken: data.access_token,
-        accessTokenExpiresAt: now + data.expires_in * 1000,
-        refreshToken: data.refresh_token,
-        refreshTokenExpiresAt: now + data.refresh_expires_in * 1000,
-        user: data.user,
-      });
-
-      console.log(pc.green('Successfully logged in!'));
-      if (data.user.name) {
-        console.log(pc.dim(`Welcome, ${data.user.name}!`));
-      }
-
-      process.removeListener('SIGINT', cleanup);
-      return;
-    } catch {
-      // Network error, continue polling
-      process.stdout.write('x');
-    }
-  }
-
-  if (!cancelled) {
+    exchangeSpinner.stop(true);
     console.log();
-    console.error(pc.red('Authorization timed out. Please try again.'));
+    success(`Successfully logged in as ${tokens.user.name || 'user'}!`);
+
+    process.removeListener('SIGINT', cleanup);
+  } catch (err) {
+    process.removeListener('SIGINT', cleanup);
+
+    if (cancelled) return;
+
+    waitSpinner.stop(false);
+    const message = err instanceof Error ? err.message : 'Unknown error';
+
+    if (message === 'access_denied') {
+      console.log();
+      error('Authorization denied.');
+      process.exit(1);
+    }
+
+    if (message === 'Authorization timed out') {
+      console.log();
+      error('Authorization timed out. Please try again.');
+      process.exit(1);
+    }
+
+    console.log();
+    error(`Authorization failed: ${message}`);
     process.exit(1);
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }

@@ -1,10 +1,16 @@
-import { REGISTRY_URL } from './paths.js';
+import { getResolvedRegistryUrl } from './paths.js';
 import { getValidToken } from './auth.js';
+import { verboseRequest, verboseResponse, verboseLog, isVerbose } from './verbose.js';
+import { parseNetworkError, parseHttpError, formatError, type FriendlyError } from './errors.js';
+import { getCachedSkill, cacheSkill, calculateContentHash, type CachedSkill } from './cache.js';
+
+const GITHUB_API = 'https://api.github.com';
 
 export interface SkillRegistryItem {
   name: string;
   description: string;
   owner: string;
+  repo?: string;
   stars: number;
   updatedAt: number;
   categories: string[];
@@ -12,6 +18,8 @@ export interface SkillRegistryItem {
   githubUrl: string;
   visibility?: 'public' | 'private' | 'unlisted';
   slug?: string;
+  contentHash?: string;
+  skillPath?: string;
 }
 
 export interface RegistrySearchResult {
@@ -31,36 +39,137 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
+/**
+ * Parse GitHub URL to extract owner, repo, and skill path
+ */
+function parseGitHubUrl(url: string): { owner: string; repo: string; skillPath?: string } | null {
+  // Match: https://github.com/owner/repo or https://github.com/owner/repo/tree/branch/path
+  const match = url.match(/github\.com\/([^\/]+)\/([^\/]+)(?:\/tree\/[^\/]+\/(.+))?/);
+  if (!match) return null;
+  return {
+    owner: match[1],
+    repo: match[2].replace(/\.git$/, ''),
+    skillPath: match[3]
+  };
+}
+
+/**
+ * Fetch SKILL.md content directly from GitHub
+ */
+async function fetchFromGitHub(owner: string, repo: string, skillPath?: string): Promise<string | null> {
+  const path = skillPath ? `${skillPath}/SKILL.md` : 'SKILL.md';
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}`;
+
+  verboseLog(`Fetching from GitHub: ${url}`);
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'skillscat-cli/0.1.0'
+      }
+    });
+
+    if (!response.ok) {
+      verboseLog(`GitHub fetch failed: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json() as { content?: string; encoding?: string };
+    if (data.encoding === 'base64' && data.content) {
+      return Buffer.from(data.content, 'base64').toString('utf-8');
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchSkill(skillIdentifier: string): Promise<SkillRegistryItem | null> {
   // skillIdentifier can be:
   // - "@owner/skill-name" (private skill format)
   // - "owner/skill-name" (e.g., "anthropics/commit-message")
   // - "skill-name" (search and pick first match)
 
-  const url = `${REGISTRY_URL}/skill/${encodeURIComponent(skillIdentifier)}`;
+  const isPrivate = skillIdentifier.startsWith('@');
+
+  // First, query registry to get skill metadata
+  const registryUrl = getResolvedRegistryUrl();
+  const url = `${registryUrl}/skill/${encodeURIComponent(skillIdentifier)}`;
+  const headers = await getAuthHeaders();
+  const startTime = Date.now();
+
+  verboseRequest('GET', url, headers);
 
   try {
-    const response = await fetch(url, {
-      headers: await getAuthHeaders(),
-    });
+    const response = await fetch(url, { headers });
+    verboseResponse(response.status, response.statusText, Date.now() - startTime);
 
     if (!response.ok) {
       if (response.status === 404) {
         return null;
       }
-      if (response.status === 401) {
-        throw new Error('Authentication required. Run `skillscat login` first.');
-      }
-      if (response.status === 403) {
-        throw new Error('You do not have permission to access this skill.');
-      }
-      throw new Error(`Registry error: ${response.statusText}`);
+      const error = parseHttpError(response.status, response.statusText);
+      throw new Error(error.message);
     }
 
-    return await response.json() as SkillRegistryItem;
+    const skill = await response.json() as SkillRegistryItem;
+
+    // For private skills, return as-is (content from R2)
+    if (isPrivate || skill.visibility === 'private') {
+      verboseLog('Private skill - using registry content');
+      return skill;
+    }
+
+    // For public skills, try to use cache or fetch from GitHub
+    const githubInfo = skill.githubUrl ? parseGitHubUrl(skill.githubUrl) : null;
+    if (!githubInfo) {
+      verboseLog('No GitHub URL - using registry content');
+      return skill;
+    }
+
+    const { owner, repo, skillPath } = githubInfo;
+
+    // Check local cache first
+    const cached = getCachedSkill(owner, repo, skillPath);
+    if (cached) {
+      // If we have a contentHash from registry, validate cache
+      if (skill.contentHash && cached.contentHash === skill.contentHash) {
+        verboseLog('Using cached version (hash match)');
+        return { ...skill, content: cached.content };
+      }
+      // If no contentHash from registry, use cache if recent (< 1 hour)
+      if (!skill.contentHash && Date.now() - cached.cachedAt < 3600000) {
+        verboseLog('Using cached version (recent)');
+        return { ...skill, content: cached.content };
+      }
+    }
+
+    // Fetch fresh content from GitHub
+    verboseLog('Fetching from GitHub...');
+    const githubContent = await fetchFromGitHub(owner, repo, skillPath);
+
+    if (githubContent) {
+      // Cache the content
+      cacheSkill(owner, repo, githubContent, 'github', skillPath);
+      verboseLog('Cached GitHub content');
+      return {
+        ...skill,
+        content: githubContent,
+        contentHash: calculateContentHash(githubContent)
+      };
+    }
+
+    // Fall back to registry content (R2)
+    verboseLog('GitHub fetch failed - using registry content');
+    if (skill.content) {
+      cacheSkill(owner, repo, skill.content, 'registry', skillPath);
+    }
+    return skill;
   } catch (error) {
-    if (error instanceof Error && error.message.includes('fetch')) {
-      throw new Error('Unable to connect to SkillsCat registry. Please check your internet connection.');
+    if (error instanceof Error && !error.message.includes('Authentication') && !error.message.includes('Access denied')) {
+      const networkError = parseNetworkError(error);
+      throw new Error(networkError.message);
     }
     throw error;
   }
@@ -78,21 +187,27 @@ export async function searchSkills(
   params.set('limit', String(limit));
   if (includePrivate) params.set('include_private', 'true');
 
-  const url = `${REGISTRY_URL}/search?${params}`;
+  const registryUrl = getResolvedRegistryUrl();
+  const url = `${registryUrl}/search?${params}`;
+  const headers = await getAuthHeaders();
+  const startTime = Date.now();
+
+  verboseRequest('GET', url, headers);
 
   try {
-    const response = await fetch(url, {
-      headers: await getAuthHeaders(),
-    });
+    const response = await fetch(url, { headers });
+    verboseResponse(response.status, response.statusText, Date.now() - startTime);
 
     if (!response.ok) {
-      throw new Error(`Registry error: ${response.statusText}`);
+      const error = parseHttpError(response.status, response.statusText);
+      throw new Error(error.message);
     }
 
     return await response.json() as RegistrySearchResult;
   } catch (error) {
-    if (error instanceof Error && error.message.includes('fetch')) {
-      throw new Error('Unable to connect to SkillsCat registry. Please check your internet connection.');
+    if (error instanceof Error && !error.message.includes('Rate limit')) {
+      const networkError = parseNetworkError(error);
+      throw new Error(networkError.message);
     }
     throw error;
   }

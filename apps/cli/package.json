@@ -10,8 +10,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean",
-    "dev": "tsup src/index.ts --format esm --watch",
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
@@ -20,8 +20,11 @@
     "picocolors": "^1.1.1"
   },
   "devDependencies": {
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-typescript": "^12.1.2",
     "@types/node": "^22.19.7",
-    "tsup": "^8.5.1",
+    "rollup": "^4.34.6",
+    "rollup-plugin-preserve-shebang": "^1.0.1",
     "typescript": "^5.9.3"
   },
   "keywords": [

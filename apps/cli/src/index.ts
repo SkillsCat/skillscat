@@ -14,13 +14,22 @@ import { whoami } from './commands/whoami.js';
 import { publish } from './commands/publish.js';
 import { submit } from './commands/submit.js';
 import { deleteSkill } from './commands/delete.js';
+import { configSet, configGet, configList, configDelete } from './commands/config.js';
+import { setVerbose } from './utils/verbose.js';
 
 const program = new Command();
 
 program
   .name('skillscat')
   .description('CLI for installing agent skills from GitHub repositories')
-  .version('0.1.0');
+  .version('0.1.0')
+  .option('-v, --verbose', 'Enable verbose output')
+  .hook('preAction', (thisCommand) => {
+    const opts = thisCommand.opts();
+    if (opts.verbose) {
+      setVerbose(true);
+    }
+  });
 
 // Main add command (compatible with add-skill)
 program
@@ -123,6 +132,32 @@ program
   .description('Delete a private skill from SkillsCat')
   .option('-y, --yes', 'Skip confirmation prompt')
   .action(deleteSkill);
+
+// Config command with subcommands
+const configCommand = program
+  .command('config')
+  .description('Manage CLI configuration');
+
+configCommand
+  .command('set <key> <value>')
+  .description('Set a configuration value')
+  .action(configSet);
+
+configCommand
+  .command('get <key>')
+  .description('Get a configuration value')
+  .action(configGet);
+
+configCommand
+  .command('list')
+  .description('List all configuration values')
+  .action(configList);
+
+configCommand
+  .command('delete <key>')
+  .alias('rm')
+  .description('Delete a configuration value (reset to default)')
+  .action(configDelete);
 
 // Error handling
 program.exitOverride((err) => {

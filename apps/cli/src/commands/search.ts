@@ -1,6 +1,8 @@
 import pc from 'picocolors';
-import { REGISTRY_URL } from '../utils/paths.js';
+import { getResolvedRegistryUrl } from '../utils/paths.js';
 import { error, spinner, warn, info } from '../utils/ui.js';
+import { verboseRequest, verboseResponse, verboseConfig, isVerbose } from '../utils/verbose.js';
+import { parseNetworkError, parseHttpError, formatError } from '../utils/errors.js';
 
 interface SearchOptions {
   category?: string;
@@ -25,6 +27,11 @@ interface SearchResult {
 export async function search(query?: string, options: SearchOptions = {}): Promise<void> {
   const limit = parseInt(options.limit || '20', 10);
 
+  // Show verbose config info
+  if (isVerbose()) {
+    verboseConfig();
+  }
+
   const searchSpinner = spinner(
     query ? `Searching for "${query}"` : 'Fetching trending skills'
   );
@@ -37,29 +44,44 @@ export async function search(query?: string, options: SearchOptions = {}): Promi
     if (options.category) params.set('category', options.category);
     params.set('limit', String(limit));
 
-    const response = await fetch(`${REGISTRY_URL}/search?${params}`, {
-      headers: {
-        'User-Agent': 'skillscat-cli/1.0'
-      }
-    });
+    const registryUrl = getResolvedRegistryUrl();
+    const url = `${registryUrl}/search?${params}`;
+    const headers = { 'User-Agent': 'skillscat-cli/1.0' };
+    const startTime = Date.now();
+
+    verboseRequest('GET', url, headers);
+
+    const response = await fetch(url, { headers });
+
+    verboseResponse(response.status, response.statusText, Date.now() - startTime);
 
     if (!response.ok) {
       if (response.status === 429) {
         searchSpinner.stop(false);
-        warn('Rate limit exceeded. Please try again later.');
+        const httpError = parseHttpError(429);
+        warn(httpError.message);
+        if (httpError.suggestion) {
+          console.log(pc.dim(httpError.suggestion));
+        }
         process.exit(1);
       }
-      throw new Error(`Registry error: ${response.statusText}`);
+      const httpError = parseHttpError(response.status, response.statusText);
+      throw new Error(httpError.message);
     }
 
     result = await response.json() as SearchResult;
   } catch (err) {
     searchSpinner.stop(false);
 
-    if (err instanceof Error && err.message.includes('fetch')) {
+    // Check for network errors
+    const networkError = parseNetworkError(err);
+    if (networkError.message.includes('connect') || networkError.message.includes('resolve') || networkError.message.includes('network')) {
       // Fallback: show help for direct GitHub/GitLab usage
       console.log();
-      info('Unable to connect to SkillsCat registry.');
+      info(networkError.message);
+      if (networkError.suggestion) {
+        console.log(pc.dim(networkError.suggestion));
+      }
       console.log();
       console.log(pc.dim('You can still install skills directly from GitHub/GitLab:'));
       console.log();

@@ -1,6 +1,5 @@
 import pc from 'picocolors';
-import { isAuthenticated, getToken } from '../utils/auth.js';
-import { REGISTRY_URL } from '../utils/paths.js';
+import { isAuthenticated, getValidToken, getBaseUrl } from '../utils/auth.js';
 import { prompt, warn } from '../utils/ui.js';
 
 interface DeleteOptions {
@@ -24,12 +23,13 @@ interface DeleteResponse {
  * Find skill by slug
  */
 async function findSkillBySlug(slug: string): Promise<SkillInfo | null> {
+  const token = await getValidToken();
   const response = await fetch(
-    `${REGISTRY_URL.replace('/api/registry', '')}/api/skills/${encodeURIComponent(slug)}`,
+    `${getBaseUrl()}/api/skills/${encodeURIComponent(slug)}`,
     {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${getToken()}`,
+        'Authorization': `Bearer ${token}`,
       },
     }
   );
@@ -94,12 +94,13 @@ export async function deleteSkill(slug: string, options: DeleteOptions): Promise
     // Delete the skill using slug
     console.log(pc.cyan('Deleting skill...'));
 
+    const token = await getValidToken();
     const response = await fetch(
-      `${REGISTRY_URL.replace('/api/registry', '')}/api/skills/${encodeURIComponent(slug)}`,
+      `${getBaseUrl()}/api/skills/${encodeURIComponent(slug)}`,
       {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${getToken()}`,
+          'Authorization': `Bearer ${token}`,
         },
       }
     );

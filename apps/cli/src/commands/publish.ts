@@ -2,7 +2,7 @@ import pc from 'picocolors';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { isAuthenticated, getValidToken } from '../utils/auth.js';
-import { REGISTRY_URL } from '../utils/paths.js';
+import { getRegistryUrl } from '../utils/config.js';
 import { box, prompt, warn } from '../utils/ui.js';
 
 interface PublishOptions {
@@ -50,7 +50,7 @@ async function getPreview(content: string, org?: string): Promise<PreviewRespons
 
   const token = await getValidToken();
   const response = await fetch(
-    `${REGISTRY_URL.replace('/api/registry', '')}/api/skills/upload?${params.toString()}`,
+    `${getRegistryUrl().replace('/registry', '')}/api/skills/upload?${params.toString()}`,
     {
       method: 'GET',
       headers: {
@@ -172,7 +172,7 @@ export async function publish(skillPath: string, options: PublishOptions): Promi
     }
 
     const uploadToken = await getValidToken();
-    const response = await fetch(`${REGISTRY_URL.replace('/api/registry', '')}/api/skills/upload`, {
+    const response = await fetch(`${getRegistryUrl().replace('/registry', '')}/api/skills/upload`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${uploadToken}`,

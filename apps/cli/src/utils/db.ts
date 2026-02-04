@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { getConfigDir, getInstalledSkillsDb } from './paths.js';
+import { getConfigDir, getInstalledDbPath, ensureConfigDir } from './config.js';
 import type { RepoSource } from './source.js';
 
 export interface InstalledSkill {
@@ -12,6 +12,7 @@ export interface InstalledSkill {
   installedAt: number;
   sha?: string;
   path: string;
+  contentHash?: string;
 }
 
 export interface InstalledSkillsDb {
@@ -19,15 +20,8 @@ export interface InstalledSkillsDb {
   skills: InstalledSkill[];
 }
 
-function ensureConfigDir(): void {
-  const configDir = getConfigDir();
-  if (!existsSync(configDir)) {
-    mkdirSync(configDir, { recursive: true });
-  }
-}
-
 function loadDb(): InstalledSkillsDb {
-  const dbPath = getInstalledSkillsDb();
+  const dbPath = getInstalledDbPath();
 
   if (!existsSync(dbPath)) {
     return { version: 1, skills: [] };
@@ -43,7 +37,7 @@ function loadDb(): InstalledSkillsDb {
 
 function saveDb(db: InstalledSkillsDb): void {
   ensureConfigDir();
-  const dbPath = getInstalledSkillsDb();
+  const dbPath = getInstalledDbPath();
   writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf-8');
 }
 

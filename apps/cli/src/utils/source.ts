@@ -14,6 +14,7 @@ export interface SkillInfo {
   path: string;
   content: string;
   sha?: string;
+  contentHash?: string;
 }
 
 export interface SkillMetadata {

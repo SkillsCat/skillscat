@@ -1,6 +1,6 @@
 import pc from 'picocolors';
 import { isAuthenticated, getUser, getToken } from '../utils/auth.js';
-import { REGISTRY_URL } from '../utils/paths.js';
+import { getRegistryUrl } from '../utils/config.js';
 
 export async function whoami(): Promise<void> {
   if (!isAuthenticated()) {
@@ -14,7 +14,7 @@ export async function whoami(): Promise<void> {
 
   // Try to get fresh user info from API
   try {
-    const response = await fetch(`${REGISTRY_URL.replace('/api/registry', '')}/api/tokens`, {
+    const response = await fetch(`${getRegistryUrl().replace('/registry', '')}/api/tokens`, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',

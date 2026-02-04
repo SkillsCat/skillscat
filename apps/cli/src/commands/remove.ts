@@ -1,9 +1,8 @@
 import { existsSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
 import pc from 'picocolors';
 import { AGENTS, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents.js';
-import { removeInstallation, getInstalledSkill } from '../utils/db.js';
-import { success, error, warn, prompt } from '../utils/ui.js';
+import { removeInstallation } from '../utils/db.js';
+import { success, error, warn } from '../utils/ui.js';
 
 interface RemoveOptions {
   global?: boolean;

@@ -305,6 +305,25 @@ export const refreshTokens = sqliteTable('refresh_tokens', {
   index('refresh_tokens_hash_idx').on(table.tokenHash)
 ]);
 
+// ========== CLI Auth Sessions (OAuth-style callback flow) ==========
+export const cliAuthSessions = sqliteTable('cli_auth_sessions', {
+  id: text('id').primaryKey(),
+  callbackUrl: text('callback_url').notNull(),
+  state: text('state').notNull(),
+  authCode: text('auth_code'),
+  userId: text('user_id'),
+  scopes: text('scopes').notNull().default('["read","write","publish"]'),
+  clientInfo: text('client_info'),
+  // PKCE (Proof Key for Code Exchange) fields
+  codeChallenge: text('code_challenge'),
+  codeChallengeMethod: text('code_challenge_method'), // 'S256' or 'plain'
+  status: text('status').notNull().default('pending'), // pending/authorized/denied/expired/used
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  index('cli_auth_sessions_status_idx').on(table.status)
+]);
+
 // ========== Types Export ==========
 // Better Auth types
 export type AuthUser = typeof user.$inferSelect;
@@ -337,5 +356,7 @@ export type DeviceCode = typeof deviceCodes.$inferSelect;
 export type NewDeviceCode = typeof deviceCodes.$inferInsert;
 export type RefreshToken = typeof refreshTokens.$inferSelect;
 export type NewRefreshToken = typeof refreshTokens.$inferInsert;
+export type CliAuthSession = typeof cliAuthSessions.$inferSelect;
+export type NewCliAuthSession = typeof cliAuthSessions.$inferInsert;
 export type Notification = typeof notifications.$inferSelect;
 export type NewNotification = typeof notifications.$inferInsert;

@@ -1,10 +1,11 @@
 import { homedir, hostname, platform, release } from 'node:os';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
-import { REGISTRY_URL } from './paths.js';
+import { randomBytes, createHash } from 'node:crypto';
+import { getResolvedRegistryUrl } from './paths.js';
+import { getConfigDir, getAuthPath, ensureConfigDir as ensureNewConfigDir } from './config.js';
 
-const CONFIG_DIR = join(homedir(), '.skillscat');
-const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
+const CONFIG_FILE = getAuthPath();
 
 export interface AuthConfig {
   accessToken?: string;
@@ -22,9 +23,7 @@ export interface AuthConfig {
 }
 
 function ensureConfigDir(): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
-  }
+  ensureNewConfigDir();
 }
 
 export function loadConfig(): AuthConfig {
@@ -55,10 +54,12 @@ export function clearConfig(): void {
 }
 
 /**
- * Get the base URL for the API (without /api/registry suffix)
+ * Get the base URL for the API (derived from registry URL)
  */
 export function getBaseUrl(): string {
-  return REGISTRY_URL.replace('/api/registry', '');
+  const registryUrl = getResolvedRegistryUrl();
+  // Remove /registry suffix to get base URL
+  return registryUrl.replace(/\/registry$/, '');
 }
 
 /**
@@ -223,4 +224,116 @@ export function isAuthenticated(): boolean {
 export function getUser(): AuthConfig['user'] | undefined {
   const config = loadConfig();
   return config.user;
+}
+
+/**
+ * Generate a random state parameter for CSRF protection
+ */
+export function generateRandomState(): string {
+  return randomBytes(32).toString('hex');
+}
+
+/**
+ * Generate a PKCE code verifier (43-128 chars, cryptographically random)
+ * Using 64 bytes = 86 chars base64url (within 43-128 range)
+ */
+export function generateCodeVerifier(): string {
+  return randomBytes(64).toString('base64url');
+}
+
+/**
+ * Compute PKCE code challenge from verifier using SHA-256
+ * Returns base64url encoded hash (no padding)
+ */
+export function computeCodeChallenge(verifier: string): string {
+  return createHash('sha256').update(verifier).digest('base64url');
+}
+
+/**
+ * Initialize a CLI auth session
+ */
+export async function initAuthSession(
+  baseUrl: string,
+  callbackUrl: string,
+  state: string,
+  clientInfo?: { os: string; hostname: string; version: string },
+  pkce?: { codeChallenge: string; codeChallengeMethod: 'S256' | 'plain' }
+): Promise<{ session_id: string; expires_in: number }> {
+  const url = `${baseUrl}/auth/init`;
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callback_url: callbackUrl,
+        state,
+        client_info: clientInfo,
+        code_challenge: pkce?.codeChallenge,
+        code_challenge_method: pkce?.codeChallengeMethod,
+      }),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    throw new Error(`Connection failed to ${url}: ${message}`);
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => 'Unable to read response');
+    throw new Error(`HTTP ${response.status} from ${url}: ${errorText}`);
+  }
+
+  return response.json() as Promise<{ session_id: string; expires_in: number }>;
+}
+
+/**
+ * Exchange auth code for tokens
+ */
+export async function exchangeCodeForTokens(
+  baseUrl: string,
+  code: string,
+  sessionId: string,
+  codeVerifier?: string
+): Promise<{
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  refresh_token: string;
+  refresh_expires_in: number;
+  user: {
+    id: string;
+    name?: string;
+    email?: string;
+    image?: string;
+  };
+}> {
+  const response = await fetch(`${baseUrl}/auth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      code,
+      session_id: sessionId,
+      code_verifier: codeVerifier,
+    }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json() as { error?: string };
+    throw new Error(data.error || 'Failed to exchange code for tokens');
+  }
+
+  return response.json() as Promise<{
+    access_token: string;
+    token_type: string;
+    expires_in: number;
+    refresh_token: string;
+    refresh_expires_in: number;
+    user: {
+      id: string;
+      name?: string;
+      email?: string;
+      image?: string;
+    };
+  }>;
 }

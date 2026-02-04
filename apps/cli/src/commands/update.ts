@@ -5,6 +5,8 @@ import { AGENTS, getAgentsByIds, getSkillPath, type Agent } from '../utils/agent
 import { getInstalledSkills, recordInstallation, type InstalledSkill } from '../utils/db.js';
 import { discoverSkills, fetchSkill } from '../utils/git.js';
 import { success, error, warn, info, spinner } from '../utils/ui.js';
+import { cacheSkill, getCachedSkill, calculateContentHash } from '../utils/cache.js';
+import { verboseLog } from '../utils/verbose.js';
 
 interface UpdateOptions {
   agent?: string[];
@@ -53,13 +55,24 @@ export async function update(skillName: string | undefined, options: UpdateOptio
   info(`Checking ${skillsToCheck.length} skill(s) for updates...`);
   console.log();
 
-  const updates: { skill: InstalledSkill; newContent: string; newSha?: string }[] = [];
+  const updates: { skill: InstalledSkill; newContent: string; newSha?: string; newContentHash?: string }[] = [];
 
   // Check each skill for updates
   for (const skill of skillsToCheck) {
     const checkSpinner = spinner(`Checking ${skill.name}`);
 
     try {
+      // Check cache first
+      const cached = getCachedSkill(skill.source.owner, skill.source.repo, skill.path !== 'SKILL.md' ? skill.path.replace(/\/SKILL\.md$/, '') : undefined);
+
+      // If we have a cached version with matching hash, skip fetch
+      if (cached && skill.contentHash && cached.contentHash === skill.contentHash) {
+        checkSpinner.stop(true);
+        verboseLog(`${skill.name}: Using cached version (hash match)`);
+        console.log(pc.dim(`  ${skill.name}: Up to date`));
+        continue;
+      }
+
       const latestSkill = await fetchSkill(skill.source, skill.name);
 
       if (!latestSkill) {
@@ -68,7 +81,13 @@ export async function update(skillName: string | undefined, options: UpdateOptio
         continue;
       }
 
-      if (latestSkill.sha && skill.sha && latestSkill.sha === skill.sha) {
+      // Compare by contentHash first, then by SHA
+      const latestHash = latestSkill.contentHash || calculateContentHash(latestSkill.content);
+      const hasUpdate = skill.contentHash
+        ? latestHash !== skill.contentHash
+        : (latestSkill.sha && skill.sha ? latestSkill.sha !== skill.sha : true);
+
+      if (!hasUpdate) {
         checkSpinner.stop(true);
         console.log(pc.dim(`  ${skill.name}: Up to date`));
         continue;
@@ -78,7 +97,8 @@ export async function update(skillName: string | undefined, options: UpdateOptio
       updates.push({
         skill,
         newContent: latestSkill.content,
-        newSha: latestSkill.sha
+        newSha: latestSkill.sha,
+        newContentHash: latestHash
       });
 
       console.log(`  ${pc.yellow('⬆')} ${skill.name}: Update available`);
@@ -108,7 +128,7 @@ export async function update(skillName: string | undefined, options: UpdateOptio
 
   let updated = 0;
 
-  for (const { skill, newContent, newSha } of updates) {
+  for (const { skill, newContent, newSha, newContentHash } of updates) {
     const skillAgents = skill.agents
       .map(id => agents.find(a => a.id === id))
       .filter((a): a is Agent => a !== undefined);
@@ -125,6 +145,17 @@ export async function update(skillName: string | undefined, options: UpdateOptio
         mkdirSync(dirname(skillFile), { recursive: true });
         writeFileSync(skillFile, newContent, 'utf-8');
         updated++;
+
+        // Cache the updated content
+        cacheSkill(
+          skill.source.owner,
+          skill.source.repo,
+          newContent,
+          'github',
+          skill.path !== 'SKILL.md' ? skill.path.replace(/\/SKILL\.md$/, '') : undefined,
+          newSha
+        );
+        verboseLog(`Cached updated skill: ${skill.name}`);
       } catch (err) {
         error(`Failed to update ${skill.name} for ${agent.name}`);
       }
@@ -134,6 +165,7 @@ export async function update(skillName: string | undefined, options: UpdateOptio
     recordInstallation({
       ...skill,
       sha: newSha,
+      contentHash: newContentHash,
       installedAt: Date.now()
     });
   }

@@ -1,5 +1,6 @@
 import type { RepoSource, SkillInfo, SkillMetadata } from './source.js';
 import { SKILL_DISCOVERY_PATHS, parseSkillFrontmatter } from './source.js';
+import { calculateContentHash } from './cache.js';
 
 const GITHUB_API = 'https://api.github.com';
 const GITLAB_API = 'https://gitlab.com/api/v4';
@@ -242,7 +243,8 @@ export async function discoverSkills(source: RepoSource): Promise<SkillInfo[]> {
             description: metadata.description,
             path: skillPath,
             content,
-            sha: sha || undefined
+            sha: sha || undefined,
+            contentHash: calculateContentHash(content)
           });
         }
       } catch {
@@ -291,7 +293,8 @@ export async function discoverSkills(source: RepoSource): Promise<SkillInfo[]> {
             description: metadata.description,
             path: file.path,
             content,
-            sha: 'sha' in file ? (file as GitHubTreeItem).sha : undefined
+            sha: 'sha' in file ? (file as GitHubTreeItem).sha : undefined,
+            contentHash: calculateContentHash(content)
           });
         }
       } catch {

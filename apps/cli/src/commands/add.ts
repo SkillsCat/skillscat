@@ -6,6 +6,8 @@ import { discoverSkills } from '../utils/git.js';
 import { AGENTS, detectInstalledAgents, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents.js';
 import { recordInstallation, isSkillInstalled, getInstalledSkill } from '../utils/db.js';
 import { success, error, warn, info, spinner, prompt } from '../utils/ui.js';
+import { cacheSkill, getCachedSkill } from '../utils/cache.js';
+import { verboseLog, isVerbose } from '../utils/verbose.js';
 import type { SkillInfo } from '../utils/source.js';
 
 interface AddOptions {
@@ -30,6 +32,12 @@ export async function add(source: string, options: AddOptions): Promise<void> {
 
   const sourceLabel = `${repoSource.owner}/${repoSource.repo}`;
   info(`Fetching skills from ${pc.cyan(sourceLabel)}...`);
+
+  // Check cache first for each potential skill path
+  const cached = getCachedSkill(repoSource.owner, repoSource.repo, repoSource.path);
+  if (cached && !options.force) {
+    verboseLog('Found cached skill content');
+  }
 
   // Discover skills
   const discoverSpinner = spinner('Discovering skills');
@@ -200,6 +208,17 @@ export async function add(source: string, options: AddOptions): Promise<void> {
         mkdirSync(dirname(skillFile), { recursive: true });
         writeFileSync(skillFile, skill.content, 'utf-8');
         installed++;
+
+        // Cache the skill content
+        cacheSkill(
+          repoSource.owner,
+          repoSource.repo,
+          skill.content,
+          'github',
+          skill.path !== 'SKILL.md' ? skill.path.replace(/\/SKILL\.md$/, '') : undefined,
+          skill.sha
+        );
+        verboseLog(`Cached skill: ${skill.name}`);
       } catch (err) {
         error(`Failed to install ${skill.name} to ${agent.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
       }
@@ -214,7 +233,8 @@ export async function add(source: string, options: AddOptions): Promise<void> {
       global: isGlobal,
       installedAt: Date.now(),
       sha: skill.sha,
-      path: skill.path
+      path: skill.path,
+      contentHash: skill.contentHash
     });
   }
 
