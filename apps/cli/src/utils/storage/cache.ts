@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { getCacheDir } from './config.js';
+import { getCacheDir } from '../config/config';
 
 const MAX_CACHE_ITEMS = 100;
 const PRUNE_PERCENTAGE = 0.2;

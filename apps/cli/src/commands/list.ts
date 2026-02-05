@@ -1,10 +1,10 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import pc from 'picocolors';
-import { AGENTS, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents.js';
-import { getInstalledSkills, removeInstallation, type InstalledSkill } from '../utils/db.js';
-import { parseSkillFrontmatter } from '../utils/source.js';
-import { success, error, warn, info, table } from '../utils/ui.js';
+import { AGENTS, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents/agents';
+import { getInstalledSkills, removeInstallation, type InstalledSkill } from '../utils/storage/db';
+import { parseSkillFrontmatter } from '../utils/source/source';
+import { success, error, warn, info, table } from '../utils/core/ui';
 
 interface ListOptions {
   global?: boolean;

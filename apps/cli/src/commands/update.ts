@@ -1,12 +1,12 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import pc from 'picocolors';
-import { AGENTS, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents.js';
-import { getInstalledSkills, recordInstallation, type InstalledSkill } from '../utils/db.js';
-import { discoverSkills, fetchSkill } from '../utils/git.js';
-import { success, error, warn, info, spinner } from '../utils/ui.js';
-import { cacheSkill, getCachedSkill, calculateContentHash } from '../utils/cache.js';
-import { verboseLog } from '../utils/verbose.js';
+import { AGENTS, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents/agents';
+import { getInstalledSkills, recordInstallation, type InstalledSkill } from '../utils/storage/db';
+import { discoverSkills, fetchSkill } from '../utils/source/git';
+import { success, error, warn, info, spinner } from '../utils/core/ui';
+import { cacheSkill, getCachedSkill, calculateContentHash } from '../utils/storage/cache';
+import { verboseLog } from '../utils/core/verbose';
 
 interface UpdateOptions {
   agent?: string[];

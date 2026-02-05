@@ -1,9 +1,9 @@
 import pc from 'picocolors';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { isAuthenticated, getValidToken } from '../utils/auth.js';
-import { getRegistryUrl } from '../utils/config.js';
-import { box, prompt, warn } from '../utils/ui.js';
+import { isAuthenticated, getValidToken } from '../utils/auth/auth';
+import { getRegistryUrl } from '../utils/config/config';
+import { box, prompt, warn } from '../utils/core/ui';
 
 interface PublishOptions {
   name?: string;

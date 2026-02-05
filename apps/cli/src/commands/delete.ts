@@ -1,6 +1,6 @@
 import pc from 'picocolors';
-import { isAuthenticated, getValidToken, getBaseUrl } from '../utils/auth.js';
-import { prompt, warn } from '../utils/ui.js';
+import { isAuthenticated, getValidToken, getBaseUrl } from '../utils/auth/auth';
+import { prompt, warn } from '../utils/core/ui';
 
 interface DeleteOptions {
   yes?: boolean;  // Skip confirmation

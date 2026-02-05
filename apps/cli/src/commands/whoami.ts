@@ -1,6 +1,6 @@
 import pc from 'picocolors';
-import { isAuthenticated, getUser, getToken } from '../utils/auth.js';
-import { getRegistryUrl } from '../utils/config.js';
+import { isAuthenticated, getUser, getToken } from '../utils/auth/auth';
+import { getRegistryUrl } from '../utils/config/config';
 
 export async function whoami(): Promise<void> {
   if (!isAuthenticated()) {

@@ -1,6 +1,6 @@
-import type { RepoSource, SkillInfo, SkillMetadata } from './source.js';
-import { SKILL_DISCOVERY_PATHS, parseSkillFrontmatter } from './source.js';
-import { calculateContentHash } from './cache.js';
+import type { RepoSource, SkillInfo, SkillMetadata } from './source';
+import { SKILL_DISCOVERY_PATHS, parseSkillFrontmatter } from './source';
+import { calculateContentHash } from '../storage/cache';
 
 const GITHUB_API = 'https://api.github.com';
 const GITLAB_API = 'https://gitlab.com/api/v4';

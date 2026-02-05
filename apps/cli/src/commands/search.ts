@@ -1,8 +1,8 @@
 import pc from 'picocolors';
-import { getResolvedRegistryUrl } from '../utils/paths.js';
-import { error, spinner, warn, info } from '../utils/ui.js';
-import { verboseRequest, verboseResponse, verboseConfig, isVerbose } from '../utils/verbose.js';
-import { parseNetworkError, parseHttpError, formatError } from '../utils/errors.js';
+import { getResolvedRegistryUrl } from '../utils/config/paths';
+import { error, spinner, warn, info } from '../utils/core/ui';
+import { verboseRequest, verboseResponse, verboseConfig, isVerbose } from '../utils/core/verbose';
+import { parseNetworkError, parseHttpError, formatError } from '../utils/core/errors';
 
 interface SearchOptions {
   category?: string;

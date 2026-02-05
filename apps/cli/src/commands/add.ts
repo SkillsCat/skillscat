@@ -1,14 +1,14 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import pc from 'picocolors';
-import { parseSource } from '../utils/source.js';
-import { discoverSkills } from '../utils/git.js';
-import { AGENTS, detectInstalledAgents, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents.js';
-import { recordInstallation, isSkillInstalled, getInstalledSkill } from '../utils/db.js';
-import { success, error, warn, info, spinner, prompt } from '../utils/ui.js';
-import { cacheSkill, getCachedSkill } from '../utils/cache.js';
-import { verboseLog, isVerbose } from '../utils/verbose.js';
-import type { SkillInfo } from '../utils/source.js';
+import { parseSource } from '../utils/source/source';
+import { discoverSkills } from '../utils/source/git';
+import { AGENTS, detectInstalledAgents, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents/agents';
+import { recordInstallation, isSkillInstalled, getInstalledSkill } from '../utils/storage/db';
+import { success, error, warn, info, spinner, prompt } from '../utils/core/ui';
+import { cacheSkill, getCachedSkill } from '../utils/storage/cache';
+import { verboseLog, isVerbose } from '../utils/core/verbose';
+import type { SkillInfo } from '../utils/source/source';
 
 interface AddOptions {
   global?: boolean;

@@ -1,5 +1,5 @@
 import pc from 'picocolors';
-import { clearConfig, isAuthenticated, getUser } from '../utils/auth.js';
+import { clearConfig, isAuthenticated, getUser } from '../utils/auth/auth';
 
 export async function logout(): Promise<void> {
   if (!isAuthenticated()) {

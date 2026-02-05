@@ -2,8 +2,8 @@ import { homedir, hostname, platform, release } from 'node:os';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
-import { getResolvedRegistryUrl } from './paths.js';
-import { getConfigDir, getAuthPath, ensureConfigDir as ensureNewConfigDir } from './config.js';
+import { getResolvedRegistryUrl } from '../config/paths';
+import { getConfigDir, getAuthPath, ensureConfigDir as ensureNewConfigDir } from '../config/config';
 
 const CONFIG_FILE = getAuthPath();
 

@@ -1,8 +1,8 @@
 import pc from 'picocolors';
-import { parseSource } from '../utils/source.js';
-import { discoverSkills } from '../utils/git.js';
-import { AGENTS } from '../utils/agents.js';
-import { error, info as showInfo, spinner } from '../utils/ui.js';
+import { parseSource } from '../utils/source/source';
+import { discoverSkills } from '../utils/source/git';
+import { AGENTS } from '../utils/agents/agents';
+import { error, info as showInfo, spinner } from '../utils/core/ui';
 
 export async function info(source: string): Promise<void> {
   // Parse source

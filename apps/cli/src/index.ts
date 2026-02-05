@@ -2,20 +2,20 @@
 
 import { Command } from 'commander';
 import pc from 'picocolors';
-import { add } from './commands/add.js';
-import { list } from './commands/list.js';
-import { search } from './commands/search.js';
-import { remove } from './commands/remove.js';
-import { update } from './commands/update.js';
-import { info } from './commands/info.js';
-import { login } from './commands/login.js';
-import { logout } from './commands/logout.js';
-import { whoami } from './commands/whoami.js';
-import { publish } from './commands/publish.js';
-import { submit } from './commands/submit.js';
-import { deleteSkill } from './commands/delete.js';
-import { configSet, configGet, configList, configDelete } from './commands/config.js';
-import { setVerbose } from './utils/verbose.js';
+import { add } from './commands/add';
+import { list } from './commands/list';
+import { search } from './commands/search';
+import { remove } from './commands/remove';
+import { update } from './commands/update';
+import { info } from './commands/info';
+import { login } from './commands/login';
+import { logout } from './commands/logout';
+import { whoami } from './commands/whoami';
+import { publish } from './commands/publish';
+import { submit } from './commands/submit';
+import { deleteSkill } from './commands/delete';
+import { configSet, configGet, configList, configDelete } from './commands/config';
+import { setVerbose } from './utils/core/verbose';
 
 const program = new Command();
 

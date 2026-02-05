@@ -1,8 +1,8 @@
-import { getResolvedRegistryUrl } from './paths.js';
-import { getValidToken } from './auth.js';
-import { verboseRequest, verboseResponse, verboseLog, isVerbose } from './verbose.js';
-import { parseNetworkError, parseHttpError, formatError, type FriendlyError } from './errors.js';
-import { getCachedSkill, cacheSkill, calculateContentHash, type CachedSkill } from './cache.js';
+import { getResolvedRegistryUrl } from '../config/paths';
+import { getValidToken } from '../auth/auth';
+import { verboseRequest, verboseResponse, verboseLog, isVerbose } from '../core/verbose';
+import { parseNetworkError, parseHttpError, formatError, type FriendlyError } from '../core/errors';
+import { getCachedSkill, cacheSkill, calculateContentHash, type CachedSkill } from '../storage/cache';
 
 const GITHUB_API = 'https://api.github.com';
 

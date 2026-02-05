@@ -1,8 +1,8 @@
 import pc from 'picocolors';
-import { setToken, setTokens, isAuthenticated, getUser, getBaseUrl, getClientInfo, generateRandomState, generateCodeVerifier, computeCodeChallenge, initAuthSession, exchangeCodeForTokens } from '../utils/auth.js';
-import { startCallbackServer } from '../utils/callback-server.js';
-import { getResolvedRegistryUrl } from '../utils/paths.js';
-import { spinner, success, error, info, warn, box } from '../utils/ui.js';
+import { setToken, setTokens, isAuthenticated, getUser, getBaseUrl, getClientInfo, generateRandomState, generateCodeVerifier, computeCodeChallenge, initAuthSession, exchangeCodeForTokens } from '../utils/auth/auth';
+import { startCallbackServer } from '../utils/auth/callback-server';
+import { getResolvedRegistryUrl } from '../utils/config/paths';
+import { spinner, success, error, info, warn, box } from '../utils/core/ui';
 
 interface LoginOptions {
   token?: string;

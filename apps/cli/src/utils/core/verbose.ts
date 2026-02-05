@@ -1,5 +1,5 @@
 import pc from 'picocolors';
-import { getConfigDir, getAuthPath, getSettingsPath, getInstalledDbPath, getRegistryUrl } from './config.js';
+import { getConfigDir, getAuthPath, getSettingsPath, getInstalledDbPath, getRegistryUrl } from '../config/config';
 
 let verboseEnabled = false;
 
