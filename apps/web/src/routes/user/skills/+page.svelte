@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { CopyButton, SettingsSection, SkillsList } from '$lib/components';
+  import { CopyButton, SettingsSection, SkillsList, ConfirmDialog } from '$lib/components';
+  import { invalidateAll } from '$app/navigation';
 
   interface Skill {
     id: string;
@@ -8,33 +9,55 @@
     description: string;
     visibility: 'public' | 'private' | 'unlisted';
     stars: number;
-    createdAt: number;
+    updatedAt: number;
   }
 
-  let skills = $state<Skill[]>([]);
-  let loading = $state(true);
-  let error = $state<string | null>(null);
+  interface SkillBase {
+    id: string;
+    name: string;
+    slug: string;
+    description: string;
+    visibility: 'public' | 'private' | 'unlisted';
+    stars: number;
+  }
 
-  $effect(() => {
-    loadSkills();
-  });
+  let { data } = $props();
 
-  async function loadSkills() {
-    loading = true;
-    error = null;
+  const skills = $derived(data.skills as Skill[]);
+
+  let unpublishTarget = $state<SkillBase | null>(null);
+  let unpublishLoading = $state(false);
+
+  function handleUnpublishClick(skill: SkillBase) {
+    unpublishTarget = skill;
+  }
+
+  async function confirmUnpublish() {
+    if (!unpublishTarget) return;
+    unpublishLoading = true;
     try {
-      const res = await fetch('/api/skills?mine=true');
+      const res = await fetch(`/api/skills/${unpublishTarget.slug}`, {
+        method: 'DELETE',
+      });
       if (res.ok) {
-        const data = await res.json() as { skills?: Skill[] };
-        skills = data.skills || [];
-      } else {
-        error = 'Failed to load skills';
+        unpublishTarget = null;
+        await invalidateAll();
       }
     } catch {
-      error = 'Failed to load skills';
+      // Silently fail
     } finally {
-      loading = false;
+      unpublishLoading = false;
     }
+  }
+
+  const unpublishDescription = $derived(
+    unpublishTarget
+      ? `Are you sure you want to unpublish "${unpublishTarget.name}"? This action cannot be undone.`
+      : ''
+  );
+
+  function cancelUnpublish() {
+    unpublishTarget = null;
   }
 </script>
 
@@ -51,7 +74,7 @@
   </div>
 
   <!-- CLI Upload Hint (only show when no skills) -->
-  {#if !loading && skills.length === 0}
+  {#if skills.length === 0}
     <div class="cli-hint">
       <div class="cli-hint-icon">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -72,14 +95,26 @@
   <SettingsSection title="Your Skills" description="Skills you have published to SkillsCat.">
     <SkillsList
       {skills}
-      {loading}
-      {error}
+      loading={false}
+      error={null}
       emptyTitle="No skills yet"
       emptyDescription="Use the CLI above to publish your first skill."
-      onRetry={loadSkills}
+      onUnpublish={handleUnpublishClick}
     />
   </SettingsSection>
 </div>
+
+<ConfirmDialog
+  open={!!unpublishTarget}
+  title="Unpublish Skill"
+  description={unpublishDescription}
+  confirmText="Unpublish"
+  cancelText="Cancel"
+  danger={true}
+  loading={unpublishLoading}
+  onConfirm={confirmUnpublish}
+  onCancel={cancelUnpublish}
+/>
 
 <style>
   .skills-page {

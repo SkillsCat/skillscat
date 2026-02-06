@@ -6,6 +6,7 @@
     SparklesIcon,
     MailOpen01Icon,
     MailMinus01Icon,
+    CheckListIcon,
   } from "@hugeicons/core-free-icons";
 
   interface OrgInviteMetadata {
@@ -33,6 +34,9 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let processingIds = $state<Set<string>>(new Set());
+  let markingAllRead = $state(false);
+
+  const hasUnread = $derived(notifications.some((n) => !n.read));
 
   $effect(() => {
     loadNotifications();
@@ -46,8 +50,6 @@
       if (res.ok) {
         const data = (await res.json()) as { notifications: Notification[] };
         notifications = data.notifications;
-        // Mark unread as read
-        markAllAsRead();
       } else {
         error = "Failed to load messages";
       }
@@ -59,17 +61,17 @@
   }
 
   async function markAllAsRead() {
-    const unread = notifications.filter((n) => !n.read);
-    for (const n of unread) {
-      try {
-        await fetch(`/api/notifications/${n.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ read: true }),
-        });
-      } catch {
-        // Silently fail
+    if (markingAllRead || !hasUnread) return;
+    markingAllRead = true;
+    try {
+      const res = await fetch("/api/notifications/read-all", { method: "POST" });
+      if (res.ok) {
+        notifications = notifications.map((n) => ({ ...n, read: true }));
       }
+    } catch {
+      // Silently fail
+    } finally {
+      markingAllRead = false;
     }
   }
 
@@ -147,8 +149,23 @@
 
 <div class="messages-page">
   <div class="page-header">
-    <h1>Messages</h1>
-    <p class="description">View your notifications and invitations.</p>
+    <div class="page-header-row">
+      <div>
+        <h1>Messages</h1>
+        <p class="description">View your notifications and invitations.</p>
+      </div>
+      {#if hasUnread}
+        <Button
+          variant="cute"
+          size="sm"
+          onclick={markAllAsRead}
+          disabled={markingAllRead}
+        >
+          <HugeiconsIcon icon={CheckListIcon} size={16} />
+          {markingAllRead ? 'Marking...' : 'Mark all as read'}
+        </Button>
+      {/if}
+    </div>
   </div>
 
   <SettingsSection
@@ -183,46 +200,49 @@
             class:notification-unread={!notification.read}
             class:notification-processed={notification.processed}
           >
-            <div class="notification-icon">
-              {getNotificationIcon(notification.type)}
-            </div>
-            <div class="notification-content">
-              <div class="notification-header">
-                <h4 class="notification-title">{notification.title}</h4>
-                <span class="notification-time"
-                  >{formatRelativeTime(notification.createdAt)}</span
-                >
+            <div class="notification-row">
+              <div class="notification-icon">
+                <HugeiconsIcon icon={getNotificationIcon(notification.type)} size={24} />
               </div>
-              {#if notification.message}
-                <p class="notification-message">{notification.message}</p>
-              {/if}
-              {#if notification.type === "org_invite" && !notification.processed && notification.metadata}
-                <div class="notification-actions">
-                  <Button
-                    variant="cute"
-                    size="sm"
-                    onclick={() => handleAccept(notification)}
-                    disabled={processingIds.has(notification.id)}
+              <div class="notification-content">
+                <div class="notification-header">
+                  <h4 class="notification-title">{notification.title}</h4>
+                  <span class="notification-time"
+                    >{formatRelativeTime(notification.createdAt)}</span
                   >
-                    {processingIds.has(notification.id)
-                      ? "Accepting..."
-                      : "Accept"}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onclick={() => handleReject(notification)}
-                    disabled={processingIds.has(notification.id)}
-                  >
-                    Decline
-                  </Button>
                 </div>
-              {:else if notification.type === "org_invite" && notification.processed}
-                <p class="notification-status">
-                  {notification.metadata ? "Invitation processed" : "Processed"}
-                </p>
-              {/if}
+                {#if notification.message}
+                  <p class="notification-message">{notification.message}</p>
+                {/if}
+                {#if notification.type === "org_invite" && notification.processed}
+                  <p class="notification-status">
+                    {notification.metadata ? "Invitation processed" : "Processed"}
+                  </p>
+                {/if}
+              </div>
             </div>
+            {#if notification.type === "org_invite" && !notification.processed && notification.metadata}
+              <div class="notification-actions">
+                <Button
+                  variant="cute"
+                  size="sm"
+                  onclick={() => handleAccept(notification)}
+                  disabled={processingIds.has(notification.id)}
+                >
+                  {processingIds.has(notification.id)
+                    ? "Accepting..."
+                    : "Accept"}
+                </Button>
+                <Button
+                  variant="cute-secondary"
+                  size="sm"
+                  onclick={() => handleReject(notification)}
+                  disabled={processingIds.has(notification.id)}
+                >
+                  Decline
+                </Button>
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -237,6 +257,13 @@
 
   .page-header {
     margin-bottom: 2rem;
+  }
+
+  .page-header-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
   }
 
   h1 {
@@ -305,7 +332,8 @@
 
   .notification-card {
     display: flex;
-    gap: 1rem;
+    flex-direction: column;
+    gap: 0.75rem;
     padding: 1rem;
     background: var(--background);
     border: 1px solid var(--border);
@@ -329,6 +357,12 @@
   .notification-icon {
     font-size: 1.5rem;
     flex-shrink: 0;
+  }
+
+  .notification-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
   }
 
   .notification-content {
@@ -359,11 +393,13 @@
   .notification-message {
     font-size: 0.875rem;
     color: var(--muted-foreground);
-    margin-bottom: 0.75rem;
+    margin: 0;
   }
 
   .notification-actions {
     display: flex;
+    align-items: center;
+    justify-content: flex-end;
     gap: 0.5rem;
   }
 
@@ -371,11 +407,13 @@
     font-size: 0.8125rem;
     color: var(--muted-foreground);
     font-style: italic;
+    margin: 0;
   }
 
   @media (max-width: 640px) {
-    .notification-card {
+    .notification-row {
       flex-direction: column;
+      align-items: flex-start;
     }
 
     .notification-header {
@@ -384,7 +422,7 @@
     }
 
     .notification-actions {
-      flex-direction: column;
+      justify-content: flex-start;
     }
   }
 </style>

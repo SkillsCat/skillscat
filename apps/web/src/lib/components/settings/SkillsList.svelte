@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { Button } from '$lib/components';
+
   interface Skill {
     id: string;
     name: string;
@@ -15,6 +17,7 @@
     emptyTitle?: string;
     emptyDescription?: string;
     onRetry?: () => void;
+    onUnpublish?: (skill: Skill) => void;
   }
 
   let {
@@ -24,6 +27,7 @@
     emptyTitle = 'No skills yet',
     emptyDescription = 'No skills have been published.',
     onRetry,
+    onUnpublish,
   }: Props = $props();
 
   let searchQuery = $state('');
@@ -92,18 +96,32 @@
             {#if skill.description}
               <p class="skill-description">{skill.description}</p>
             {/if}
-            <div class="skill-meta">
-              <span class="stars">
-                <svg class="star-icon" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 .587l3.668 7.568 8.332 1.151-6.064 5.828 1.48 8.279-7.416-3.967-7.417 3.967 1.481-8.279-6.064-5.828 8.332-1.151z"/>
-                </svg>
-                {skill.stars}
-              </span>
-            </div>
+            {#if skill.visibility !== 'private'}
+              <div class="skill-meta">
+                <span class="stars">
+                  <svg class="star-icon" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 .587l3.668 7.568 8.332 1.151-6.064 5.828 1.48 8.279-7.416-3.967-7.417 3.967 1.481-8.279-6.064-5.828 8.332-1.151z"/>
+                  </svg>
+                  {skill.stars}
+                </span>
+              </div>
+            {/if}
           </div>
-          <svg class="chevron" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
+          {#if skill.visibility === 'private' && onUnpublish}
+            <button
+              class="unpublish-btn"
+              title="Unpublish skill"
+              onclick={(e) => { e.preventDefault(); e.stopPropagation(); onUnpublish(skill); }}
+            >
+              <svg class="trash-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          {:else}
+            <svg class="chevron" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          {/if}
         </a>
       {/each}
     </div>
@@ -222,14 +240,16 @@
   }
 
   .stars {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 0.25rem;
+    line-height: 1;
   }
 
   .star-icon {
-    width: 1rem;
-    height: 1rem;
+    width: 0.875rem;
+    height: 0.875rem;
+    vertical-align: middle;
   }
 
   .chevron {
@@ -237,6 +257,39 @@
     height: 1.25rem;
     color: var(--muted-foreground);
     flex-shrink: 0;
+  }
+
+  .unpublish-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-full);
+    background: var(--background);
+    color: var(--muted-foreground);
+    cursor: pointer;
+    flex-shrink: 0;
+    box-shadow: 0 3px 0 0 var(--border);
+    transition: all 0.15s ease;
+  }
+
+  .unpublish-btn:hover {
+    color: #ef4444;
+    border-color: #ef4444;
+    box-shadow: 0 4px 0 0 oklch(45% 0.20 25);
+    transform: translateY(-1px);
+  }
+
+  .unpublish-btn:active {
+    box-shadow: 0 1px 0 0 oklch(45% 0.20 25);
+    transform: translateY(2px);
+  }
+
+  .trash-icon {
+    width: 1rem;
+    height: 1rem;
   }
 
   /* States */
