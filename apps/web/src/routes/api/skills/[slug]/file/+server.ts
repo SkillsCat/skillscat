@@ -100,7 +100,7 @@ export const GET: RequestHandler = async ({ params, platform, request, url }) =>
   if (!filePath) throw error(400, 'File path is required');
 
   // Validate slug and path format
-  if (!/^[@a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/.test(slug)) {
+  if (!/^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/.test(slug)) {
     throw error(400, 'Invalid skill slug format');
   }
 
@@ -123,9 +123,9 @@ export const GET: RequestHandler = async ({ params, platform, request, url }) =>
   // Build R2 key
   let r2Key: string;
   if (skill.source_type === 'upload') {
-    const slugMatch = slug.match(/^@([^/]+)\/(.+)$/);
-    r2Key = slugMatch
-      ? `skills/${slugMatch[1]}/${slugMatch[2]}/${filePath}`
+    const parts = slug.split('/');
+    r2Key = parts.length >= 2
+      ? `skills/${parts[0]}/${parts[1]}/${filePath}`
       : `skills/${slug}/${filePath}`;
   } else {
     const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';

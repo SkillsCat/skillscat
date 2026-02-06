@@ -7,13 +7,14 @@ import { list } from './commands/list';
 import { search } from './commands/search';
 import { remove } from './commands/remove';
 import { update } from './commands/update';
+import { selfUpgrade } from './commands/self-upgrade';
 import { info } from './commands/info';
 import { login } from './commands/login';
 import { logout } from './commands/logout';
 import { whoami } from './commands/whoami';
 import { publish } from './commands/publish';
 import { submit } from './commands/submit';
-import { deleteSkill } from './commands/delete';
+import { unpublishSkill } from './commands/unpublish';
 import { configSet, configGet, configList, configDelete } from './commands/config';
 import { setVerbose } from './utils/core/verbose';
 
@@ -75,6 +76,13 @@ program
   .option('--check', 'Check for updates without installing')
   .action(update);
 
+// Self-upgrade command
+program
+  .command('self-upgrade')
+  .description('Upgrade the SkillsCat CLI itself')
+  .option('-m, --manager <manager>', 'Package manager to use (npm, pnpm, bun)')
+  .action(selfUpgrade);
+
 // Search command (uses SkillsCat registry)
 program
   .command('search [query]')
@@ -126,12 +134,13 @@ program
   .description('Submit a GitHub repository to SkillsCat registry')
   .action(submit);
 
-// Delete command
+// Unpublish command
 program
-  .command('delete <slug>')
-  .description('Delete a private skill from SkillsCat')
+  .command('unpublish <slug>')
+  .alias('delete')
+  .description('Unpublish a private skill from SkillsCat')
   .option('-y, --yes', 'Skip confirmation prompt')
-  .action(deleteSkill);
+  .action(unpublishSkill);
 
 // Config command with subcommands
 const configCommand = program

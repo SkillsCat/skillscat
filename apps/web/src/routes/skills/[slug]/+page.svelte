@@ -248,7 +248,7 @@
   // Determine the install identifier based on skill type
   const skillIdentifier = $derived(() => {
     if (!data.skill) return '';
-    // For private/uploaded skills, use the slug format (@owner/name)
+    // For private/uploaded skills, use the slug format (owner/name)
     if (data.skill.visibility !== 'public' || data.skill.sourceType === 'upload') {
       return data.skill.slug;
     }

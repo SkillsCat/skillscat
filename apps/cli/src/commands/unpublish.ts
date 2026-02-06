@@ -1,8 +1,9 @@
 import pc from 'picocolors';
 import { isAuthenticated, getValidToken, getBaseUrl } from '../utils/auth/auth';
 import { prompt, warn } from '../utils/core/ui';
+import { parseSlug } from '../utils/core/slug';
 
-interface DeleteOptions {
+interface UnpublishOptions {
   yes?: boolean;  // Skip confirmation
 }
 
@@ -13,19 +14,20 @@ interface SkillInfo {
   sourceType: string;
 }
 
-interface DeleteResponse {
+interface UnpublishResponse {
   success: boolean;
   message?: string;
   error?: string;
 }
 
 /**
- * Find skill by slug
+ * Find skill by slug using two-segment path
  */
 async function findSkillBySlug(slug: string): Promise<SkillInfo | null> {
   const token = await getValidToken();
+  const { owner, name } = parseSlug(slug);
   const response = await fetch(
-    `${getBaseUrl()}/api/skills/${encodeURIComponent(slug)}`,
+    `${getBaseUrl()}/api/skills/${owner}/${name}`,
     {
       method: 'GET',
       headers: {
@@ -42,7 +44,7 @@ async function findSkillBySlug(slug: string): Promise<SkillInfo | null> {
   return data.data?.skill || null;
 }
 
-export async function deleteSkill(slug: string, options: DeleteOptions): Promise<void> {
+export async function unpublishSkill(slug: string, options: UnpublishOptions): Promise<void> {
   // Check authentication
   if (!isAuthenticated()) {
     console.error(pc.red('Authentication required.'));
@@ -51,8 +53,8 @@ export async function deleteSkill(slug: string, options: DeleteOptions): Promise
   }
 
   // Validate slug format
-  if (!slug.startsWith('@')) {
-    console.error(pc.red('Invalid slug format. Expected format: @username/skill-name'));
+  if (!slug.includes('/')) {
+    console.error(pc.red('Invalid slug format. Expected format: owner/skill-name'));
     process.exit(1);
   }
 
@@ -69,7 +71,7 @@ export async function deleteSkill(slug: string, options: DeleteOptions): Promise
 
     // Check if it's a private (uploaded) skill
     if (skill.sourceType !== 'upload') {
-      console.error(pc.red('Cannot delete GitHub-sourced skills.'));
+      console.error(pc.red('Cannot unpublish GitHub-sourced skills.'));
       console.log(pc.dim('Remove the SKILL.md from your repository instead.'));
       process.exit(1);
     }
@@ -83,7 +85,7 @@ export async function deleteSkill(slug: string, options: DeleteOptions): Promise
     if (!options.yes) {
       warn('This action cannot be undone!');
       console.log();
-      const answer = await prompt(`Delete ${pc.red(slug)}? Type the slug to confirm: `);
+      const answer = await prompt(`Unpublish ${pc.red(slug)}? Type the slug to confirm: `);
       if (answer !== slug) {
         console.log(pc.dim('Cancelled.'));
         process.exit(0);
@@ -91,28 +93,31 @@ export async function deleteSkill(slug: string, options: DeleteOptions): Promise
       console.log();
     }
 
-    // Delete the skill using slug
-    console.log(pc.cyan('Deleting skill...'));
+    // Unpublish the skill using two-segment path
+    console.log(pc.cyan('Unpublishing skill...'));
 
     const token = await getValidToken();
+    const baseUrl = getBaseUrl();
+    const { owner, name } = parseSlug(slug);
     const response = await fetch(
-      `${getBaseUrl()}/api/skills/${encodeURIComponent(slug)}`,
+      `${baseUrl}/api/skills/${owner}/${name}`,
       {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
+          'Origin': baseUrl,
         },
       }
     );
 
-    const result = await response.json() as DeleteResponse;
+    const result = await response.json() as UnpublishResponse;
 
     if (!response.ok || !result.success) {
-      console.error(pc.red(`Failed to delete: ${result.error || result.message || 'Unknown error'}`));
+      console.error(pc.red(`Failed to unpublish: ${result.error || result.message || 'Unknown error'}`));
       process.exit(1);
     }
 
-    console.log(pc.green('✔ Skill deleted successfully!'));
+    console.log(pc.green('✔ Skill unpublished successfully!'));
   } catch (error) {
     console.error(pc.red('Failed to connect to registry.'));
     if (error instanceof Error) {

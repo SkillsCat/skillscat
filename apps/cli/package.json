@@ -13,7 +13,8 @@
     "build": "rollup -c",
     "dev": "rollup -c -w",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "vitest run"
   },
   "dependencies": {
     "commander": "^12.1.0",
@@ -25,7 +26,8 @@
     "@types/node": "^22.19.7",
     "rollup": "^4.34.6",
     "rollup-plugin-preserve-shebang": "^1.0.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   },
   "keywords": [
     "claude",

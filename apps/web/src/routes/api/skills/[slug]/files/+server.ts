@@ -346,7 +346,7 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
   if (!slug) throw error(400, 'Skill slug is required');
 
   // Validate slug format to prevent injection
-  if (!/^[@a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/.test(slug)) {
+  if (!/^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/.test(slug)) {
     throw error(400, 'Invalid skill slug format');
   }
 
@@ -363,9 +363,9 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
   // Build R2 prefix path
   let r2Prefix: string;
   if (skill.source_type === 'upload') {
-    const slugMatch = slug.match(/^@([^/]+)\/(.+)$/);
-    r2Prefix = slugMatch
-      ? `skills/${slugMatch[1]}/${slugMatch[2]}/`
+    const parts = slug.split('/');
+    r2Prefix = parts.length >= 2
+      ? `skills/${parts[0]}/${parts[1]}/`
       : `skills/${slug}/`;
   } else {
     const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';

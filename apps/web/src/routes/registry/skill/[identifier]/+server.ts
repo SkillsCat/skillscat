@@ -22,7 +22,6 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
   const identifier = params.identifier;
 
   // identifier can be:
-  // - "@owner/skill-name" (e.g., "@anthropics/commit-message") - private skill format
   // - "owner/skill-name" (e.g., "anthropics/commit-message")
   // - "skill-name" (search and pick first match)
 
@@ -64,20 +63,18 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     // Parse identifier
     let owner: string | undefined;
     let skillName: string;
-    let isPrivateFormat = false;
 
-    // Handle @owner/skill-name format (private skills)
-    if (identifier.startsWith('@')) {
-      isPrivateFormat = true;
-      const slug = identifier; // Keep the @ prefix for slug lookup
-      const parts = identifier.slice(1).split('/');
+    if (identifier.includes('/')) {
+      // Handle owner/skill-name format
+      const slug = identifier;
+      const parts = identifier.split('/');
       if (parts.length === 2) {
         [owner, skillName] = parts;
       } else {
         skillName = identifier;
       }
 
-      // Try to find by slug first for private skills
+      // Try to find by slug first
       const slugRow = await db.prepare(`
         SELECT
           s.id,
@@ -164,8 +161,6 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
           }
         });
       }
-    } else if (identifier.includes('/')) {
-      [owner, skillName] = identifier.split('/');
     } else {
       skillName = identifier;
     }

@@ -3,6 +3,7 @@ import { getValidToken } from '../auth/auth';
 import { verboseRequest, verboseResponse, verboseLog, isVerbose } from '../core/verbose';
 import { parseNetworkError, parseHttpError, formatError, type FriendlyError } from '../core/errors';
 import { getCachedSkill, cacheSkill, calculateContentHash, type CachedSkill } from '../storage/cache';
+import { parseSlug } from '../core/slug';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -87,15 +88,23 @@ async function fetchFromGitHub(owner: string, repo: string, skillPath?: string):
 
 export async function fetchSkill(skillIdentifier: string): Promise<SkillRegistryItem | null> {
   // skillIdentifier can be:
-  // - "@owner/skill-name" (private skill format)
   // - "owner/skill-name" (e.g., "anthropics/commit-message")
   // - "skill-name" (search and pick first match)
 
-  const isPrivate = skillIdentifier.startsWith('@');
-
   // First, query registry to get skill metadata
   const registryUrl = getResolvedRegistryUrl();
-  const url = `${registryUrl}/skill/${encodeURIComponent(skillIdentifier)}`;
+
+  // Use two-segment path for cleaner URLs
+  let url: string;
+  if (skillIdentifier.includes('/')) {
+    // Has owner/name format - use two-segment path
+    const { owner, name } = parseSlug(skillIdentifier);
+    url = `${registryUrl}/skill/${owner}/${name}`;
+  } else {
+    // Just skill name - use legacy single-segment path
+    url = `${registryUrl}/skill/${encodeURIComponent(skillIdentifier)}`;
+  }
+
   const headers = await getAuthHeaders();
   const startTime = Date.now();
 
@@ -116,7 +125,7 @@ export async function fetchSkill(skillIdentifier: string): Promise<SkillRegistry
     const skill = await response.json() as SkillRegistryItem;
 
     // For private skills, return as-is (content from R2)
-    if (isPrivate || skill.visibility === 'private') {
+    if (skill.visibility === 'private') {
       verboseLog('Private skill - using registry content');
       return skill;
     }

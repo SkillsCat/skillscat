@@ -145,9 +145,9 @@ export function generateId(): string {
  * @returns URL-friendly slug
  *
  * Examples:
- * - Root skill: "remotion-dev-remotion"
- * - Subfolder with displayName: "remotion-dev-skills-remotion-best-practices"
- * - Subfolder without displayName: "remotion-dev-skills-skills-remotion"
+ * - Root skill: "remotion-dev/remotion"
+ * - Subfolder with displayName: "remotion-dev/remotion/best-practices"
+ * - Subfolder without displayName: "remotion-dev/remotion/skills-remotion"
  */
 export function generateSlug(
   owner: string,
@@ -155,28 +155,27 @@ export function generateSlug(
   skillPath?: string,
   displayName?: string
 ): string {
-  let slug = `${owner}-${name}`;
+  // Sanitize each segment individually
+  const sanitize = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+
+  let slug = `${sanitize(owner)}/${sanitize(name)}`;
 
   if (skillPath) {
     // Normalize: remove leading/trailing slashes
     const normalizedPath = skillPath.replace(/^\/|\/$/g, '');
 
     if (displayName) {
-      // Use displayName (from frontmatter) - normalize to URL-friendly format
-      const normalizedDisplayName = displayName
-        .toLowerCase()
-        .replace(/[^a-z0-9-]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '');
-      slug = `${slug}-${normalizedDisplayName}`;
+      const normalizedDisplayName = sanitize(displayName);
+      slug = `${slug}/${normalizedDisplayName}`;
     } else {
-      // Fallback to full path (replace slashes with dashes)
-      const pathSlug = normalizedPath.replace(/\//g, '-');
-      slug = `${slug}-${pathSlug}`;
+      // Fallback to full path (replace slashes with dashes within segment)
+      const pathSlug = sanitize(normalizedPath.replace(/\//g, '-'));
+      slug = `${slug}/${pathSlug}`;
     }
   }
 
-  return slug.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
+  return slug;
 }
 
 /**

@@ -172,10 +172,12 @@ export async function publish(skillPath: string, options: PublishOptions): Promi
     }
 
     const uploadToken = await getValidToken();
-    const response = await fetch(`${getRegistryUrl().replace('/registry', '')}/api/skills/upload`, {
+    const baseUrl = getRegistryUrl().replace('/registry', '');
+    const response = await fetch(`${baseUrl}/api/skills/upload`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${uploadToken}`,
+        'Origin': baseUrl,
       },
       body: formData,
     });

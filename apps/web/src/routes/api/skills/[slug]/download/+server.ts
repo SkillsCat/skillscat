@@ -17,10 +17,9 @@ interface SkillInfo {
  */
 function buildR2Path(skill: SkillInfo): string {
   if (skill.source_type === 'upload') {
-    const slugMatch = skill.slug.match(/^@([^/]+)\/(.+)$/);
-    if (slugMatch) {
-      const [, owner, name] = slugMatch;
-      return `skills/${owner}/${name}/SKILL.md`;
+    const parts = skill.slug.split('/');
+    if (parts.length >= 2) {
+      return `skills/${parts[0]}/${parts[1]}/SKILL.md`;
     }
   }
   const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';

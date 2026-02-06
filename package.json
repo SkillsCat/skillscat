@@ -19,7 +19,8 @@
     "db:generate": "pnpm --filter @skillscat/web db:generate",
     "db:migrate": "pnpm --filter @skillscat/web db:migrate",
     "deploy": "pnpm --filter @skillscat/web deploy",
-    "publish:cli": "pnpm --filter skillscat publish"
+    "publish:cli": "pnpm --filter skillscat publish",
+    "test:cli": "pnpm --filter skillscat test"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

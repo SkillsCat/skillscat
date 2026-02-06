@@ -64,6 +64,7 @@ export async function getTrendingSkills(
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
+    WHERE s.visibility = 'public'
     ORDER BY s.trending_score DESC
     LIMIT ?
   `)
@@ -100,13 +101,14 @@ export async function getTrendingSkillsPaginated(
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
+    WHERE s.visibility = 'public'
     ORDER BY s.trending_score DESC
     LIMIT ? OFFSET ?
   `)
     .bind(limit, offset)
     .all();
 
-  const countResult = await env.DB.prepare('SELECT COUNT(*) as total FROM skills')
+  const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
     .first<{ total: number }>();
 
   const skills = await addCategoriesToSkills(env.DB, result.results as any[]);
@@ -148,6 +150,7 @@ export async function getRecentSkills(
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
+    WHERE s.visibility = 'public'
     ORDER BY COALESCE(s.last_commit_at, s.indexed_at) DESC
     LIMIT ?
   `)
@@ -184,13 +187,14 @@ export async function getRecentSkillsPaginated(
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
+    WHERE s.visibility = 'public'
     ORDER BY COALESCE(s.last_commit_at, s.indexed_at) DESC
     LIMIT ? OFFSET ?
   `)
     .bind(limit, offset)
     .all();
 
-  const countResult = await env.DB.prepare('SELECT COUNT(*) as total FROM skills')
+  const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
     .first<{ total: number }>();
 
   const skills = await addCategoriesToSkills(env.DB, result.results as any[]);
@@ -232,6 +236,7 @@ export async function getTopSkills(
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
+    WHERE s.visibility = 'public'
     ORDER BY s.stars DESC
     LIMIT ?
   `)
@@ -268,13 +273,14 @@ export async function getTopSkillsPaginated(
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
+    WHERE s.visibility = 'public'
     ORDER BY s.stars DESC
     LIMIT ? OFFSET ?
   `)
     .bind(limit, offset)
     .all();
 
-  const countResult = await env.DB.prepare('SELECT COUNT(*) as total FROM skills')
+  const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
     .first<{ total: number }>();
 
   const skills = await addCategoriesToSkills(env.DB, result.results as any[]);
@@ -312,7 +318,7 @@ export async function getSkillsByCategory(
     FROM skills s
     JOIN skill_categories sc ON s.id = sc.skill_id
     LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE sc.category_slug = ?
+    WHERE sc.category_slug = ? AND s.visibility = 'public'
     ORDER BY s.trending_score DESC
     LIMIT ? OFFSET ?
   `)
@@ -320,7 +326,9 @@ export async function getSkillsByCategory(
     .all();
 
   const countResult = await env.DB.prepare(`
-    SELECT COUNT(*) as total FROM skill_categories WHERE category_slug = ?
+    SELECT COUNT(*) as total FROM skill_categories sc
+    JOIN skills s ON sc.skill_id = s.id
+    WHERE sc.category_slug = ? AND s.visibility = 'public'
   `)
     .bind(categorySlug)
     .first<{ total: number }>();
@@ -373,7 +381,7 @@ export async function searchSkills(
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE s.name LIKE ? OR s.description LIKE ? OR s.repo_owner LIKE ?
+    WHERE s.visibility = 'public' AND (s.name LIKE ? OR s.description LIKE ? OR s.repo_owner LIKE ?)
     ORDER BY s.trending_score DESC
     LIMIT ?
   `)
@@ -472,7 +480,7 @@ export async function getSkillBySlug(
     let r2Path: string;
     if (skillData.source_type === 'upload') {
       // 上传的 skill 使用 slug 中的 owner 和 name
-      const slugParts = skillData.slug.replace(/^@/, '').split('/');
+      const slugParts = skillData.slug.split('/');
       r2Path = `skills/${slugParts[0]}/${slugParts[1] || skillData.name}/SKILL.md`;
     } else {
       // Include skill_path in R2 path for multi-skill repos
@@ -574,7 +582,7 @@ export async function getRelatedSkills(
     FROM skills s
     JOIN skill_categories sc ON s.id = sc.skill_id
     LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE sc.category_slug IN (${placeholders}) AND s.id != ?
+    WHERE sc.category_slug IN (${placeholders}) AND s.id != ? AND s.visibility = 'public'
     ORDER BY s.stars DESC
     LIMIT ?
   `)
@@ -590,7 +598,7 @@ export async function getRelatedSkills(
 export async function getStats(env: DbEnv): Promise<{ totalSkills: number }> {
   if (!env.DB) return { totalSkills: 0 };
 
-  const result = await env.DB.prepare('SELECT COUNT(*) as total FROM skills').first<{ total: number }>();
+  const result = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'").first<{ total: number }>();
 
   return {
     totalSkills: result?.total || 0,
@@ -606,9 +614,11 @@ export async function getCategoryStats(
   if (!env.DB) return {};
 
   const result = await env.DB.prepare(`
-    SELECT category_slug, COUNT(*) as count
-    FROM skill_categories
-    GROUP BY category_slug
+    SELECT sc.category_slug, COUNT(*) as count
+    FROM skill_categories sc
+    JOIN skills s ON sc.skill_id = s.id
+    WHERE s.visibility = 'public'
+    GROUP BY sc.category_slug
   `).all();
 
   const stats: Record<string, number> = {};

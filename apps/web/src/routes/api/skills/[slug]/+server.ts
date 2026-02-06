@@ -39,6 +39,8 @@ export const GET: RequestHandler = async ({ params, platform }) => {
             s.last_commit_at as lastCommitAt,
             s.created_at as createdAt,
             s.indexed_at as indexedAt,
+            s.source_type as sourceType,
+            s.visibility,
             GROUP_CONCAT(sc.category_slug) as categories,
             a.username as authorUsername,
             a.display_name as authorDisplayName,
@@ -69,6 +71,8 @@ export const GET: RequestHandler = async ({ params, platform }) => {
           lastCommitAt: number | null;
           createdAt: number;
           indexedAt: number;
+          sourceType: string;
+          visibility: string;
           categories: string | null;
           authorUsername: string | null;
           authorDisplayName: string | null;
@@ -120,8 +124,8 @@ export const GET: RequestHandler = async ({ params, platform }) => {
           authorBio: row.authorBio || undefined,
           authorSkillsCount: row.authorSkillsCount || undefined,
           authorTotalStars: row.authorTotalStars || undefined,
-          visibility: 'public',
-          sourceType: 'github',
+          visibility: (row.visibility as 'public' | 'private' | 'unlisted') || 'public',
+          sourceType: (row.sourceType as 'github' | 'upload') || 'github',
         };
 
         // Get related skills (same category, exclude current)
@@ -227,11 +231,10 @@ interface SkillInfo {
  */
 function buildR2Path(skill: SkillInfo): string {
   if (skill.source_type === 'upload') {
-    // For uploaded skills, extract owner from slug (@owner/name)
-    const slugMatch = skill.slug.match(/^@([^/]+)\/(.+)$/);
-    if (slugMatch) {
-      const [, owner, name] = slugMatch;
-      return `skills/${owner}/${name}/SKILL.md`;
+    // For uploaded skills, extract owner and name from slug (owner/name)
+    const parts = skill.slug.split('/');
+    if (parts.length >= 2) {
+      return `skills/${parts[0]}/${parts[1]}/SKILL.md`;
     }
   }
 

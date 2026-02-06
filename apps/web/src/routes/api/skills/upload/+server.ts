@@ -21,7 +21,7 @@ function generateSlug(owner: string, name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
-  return `@${owner}/${safeName}`;
+  return `${owner}/${safeName}`;
 }
 
 interface SkillFrontmatter {

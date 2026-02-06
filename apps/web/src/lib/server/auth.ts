@@ -44,6 +44,7 @@ export function createAuth(env: AuthEnv, baseURL?: string) {
     },
     trustedOrigins: [
       'http://localhost:5173',
+      'http://localhost:3000',
       'https://skills.cat'
     ]
   });

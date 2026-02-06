@@ -287,6 +287,7 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
+        'Origin': baseUrl,
       },
       body: JSON.stringify({
         url: normalizedUrl,

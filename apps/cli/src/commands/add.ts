@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import pc from 'picocolors';
 import { parseSource } from '../utils/source/source';
 import { discoverSkills } from '../utils/source/git';
+import { fetchSkill } from '../utils/api/registry';
 import { AGENTS, detectInstalledAgents, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents/agents';
 import { recordInstallation, isSkillInstalled, getInstalledSkill } from '../utils/storage/db';
 import { success, error, warn, info, spinner, prompt } from '../utils/core/ui';
@@ -46,9 +47,29 @@ export async function add(source: string, options: AddOptions): Promise<void> {
   try {
     skills = await discoverSkills(repoSource);
   } catch (err) {
-    discoverSpinner.stop(false);
-    error(err instanceof Error ? err.message : 'Failed to discover skills');
-    process.exit(1);
+    // GitHub/GitLab discovery failed — try the registry as fallback
+    verboseLog(`Git discovery failed: ${err instanceof Error ? err.message : 'unknown'}`);
+    verboseLog('Trying registry fallback...');
+
+    try {
+      const registrySkill = await fetchSkill(source);
+      if (registrySkill && registrySkill.content) {
+        skills = [{
+          name: registrySkill.name,
+          description: registrySkill.description || '',
+          path: 'SKILL.md',
+          content: registrySkill.content,
+        }];
+      } else {
+        discoverSpinner.stop(false);
+        error(err instanceof Error ? err.message : 'Failed to discover skills');
+        process.exit(1);
+      }
+    } catch {
+      discoverSpinner.stop(false);
+      error(err instanceof Error ? err.message : 'Failed to discover skills');
+      process.exit(1);
+    }
   }
 
   discoverSpinner.stop(true);
