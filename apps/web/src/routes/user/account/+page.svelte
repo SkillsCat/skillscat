@@ -88,13 +88,13 @@
     <h2>Danger Zone</h2>
     <div class="danger-card">
       <div class="danger-content">
-        <h4>Delete Account</h4>
-        <p>
-          Permanently delete your account and all associated data. This action cannot be undone.
-          <Button variant="danger" size="sm" onclick={() => showDeleteConfirm = true}>
-            Delete Account
-          </Button>
-        </p>
+        <div>
+          <h4>Delete Account</h4>
+          <p>Permanently delete your account and all associated data. This action cannot be undone.</p>
+        </div>
+        <Button variant="danger" size="sm" onclick={() => showDeleteConfirm = true}>
+          Delete Account
+        </Button>
       </div>
     </div>
   </section>
@@ -283,6 +283,13 @@
     border-radius: var(--radius-md);
   }
 
+  .danger-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
   .danger-content h4 {
     font-size: 0.9375rem;
     font-weight: 600;
@@ -292,13 +299,6 @@
   .danger-content p {
     font-size: 0.8125rem;
     color: var(--muted-foreground);
-    display: inline;
-  }
-
-  .danger-content :global(.btn) {
-    display: inline-flex;
-    margin-left: 0.5rem;
-    vertical-align: middle;
   }
 
   /* Dialog */

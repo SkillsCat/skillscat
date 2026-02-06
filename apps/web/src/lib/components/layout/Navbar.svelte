@@ -131,8 +131,10 @@
     }
   }
 
-  // Get first 5 sections for dropdown (most relevant for developers)
-  const displaySections = CATEGORY_SECTIONS.slice(0, 5);
+  // Get sections for dropdown display
+  const displaySections = CATEGORY_SECTIONS.filter(s =>
+    ['development', 'backend', 'frontend', 'devops', 'quality', 'lifestyle'].includes(s.id)
+  );
 </script>
 
 <nav class="navbar">
@@ -464,9 +466,9 @@
 
   @media (min-width: 1024px) {
     .dropdown-sections {
-      grid-template-columns: repeat(5, minmax(140px, 1fr));
-      min-width: 700px;
-      max-width: 800px;
+      grid-template-columns: repeat(6, minmax(130px, 1fr));
+      min-width: 800px;
+      max-width: 900px;
     }
   }
 
