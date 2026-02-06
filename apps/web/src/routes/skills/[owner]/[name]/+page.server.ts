@@ -1,5 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { getSkillBySlug, getRelatedSkills, recordSkillAccess } from '$lib/server/db/utils';
+import { getCached } from '$lib/server/cache';
 
 /**
  * Two-segment skill detail page: /skills/[owner]/[name]
@@ -38,12 +39,11 @@ export const load: PageServerLoad = async ({ params, platform, locals }) => {
       });
     }
 
-    // Get related skills based on categories (only public ones)
-    const relatedSkills = await getRelatedSkills(
-      env,
-      skill.id,
-      skill.categories || [],
-      10
+    // Get related skills based on categories (multi-signal scoring, cached 1h)
+    const { data: relatedSkills } = await getCached(
+      `related:${skill.id}`,
+      () => getRelatedSkills(env, skill.id, skill.categories || [], skill.repoOwner || '', 10),
+      3600
     );
 
     // Check if user has bookmarked this skill

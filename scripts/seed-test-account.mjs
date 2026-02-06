@@ -4,6 +4,9 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = resolve(__dirname, '..');
@@ -26,6 +29,15 @@ const publicSkillRepoOwner = 'testowner';
 const publicSkillRepoName = 'testrepo';
 const publicSkillUrl = 'https://github.com/testowner/testrepo';
 
+const publicSkillContent = `---
+name: Public Test Skill
+description: Seeded public skill for CLI tests
+---
+# Public Test Skill
+
+This is a seeded public skill used for CLI integration tests.
+`;
+
 const sql = `
 DELETE FROM api_tokens WHERE id = '${tokenId}' OR token_hash = '${tokenHash}';
 DELETE FROM user WHERE id = '${userId}';
@@ -39,6 +51,7 @@ VALUES ('${publicSkillId}', '${publicSkillName}', '${publicSkillSlug}', 'Seeded 
 `;
 
 try {
+  // Seed D1 database
   execFileSync('npx', [
     'wrangler',
     'd1',
@@ -49,6 +62,30 @@ try {
     WRANGLER_CONFIG,
     '--command',
     sql,
+  ], {
+    cwd: ROOT_DIR,
+    stdio: 'inherit',
+    env: process.env,
+  });
+
+  // Seed R2 with SKILL.md content
+  const tmpFile = join(tmpdir(), `skillscat-seed-${Date.now()}.md`);
+  writeFileSync(tmpFile, publicSkillContent, 'utf-8');
+
+  const r2Key = `skills/${publicSkillRepoOwner}/${publicSkillRepoName}/SKILL.md`;
+  execFileSync('npx', [
+    'wrangler',
+    'r2',
+    'object',
+    'put',
+    `skillscat-storage/${r2Key}`,
+    '--local',
+    '--file',
+    tmpFile,
+    '--content-type',
+    'text/markdown',
+    '-c',
+    WRANGLER_CONFIG,
   ], {
     cwd: ROOT_DIR,
     stdio: 'inherit',

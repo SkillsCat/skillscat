@@ -554,20 +554,33 @@ export async function getSkillBySlug(
 }
 
 /**
- * 获取相关 skills
+ * 获取相关 skills (multi-signal scoring)
+ *
+ * Scores candidates on 5 signals:
+ *   categoryOverlap (0.35) + tagOverlap (0.25) + authorBonus (0.10)
+ *   + popularity (0.15) + freshness (0.15)
  */
 export async function getRelatedSkills(
   env: DbEnv,
   skillId: string,
   categories: string[],
+  repoOwner: string = '',
   limit: number = 10
 ): Promise<SkillCardData[]> {
   if (!env.DB || categories.length === 0) return [];
 
-  const placeholders = categories.map(() => '?').join(',');
+  const catPlaceholders = categories.map(() => '?').join(',');
+  const totalCategories = categories.length;
 
-  const result = await env.DB.prepare(`
-    SELECT DISTINCT
+  // Query 0: Get current skill's tags
+  const tagsResult = await env.DB.prepare(
+    'SELECT tag FROM skill_tags WHERE skill_id = ?'
+  ).bind(skillId).all();
+  const skillTags: string[] = (tagsResult.results as any[]).map((r) => r.tag);
+
+  // Query 1: Fetch up to 30 category-overlapping candidates
+  const candidateResult = await env.DB.prepare(`
+    SELECT
       s.id,
       s.name,
       s.slug,
@@ -578,18 +591,75 @@ export async function getRelatedSkills(
       s.forks,
       s.trending_score as trendingScore,
       s.updated_at as updatedAt,
-      a.avatar_url as authorAvatar
+      s.last_commit_at as lastCommitAt,
+      a.avatar_url as authorAvatar,
+      COUNT(sc.category_slug) as sharedCategoryCount
     FROM skills s
     JOIN skill_categories sc ON s.id = sc.skill_id
     LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE sc.category_slug IN (${placeholders}) AND s.id != ? AND s.visibility = 'public'
-    ORDER BY s.stars DESC
-    LIMIT ?
-  `)
-    .bind(...categories, skillId, limit)
-    .all();
+    WHERE sc.category_slug IN (${catPlaceholders})
+      AND s.id != ?
+      AND s.visibility = 'public'
+    GROUP BY s.id
+    ORDER BY sharedCategoryCount DESC, s.trending_score DESC
+    LIMIT 30
+  `).bind(...categories, skillId).all();
 
-  return addCategoriesToSkills(env.DB, result.results as any[]);
+  const candidates = candidateResult.results as any[];
+  if (candidates.length === 0) return [];
+
+  // Query 2: Fetch tag overlap for candidates (skip if no tags)
+  const tagOverlapMap: Record<string, number> = {};
+  if (skillTags.length > 0) {
+    const idPlaceholders = candidates.map(() => '?').join(',');
+    const tagPlaceholders = skillTags.map(() => '?').join(',');
+    const tagResult = await env.DB.prepare(`
+      SELECT skill_id, COUNT(*) as cnt
+      FROM skill_tags
+      WHERE skill_id IN (${idPlaceholders}) AND tag IN (${tagPlaceholders})
+      GROUP BY skill_id
+    `).bind(...candidates.map((c) => c.id), ...skillTags).all();
+    for (const row of tagResult.results as any[]) {
+      tagOverlapMap[row.skill_id] = row.cnt;
+    }
+  }
+
+  // Score each candidate
+  const now = Date.now();
+  const totalTags = Math.max(skillTags.length, 1);
+
+  const scored = candidates.map((c) => {
+    const categoryScore = (c.sharedCategoryCount / totalCategories) * 100;
+    const tagScore = ((tagOverlapMap[c.id] || 0) / totalTags) * 100;
+    const authorScore = (repoOwner && c.repoOwner === repoOwner) ? 100 : 0;
+    const stars = c.stars || 0;
+    const trending = c.trendingScore || 0;
+    const popularityScore = Math.min(100, Math.log10(stars + 1) * 20 + trending * 2);
+    const commitTs = c.lastCommitAt || (now - 200 * 86400000); // null → 200 days ago
+    const daysSinceCommit = (now - commitTs) / 86400000;
+    const freshnessScore = Math.max(0, 100 - daysSinceCommit * 0.5);
+
+    const relevanceScore =
+      categoryScore * 0.35 +
+      tagScore * 0.25 +
+      authorScore * 0.10 +
+      popularityScore * 0.15 +
+      freshnessScore * 0.15;
+
+    return { ...c, relevanceScore, trendingScore: trending, stars };
+  });
+
+  // Sort by relevance, tie-break by trending then stars
+  scored.sort((a, b) =>
+    b.relevanceScore - a.relevanceScore
+    || b.trendingScore - a.trendingScore
+    || b.stars - a.stars
+  );
+
+  // Take top N, strip scoring fields before passing to addCategoriesToSkills
+  const top = scored.slice(0, limit).map(({ relevanceScore, sharedCategoryCount, lastCommitAt, ...rest }) => rest);
+
+  return addCategoriesToSkills(env.DB, top);
 }
 
 /**
