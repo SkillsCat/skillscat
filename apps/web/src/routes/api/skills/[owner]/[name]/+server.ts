@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import type { SkillDetail, SkillCardData, ApiResponse, FileNode } from '$lib/types';
 import { getCached } from '$lib/server/cache';
 import { getAuthContext } from '$lib/server/middleware/auth';
-import { isSkillOwner } from '$lib/server/permissions';
+import { isSkillOwner, checkSkillAccess } from '$lib/server/permissions';
 
 /**
  * GET /api/skills/[owner]/[name] - Get skill by owner and name
@@ -11,7 +11,7 @@ import { isSkillOwner } from '$lib/server/permissions';
  * This is the two-segment path version that produces clean URLs like:
  * /api/skills/testuser/my-skill instead of /api/skills/%40testuser%2Fmy-skill
  */
-export const GET: RequestHandler = async ({ params, platform }) => {
+export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const { owner, name } = params;
   const slug = `${owner}/${name}`;
 
@@ -160,6 +160,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
             LEFT JOIN authors a ON s.repo_owner = a.username
             WHERE sc.category_slug IN (${skill.categories.map(() => '?').join(',')})
               AND s.id != ?
+              AND s.visibility != 'private'
             GROUP BY s.id
             ORDER BY s.trending_score DESC
             LIMIT 6
@@ -206,12 +207,32 @@ export const GET: RequestHandler = async ({ params, platform }) => {
       } satisfies ApiResponse<never>, { status: 404 });
     }
 
+    // Access control for private skills
+    if (data.skill.visibility === 'private') {
+      const auth = await getAuthContext(request, locals, db);
+      if (!auth.userId) {
+        return json({
+          success: false,
+          error: 'Authentication required'
+        } satisfies ApiResponse<never>, { status: 401 });
+      }
+      const hasAccess = await checkSkillAccess(data.skill.id, auth.userId, db);
+      if (!hasAccess) {
+        return json({
+          success: false,
+          error: 'You do not have permission to access this skill'
+        } satisfies ApiResponse<never>, { status: 403 });
+      }
+    }
+
+    const isPrivate = data.skill.visibility === 'private';
+
     return json({
       success: true,
       data
     } satisfies ApiResponse<{ skill: SkillDetail; relatedSkills: SkillCardData[] }>, {
       headers: {
-        'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
+        'Cache-Control': isPrivate ? 'private, no-cache' : 'public, max-age=300, stale-while-revalidate=600',
         'X-Cache': hit ? 'HIT' : 'MISS'
       }
     });

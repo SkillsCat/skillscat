@@ -1,5 +1,6 @@
 import pc from 'picocolors';
 import { getResolvedRegistryUrl } from '../utils/config/paths';
+import { getValidToken } from '../utils/auth/auth';
 import { error, spinner, warn, info } from '../utils/core/ui';
 import { verboseRequest, verboseResponse, verboseConfig, isVerbose } from '../utils/core/verbose';
 import { parseNetworkError, parseHttpError, formatError } from '../utils/core/errors';
@@ -17,6 +18,8 @@ interface RegistrySkill {
   stars: number;
   categories: string[];
   platform: 'github' | 'gitlab';
+  visibility?: 'public' | 'private' | 'unlisted';
+  slug?: string;
 }
 
 interface SearchResult {
@@ -44,9 +47,16 @@ export async function search(query?: string, options: SearchOptions = {}): Promi
     if (options.category) params.set('category', options.category);
     params.set('limit', String(limit));
 
+    // Include private skills when authenticated
+    const token = await getValidToken();
+    const headers: Record<string, string> = { 'User-Agent': 'skillscat-cli/1.0' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+      params.set('include_private', 'true');
+    }
+
     const registryUrl = getResolvedRegistryUrl();
     const url = `${registryUrl}/search?${params}`;
-    const headers = { 'User-Agent': 'skillscat-cli/1.0' };
     const startTime = Date.now();
 
     verboseRequest('GET', url, headers);
@@ -116,10 +126,11 @@ export async function search(query?: string, options: SearchOptions = {}): Promi
   console.log();
 
   for (const skill of result.skills) {
-    const identifier = `${skill.owner}/${skill.repo}`;
+    const identifier = skill.slug || `${skill.owner}/${skill.repo}`;
     const platformIcon = skill.platform === 'github' ? '' : ' (GitLab)';
+    const privateLabel = skill.visibility === 'private' ? pc.red(' [private]') : '';
 
-    console.log(`  ${pc.bold(pc.cyan(identifier))}${pc.dim(platformIcon)}`);
+    console.log(`  ${pc.bold(pc.cyan(identifier))}${pc.dim(platformIcon)}${privateLabel}`);
     if (skill.description) {
       console.log(`  ${pc.dim(skill.description)}`);
     }

@@ -120,6 +120,23 @@ const ORG_SKILL_TEMPLATE = {
   tags: ['security', 'scanner', 'cicd', 'vulnerabilities'],
 };
 
+const PRIVATE_SKILL_TEMPLATES = [
+  {
+    suffix: 'skill_priv_1', name: 'Internal Deploy Script',
+    repoSuffix: 'internal-deploy',
+    desc: 'Private deployment automation for internal services',
+    categories: ['automation', 'ci-cd'],
+    tags: ['deploy', 'internal', 'automation'],
+  },
+  {
+    suffix: 'skill_priv_2', name: 'Secret Config Generator',
+    repoSuffix: 'secret-config-gen',
+    desc: 'Generate environment configs with secret management',
+    categories: ['security', 'automation'],
+    tags: ['secrets', 'config', 'env'],
+  },
+];
+
 // ── SQL builders ────────────────────────────────────────
 function buildSkillSQL(tpl, ownerName, ownerUserId, orgId) {
   const skillId = id(tpl.suffix);
@@ -140,6 +157,22 @@ function buildSkillSQL(tpl, ownerName, ownerUserId, orgId) {
 
 function buildSkillMD(tpl) {
   return `---\nname: ${tpl.name}\ndescription: ${tpl.desc}\ntags: [${tpl.tags.join(', ')}]\n---\n# ${tpl.name}\n\n${tpl.desc}\n\nThis is seeded test data for local development.\n`;
+}
+
+function buildPrivateSkillSQL(tpl, ownerName, ownerUserId) {
+  const skillId = id(tpl.suffix);
+  const slug = `${ownerName}/${tpl.repoSuffix}`;
+  const lines = [
+    `INSERT OR REPLACE INTO skills (id, name, slug, description, repo_owner, repo_name, github_url, stars, forks, trending_score, last_commit_at, visibility, source_type, owner_id, org_id, created_at, updated_at, indexed_at)`
+    + ` VALUES (${esc(skillId)}, ${esc(tpl.name)}, ${esc(slug)}, ${esc(tpl.desc)}, ${esc(ownerName)}, ${esc(tpl.repoSuffix)}, NULL, 0, 0, 0, ${now}, 'private', 'upload', ${esc(ownerUserId)}, NULL, ${now}, ${now}, ${now});`,
+  ];
+  for (const cat of tpl.categories) {
+    lines.push(`INSERT OR REPLACE INTO skill_categories (skill_id, category_slug) VALUES (${esc(skillId)}, ${esc(cat)});`);
+  }
+  for (const tag of tpl.tags) {
+    lines.push(`INSERT OR REPLACE INTO skill_tags (skill_id, tag, created_at) VALUES (${esc(skillId)}, ${esc(tag)}, ${now});`);
+  }
+  return { sql: lines.join('\n'), ownerName, repoSuffix: tpl.repoSuffix, tpl };
 }
 
 function buildMessagesSQL(userId) {
@@ -203,17 +236,19 @@ async function main() {
 
   // 3) Choose what to seed
   console.log('\nWhat to seed?');
-  console.log('  1) Skills for this user');
-  console.log('  2) Messages (notifications) for this user');
-  console.log('  3) Create an org for this user + add an org skill');
-  console.log('  4) All of the above');
-  const choice = await ask('Choose [1-4]: ');
+  console.log('  1) Public skills for this user');
+  console.log('  2) Private skills for this user');
+  console.log('  3) Messages (notifications) for this user');
+  console.log('  4) Create an org for this user + add an org skill');
+  console.log('  5) All of the above');
+  const choice = await ask('Choose [1-5]: ');
 
-  const doSkills   = choice === '1' || choice === '4';
-  const doMessages = choice === '2' || choice === '4';
-  const doOrg      = choice === '3' || choice === '4';
+  const doSkills        = choice === '1' || choice === '5';
+  const doPrivateSkills = choice === '2' || choice === '5';
+  const doMessages      = choice === '3' || choice === '5';
+  const doOrg           = choice === '4' || choice === '5';
 
-  if (!doSkills && !doMessages && !doOrg) {
+  if (!doSkills && !doPrivateSkills && !doMessages && !doOrg) {
     console.log('Nothing selected, exiting.');
     rl.close();
     return;
@@ -229,6 +264,18 @@ async function main() {
       putR2(`skills/${p.ownerName}/${p.repoSuffix}/SKILL.md`, buildSkillMD(p.tpl));
     }
     console.log(`  ✓ ${SKILL_TEMPLATES.length} skills inserted`);
+  }
+
+  // 4b) Seed private skills
+  if (doPrivateSkills) {
+    console.log(`\nSeeding ${PRIVATE_SKILL_TEMPLATES.length} private skills for "${user.name}"...`);
+    const ownerName = user.name;
+    const parts = PRIVATE_SKILL_TEMPLATES.map(tpl => buildPrivateSkillSQL(tpl, ownerName, user.id));
+    runSQL(parts.map(p => p.sql).join('\n'));
+    for (const p of parts) {
+      putR2(`skills/${p.ownerName}/${p.repoSuffix}/SKILL.md`, buildSkillMD(p.tpl));
+    }
+    console.log(`  ✓ ${PRIVATE_SKILL_TEMPLATES.length} private skills inserted`);
   }
 
   // 5) Seed messages
