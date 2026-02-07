@@ -44,7 +44,7 @@
   href="/skills/{skill.slug}"
   class="skill-card group block"
 >
-  <div class="flex items-start gap-4">
+  <div class="card-layout">
     {#if !hideAvatar}
       <!-- Author Avatar -->
       <div class="flex-shrink-0 avatar-wrapper">
@@ -61,7 +61,7 @@
     <!-- Content -->
     <div class="flex-1 min-w-0">
       <!-- Title -->
-      <h3 class="font-bold text-fg group-hover:text-primary transition-colors duration-200 truncate text-lg">
+      <h3 class="skill-title">
         {skill.name}
       </h3>
 
@@ -72,13 +72,13 @@
 
       <!-- Description -->
       {#if skill.description}
-        <p class="mt-2 text-sm text-fg-muted line-clamp-2 leading-relaxed">
+        <p class="skill-desc">
           {skill.description}
         </p>
       {/if}
 
       <!-- Meta -->
-      <div class="meta-row mt-3 flex items-center gap-2">
+      <div class="meta-row">
         <!-- Categories -->
         {#if skill.categories && skill.categories.length > 0}
           {#each skill.categories.slice(0, 1) as category}
@@ -110,6 +110,46 @@
     border: 3px solid var(--border-sketch);
     border-radius: 1rem;
     transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+
+  .card-layout {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .skill-title {
+    font-weight: 700;
+    color: var(--fg);
+    transition: color 0.2s;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 1.125rem;
+  }
+
+  .skill-card:hover .skill-title {
+    color: var(--primary);
+  }
+
+  .skill-desc {
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--fg-muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.625;
+  }
+
+  .meta-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    flex-wrap: nowrap;
+    overflow: hidden;
   }
 
   .skill-card::before {
@@ -182,11 +222,6 @@
     opacity: 1;
   }
 
-  .meta-row {
-    flex-wrap: nowrap;
-    overflow: hidden;
-  }
-
   .meta-badge-category,
   .meta-badge-stars {
     flex-shrink: 0;
@@ -198,5 +233,41 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* Mobile optimizations */
+  @media (max-width: 640px) {
+    .skill-card {
+      padding: 0.875rem;
+    }
+
+    .card-layout {
+      gap: 0.75rem;
+    }
+
+    .avatar-wrapper :global(.avatar-container) {
+      width: 32px !important;
+      height: 32px !important;
+    }
+
+    .skill-title {
+      font-size: 0.9375rem;
+    }
+
+    .skill-desc {
+      margin-top: 0.375rem;
+      font-size: 0.8125rem;
+      -webkit-line-clamp: 2;
+    }
+
+    .meta-row {
+      margin-top: 0.5rem;
+      gap: 0.375rem;
+    }
+
+    .meta-badge {
+      padding: 0.125rem 0.375rem;
+      font-size: 0.6875rem;
+    }
   }
 </style>

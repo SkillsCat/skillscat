@@ -118,4 +118,17 @@
     background: var(--primary-subtle);
     color: var(--primary);
   }
+
+  /* Mobile optimizations */
+  @media (max-width: 640px) {
+    .skill-card-compact {
+      gap: 0.625rem;
+      padding: 0.625rem 0.75rem;
+    }
+
+    .avatar-wrapper :global(.avatar-container) {
+      width: 24px !important;
+      height: 24px !important;
+    }
+  }
 </style>

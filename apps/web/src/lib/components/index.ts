@@ -6,6 +6,7 @@ export { default as ThemeToggle } from './ui/ThemeToggle.svelte';
 export { default as Toast, toast, dismissToast } from './ui/Toast.svelte';
 export { default as Pagination } from './ui/Pagination.svelte';
 export { default as ConfirmDialog } from './ui/ConfirmDialog.svelte';
+export { default as VisibilityBadge } from './ui/VisibilityBadge.svelte';
 
 // Layout Components
 export { default as Navbar } from './layout/Navbar.svelte';

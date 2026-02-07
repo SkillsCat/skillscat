@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CopyButton, SkillCardCompact, ErrorState, toast, Avatar } from '$lib/components';
+  import { CopyButton, SkillCardCompact, ErrorState, toast, Avatar, VisibilityBadge } from '$lib/components';
   import { getCategoryBySlug } from '$lib/constants/categories';
   import { marked } from 'marked';
   import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
@@ -604,15 +604,6 @@
     return `${Math.floor(seconds / 2592000)}mo ago`;
   }
 
-  // Get visibility badge color
-  function getVisibilityColor(visibility: string): string {
-    switch (visibility) {
-      case 'private': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
-      case 'unlisted': return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400';
-      default: return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
-    }
-  }
-
   // Get author profile URL
   function getAuthorProfileUrl(): string {
     if (!data.skill) return '#';
@@ -759,9 +750,7 @@
           <div class="skill-meta">
             <!-- Badges first -->
             {#if data.skill.visibility !== 'public'}
-              <span class="px-2.5 py-1 text-xs font-semibold rounded-full {getVisibilityColor(data.skill.visibility)}">
-                {data.skill.visibility}
-              </span>
+              <VisibilityBadge visibility={data.skill.visibility} size="md" />
             {/if}
             {#if data.skill.sourceType === 'upload'}
               <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
@@ -1211,34 +1200,11 @@
     cursor: not-allowed;
   }
 
-  .skill-description-inline {
-    font-size: 0.9375rem;
-    color: var(--fg-muted);
-    line-height: 1.5;
-    margin-top: 0.25rem;
-  }
-
   .skill-description-full {
     font-size: 0.9375rem;
     color: var(--fg-muted);
     line-height: 1.6;
     margin-bottom: 1rem;
-  }
-
-  .skill-title {
-    font-size: clamp(1.75rem, 4vw, 2.25rem);
-    font-weight: 800;
-    color: var(--fg);
-    line-height: 1.2;
-    margin-bottom: 0.75rem;
-    letter-spacing: -0.02em;
-  }
-
-  .skill-description {
-    font-size: 1.0625rem;
-    color: var(--fg-muted);
-    line-height: 1.6;
-    margin-bottom: 1.25rem;
   }
 
   .skill-meta {

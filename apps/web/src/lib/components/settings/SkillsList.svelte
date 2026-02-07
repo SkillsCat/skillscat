@@ -1,5 +1,6 @@
 <script lang="ts">
-  
+  import { VisibilityBadge } from '$lib/components';
+
 interface Skill {
     id: string;
     name: string;
@@ -37,14 +38,6 @@ interface Skill {
       skill.description?.toLowerCase().includes(searchQuery.toLowerCase())
     )
   );
-
-  function getVisibilityColor(visibility: string): string {
-    switch (visibility) {
-      case 'private': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
-      case 'unlisted': return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400';
-      default: return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
-    }
-  }
 </script>
 
 {#if loading}
@@ -88,9 +81,7 @@ interface Skill {
           <div class="skill-info">
             <div class="skill-header">
               <h3 class="skill-name">{skill.name}</h3>
-              <span class="visibility-badge {getVisibilityColor(skill.visibility)}">
-                {skill.visibility}
-              </span>
+              <VisibilityBadge visibility={skill.visibility} />
             </div>
             {#if skill.description}
               <p class="skill-description">{skill.description}</p>
@@ -212,13 +203,6 @@ interface Skill {
     font-size: 0.9375rem;
     font-weight: 600;
     color: var(--foreground);
-  }
-
-  .visibility-badge {
-    padding: 0.125rem 0.5rem;
-    font-size: 0.75rem;
-    font-weight: 500;
-    border-radius: var(--radius-full);
   }
 
   .skill-description {
