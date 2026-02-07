@@ -460,5 +460,18 @@
       flex-direction: column;
       align-items: stretch;
     }
+
+    h1 {
+      font-size: 1.375rem;
+    }
+
+    .org-card {
+      padding: 1rem;
+    }
+
+    .slug-prefix {
+      font-size: 0.75rem;
+      padding: 0.75rem 0.5rem;
+    }
   }
 </style>

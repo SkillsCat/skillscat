@@ -80,6 +80,7 @@
     position: relative;
     min-height: 100vh;
     background: var(--background);
+    overflow-x: hidden;
   }
 
   /* Lava Lamp Background - Clean, Subtle Design */

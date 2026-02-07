@@ -198,5 +198,15 @@
       flex-direction: column;
       align-items: stretch;
     }
+
+    h1 {
+      font-size: 1.375rem;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .cli-hint {
+      display: none;
+    }
   }
 </style>

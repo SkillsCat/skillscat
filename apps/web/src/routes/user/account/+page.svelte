@@ -417,4 +417,29 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
+
+  @media (max-width: 640px) {
+    h1 {
+      font-size: 1.375rem;
+    }
+
+    .section {
+      padding: 1rem;
+    }
+
+    .profile-card {
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    .danger-content {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .danger-content :global(button) {
+      width: 100%;
+    }
+  }
 </style>

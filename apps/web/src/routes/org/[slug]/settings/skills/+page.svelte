@@ -151,4 +151,16 @@
     font-size: 0.8125rem;
     color: var(--foreground);
   }
+
+  @media (max-width: 640px) {
+    h1 {
+      font-size: 1.375rem;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .cli-hint {
+      display: none;
+    }
+  }
 </style>

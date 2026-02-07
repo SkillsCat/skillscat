@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { useSession } from '$lib/auth-client';
@@ -85,6 +86,20 @@
     }
     return $page.url.pathname === href || $page.url.pathname.startsWith(href + '/');
   }
+
+  let navEl: HTMLElement;
+
+  // Scroll active tab into view on mobile
+  $effect(() => {
+    $page.url.pathname;
+    tick().then(() => {
+      if (!navEl) return;
+      const active = navEl.querySelector('.nav-item-active') as HTMLElement | null;
+      if (active) {
+        navEl.scrollLeft = active.offsetLeft - navEl.offsetWidth / 2 + active.offsetWidth / 2;
+      }
+    });
+  });
 </script>
 
 <svelte:head>
@@ -117,7 +132,7 @@
       </a>
 
       <h2 class="sidebar-title">Settings</h2>
-      <nav class="sidebar-nav">
+      <nav class="sidebar-nav" bind:this={navEl}>
         {#each navItems as item}
           <a
             href={item.href}
@@ -261,27 +276,48 @@
 
   .settings-content {
     min-width: 0;
+    overflow-x: hidden;
   }
 
   @media (max-width: 768px) {
     .settings-layout {
-      grid-template-columns: 1fr;
-      gap: 1.5rem;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 1rem;
+      padding: 1rem;
     }
 
     .settings-sidebar {
       position: static;
+      overflow: hidden;
+    }
+
+    .org-header {
+      display: none;
+    }
+
+    .sidebar-title {
+      display: none;
     }
 
     .sidebar-nav {
       flex-direction: row;
-      flex-wrap: wrap;
-      gap: 0.5rem;
+      flex-wrap: nowrap;
+      gap: 0.375rem;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      padding-bottom: 2px;
+    }
+
+    .sidebar-nav::-webkit-scrollbar {
+      display: none;
     }
 
     .nav-item {
       padding: 0.5rem 0.75rem;
-      font-size: 0.875rem;
+      font-size: 0.8125rem;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
   }
 </style>

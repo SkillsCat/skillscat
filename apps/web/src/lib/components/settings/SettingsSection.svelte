@@ -85,6 +85,10 @@
   }
 
   @media (max-width: 640px) {
+    .section {
+      padding: 1rem;
+    }
+
     .section-header {
       flex-direction: column;
       align-items: stretch;

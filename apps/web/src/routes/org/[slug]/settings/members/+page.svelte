@@ -472,6 +472,10 @@
   }
 
   @media (max-width: 640px) {
+    h1 {
+      font-size: 1.375rem;
+    }
+
     .page-header {
       flex-direction: column;
       align-items: stretch;

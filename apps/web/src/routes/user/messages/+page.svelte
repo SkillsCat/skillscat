@@ -411,6 +411,15 @@
   }
 
   @media (max-width: 640px) {
+    h1 {
+      font-size: 1.375rem;
+    }
+
+    .page-header-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
     .notification-row {
       flex-direction: column;
       align-items: flex-start;

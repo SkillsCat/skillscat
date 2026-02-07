@@ -907,9 +907,35 @@
 
   /* Responsive */
   @media (max-width: 640px) {
+    h1 {
+      font-size: 1.375rem;
+    }
+
+    .header-icon {
+      display: none;
+    }
+
     .page-header {
-      flex-direction: column;
       align-items: flex-start;
+    }
+
+    section {
+      padding: 1rem;
+    }
+
+    .token-display {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .token-card {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.75rem;
+    }
+
+    .token-card .delete-btn {
+      align-self: flex-end;
     }
 
     .token-header {
@@ -926,6 +952,14 @@
 
     .separator {
       display: none;
+    }
+
+    .form-actions {
+      justify-content: stretch;
+    }
+
+    .form-actions :global(button) {
+      width: 100%;
     }
   }
 </style>

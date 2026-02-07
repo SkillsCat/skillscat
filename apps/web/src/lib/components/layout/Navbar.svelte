@@ -288,27 +288,13 @@
               class="mobile-sign-in-btn"
               onclick={() => { mobileMenuOpen = false; showLoginDialog = true; }}
             >
-              <HugeiconsIcon icon={Login03Icon} size={18} strokeWidth={2} />
+              <HugeiconsIcon icon={Login03Icon} size={16} strokeWidth={2} />
               Sign In with GitHub
             </button>
           {/if}
         </div>
 
         <div class="mobile-separator"></div>
-
-        <!-- Submit (logged in only) -->
-        {#if $session.data?.user}
-          <div class="mobile-links">
-            <button
-              class="mobile-link"
-              onclick={() => { mobileMenuOpen = false; showSubmitDialog = true; }}
-            >
-              <HugeiconsIcon icon={Add01Icon} size={18} strokeWidth={2} />
-              Submit a Skill
-            </button>
-          </div>
-          <div class="mobile-separator"></div>
-        {/if}
 
         <!-- Search -->
         <div class="mobile-search">
@@ -319,14 +305,23 @@
           />
         </div>
 
-        <!-- Nav Links -->
+        <!-- Submit (logged in only) + Nav Links -->
         <div class="mobile-links">
+          {#if $session.data?.user}
+            <button
+              class="mobile-link"
+              onclick={() => { mobileMenuOpen = false; showSubmitDialog = true; }}
+            >
+              <HugeiconsIcon icon={Add01Icon} size={16} strokeWidth={2} />
+              Submit a Skill
+            </button>
+          {/if}
           <a href="/trending" class="mobile-link" onclick={() => mobileMenuOpen = false}>
-            <HugeiconsIcon icon={SparklesIcon} size={18} strokeWidth={2} />
+            <HugeiconsIcon icon={SparklesIcon} size={16} strokeWidth={2} />
             Trending
           </a>
           <a href="/categories" class="mobile-link" onclick={() => mobileMenuOpen = false}>
-            <HugeiconsIcon icon={Folder01Icon} size={18} strokeWidth={2} />
+            <HugeiconsIcon icon={Folder01Icon} size={16} strokeWidth={2} />
             Categories
           </a>
         </div>
@@ -335,23 +330,23 @@
         {#if $session.data?.user}
           <div class="mobile-separator"></div>
           <div class="mobile-links">
-            <a href="/my-skills" class="mobile-link" onclick={() => mobileMenuOpen = false}>
-              <HugeiconsIcon icon={CodeIcon} size={18} strokeWidth={2} />
+            <a href="/user/skills" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+              <HugeiconsIcon icon={CodeIcon} size={16} strokeWidth={2} />
               My Skills
             </a>
-            <a href="/messages" class="mobile-link" onclick={() => mobileMenuOpen = false}>
-              <HugeiconsIcon icon={Mail01Icon} size={18} strokeWidth={2} />
+            <a href="/user/messages" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+              <HugeiconsIcon icon={Mail01Icon} size={16} strokeWidth={2} />
               Messages
               {#if unreadCount > 0}
                 <span class="mobile-badge">{unreadCount}</span>
               {/if}
             </a>
             <a href="/bookmarks" class="mobile-link" onclick={() => mobileMenuOpen = false}>
-              <HugeiconsIcon icon={Bookmark02Icon} size={18} strokeWidth={2} />
+              <HugeiconsIcon icon={Bookmark02Icon} size={16} strokeWidth={2} />
               Bookmarks
             </a>
-            <a href="/settings" class="mobile-link" onclick={() => mobileMenuOpen = false}>
-              <HugeiconsIcon icon={Settings01Icon} size={18} strokeWidth={2} />
+            <a href="/user/account" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+              <HugeiconsIcon icon={Settings01Icon} size={16} strokeWidth={2} />
               Settings
             </a>
           </div>
@@ -359,7 +354,7 @@
           <div class="mobile-separator"></div>
           <div class="mobile-links">
             <button class="mobile-link mobile-link-danger" onclick={handleSignOut}>
-              <HugeiconsIcon icon={Logout01Icon} size={18} strokeWidth={2} />
+              <HugeiconsIcon icon={Logout01Icon} size={16} strokeWidth={2} />
               Sign Out
             </button>
           </div>
@@ -712,7 +707,7 @@
   /* Mobile Menu */
   .mobile-menu {
     display: block;
-    padding: 1rem 0;
+    padding: 0.75rem 0;
     border-top: 2px solid var(--border);
     max-height: calc(100dvh - 4.5rem);
     overflow-y: auto;
@@ -725,19 +720,19 @@
   }
 
   .mobile-user-section {
-    padding: 0.5rem 0 0.75rem;
+    padding: 0.25rem 0 0.5rem;
   }
 
   .mobile-user-info {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.5rem 1rem;
+    gap: 0.625rem;
+    padding: 0.375rem 1rem;
   }
 
   .mobile-user-name {
     font-weight: 600;
-    font-size: 0.9375rem;
+    font-size: 0.875rem;
     color: var(--foreground);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -746,7 +741,7 @@
   }
 
   .mobile-user-email {
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     color: var(--muted-foreground);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -760,9 +755,9 @@
     justify-content: center;
     gap: 0.5rem;
     width: 100%;
-    padding: 0.75rem 1rem;
-    min-height: 44px;
-    font-size: 0.9375rem;
+    padding: 0.625rem 1rem;
+    min-height: 40px;
+    font-size: 0.875rem;
     font-weight: 600;
     color: var(--primary-foreground);
     background: var(--primary);
@@ -786,31 +781,31 @@
   .mobile-separator {
     height: 0;
     border-top: 2px solid var(--border);
-    margin: 0.5rem 0;
+    margin: 0.375rem 0;
   }
 
   .mobile-search {
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
   }
 
   .mobile-links {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 0.125rem;
   }
 
   .mobile-link {
     display: flex;
     align-items: center;
-    gap: 0.625rem;
-    padding: 0.875rem 1rem;
-    min-height: 44px;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    min-height: 40px;
     border: none;
     background: transparent;
     border-radius: var(--radius-lg);
     color: var(--muted-foreground);
     font-weight: 600;
-    font-size: 1rem;
+    font-size: 0.875rem;
     text-decoration: none;
     cursor: pointer;
     transition: all 0.15s ease;
@@ -834,10 +829,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 1.25rem;
-    height: 1.25rem;
-    padding: 0 0.375rem;
-    font-size: 0.6875rem;
+    min-width: 1.125rem;
+    height: 1.125rem;
+    padding: 0 0.3rem;
+    font-size: 0.625rem;
     font-weight: 700;
     color: var(--primary-foreground);
     background: var(--primary);

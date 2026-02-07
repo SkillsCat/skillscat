@@ -523,6 +523,10 @@
   }
 
   @media (max-width: 640px) {
+    h1 {
+      font-size: 1.375rem;
+    }
+
     .profile-card {
       flex-direction: column;
       text-align: center;
@@ -531,6 +535,19 @@
     .github-card {
       flex-direction: column;
       text-align: center;
+    }
+
+    .github-card.not-connected {
+      text-align: center;
+    }
+
+    .danger-card {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .danger-card :global(button) {
+      width: 100%;
     }
   }
 </style>
