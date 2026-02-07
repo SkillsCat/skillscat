@@ -1,6 +1,5 @@
 <script lang="ts">
   import { Button } from '$lib/components';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
   import type { Snippet } from 'svelte';
 
   interface Props {

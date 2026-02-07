@@ -1,4 +1,4 @@
-import type { RepoSource, SkillInfo, SkillMetadata } from './source';
+import type { RepoSource, SkillInfo } from './source';
 import { SKILL_DISCOVERY_PATHS, parseSkillFrontmatter } from './source';
 import { calculateContentHash } from '../storage/cache';
 

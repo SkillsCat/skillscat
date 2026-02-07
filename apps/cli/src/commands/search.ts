@@ -3,7 +3,7 @@ import { getResolvedRegistryUrl } from '../utils/config/paths';
 import { getValidToken } from '../utils/auth/auth';
 import { error, spinner, warn, info } from '../utils/core/ui';
 import { verboseRequest, verboseResponse, verboseConfig, isVerbose } from '../utils/core/verbose';
-import { parseNetworkError, parseHttpError, formatError } from '../utils/core/errors';
+import { parseNetworkError, parseHttpError } from '../utils/core/errors';
 
 interface SearchOptions {
   category?: string;

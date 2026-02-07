@@ -1,6 +1,6 @@
 import pc from 'picocolors';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { resolve, join, relative, dirname } from 'node:path';
+import { join, relative, dirname } from 'node:path';
 import { isAuthenticated, getValidToken, getBaseUrl } from '../utils/auth/auth';
 
 interface SubmitOptions {

@@ -1,5 +1,5 @@
 import pc from 'picocolors';
-import { loadSettings, getSetting, setSetting, deleteSetting, getConfigDir, getRegistryUrl, type Settings } from '../utils/config/config';
+import { loadSettings, getSetting, setSetting, deleteSetting, getConfigDir, type Settings } from '../utils/config/config';
 import { verboseConfig, isVerbose } from '../utils/core/verbose';
 
 const DEFAULT_REGISTRY_URL = 'https://skills.cat/registry';

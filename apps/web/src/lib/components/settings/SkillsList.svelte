@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { Button } from '$lib/components';
-
-  interface Skill {
+  
+interface Skill {
     id: string;
     name: string;
     slug: string;

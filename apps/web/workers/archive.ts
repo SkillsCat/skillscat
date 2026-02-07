@@ -9,7 +9,7 @@
  * Archives to R2 and updates tier to 'archived'
  */
 
-import type { BaseEnv, SkillTier } from './shared/types';
+import type { BaseEnv } from './shared/types';
 
 interface ArchiveEnv extends BaseEnv {}
 

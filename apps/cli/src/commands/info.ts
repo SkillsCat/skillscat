@@ -2,7 +2,7 @@ import pc from 'picocolors';
 import { parseSource } from '../utils/source/source';
 import { discoverSkills } from '../utils/source/git';
 import { AGENTS } from '../utils/agents/agents';
-import { error, info as showInfo, spinner } from '../utils/core/ui';
+import { error, spinner } from '../utils/core/ui';
 
 export async function info(source: string): Promise<void> {
   // Parse source

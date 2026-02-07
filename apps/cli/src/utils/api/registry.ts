@@ -1,8 +1,8 @@
 import { getResolvedRegistryUrl } from '../config/paths';
 import { getValidToken } from '../auth/auth';
-import { verboseRequest, verboseResponse, verboseLog, isVerbose } from '../core/verbose';
-import { parseNetworkError, parseHttpError, formatError, type FriendlyError } from '../core/errors';
-import { getCachedSkill, cacheSkill, calculateContentHash, type CachedSkill } from '../storage/cache';
+import { verboseRequest, verboseResponse, verboseLog } from '../core/verbose';
+import { parseNetworkError, parseHttpError } from '../core/errors';
+import { getCachedSkill, cacheSkill, calculateContentHash } from '../storage/cache';
 import { parseSlug } from '../core/slug';
 
 const GITHUB_API = 'https://api.github.com';

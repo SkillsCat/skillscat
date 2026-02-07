@@ -1,5 +1,3 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { getRegistryUrl as getConfigRegistryUrl, getConfigDir as getNewConfigDir, getInstalledDbPath as getNewInstalledDbPath } from './config';
 
 /**

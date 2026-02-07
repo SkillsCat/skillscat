@@ -1,6 +1,5 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { getConfigDir, getInstalledDbPath, ensureConfigDir } from '../config/config';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { getInstalledDbPath, ensureConfigDir } from '../config/config';
 import type { RepoSource } from '../source/source';
 
 export interface InstalledSkill {

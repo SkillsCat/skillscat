@@ -74,7 +74,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   });
 
   preview.on('error', (error) => {
-    // eslint-disable-next-line no-console
+     
     console.error('Failed to start preview:web', error);
   });
 

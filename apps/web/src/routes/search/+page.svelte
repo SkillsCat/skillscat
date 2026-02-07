@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { page } from '$app/stores';
   import { SearchBox, Grid, SkillCard, Section, EmptyState } from '$lib/components';
   import { CATEGORIES } from '$lib/constants';
   import { HugeiconsIcon } from '@hugeicons/svelte';

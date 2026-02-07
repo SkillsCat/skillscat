@@ -15,7 +15,8 @@
     "build": "pnpm --filter @skillscat/web build",
     "build:cli": "pnpm --filter skillscat build",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm --filter @skillscat/web lint",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "db:generate": "pnpm --filter @skillscat/web db:generate",
     "db:migrate": "pnpm --filter @skillscat/web db:migrate",
     "deploy": "pnpm --filter @skillscat/web deploy",
@@ -23,6 +24,11 @@
     "test:cli": "pnpm --filter skillscat test"
   },
   "devDependencies": {
-    "typescript": "^5.9.3"
+    "eslint": "^9.39.2",
+    "eslint-plugin-svelte": "^3.14.0",
+    "eslint-plugin-unused-imports": "^4.3.0",
+    "svelte-eslint-parser": "^1.4.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.54.0"
   }
 }

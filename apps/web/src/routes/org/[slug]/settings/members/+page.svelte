@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from "$app/stores";
-  import { Avatar, Button, SettingsSection, ErrorState } from "$lib/components";
+  import { Avatar, Button, SettingsSection } from "$lib/components";
   import { Select } from "bits-ui";
   import { HugeiconsIcon } from "@hugeicons/svelte";
   import { ArrowDown01Icon } from "@hugeicons/core-free-icons";

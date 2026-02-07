@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CopyButton, Button, Section, Grid, SkillCard, SkillCardCompact, EmptyState, ErrorState, toast, Avatar } from '$lib/components';
+  import { CopyButton, SkillCardCompact, ErrorState, toast, Avatar } from '$lib/components';
   import { getCategoryBySlug } from '$lib/constants/categories';
   import { marked } from 'marked';
   import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SearchBox, Grid, SkillCard, EmptyState, ErrorState, Pagination } from '$lib/components';
+  import { SearchBox, Grid, SkillCard, EmptyState, Pagination } from '$lib/components';
   import type { Category } from '$lib/constants/categories';
   import type { SkillCardData } from '$lib/types';
   import { HugeiconsIcon } from '@hugeicons/svelte';

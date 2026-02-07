@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { Checkbox, Select } from 'bits-ui';
-  import { Button, CopyButton, toast, ConfirmDialog, SettingsSection, ErrorState } from '$lib/components';
+  import { Button, toast, ConfirmDialog, SettingsSection, ErrorState } from '$lib/components';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { Key01Icon, Delete02Icon, Tick02Icon, Copy01Icon, ArrowDown01Icon } from '@hugeicons/core-free-icons';
 

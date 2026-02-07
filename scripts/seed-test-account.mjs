@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -92,12 +92,12 @@ try {
     env: process.env,
   });
 
-  // eslint-disable-next-line no-console
+   
   console.log(`Seeded local test account: ${userName} (${userEmail})`);
-  // eslint-disable-next-line no-console
+   
   console.log(`Test token: ${token}`);
 } catch (error) {
-  // eslint-disable-next-line no-console
+   
   console.error('Failed to seed test account:', error);
   process.exit(1);
 }

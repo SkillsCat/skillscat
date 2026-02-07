@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, SettingsSection, ErrorState, Avatar } from "$lib/components";
+  import { Button, SettingsSection, ErrorState } from "$lib/components";
   import { HugeiconsIcon } from "@hugeicons/svelte";
   import {
     Building04Icon,

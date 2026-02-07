@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import pc from 'picocolors';
 import { AGENTS, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents/agents';
 import { getInstalledSkills, recordInstallation, type InstalledSkill } from '../utils/storage/db';
-import { discoverSkills, fetchSkill } from '../utils/source/git';
+import { fetchSkill } from '../utils/source/git';
 import { success, error, warn, info, spinner } from '../utils/core/ui';
 import { cacheSkill, getCachedSkill, calculateContentHash } from '../utils/storage/cache';
 import { verboseLog } from '../utils/core/verbose';

@@ -3,7 +3,6 @@ import type { RequestHandler } from './$types';
 import { checkRateLimit, getRateLimitKey, rateLimitHeaders, RATE_LIMITS } from '$lib/server/ratelimit';
 import { getAuthContext } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
-import { getCached } from '$lib/server/cache';
 
 export interface RegistrySkillItem {
   name: string;

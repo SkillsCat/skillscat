@@ -5,10 +5,10 @@ import { parseSource } from '../utils/source/source';
 import { discoverSkills } from '../utils/source/git';
 import { fetchSkill } from '../utils/api/registry';
 import { AGENTS, detectInstalledAgents, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents/agents';
-import { recordInstallation, isSkillInstalled, getInstalledSkill } from '../utils/storage/db';
+import { recordInstallation } from '../utils/storage/db';
 import { success, error, warn, info, spinner, prompt } from '../utils/core/ui';
 import { cacheSkill, getCachedSkill } from '../utils/storage/cache';
-import { verboseLog, isVerbose } from '../utils/core/verbose';
+import { verboseLog } from '../utils/core/verbose';
 import type { SkillInfo } from '../utils/source/source';
 
 interface AddOptions {

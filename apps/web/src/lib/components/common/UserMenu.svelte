@@ -6,7 +6,7 @@
   import { DropdownMenu } from 'bits-ui';
   import { signOut, useSession } from '$lib/auth-client';
   import { LoginDialog, Avatar } from '$lib/components';
-  import { fly, fade } from 'svelte/transition';
+  import { fly } from 'svelte/transition';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { ArrowDown01Icon, Bookmark02Icon, Settings01Icon, Logout01Icon, Login03Icon, SparklesIcon, Mail01Icon } from '@hugeicons/core-free-icons';
 
