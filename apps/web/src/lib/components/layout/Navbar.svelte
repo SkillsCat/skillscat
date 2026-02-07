@@ -2,8 +2,10 @@
   import { NavigationMenu } from 'bits-ui';
   import { Logo, ThemeToggle, SearchBox, UserMenu, SubmitDialog, Button, LoginDialog, Avatar } from '$lib/components';
   import { CATEGORY_SECTIONS } from '$lib/constants/categories';
+  import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { useSession, signOut } from '$lib/auth-client';
+  import { slide } from 'svelte/transition';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import {
     ArrowDown01Icon,
@@ -72,6 +74,12 @@
   let showLoginDialog = $state(false);
 
   const session = useSession();
+
+  // Close mobile menu on navigation
+  $effect(() => {
+    $page.url.pathname;
+    mobileMenuOpen = false;
+  });
 
   function handleSignOut() {
     mobileMenuOpen = false;
@@ -266,7 +274,7 @@
 
     <!-- Mobile Menu -->
     {#if mobileMenuOpen}
-      <div class="mobile-menu">
+      <div class="mobile-menu" transition:slide={{ duration: 200 }}>
         <!-- User Profile Section -->
         <div class="mobile-user-section">
           {#if $session.data?.user}
@@ -293,8 +301,6 @@
             </button>
           {/if}
         </div>
-
-        <div class="mobile-separator"></div>
 
         <!-- Search -->
         <div class="mobile-search">

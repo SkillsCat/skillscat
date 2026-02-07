@@ -688,26 +688,25 @@
 </svelte:head>
 
 {#if data.skill}
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
     <!-- Breadcrumb -->
-    <nav class="mb-6 text-sm">
-      <ol class="flex items-center gap-2 text-fg-muted">
-        <li><a href="/" class="hover:text-primary transition-colors">Home</a></li>
-        <li>/</li>
-        <li><a href="/trending" class="hover:text-primary transition-colors">Skills</a></li>
-        <li>/</li>
-        <li>
+    <nav class="breadcrumb">
+      <ol>
+        <li class="breadcrumb-fixed hide-mobile"><a href="/">Home</a></li>
+        <li class="breadcrumb-sep hide-mobile">/</li>
+        <li class="breadcrumb-fixed"><a href="/trending">Skills</a></li>
+        <li class="breadcrumb-sep">/</li>
+        <li class="breadcrumb-truncate">
           <a
             href={getAuthorProfileUrl()}
             target={isAuthorExternal() ? '_blank' : undefined}
             rel={isAuthorExternal() ? 'noopener noreferrer' : undefined}
-            class="hover:text-primary transition-colors"
           >
             {getAuthorDisplayName()}
           </a>
         </li>
-        <li>/</li>
-        <li class="text-fg font-medium">{data.skill.name}</li>
+        <li class="breadcrumb-sep">/</li>
+        <li class="breadcrumb-truncate breadcrumb-current">{data.skill.name}</li>
       </ol>
     </nav>
 
@@ -1095,6 +1094,66 @@
 {/if}
 
 <style>
+  /* Breadcrumb */
+  .breadcrumb {
+    margin-bottom: 1.5rem;
+    font-size: 0.875rem;
+    overflow: hidden;
+  }
+
+  .breadcrumb ol {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--fg-muted);
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .breadcrumb a {
+    color: inherit;
+    text-decoration: none;
+    transition: color 0.15s ease;
+  }
+
+  .breadcrumb a:hover {
+    color: var(--primary);
+  }
+
+  .breadcrumb-fixed {
+    flex-shrink: 0;
+  }
+
+  .breadcrumb-sep {
+    flex-shrink: 0;
+    opacity: 0.5;
+  }
+
+  .breadcrumb-truncate {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .breadcrumb-truncate a {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .breadcrumb-current {
+    color: var(--fg);
+    font-weight: 500;
+  }
+
+  @media (max-width: 640px) {
+    .breadcrumb .hide-mobile {
+      display: none;
+    }
+  }
+
   /* Skill Header Styles */
   .skill-header {
     padding: 1.5rem;
@@ -1936,13 +1995,11 @@
     }
 
     .command-box {
-      flex-direction: column;
-      align-items: stretch;
       gap: 0.5rem;
     }
 
     .command-text {
-      padding-bottom: 0.5rem;
+      font-size: 0.75rem;
     }
 
     .skill-content-card {

@@ -160,7 +160,7 @@
 </svelte:head>
 
 {#if data.category}
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
     <!-- Breadcrumb -->
     <nav class="mb-6 text-sm">
       <ol class="flex items-center gap-2 text-fg-muted">
@@ -253,7 +253,7 @@
   </div>
 {:else}
   <!-- Not Found -->
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
     <EmptyState
       title="Category Not Found"
       description="The category you're looking for doesn't exist."

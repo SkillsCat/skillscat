@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { CopyButton, SettingsSection, SkillsList, ConfirmDialog } from '$lib/components';
+  import { CopyButton, SettingsSection, SkillsList, ConfirmDialog, Pagination } from '$lib/components';
   import { invalidateAll } from '$app/navigation';
+  import { browser } from '$app/environment';
 
   interface Skill {
     id: string;
@@ -23,7 +24,70 @@
 
   let { data } = $props();
 
-  const skills = $derived(data.skills as Skill[]);
+  const pageSkills = $derived(data.skills as Skill[]);
+  const pagination = $derived(data.pagination);
+
+  // Infinite scroll state (mobile)
+  let allSkills = $state<Skill[]>([]);
+  let loadingMore = $state(false);
+  let currentMobilePage = $state(1);
+  let hasMore = $state(true);
+  let isDesktop = $state(true);
+  let sentinelEl = $state<HTMLDivElement | null>(null);
+  let observer: IntersectionObserver | null = null;
+
+  // Detect desktop vs mobile
+  $effect(() => {
+    if (!browser) return;
+    const mql = window.matchMedia('(min-width: 768px)');
+    isDesktop = mql.matches;
+    const handler = (e: MediaQueryListEvent) => { isDesktop = e.matches; };
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  });
+
+  // Reset allSkills when SSR data changes (desktop page navigation)
+  $effect(() => {
+    allSkills = [...pageSkills];
+    currentMobilePage = pagination.currentPage;
+    hasMore = pagination.currentPage < pagination.totalPages;
+  });
+
+  // IntersectionObserver for mobile infinite scroll
+  $effect(() => {
+    if (!browser || isDesktop || !sentinelEl) return;
+    observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && hasMore && !loadingMore) {
+          loadNextPage();
+        }
+      },
+      { rootMargin: '200px' }
+    );
+    observer.observe(sentinelEl);
+    return () => { observer?.disconnect(); observer = null; };
+  });
+
+  async function loadNextPage() {
+    if (loadingMore || !hasMore) return;
+    loadingMore = true;
+    try {
+      const nextPage = currentMobilePage + 1;
+      const res = await fetch(`/api/user/skills?page=${nextPage}&limit=20`);
+      if (res.ok) {
+        const result = await res.json() as { skills: Skill[]; totalPages: number };
+        allSkills = [...allSkills, ...result.skills];
+        currentMobilePage = nextPage;
+        hasMore = nextPage < result.totalPages;
+      }
+    } catch {
+      // Silently fail
+    } finally {
+      loadingMore = false;
+    }
+  }
+
+  const displaySkills = $derived(isDesktop ? pageSkills : allSkills);
 
   let unpublishTarget = $state<SkillBase | null>(null);
   let unpublishLoading = $state(false);
@@ -74,7 +138,7 @@
   </div>
 
   <!-- CLI Upload Hint (only show when no skills) -->
-  {#if skills.length === 0}
+  {#if displaySkills.length === 0 && pagination.totalItems === 0}
     <div class="cli-hint">
       <div class="cli-hint-icon">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -94,13 +158,37 @@
 
   <SettingsSection title="Your Skills" description="Skills you have published to SkillsCat.">
     <SkillsList
-      {skills}
+      skills={displaySkills}
       loading={false}
       error={null}
       emptyTitle="No skills yet"
       emptyDescription="Use the CLI above to publish your first skill."
       onUnpublish={handleUnpublishClick}
     />
+
+    <!-- Desktop: Pagination -->
+    {#if pagination.totalPages > 1}
+      <div class="desktop-pagination">
+        <Pagination
+          currentPage={pagination.currentPage}
+          totalPages={pagination.totalPages}
+          totalItems={pagination.totalItems}
+          itemsPerPage={pagination.itemsPerPage}
+          baseUrl={pagination.baseUrl}
+        />
+      </div>
+    {/if}
+
+    <!-- Mobile: Infinite scroll sentinel -->
+    {#if hasMore && !isDesktop}
+      <div class="scroll-sentinel" bind:this={sentinelEl}>
+        {#if loadingMore}
+          <div class="loading-more">
+            <div class="loading-spinner"></div>
+          </div>
+        {/if}
+      </div>
+    {/if}
   </SettingsSection>
 </div>
 
@@ -208,5 +296,34 @@
     .cli-hint {
       display: none;
     }
+
+    .desktop-pagination {
+      display: none;
+    }
+  }
+
+  @media (min-width: 769px) {
+    .scroll-sentinel {
+      display: none;
+    }
+  }
+
+  .loading-more {
+    display: flex;
+    justify-content: center;
+    padding: 1.5rem 0;
+  }
+
+  .loading-spinner {
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 3px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 </style>

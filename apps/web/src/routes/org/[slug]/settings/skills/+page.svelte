@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { CopyButton, SettingsSection, SkillsList } from '$lib/components';
+  import { browser } from '$app/environment';
+  import { CopyButton, SettingsSection, SkillsList, Pagination } from '$lib/components';
 
   interface Skill {
     id: string;
@@ -11,26 +12,71 @@
     stars: number;
   }
 
+  const ITEMS_PER_PAGE = 20;
+
   let skills = $state<Skill[]>([]);
+  let allSkills = $state<Skill[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let totalItems = $state(0);
+  let totalPages = $state(0);
+  let currentPage = $state(1);
+  let loadingMore = $state(false);
+  let hasMore = $state(true);
+  let isDesktop = $state(true);
+  let sentinelEl = $state<HTMLDivElement | null>(null);
+  let observer: IntersectionObserver | null = null;
 
   const slug = $derived($page.params.slug);
 
+  // Detect desktop vs mobile
+  $effect(() => {
+    if (!browser) return;
+    const mql = window.matchMedia('(min-width: 768px)');
+    isDesktop = mql.matches;
+    const handler = (e: MediaQueryListEvent) => { isDesktop = e.matches; };
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  });
+
+  // Load skills on slug change or page param change (desktop)
   $effect(() => {
     if (slug) {
-      loadSkills();
+      const pageParam = $page.url.searchParams.get('page');
+      const p = pageParam ? Math.max(1, parseInt(pageParam, 10)) : 1;
+      loadSkills(p);
     }
   });
 
-  async function loadSkills() {
+  // IntersectionObserver for mobile infinite scroll
+  $effect(() => {
+    if (!browser || isDesktop || !sentinelEl) return;
+    observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && hasMore && !loadingMore && !loading) {
+          loadNextPage();
+        }
+      },
+      { rootMargin: '200px' }
+    );
+    observer.observe(sentinelEl);
+    return () => { observer?.disconnect(); observer = null; };
+  });
+
+  async function loadSkills(page: number = 1) {
     loading = true;
     error = null;
     try {
-      const res = await fetch(`/api/orgs/${slug}/skills`);
+      const res = await fetch(`/api/orgs/${slug}/skills?page=${page}&limit=${ITEMS_PER_PAGE}`);
       if (res.ok) {
-        const data = await res.json() as { skills?: Skill[] };
+        const data = await res.json() as { skills?: Skill[]; total?: number; totalPages?: number; page?: number };
         skills = data.skills || [];
+        totalItems = data.total ?? skills.length;
+        totalPages = data.totalPages ?? Math.ceil(totalItems / ITEMS_PER_PAGE);
+        currentPage = data.page ?? page;
+        // Reset accumulated skills for mobile
+        allSkills = [...skills];
+        hasMore = currentPage < totalPages;
       } else {
         error = 'Failed to load skills';
       }
@@ -40,6 +86,28 @@
       loading = false;
     }
   }
+
+  async function loadNextPage() {
+    if (loadingMore || !hasMore) return;
+    loadingMore = true;
+    try {
+      const nextPage = currentPage + 1;
+      const res = await fetch(`/api/orgs/${slug}/skills?page=${nextPage}&limit=${ITEMS_PER_PAGE}`);
+      if (res.ok) {
+        const data = await res.json() as { skills?: Skill[]; totalPages?: number };
+        const newSkills = data.skills || [];
+        allSkills = [...allSkills, ...newSkills];
+        currentPage = nextPage;
+        hasMore = nextPage < (data.totalPages ?? totalPages);
+      }
+    } catch {
+      // Silently fail
+    } finally {
+      loadingMore = false;
+    }
+  }
+
+  const displaySkills = $derived(isDesktop ? skills : allSkills);
 </script>
 
 <div class="skills-page">
@@ -49,7 +117,7 @@
   </div>
 
   <!-- CLI Upload Hint -->
-  {#if !loading && skills.length === 0}
+  {#if !loading && displaySkills.length === 0 && totalItems === 0}
     <div class="cli-hint">
       <div class="cli-hint-icon">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -69,13 +137,37 @@
 
   <SettingsSection title="Organization Skills" description="Skills published under this organization.">
     <SkillsList
-      {skills}
+      skills={displaySkills}
       {loading}
       {error}
       emptyTitle="No skills yet"
       emptyDescription="Use the CLI above to publish your first skill."
-      onRetry={loadSkills}
+      onRetry={() => loadSkills(currentPage)}
     />
+
+    <!-- Desktop: Pagination -->
+    {#if totalPages > 1}
+      <div class="desktop-pagination">
+        <Pagination
+          {currentPage}
+          {totalPages}
+          {totalItems}
+          itemsPerPage={ITEMS_PER_PAGE}
+          baseUrl={`/org/${slug}/settings/skills`}
+        />
+      </div>
+    {/if}
+
+    <!-- Mobile: Infinite scroll sentinel -->
+    {#if hasMore && !isDesktop && !loading}
+      <div class="scroll-sentinel" bind:this={sentinelEl}>
+        {#if loadingMore}
+          <div class="loading-more">
+            <div class="loading-spinner"></div>
+          </div>
+        {/if}
+      </div>
+    {/if}
   </SettingsSection>
 </div>
 
@@ -162,5 +254,34 @@
     .cli-hint {
       display: none;
     }
+
+    .desktop-pagination {
+      display: none;
+    }
+  }
+
+  @media (min-width: 769px) {
+    .scroll-sentinel {
+      display: none;
+    }
+  }
+
+  .loading-more {
+    display: flex;
+    justify-content: center;
+    padding: 1.5rem 0;
+  }
+
+  .loading-spinner {
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 3px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 </style>

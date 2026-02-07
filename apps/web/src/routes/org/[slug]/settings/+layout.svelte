@@ -87,7 +87,7 @@
     return $page.url.pathname === href || $page.url.pathname.startsWith(href + '/');
   }
 
-  let navEl: HTMLElement;
+  let navEl = $state<HTMLElement>();
 
   // Scroll active tab into view on mobile
   $effect(() => {

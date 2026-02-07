@@ -1,6 +1,6 @@
 <script lang="ts">
   import { signIn } from '$lib/auth-client';
-  import { Avatar, Button } from '$lib/components';
+  import { Avatar, Button, toast } from '$lib/components';
 
   interface Props {
     data: {
@@ -19,20 +19,18 @@
   let { data }: Props = $props();
 
   let loading = $state(false);
-  let error = $state<string | null>(null);
   let success = $state(false);
   let denied = $state(false);
 
   // Initialize error from data
   $effect(() => {
-    error = data.error;
+    if (data.error) toast(data.error, 'error');
   });
 
   async function authorize(action: 'approve' | 'deny') {
     if (!data.cliSession) return;
 
     loading = true;
-    error = null;
 
     try {
       const res = await fetch('/registry/auth/authorize', {
@@ -60,10 +58,10 @@
           denied = true;
         }
       } else {
-        error = result.error || 'Authorization failed';
+        toast(result.error || 'Authorization failed', 'error');
       }
     } catch {
-      error = 'Failed to authorize';
+      toast('Failed to authorize', 'error');
     } finally {
       loading = false;
     }
@@ -180,10 +178,6 @@
         <strong>{data.user.name || data.user.email}</strong>
       </div>
 
-      {#if error}
-        <div class="error">{error}</div>
-      {/if}
-
       <div class="actions">
         <Button variant="cute" onclick={() => authorize('approve')} disabled={loading}>
           {loading ? 'Authorizing...' : 'Authorize'}
@@ -197,10 +191,6 @@
       <p class="description">
         No valid authorization session found.
       </p>
-
-      {#if error}
-        <div class="error">{error}</div>
-      {/if}
 
       <p class="hint">
         Please run <code>skillscat login</code> in your terminal to start a new authorization.
@@ -364,16 +354,6 @@
 
   .actions :global(.btn) {
     flex: 1;
-  }
-
-  .error {
-    padding: 0.75rem;
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 0.5rem;
-    color: #ef4444;
-    font-size: 0.875rem;
-    margin-bottom: 1rem;
   }
 
   .hint {

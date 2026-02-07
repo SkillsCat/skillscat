@@ -4,7 +4,7 @@ import type { RequestHandler } from './$types';
 /**
  * GET /api/orgs/[slug]/skills - List organization skills
  */
-export const GET: RequestHandler = async ({ locals, platform, params }) => {
+export const GET: RequestHandler = async ({ locals, platform, params, url }) => {
   const db = platform?.env?.DB;
   if (!db) {
     throw error(500, 'Database not available');
@@ -14,6 +14,10 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
   if (!slug) {
     throw error(400, 'Organization slug is required');
   }
+
+  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+  const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '20', 10)));
+  const offset = (page - 1) * limit;
 
   // Get org ID
   const org = await db.prepare(`
@@ -44,7 +48,9 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
   // Build query based on membership
   // Members can see all skills, non-members can only see public skills
   let query: string;
+  let countQuery: string;
   let bindings: (string | number)[];
+  let countBindings: (string | number)[];
 
   if (isMember) {
     query = `
@@ -52,28 +58,42 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
       FROM skills
       WHERE org_id = ?
       ORDER BY stars DESC, created_at DESC
+      LIMIT ? OFFSET ?
     `;
-    bindings = [org.id];
+    bindings = [org.id, limit, offset];
+    countQuery = `SELECT COUNT(*) as count FROM skills WHERE org_id = ?`;
+    countBindings = [org.id];
   } else {
     query = `
       SELECT id, name, slug, description, visibility, stars
       FROM skills
       WHERE org_id = ? AND visibility = 'public'
       ORDER BY stars DESC, created_at DESC
+      LIMIT ? OFFSET ?
     `;
-    bindings = [org.id];
+    bindings = [org.id, limit, offset];
+    countQuery = `SELECT COUNT(*) as count FROM skills WHERE org_id = ? AND visibility = 'public'`;
+    countBindings = [org.id];
   }
 
-  const results = await db.prepare(query)
-    .bind(...bindings)
-    .all<{
-      id: string;
-      name: string;
-      slug: string;
-      description: string | null;
-      visibility: string;
-      stars: number;
-    }>();
+  const [results, countResult] = await Promise.all([
+    db.prepare(query)
+      .bind(...bindings)
+      .all<{
+        id: string;
+        name: string;
+        slug: string;
+        description: string | null;
+        visibility: string;
+        stars: number;
+      }>(),
+    db.prepare(countQuery)
+      .bind(...countBindings)
+      .first<{ count: number }>(),
+  ]);
+
+  const total = countResult?.count ?? 0;
+  const totalPages = Math.ceil(total / limit);
 
   return json({
     success: true,
@@ -85,5 +105,8 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
       visibility: s.visibility,
       stars: s.stars,
     })),
+    total,
+    page,
+    totalPages,
   });
 };

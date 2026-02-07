@@ -37,7 +37,6 @@
 
   let tokens = $state<Token[]>([]);
   let loading = $state(true);
-  let error = $state<string | null>(null);
   let newTokenName = $state('');
   let newTokenScopes = $state<string[]>(['read']);
   let newTokenExpiration = $state<number | null>(90);
@@ -63,7 +62,7 @@
         tokens = data.tokens || [];
       }
     } catch {
-      error = 'Failed to load tokens';
+      toast('Failed to load tokens', 'error');
     } finally {
       loading = false;
     }
@@ -93,10 +92,10 @@
         await loadTokens();
       } else {
         const data = await res.json() as { error?: string };
-        error = data.error || 'Failed to create token';
+        toast(data.error || 'Failed to create token', 'error');
       }
     } catch {
-      error = 'Failed to create token';
+      toast('Failed to create token', 'error');
     } finally {
       creating = false;
     }
@@ -120,7 +119,7 @@
         await loadTokens();
       }
     } catch {
-      error = 'Failed to revoke token';
+      toast('Failed to revoke token', 'error');
     } finally {
       revoking = false;
     }
@@ -351,13 +350,6 @@
       </div>
     {/if}
   </section>
-
-  {#if error}
-    <div class="error-toast">
-      <p>{error}</p>
-      <button onclick={() => error = null}>Dismiss</button>
-    </div>
-  {/if}
 </div>
 
 <!-- Revoke Token Confirmation Dialog -->
@@ -866,36 +858,6 @@
     box-shadow: 0 1px 0 0 oklch(35% 0.18 25);
   }
 
-  /* Error Toast */
-  .error-toast {
-    position: fixed;
-    bottom: 1.5rem;
-    right: 1.5rem;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 1rem 1.25rem;
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: var(--radius-md);
-    color: #ef4444;
-    z-index: 100;
-  }
-
-  .error-toast button {
-    padding: 0.25rem 0.75rem;
-    font-size: 0.8125rem;
-    color: #ef4444;
-    background: transparent;
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-  }
-
-  .error-toast button:hover {
-    background: rgba(239, 68, 68, 0.1);
-  }
-
   /* Dark mode for success card */
   :global(:root.dark) .token-created-card {
     box-shadow: 4px 4px 0 0 oklch(45% 0.15 145);
@@ -929,13 +891,8 @@
     }
 
     .token-card {
-      flex-direction: column;
-      align-items: stretch;
+      padding: 0.75rem;
       gap: 0.75rem;
-    }
-
-    .token-card .delete-btn {
-      align-self: flex-end;
     }
 
     .token-header {

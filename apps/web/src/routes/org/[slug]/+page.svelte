@@ -453,6 +453,7 @@
     text-decoration: none;
     color: inherit;
     transition: all 0.15s ease;
+    min-width: 0;
   }
 
   .skill-card:hover {
@@ -464,6 +465,9 @@
     font-size: 1rem;
     font-weight: 600;
     margin-bottom: 0.25rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .skill-card p {
@@ -520,6 +524,9 @@
     font-size: 0.9375rem;
     font-weight: 600;
     color: var(--foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .member-role {
@@ -590,47 +597,102 @@
   }
 
   @media (max-width: 640px) {
+    .org-page {
+      padding: 1rem 0.75rem;
+    }
+
     .org-header {
       flex-direction: column;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+      padding-bottom: 1.25rem;
     }
 
     .header-left {
-      flex-direction: column;
+      flex-direction: row;
       align-items: center;
-      text-align: center;
+      gap: 0.75rem;
+    }
+
+    .header-left :global(.avatar) {
+      width: 3rem;
+      height: 3rem;
+      flex-shrink: 0;
+    }
+
+    .header-info {
+      text-align: left;
     }
 
     .header-title-row {
-      justify-content: center;
+      justify-content: flex-start;
+    }
+
+    h1 {
+      font-size: 1.125rem;
+    }
+
+    .org-slug {
+      font-size: 0.8125rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .org-description {
+      font-size: 0.875rem;
+      margin-bottom: 0.5rem;
     }
 
     .org-stats {
-      justify-content: center;
+      font-size: 0.8125rem;
     }
 
     .header-actions {
-      align-self: center;
+      align-self: stretch;
+    }
+
+    .header-actions :global(a),
+    .header-actions :global(button) {
+      width: 100%;
+      justify-content: center;
     }
 
     .tabs {
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-      flex-wrap: nowrap;
+      gap: 0.5rem;
     }
 
     .tabs button {
-      padding: 0.625rem 1rem;
+      flex: 1;
+      justify-content: center;
+      padding: 0.625rem 0.75rem;
       font-size: 0.875rem;
       white-space: nowrap;
-      flex-shrink: 0;
+      min-height: 2.75rem;
     }
 
     .skills-grid {
       grid-template-columns: 1fr;
+      gap: 0.75rem;
+    }
+
+    .skill-card {
+      padding: 1rem;
     }
 
     .members-grid {
       grid-template-columns: 1fr;
+      gap: 0.75rem;
+    }
+
+    .member-card {
+      padding: 0.75rem;
+    }
+
+    .empty-state {
+      padding: 2.5rem 1.5rem;
+    }
+
+    .loading-state {
+      padding: 2.5rem 1.5rem;
     }
   }
 </style>

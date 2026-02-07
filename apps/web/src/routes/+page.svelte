@@ -42,7 +42,7 @@
 </svelte:head>
 
 <div class="home-page">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
     <!-- Hero Section -->
     <div class="hero-section">
       <div class="hero-card">
@@ -202,7 +202,6 @@
     line-height: 1.2;
     margin-bottom: 1rem;
     color: var(--card-foreground);
-    text-shadow: 0 1px 4px oklch(100% 0 0 / 0.6);
   }
 
   .hero-subtitle {
@@ -210,13 +209,5 @@
     color: var(--fg-muted);
     font-weight: 500;
     line-height: 1.6;
-    text-shadow: 0 1px 3px oklch(100% 0 0 / 0.5);
-  }
-
-  @media (min-width: 768px) {
-    .hero-title,
-    .hero-subtitle {
-      text-shadow: none;
-    }
   }
 </style>

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { signIn } from '$lib/auth-client';
-  import { Avatar } from '$lib/components';
+  import { Avatar, toast } from '$lib/components';
 
   interface Props {
     data: {
@@ -21,7 +21,6 @@
   let userCode = $state('');
   let loading = $state(false);
   let verifying = $state(false);
-  let error = $state<string | null>(null);
   let deviceInfo = $state<Props['data']['deviceInfo']>(null);
   let success = $state(false);
   let denied = $state(false);
@@ -29,7 +28,7 @@
   // Initialize state from data on mount
   $effect(() => {
     userCode = data.prefillCode ?? '';
-    error = data.error;
+    if (data.error) toast(data.error, 'error');
     deviceInfo = data.deviceInfo;
   });
 
@@ -46,12 +45,11 @@
 
   async function verifyCode() {
     if (userCode.replace(/-/g, '').length !== 8) {
-      error = 'Please enter a valid 8-character code';
+      toast('Please enter a valid 8-character code', 'error');
       return;
     }
 
     verifying = true;
-    error = null;
 
     try {
       const res = await fetch(`/device?code=${encodeURIComponent(userCode)}`);
@@ -60,14 +58,13 @@
       // Reload the page with the code parameter
       window.location.href = `/device?code=${encodeURIComponent(userCode)}`;
     } catch {
-      error = 'Failed to verify code';
+      toast('Failed to verify code', 'error');
       verifying = false;
     }
   }
 
   async function authorize(action: 'approve' | 'deny') {
     loading = true;
-    error = null;
 
     try {
       const res = await fetch('/api/device/authorize', {
@@ -88,10 +85,10 @@
           denied = true;
         }
       } else {
-        error = result.error || 'Authorization failed';
+        toast(result.error || 'Authorization failed', 'error');
       }
     } catch {
-      error = 'Failed to authorize';
+      toast('Failed to authorize', 'error');
     } finally {
       loading = false;
     }
@@ -237,10 +234,6 @@
         <strong>{data.user.name || data.user.email}</strong>
       </div>
 
-      {#if error}
-        <div class="error">{error}</div>
-      {/if}
-
       <div class="actions">
         <button
           type="button"
@@ -278,10 +271,6 @@
             spellcheck="false"
           />
         </div>
-
-        {#if error}
-          <div class="error">{error}</div>
-        {/if}
 
         <button type="submit" class="btn-verify" disabled={verifying || userCode.replace(/-/g, '').length !== 8}>
           {verifying ? 'Verifying...' : 'Continue'}
@@ -521,16 +510,6 @@
   .btn-approve:disabled, .btn-deny:disabled, .btn-verify:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-
-  .error {
-    padding: 0.75rem;
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 0.5rem;
-    color: #ef4444;
-    font-size: 0.875rem;
-    margin-bottom: 1rem;
   }
 
   .success-state, .denied-state {

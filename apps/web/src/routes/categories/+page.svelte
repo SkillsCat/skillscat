@@ -173,7 +173,7 @@
   <meta name="description" content="Browse Claude Code skills by category." />
 </svelte:head>
 
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
   <!-- Header -->
   <div class="mb-8">
     <h1 class="text-3xl md:text-4xl font-bold text-fg mb-2">
