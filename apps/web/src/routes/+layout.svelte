@@ -3,7 +3,7 @@
   import { Navbar, Footer, Toast } from '$lib/components';
   import { onMount } from 'svelte';
 
-  let { children } = $props();
+  let { children, data } = $props();
 
   let scrollY = $state(0);
   let isScrolled = $derived(scrollY > 20);
@@ -60,7 +60,7 @@
       </div>
 
       <div class="main-content">
-        <Navbar />
+        <Navbar unreadCount={data.unreadCount} />
 
         <main class="flex-1">
           {@render children()}

@@ -14,7 +14,7 @@
       </div>
 
       <!-- Skills -->
-      <div>
+      <div class="hidden md:block">
         <h4 class="font-semibold text-fg mb-3">Discover</h4>
         <ul class="space-y-2 text-sm">
           <li>
@@ -33,7 +33,7 @@
       </div>
 
       <!-- Resources -->
-      <div>
+      <div class="hidden md:block">
         <h4 class="font-semibold text-fg mb-3">Resources</h4>
         <ul class="space-y-2 text-sm">
           <li>
@@ -69,8 +69,8 @@
         </ul>
       </div>
 
-      <!-- Legal -->
-      <div>
+      <!-- Legal (hidden on mobile, shown in bottom bar instead) -->
+      <div class="hidden md:block">
         <h4 class="font-semibold text-fg mb-3">Legal</h4>
         <ul class="space-y-2 text-sm">
           <li>
@@ -85,9 +85,16 @@
 
     <!-- Bottom -->
     <div class="mt-8 pt-8 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4">
-      <p class="text-sm text-fg-subtle">
-        © {new Date().getFullYear()} SkillsCat. Open source under AGPL-3.0.
-      </p>
+      <div class="flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
+        <p class="text-sm text-fg-subtle">
+          © {new Date().getFullYear()} SkillsCat. Open source under AGPL-3.0.
+        </p>
+        <div class="flex items-center gap-3 md:hidden text-sm">
+          <a href="/privacy" class="text-fg-subtle hover:text-fg transition-colors">Privacy</a>
+          <span class="text-fg-subtle">·</span>
+          <a href="/terms" class="text-fg-subtle hover:text-fg transition-colors">Terms</a>
+        </div>
+      </div>
       <div class="flex items-center gap-4">
         <a
           href="https://github.com/skillscat/skillscat"

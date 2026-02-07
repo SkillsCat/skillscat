@@ -10,31 +10,15 @@
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { ArrowDown01Icon, Bookmark02Icon, Settings01Icon, Logout01Icon, Login03Icon, SparklesIcon, Mail01Icon } from '@hugeicons/core-free-icons';
 
+  interface Props {
+    unreadCount?: number;
+  }
+
+  let { unreadCount = 0 }: Props = $props();
+
   const session = useSession();
 
   let showLoginDialog = $state(false);
-  let unreadCount = $state(0);
-
-  // Fetch unread count when session changes
-  $effect(() => {
-    if ($session.data?.user) {
-      fetchUnreadCount();
-    } else {
-      unreadCount = 0;
-    }
-  });
-
-  async function fetchUnreadCount() {
-    try {
-      const res = await fetch('/api/notifications/unread-count');
-      if (res.ok) {
-        const data = await res.json() as { count: number };
-        unreadCount = data.count;
-      }
-    } catch {
-      // Silently fail
-    }
-  }
 
   function handleSignOut() {
     signOut();

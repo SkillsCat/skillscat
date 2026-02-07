@@ -1,9 +1,9 @@
 <script lang="ts">
   import { NavigationMenu } from 'bits-ui';
-  import { Logo, ThemeToggle, SearchBox, UserMenu, SubmitDialog, Button } from '$lib/components';
+  import { Logo, ThemeToggle, SearchBox, UserMenu, SubmitDialog, Button, LoginDialog, Avatar } from '$lib/components';
   import { CATEGORY_SECTIONS } from '$lib/constants/categories';
   import { goto } from '$app/navigation';
-  import { useSession } from '$lib/auth-client';
+  import { useSession, signOut } from '$lib/auth-client';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import {
     ArrowDown01Icon,
@@ -54,14 +54,29 @@
     JusticeScale01Icon,
     MortarboardIcon,
     GameboyIcon,
-    Calculator01Icon
+    Calculator01Icon,
+    Bookmark02Icon,
+    Logout01Icon,
+    Login03Icon
   } from '@hugeicons/core-free-icons';
+
+  interface Props {
+    unreadCount?: number;
+  }
+
+  let { unreadCount = 0 }: Props = $props();
 
   let mobileMenuOpen = $state(false);
   let searchQuery = $state('');
   let showSubmitDialog = $state(false);
+  let showLoginDialog = $state(false);
 
   const session = useSession();
+
+  function handleSignOut() {
+    mobileMenuOpen = false;
+    signOut();
+  }
 
   // Icon mapping for categories (by slug)
   const categoryIcons: Record<string, any> = {
@@ -219,18 +234,20 @@
 
       <!-- Right Side -->
       <div class="navbar-right">
-        {#if $session.data?.user}
-          <Button
-            variant="cute"
-            size="sm"
-            onclick={() => showSubmitDialog = true}
-          >
-            <HugeiconsIcon icon={Add01Icon} size={16} strokeWidth={2} />
-            <span class="submit-btn-text">Submit</span>
-          </Button>
-        {/if}
-        <ThemeToggle />
-        <UserMenu />
+        <div class="desktop-controls">
+          {#if $session.data?.user}
+            <Button
+              variant="cute"
+              size="sm"
+              onclick={() => showSubmitDialog = true}
+            >
+              <HugeiconsIcon icon={Add01Icon} size={16} strokeWidth={2} />
+              <span class="submit-btn-text">Submit</span>
+            </Button>
+          {/if}
+          <ThemeToggle />
+          <UserMenu {unreadCount} />
+        </div>
 
         <!-- Mobile Menu Button -->
         <button
@@ -250,6 +267,50 @@
     <!-- Mobile Menu -->
     {#if mobileMenuOpen}
       <div class="mobile-menu">
+        <!-- User Profile Section -->
+        <div class="mobile-user-section">
+          {#if $session.data?.user}
+            <div class="mobile-user-info">
+              <Avatar
+                src={$session.data.user.image}
+                alt={$session.data.user.name}
+                fallback={$session.data.user.name}
+                size="sm"
+                useGithubFallback
+              />
+              <div>
+                <div class="mobile-user-name">{$session.data.user.name}</div>
+                <div class="mobile-user-email">{$session.data.user.email}</div>
+              </div>
+            </div>
+          {:else}
+            <button
+              class="mobile-sign-in-btn"
+              onclick={() => { mobileMenuOpen = false; showLoginDialog = true; }}
+            >
+              <HugeiconsIcon icon={Login03Icon} size={18} strokeWidth={2} />
+              Sign In with GitHub
+            </button>
+          {/if}
+        </div>
+
+        <div class="mobile-separator"></div>
+
+        <!-- Submit (logged in only) -->
+        {#if $session.data?.user}
+          <div class="mobile-links">
+            <button
+              class="mobile-link"
+              onclick={() => { mobileMenuOpen = false; showSubmitDialog = true; }}
+            >
+              <HugeiconsIcon icon={Add01Icon} size={18} strokeWidth={2} />
+              Submit a Skill
+            </button>
+          </div>
+          <div class="mobile-separator"></div>
+        {/if}
+
+        <!-- Search -->
         <div class="mobile-search">
           <SearchBox
             bind:value={searchQuery}
@@ -257,28 +318,59 @@
             placeholder="Search skills..."
           />
         </div>
+
+        <!-- Nav Links -->
         <div class="mobile-links">
-          <a
-            href="/trending"
-            class="mobile-link"
-            onclick={() => mobileMenuOpen = false}
-          >
+          <a href="/trending" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+            <HugeiconsIcon icon={SparklesIcon} size={18} strokeWidth={2} />
             Trending
           </a>
-          <a
-            href="/categories"
-            class="mobile-link"
-            onclick={() => mobileMenuOpen = false}
-          >
+          <a href="/categories" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+            <HugeiconsIcon icon={Folder01Icon} size={18} strokeWidth={2} />
             Categories
           </a>
         </div>
+
+        <!-- User Links (logged in only) -->
+        {#if $session.data?.user}
+          <div class="mobile-separator"></div>
+          <div class="mobile-links">
+            <a href="/my-skills" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+              <HugeiconsIcon icon={CodeIcon} size={18} strokeWidth={2} />
+              My Skills
+            </a>
+            <a href="/messages" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+              <HugeiconsIcon icon={Mail01Icon} size={18} strokeWidth={2} />
+              Messages
+              {#if unreadCount > 0}
+                <span class="mobile-badge">{unreadCount}</span>
+              {/if}
+            </a>
+            <a href="/bookmarks" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+              <HugeiconsIcon icon={Bookmark02Icon} size={18} strokeWidth={2} />
+              Bookmarks
+            </a>
+            <a href="/settings" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+              <HugeiconsIcon icon={Settings01Icon} size={18} strokeWidth={2} />
+              Settings
+            </a>
+          </div>
+
+          <div class="mobile-separator"></div>
+          <div class="mobile-links">
+            <button class="mobile-link mobile-link-danger" onclick={handleSignOut}>
+              <HugeiconsIcon icon={Logout01Icon} size={18} strokeWidth={2} />
+              Sign Out
+            </button>
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
 </nav>
 
 <SubmitDialog isOpen={showSubmitDialog} onClose={() => showSubmitDialog = false} />
+<LoginDialog isOpen={showLoginDialog} onClose={() => showLoginDialog = false} />
 
 <style>
   .navbar {
@@ -569,6 +661,18 @@
     gap: 0.75rem;
   }
 
+  .desktop-controls {
+    display: none;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  @media (min-width: 768px) {
+    .desktop-controls {
+      display: flex;
+    }
+  }
+
   .submit-btn-text {
     display: none;
   }
@@ -610,6 +714,8 @@
     display: block;
     padding: 1rem 0;
     border-top: 2px solid var(--border);
+    max-height: calc(100dvh - 4.5rem);
+    overflow-y: auto;
   }
 
   @media (min-width: 768px) {
@@ -618,8 +724,73 @@
     }
   }
 
+  .mobile-user-section {
+    padding: 0.5rem 0 0.75rem;
+  }
+
+  .mobile-user-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 1rem;
+  }
+
+  .mobile-user-name {
+    font-weight: 600;
+    font-size: 0.9375rem;
+    color: var(--foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
+  }
+
+  .mobile-user-email {
+    font-size: 0.8125rem;
+    color: var(--muted-foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
+  }
+
+  .mobile-sign-in-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    min-height: 44px;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--primary-foreground);
+    background: var(--primary);
+    border: 2px solid var(--primary);
+    border-radius: var(--radius-full);
+    box-shadow: 0 4px 0 0 oklch(50% 0.22 55);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .mobile-sign-in-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 0 0 oklch(50% 0.22 55);
+  }
+
+  .mobile-sign-in-btn:active {
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 0 oklch(50% 0.22 55);
+  }
+
+  .mobile-separator {
+    height: 0;
+    border-top: 2px solid var(--border);
+    margin: 0.5rem 0;
+  }
+
   .mobile-search {
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
   }
 
   .mobile-links {
@@ -629,18 +800,48 @@
   }
 
   .mobile-link {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
     padding: 0.875rem 1rem;
     min-height: 44px;
+    border: none;
+    background: transparent;
     border-radius: var(--radius-lg);
     color: var(--muted-foreground);
     font-weight: 600;
     font-size: 1rem;
     text-decoration: none;
+    cursor: pointer;
     transition: all 0.15s ease;
   }
 
   .mobile-link:hover {
     color: var(--primary);
     background-color: var(--primary-subtle);
+  }
+
+  .mobile-link-danger {
+    color: oklch(55% 0.20 25);
+  }
+
+  .mobile-link-danger:hover {
+    color: oklch(45% 0.20 25);
+    background-color: oklch(95% 0.02 25);
+  }
+
+  .mobile-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25rem;
+    height: 1.25rem;
+    padding: 0 0.375rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--primary-foreground);
+    background: var(--primary);
+    border-radius: var(--radius-full);
+    margin-left: auto;
   }
 </style>

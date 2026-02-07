@@ -38,23 +38,37 @@
   .section-title {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    font-size: 1.5rem;
+    gap: 0.5rem;
+    font-size: 1.125rem;
     font-weight: 700;
     color: var(--foreground);
+  }
+
+  @media (min-width: 768px) {
+    .section-title {
+      font-size: 1.5rem;
+      gap: 0.75rem;
+    }
   }
 
   .section-icon {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 2.5rem;
-    height: 2.5rem;
+    width: 2rem;
+    height: 2rem;
     background: var(--primary-subtle);
     border: 2px solid var(--primary);
     border-radius: var(--radius-lg);
     color: var(--primary);
     transition: all 0.2s ease;
+  }
+
+  @media (min-width: 768px) {
+    .section-icon {
+      width: 2.5rem;
+      height: 2.5rem;
+    }
   }
 
   .section-title:hover .section-icon {
