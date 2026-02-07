@@ -78,6 +78,8 @@ CREATE TABLE `cli_auth_sessions` (
 	`user_id` text,
 	`scopes` text DEFAULT '["read","write","publish"]' NOT NULL,
 	`client_info` text,
+	`code_challenge` text,
+	`code_challenge_method` text,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`expires_at` integer NOT NULL,
 	`created_at` integer DEFAULT (unixepoch() * 1000) NOT NULL

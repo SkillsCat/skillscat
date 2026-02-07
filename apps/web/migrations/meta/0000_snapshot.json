@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c6baca8a-90fc-4f1d-b79b-9373309d9e85",
+  "id": "6f08a864-ed70-47df-980b-dc3811bd437c",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -547,6 +547,20 @@
         },
         "client_info": {
           "name": "client_info",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "code_challenge": {
+          "name": "code_challenge",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "code_challenge_method": {
+          "name": "code_challenge_method",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
