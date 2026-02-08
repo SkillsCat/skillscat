@@ -1,7 +1,7 @@
 import pc from 'picocolors';
-import { setToken, setTokens, isAuthenticated, getUser, getBaseUrl, getClientInfo, generateRandomState, generateCodeVerifier, computeCodeChallenge, initAuthSession, exchangeCodeForTokens } from '../utils/auth/auth';
+import { setToken, setTokens, isAuthenticated, getUser, getBaseUrl, getClientInfo, generateRandomState, generateCodeVerifier, computeCodeChallenge, initAuthSession, exchangeCodeForTokens, validateAccessToken } from '../utils/auth/auth';
 import { startCallbackServer } from '../utils/auth/callback-server';
-import { getResolvedRegistryUrl } from '../utils/config/paths';
+import { getRegistryUrl } from '../utils/config/config';
 import { spinner, success, error, info, warn, box } from '../utils/core/ui';
 
 interface LoginOptions {
@@ -10,26 +10,20 @@ interface LoginOptions {
 
 export async function login(options: LoginOptions): Promise<void> {
   const baseUrl = getBaseUrl();
-  const registryUrl = getResolvedRegistryUrl();
+  const registryUrl = getRegistryUrl();
 
   // If token is provided directly, use it
   if (options.token) {
     const sp = spinner('Validating token...');
     try {
-      const response = await fetch(`${baseUrl}/api/tokens`, {
-        headers: {
-          'Authorization': `Bearer ${options.token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
+      const user = await validateAccessToken(options.token);
+      if (!user) {
         sp.stop(false);
         error('Invalid token. Please check your token and try again.');
         process.exit(1);
       }
 
-      setToken(options.token);
+      setToken(options.token, user);
       sp.stop(true);
       success('Successfully logged in with API token.');
       return;

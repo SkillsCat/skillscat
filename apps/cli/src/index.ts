@@ -32,7 +32,7 @@ program
     }
   });
 
-// Main add command (compatible with add-skill)
+// Main add command
 program
   .command('add <source>')
   .alias('a')

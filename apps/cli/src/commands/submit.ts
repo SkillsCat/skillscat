@@ -162,11 +162,15 @@ function findSkillMd(cwd: string, maxDepth: number = 3): string | null {
 function findGitRoot(cwd: string): string | null {
   let dir = cwd;
 
-  while (dir !== '/') {
+  while (true) {
     if (existsSync(join(dir, '.git'))) {
       return dir;
     }
-    dir = dirname(dir);
+    const parent = dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
   }
 
   return null;

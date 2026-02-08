@@ -1,5 +1,5 @@
 import pc from 'picocolors';
-import { getResolvedRegistryUrl } from '../utils/config/paths';
+import { getRegistryUrl } from '../utils/config/config';
 import { getValidToken } from '../utils/auth/auth';
 import { error, spinner, warn, info } from '../utils/core/ui';
 import { verboseRequest, verboseResponse, verboseConfig, isVerbose } from '../utils/core/verbose';
@@ -55,7 +55,7 @@ export async function search(query?: string, options: SearchOptions = {}): Promi
       params.set('include_private', 'true');
     }
 
-    const registryUrl = getResolvedRegistryUrl();
+    const registryUrl = getRegistryUrl();
     const url = `${registryUrl}/search?${params}`;
     const startTime = Date.now();
 

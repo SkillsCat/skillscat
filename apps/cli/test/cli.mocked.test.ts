@@ -97,8 +97,15 @@ describe('CLI commands with mocked network', () => {
   it('login/logout/whoami with token', async () => {
     const fetchMock = vi.fn(async (input: any) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.endsWith('/api/tokens')) {
-        return mockResponse({ success: true }, 200);
+      if (url.endsWith('/api/tokens/validate')) {
+        return mockResponse({
+          success: true,
+          user: {
+            id: 'user_test_1',
+            name: 'testuser',
+            email: 'testuser@example.com',
+          },
+        }, 200);
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });

@@ -203,15 +203,19 @@ export async function add(source: string, options: AddOptions): Promise<void> {
   let skipped = 0;
 
   for (const skill of selectedSkills) {
+    const activeAgentIds = new Set<string>();
+
     for (const agent of targetAgents) {
       const skillDir = getSkillPath(agent, skill.name, isGlobal);
       const skillFile = join(skillDir, 'SKILL.md');
+      const existedBefore = existsSync(skillFile);
 
       // Check if already installed
-      if (existsSync(skillFile) && !options.force) {
+      if (existedBefore && !options.force) {
         const existingContent = readFileSync(skillFile, 'utf-8');
         if (existingContent === skill.content) {
           skipped++;
+          activeAgentIds.add(agent.id);
           continue;
         }
 
@@ -220,6 +224,7 @@ export async function add(source: string, options: AddOptions): Promise<void> {
           const overwrite = await prompt('Overwrite? [y/N] ');
           if (overwrite.toLowerCase() !== 'y') {
             skipped++;
+            activeAgentIds.add(agent.id);
             continue;
           }
         }
@@ -230,6 +235,7 @@ export async function add(source: string, options: AddOptions): Promise<void> {
         mkdirSync(dirname(skillFile), { recursive: true });
         writeFileSync(skillFile, skill.content, 'utf-8');
         installed++;
+        activeAgentIds.add(agent.id);
 
         // Cache the skill content
         cacheSkill(
@@ -242,26 +248,30 @@ export async function add(source: string, options: AddOptions): Promise<void> {
         );
         verboseLog(`Cached skill: ${skill.name}`);
       } catch (err) {
+        if (existedBefore) {
+          activeAgentIds.add(agent.id);
+        }
         error(`Failed to install ${skill.name} to ${agent.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
       }
     }
 
-    // Record installation
-    recordInstallation({
-      name: skill.name,
-      description: skill.description,
-      source: repoSource,
-      agents: targetAgents.map(a => a.id),
-      global: isGlobal,
-      installedAt: Date.now(),
-      sha: skill.sha,
-      path: skill.path,
-      contentHash: skill.contentHash
-    });
+    if (activeAgentIds.size > 0) {
+      recordInstallation({
+        name: skill.name,
+        description: skill.description,
+        source: repoSource,
+        agents: Array.from(activeAgentIds),
+        global: isGlobal,
+        installedAt: Date.now(),
+        sha: skill.sha,
+        path: skill.path,
+        contentHash: skill.contentHash
+      });
 
-    // Track installation on server (non-blocking, fail-silent)
-    const slug = `${repoSource.owner}/${repoSource.repo}`;
-    trackInstallation(slug).catch(() => {});
+      // Track installation on server (non-blocking, fail-silent)
+      const slug = `${repoSource.owner}/${repoSource.repo}`;
+      trackInstallation(slug).catch(() => {});
+    }
   }
 
   console.log();

@@ -44,8 +44,12 @@ export async function remove(skillName: string, options: RemoveOptions): Promise
     }
   }
 
-  // Remove from database
-  removeInstallation(skillName);
+  if (removed > 0) {
+    removeInstallation(skillName, {
+      agents: agents.map((agent) => agent.id),
+      global: isGlobal,
+    });
+  }
 
   if (removed === 0) {
     if (notFound === agents.length) {

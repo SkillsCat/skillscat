@@ -78,9 +78,6 @@ export async function info(source: string): Promise<void> {
   console.log(pc.bold('Install:'));
   console.log(`  ${pc.cyan(`npx skillscat add ${source}`)}`);
   console.log();
-  console.log(pc.dim('Or with add-skill:'));
-  console.log(`  ${pc.dim(`npx add-skill ${source}`)}`);
-  console.log();
 
   // Show compatible agents
   console.log(pc.bold('Compatible agents:'));

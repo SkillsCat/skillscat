@@ -1,5 +1,4 @@
-import { getResolvedRegistryUrl } from '../config/paths';
-import { getValidToken } from '../auth/auth';
+import { getValidToken, getBaseUrl } from '../auth/auth';
 
 /**
  * Track a skill installation on the server.
@@ -7,7 +6,7 @@ import { getValidToken } from '../auth/auth';
  */
 export async function trackInstallation(slug: string): Promise<void> {
   try {
-    const baseUrl = getResolvedRegistryUrl();
+    const baseUrl = getBaseUrl();
     const token = await getValidToken();
 
     const headers: Record<string, string> = {

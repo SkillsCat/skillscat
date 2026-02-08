@@ -58,16 +58,45 @@ export function recordInstallation(skill: InstalledSkill): void {
 /**
  * Remove a skill record
  */
-export function removeInstallation(skillName: string, source?: RepoSource): void {
-  const db = loadDb();
-
-  if (source) {
-    db.skills = db.skills.filter(
-      s => !(s.name === skillName && s.source.owner === source.owner && s.source.repo === source.repo)
-    );
-  } else {
-    db.skills = db.skills.filter(s => s.name !== skillName);
+export function removeInstallation(
+  skillName: string,
+  options?: {
+    source?: RepoSource;
+    agents?: string[];
+    global?: boolean;
   }
+): void {
+  const db = loadDb();
+  const targetAgents = options?.agents;
+
+  db.skills = db.skills.flatMap((skill) => {
+    if (skill.name !== skillName) {
+      return [skill];
+    }
+
+    if (options?.source) {
+      const sameSource =
+        skill.source.owner === options.source.owner &&
+        skill.source.repo === options.source.repo;
+      if (!sameSource) {
+        return [skill];
+      }
+    }
+
+    if (options?.global !== undefined && skill.global !== options.global) {
+      return [skill];
+    }
+
+    if (targetAgents && targetAgents.length > 0) {
+      const remainingAgents = skill.agents.filter((agentId) => !targetAgents.includes(agentId));
+      if (remainingAgents.length === 0) {
+        return [];
+      }
+      return [{ ...skill, agents: remainingAgents }];
+    }
+
+    return [];
+  });
 
   saveDb(db);
 }

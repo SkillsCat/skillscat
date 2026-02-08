@@ -1,4 +1,4 @@
-import { getResolvedRegistryUrl } from '../config/paths';
+import { getRegistryUrl } from '../config/config';
 import { getValidToken } from '../auth/auth';
 import { verboseRequest, verboseResponse, verboseLog } from '../core/verbose';
 import { parseNetworkError, parseHttpError } from '../core/errors';
@@ -87,23 +87,9 @@ async function fetchFromGitHub(owner: string, repo: string, skillPath?: string):
 }
 
 export async function fetchSkill(skillIdentifier: string): Promise<SkillRegistryItem | null> {
-  // skillIdentifier can be:
-  // - "owner/skill-name" (e.g., "anthropics/commit-message")
-  // - "skill-name" (search and pick first match)
-
-  // First, query registry to get skill metadata
-  const registryUrl = getResolvedRegistryUrl();
-
-  // Use two-segment path for cleaner URLs
-  let url: string;
-  if (skillIdentifier.includes('/')) {
-    // Has owner/name format - use two-segment path
-    const { owner, name } = parseSlug(skillIdentifier);
-    url = `${registryUrl}/skill/${owner}/${name}`;
-  } else {
-    // Just skill name - use legacy single-segment path
-    url = `${registryUrl}/skill/${encodeURIComponent(skillIdentifier)}`;
-  }
+  const { owner, name } = parseSlug(skillIdentifier);
+  const registryUrl = getRegistryUrl();
+  const url = `${registryUrl}/skill/${owner}/${name}`;
 
   const headers = await getAuthHeaders();
   const startTime = Date.now();
@@ -196,7 +182,7 @@ export async function searchSkills(
   params.set('limit', String(limit));
   if (includePrivate) params.set('include_private', 'true');
 
-  const registryUrl = getResolvedRegistryUrl();
+  const registryUrl = getRegistryUrl();
   const url = `${registryUrl}/search?${params}`;
   const headers = await getAuthHeaders();
   const startTime = Date.now();

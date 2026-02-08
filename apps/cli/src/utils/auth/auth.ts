@@ -1,8 +1,7 @@
 import { hostname, platform, release } from 'node:os';
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
-import { getResolvedRegistryUrl } from '../config/paths';
-import { getAuthPath, ensureConfigDir as ensureNewConfigDir } from '../config/config';
+import { getAuthPath, ensureConfigDir as ensureNewConfigDir, getRegistryUrl } from '../config/config';
 
 const CONFIG_FILE = getAuthPath();
 
@@ -17,8 +16,6 @@ export interface AuthConfig {
     email?: string;
     image?: string;
   };
-  // Legacy field for backwards compatibility
-  token?: string;
 }
 
 function ensureConfigDir(): void {
@@ -56,7 +53,7 @@ export function clearConfig(): void {
  * Get the base URL for the API (derived from registry URL)
  */
 export function getBaseUrl(): string {
-  const registryUrl = getResolvedRegistryUrl();
+  const registryUrl = getRegistryUrl();
   // Remove /registry suffix to get base URL
   return registryUrl.replace(/\/registry$/, '');
 }
@@ -127,13 +124,13 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
 export async function getValidToken(): Promise<string | null> {
   const config = loadConfig();
 
-  // Check for legacy token field
-  if (config.token && !config.accessToken) {
-    return config.token;
-  }
-
   if (!config.accessToken) {
     return null;
+  }
+
+  // API tokens set via `login --token` may not have an expiry timestamp.
+  if (!config.accessTokenExpiresAt) {
+    return config.accessToken;
   }
 
   // Check if access token is still valid (with 5 minute buffer)
@@ -174,24 +171,44 @@ export async function getValidToken(): Promise<string | null> {
 }
 
 /**
- * Get the current token (without auto-refresh)
- * @deprecated Use getValidToken() instead for automatic refresh
+ * Validate an access token by calling token auth endpoint.
  */
-export function getToken(): string | undefined {
-  const config = loadConfig();
-  return config.accessToken ?? config.token;
+export async function validateAccessToken(token: string): Promise<AuthConfig['user'] | null> {
+  try {
+    const response = await fetch(`${getBaseUrl()}/api/tokens/validate`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json() as {
+      success?: boolean;
+      user?: AuthConfig['user'];
+    };
+
+    if (!data.success) {
+      return null;
+    }
+
+    return data.user ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Set token directly (for --token flag)
  */
 export function setToken(token: string, user?: AuthConfig['user']): void {
-  const config = loadConfig();
-  config.accessToken = token;
-  config.token = token; // Keep legacy field for compatibility
-  if (user) {
-    config.user = user;
-  }
+  const config: AuthConfig = {
+    accessToken: token,
+    user,
+  };
   saveConfig(config);
 }
 
@@ -217,7 +234,7 @@ export function setTokens(tokens: {
 
 export function isAuthenticated(): boolean {
   const config = loadConfig();
-  return !!(config.accessToken || config.token);
+  return !!config.accessToken;
 }
 
 export function getUser(): AuthConfig['user'] | undefined {
