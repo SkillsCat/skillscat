@@ -437,6 +437,16 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
     throw error(404, 'Skill files not found');
   }
 
+  // Track download count in KV (date-partitioned for true rolling window)
+  if (kv) {
+    try {
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const key = `dl:${skill.id}:${today}`;
+      const current = parseInt(await kv.get(key) || '0');
+      await kv.put(key, String(current + 1), { expirationTtl: 31 * 86400 });
+    } catch { /* non-critical */ }
+  }
+
   return json({ folderName, files }, {
     headers: {
       'Cache-Control': 'public, max-age=300',

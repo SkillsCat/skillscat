@@ -32,6 +32,7 @@ export function calculateTrendingScore(skill: {
   starSnapshots: StarSnapshot[];
   indexedAt: number;
   lastCommitAt: number | null;
+  downloadCount7d?: number;
 }): number {
   const now = Date.now();
 
@@ -67,7 +68,11 @@ export function calculateTrendingScore(skill: {
     else if (daysSinceCommit > 30) activityPenalty = 0.9;
   }
 
-  const score = baseScore * velocityMultiplier * recencyBoost * activityPenalty;
+  // Download boost: 0 downloads → 1.0x, 10 → ~1.52x, 100 → 2.0x (capped)
+  const downloads7d = skill.downloadCount7d ?? 0;
+  const downloadBoost = Math.min(2.0, 1.0 + Math.log2(downloads7d + 1) * 0.15);
+
+  const score = baseScore * velocityMultiplier * recencyBoost * activityPenalty * downloadBoost;
   return Math.round(score * 100) / 100;
 }
 
@@ -238,7 +243,7 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
   const placeholders = skillIds.map(() => '?').join(',');
   const skills = await env.DB.prepare(`
     SELECT id, repo_owner, repo_name, stars, star_snapshots, indexed_at, last_commit_at,
-           tier, last_accessed_at, access_count_7d
+           tier, last_accessed_at, access_count_7d, download_count_7d
     FROM skills WHERE id IN (${placeholders})
   `)
     .bind(...skillIds)
@@ -288,6 +293,7 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
       starSnapshots: compressed,
       indexedAt: skill.indexed_at,
       lastCommitAt: pushedAt,
+      downloadCount7d: skill.download_count_7d,
     });
 
     const newTier = calculateTier({
@@ -343,7 +349,7 @@ async function updateSkillsByTier(
   // Only fetch skills that are due for update
   const skills = await env.DB.prepare(`
     SELECT id, repo_owner, repo_name, stars, star_snapshots, indexed_at, last_commit_at,
-           tier, last_accessed_at, access_count_7d
+           tier, last_accessed_at, access_count_7d, download_count_7d
     FROM skills
     WHERE tier IN (${tierPlaceholders})
       AND (next_update_at IS NULL OR next_update_at < ?)
@@ -411,6 +417,7 @@ async function updateSkillsByTier(
         starSnapshots: compressed,
         indexedAt: skill.indexed_at,
         lastCommitAt: pushedAt,
+        downloadCount7d: skill.download_count_7d,
       });
 
       const newTier = calculateTier({
@@ -512,6 +519,92 @@ async function detectReclassificationNeeded(
   return skills.results.length;
 }
 
+/**
+ * Flush download counts from KV to D1 (true rolling window).
+ *
+ * KV stores date-partitioned keys: `dl:{skillId}:{YYYY-MM-DD}` → daily count.
+ * This function lists all keys, groups by skillId, sums the last 7/30 days,
+ * and SETs (not increments) the D1 columns. Idempotent — safe to re-run.
+ *
+ * Runs at most once per day (guarded by `dl:last_flush` KV key) to save reads.
+ */
+async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
+  try {
+    // Guard: only flush once per day
+    const lastFlush = await env.KV.get('dl:last_flush');
+    const today = new Date().toISOString().slice(0, 10);
+    if (lastFlush === today) return 0;
+
+    // List all dl:* keys (paginate if >1000)
+    const allKeys: { name: string }[] = [];
+    let cursor: string | undefined;
+    do {
+      const list = await env.KV.list({ prefix: 'dl:', cursor });
+      allKeys.push(...list.keys);
+      cursor = list.list_complete ? undefined : list.cursor;
+    } while (cursor);
+
+    if (allKeys.length === 0) {
+      await env.KV.put('dl:last_flush', today, { expirationTtl: 86400 });
+      return 0;
+    }
+
+    // Read all values and parse key structure
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000).toISOString().slice(0, 10);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10);
+
+    // Group counts by skillId
+    const skillCounts = new Map<string, { sum7d: number; sum30d: number }>();
+
+    for (const key of allKeys) {
+      // Skip non-daily keys (e.g., dl:last_flush)
+      const parts = key.name.split(':');
+      if (parts.length !== 3) continue;
+
+      const [, skillId, date] = parts;
+      if (date < thirtyDaysAgo) continue; // Skip expired (TTL should handle, but be safe)
+
+      const countStr = await env.KV.get(key.name);
+      const count = parseInt(countStr || '0');
+      if (count <= 0) continue;
+
+      const entry = skillCounts.get(skillId) || { sum7d: 0, sum30d: 0 };
+      entry.sum30d += count;
+      if (date >= sevenDaysAgo) {
+        entry.sum7d += count;
+      }
+      skillCounts.set(skillId, entry);
+    }
+
+    if (skillCounts.size === 0) {
+      await env.KV.put('dl:last_flush', today, { expirationTtl: 86400 });
+      return 0;
+    }
+
+    // D1 batch SET (not increment — these are computed totals)
+    const entries = [...skillCounts.entries()];
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+      const chunk = entries.slice(i, i + BATCH_SIZE);
+      const stmts = chunk.map(([skillId, counts]) =>
+        env.DB.prepare(`
+          UPDATE skills
+          SET download_count_7d = ?, download_count_30d = ?
+          WHERE id = ?
+        `).bind(counts.sum7d, counts.sum30d, skillId)
+      );
+      await env.DB.batch(stmts);
+    }
+
+    await env.KV.put('dl:last_flush', today, { expirationTtl: 86400 });
+    return skillCounts.size;
+  } catch (err) {
+    console.error('Failed to flush download counts:', err);
+    return 0;
+  }
+}
+
 async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   const now = Date.now();
 
@@ -539,6 +632,7 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.visibility = 'public'
+      AND (s.skill_path IS NULL OR s.skill_path = '' OR s.skill_path NOT LIKE '.%')
     ORDER BY s.stars DESC
     LIMIT 100
   `).all<SkillListItem>();
@@ -636,10 +730,16 @@ export default {
       console.log(`Queued ${reclassifications} skills for AI reclassification`);
     }
 
-    // 6. Regenerate list caches
+    // 6. Flush download counts from KV to D1
+    const downloadsFlushed = await flushDownloadCounts(env);
+    if (downloadsFlushed > 0) {
+      console.log(`Flushed download counts for ${downloadsFlushed} skills`);
+    }
+
+    // 7. Regenerate list caches
     await regenerateListCaches(env);
 
-    // 7. Record metrics
+    // 8. Record metrics
     const totalBatches = Math.ceil((markedUpdates + hotResult.count + warmResult.count + coolResult.count) / BATCH_SIZE);
     await recordMetrics(env, {
       markedUpdates,

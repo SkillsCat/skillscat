@@ -6,6 +6,7 @@ import { discoverSkills } from '../utils/source/git';
 import { fetchSkill } from '../utils/api/registry';
 import { AGENTS, detectInstalledAgents, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents/agents';
 import { recordInstallation } from '../utils/storage/db';
+import { trackInstallation } from '../utils/api/tracking';
 import { success, error, warn, info, spinner, prompt } from '../utils/core/ui';
 import { cacheSkill, getCachedSkill } from '../utils/storage/cache';
 import { verboseLog } from '../utils/core/verbose';
@@ -257,6 +258,10 @@ export async function add(source: string, options: AddOptions): Promise<void> {
       path: skill.path,
       contentHash: skill.contentHash
     });
+
+    // Track installation on server (non-blocking, fail-silent)
+    const slug = `${repoSource.owner}/${repoSource.repo}`;
+    trackInstallation(slug).catch(() => {});
   }
 
   console.log();

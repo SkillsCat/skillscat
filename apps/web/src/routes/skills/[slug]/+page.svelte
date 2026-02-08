@@ -13,6 +13,7 @@
       isOwner?: boolean;
       isBookmarked?: boolean;
       isAuthenticated?: boolean;
+      isDotFolderSkill?: boolean;
     };
   }
 
@@ -1051,6 +1052,28 @@
                 <code class="block mt-2 text-xs bg-yellow-100 dark:bg-yellow-900/40 px-2 py-1 rounded">
                   skillscat login
                 </code>
+              </div>
+            </div>
+          </div>
+        {/if}
+
+        <!-- Dot-Folder Skill Notice -->
+        {#if data.isDotFolderSkill}
+          <div class="card bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
+            <div class="flex items-start gap-3">
+              <svg class="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <h4 class="font-medium text-blue-800 dark:text-blue-200">Repository Stars</h4>
+                <p class="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                  The star count shown is for the parent repository ({data.skill.repoOwner}/{data.skill.repoName}), not this specific skill.
+                </p>
+                {#if data.skill.skillPath}
+                  <code class="block mt-2 text-xs bg-blue-100 dark:bg-blue-900/40 px-2 py-1 rounded">
+                    {data.skill.skillPath}
+                  </code>
+                {/if}
               </div>
             </div>
           </div>

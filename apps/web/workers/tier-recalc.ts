@@ -107,6 +107,9 @@ async function resetAccessCounts(env: TierRecalcEnv): Promise<void> {
     .bind(thirtyDaysAgo)
     .run();
 
+  // Note: download_count_7d and download_count_30d are computed as true rolling
+  // window sums by the trending worker's flushDownloadCounts() — no decay needed here.
+
   console.log('Access counts reset completed');
 }
 

@@ -48,12 +48,16 @@ export const load: PageServerLoad = async ({ params, platform, locals }) => {
       isBookmarked = !!bookmark;
     }
 
+    // Determine if this is a dot-folder skill (e.g., .claude/SKILL.md)
+    const isDotFolderSkill = skill.skillPath ? /^\.[\w-]+/.test(skill.skillPath) : false;
+
     return {
       skill,
       relatedSkills,
       isOwner: skill.ownerId === userId,
       isBookmarked,
       isAuthenticated: !!userId,
+      isDotFolderSkill,
     };
   } catch (error) {
     console.error('Error loading skill:', error);

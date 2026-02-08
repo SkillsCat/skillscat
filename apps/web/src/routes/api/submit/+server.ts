@@ -12,6 +12,9 @@ const MAX_DEPTH = 3;
 const MAX_SKILLS_TO_SUBMIT = 50; // Safety limit for auto-submission
 const QUEUE_DELAY_MS = 1000; // 1 second delay between queue messages
 
+/** Minimum stars required for a repo to allow dot-folder skills */
+const DOT_FOLDER_MIN_STARS = 500;
+
 interface ArchiveData {
   id: string;
   categories: string[];
@@ -146,7 +149,8 @@ async function scanRepoForSkillMd(
   repo: string,
   token?: string,
   basePath: string = '',
-  maxDepth: number = MAX_DEPTH
+  maxDepth: number = MAX_DEPTH,
+  allowDotFolders: boolean = false
 ): Promise<ScanResult> {
   const headers: HeadersInit = {
     Accept: 'application/vnd.github+json',
@@ -167,7 +171,7 @@ async function scanRepoForSkillMd(
 
     if (!response.ok) {
       // Fallback to search API if trees API fails
-      return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth);
+      return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, allowDotFolders);
     }
 
     const data = await response.json() as GitHubTreeResponse;
@@ -184,8 +188,8 @@ async function scanRepoForSkillMd(
       const fileName = item.path.split('/').pop() || '';
       if (fileName.toLowerCase() !== 'skill.md') continue;
 
-      // Skip files in dot folders
-      if (containsDotFolder(item.path)) continue;
+      // Skip files in dot folders (unless allowed for high-star repos)
+      if (!allowDotFolders && containsDotFolder(item.path)) continue;
 
       // If basePath is specified, only include files within that scope
       if (normalizedBasePath) {
@@ -222,7 +226,7 @@ async function scanRepoForSkillMd(
   } catch (err) {
     log.error('Error scanning repo with Trees API:', err);
     // Fallback to search API
-    return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth);
+    return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, allowDotFolders);
   }
 }
 
@@ -249,7 +253,8 @@ async function searchRepoForSkillMd(
   repo: string,
   token?: string,
   basePath: string = '',
-  maxDepth: number = MAX_DEPTH
+  maxDepth: number = MAX_DEPTH,
+  allowDotFolders: boolean = false
 ): Promise<ScanResult> {
   const headers: HeadersInit = {
     Accept: 'application/vnd.github+json',
@@ -279,8 +284,8 @@ async function searchRepoForSkillMd(
     const normalizedBasePath = basePath ? basePath.replace(/\/$/, '') : '';
 
     for (const item of data.items) {
-      // Skip files in dot folders
-      if (containsDotFolder(item.path)) continue;
+      // Skip files in dot folders (unless allowed for high-star repos)
+      if (!allowDotFolders && containsDotFolder(item.path)) continue;
 
       // If basePath is specified, only include files within that scope
       if (normalizedBasePath) {
@@ -392,7 +397,7 @@ async function fetchGitHubRepo(owner: string, repo: string, token?: string): Pro
 /**
  * Check if SKILL.md exists in GitHub repo (only in root, not in dot folders)
  */
-async function checkGitHubSkillMd(owner: string, repo: string, path: string, token?: string): Promise<boolean> {
+async function checkGitHubSkillMd(owner: string, repo: string, path: string, token?: string, allowDotFolders: boolean = false): Promise<boolean> {
   const headers: HeadersInit = {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
@@ -403,10 +408,10 @@ async function checkGitHubSkillMd(owner: string, repo: string, path: string, tok
     headers.Authorization = `Bearer ${token}`;
   }
 
-  // Only check root SKILL.md (not in dot folders like .claude/, .cursor/, etc.)
+  // Only check root SKILL.md (skip dot folders unless allowed for high-star repos)
   const skillPaths = [
     path ? `${path}/SKILL.md` : 'SKILL.md',
-  ].filter(p => !isInDotFolder(p));
+  ].filter(p => allowDotFolders || !isInDotFolder(p));
 
   for (const checkPath of skillPaths) {
     const response = await fetch(
@@ -448,11 +453,6 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     // Use explicit skillPath if provided, otherwise use path from URL
     const path = explicitSkillPath !== undefined ? explicitSkillPath : urlPath;
 
-    // Reject submissions from dot folders (IDE-specific configurations)
-    if (path && isInDotFolder(path)) {
-      throw error(400, 'Skills from IDE-specific folders (e.g., .claude, .cursor, .trae) are not accepted. Please submit standalone skills from the repository root.');
-    }
-
     const db = platform?.env?.DB;
     const queue = platform?.env?.INDEXING_QUEUE;
     const githubToken = platform?.env?.GITHUB_TOKEN;
@@ -467,8 +467,14 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       throw error(400, 'Forked repositories are not accepted. Please submit the original repository.');
     }
 
+    // Reject dot-folder submissions from repos with insufficient stars
+    const allowDotFolders = (repoData.stars ?? 0) >= DOT_FOLDER_MIN_STARS;
+    if (path && isInDotFolder(path) && !allowDotFolders) {
+      throw error(400, 'Skills from IDE-specific folders are only accepted from repositories with 500+ stars.');
+    }
+
     // First, check if SKILL.md exists at the submitted path (or root if no path)
-    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken);
+    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, allowDotFolders);
 
     if (hasSkillMd) {
       // SKILL.md found at the submitted path - submit directly
@@ -484,7 +490,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     }
 
     // No SKILL.md at submitted path - scan for SKILL.md files as fallback
-    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path);
+    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders);
 
     if (scanResult.found.length === 0) {
       throw error(400, 'No SKILL.md file found in the repository');
@@ -737,8 +743,11 @@ export const GET: RequestHandler = async ({ platform, url }) => {
       return json({ valid: false, error: 'Forked repositories are not accepted' });
     }
 
+    // Determine if dot-folder skills are allowed based on star count
+    const allowDotFolders = (repoData.stars ?? 0) >= DOT_FOLDER_MIN_STARS;
+
     // First, check if SKILL.md exists at the submitted path (or root if no path)
-    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken);
+    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, allowDotFolders);
 
     if (hasSkillMd) {
       // SKILL.md found at the submitted path - check if already exists in DB
@@ -787,7 +796,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
     }
 
     // No SKILL.md at submitted path - scan for SKILL.md files as fallback
-    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path);
+    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders);
 
     if (scanResult.found.length === 0) {
       return json({ valid: false, error: 'No SKILL.md file found in the repository' });

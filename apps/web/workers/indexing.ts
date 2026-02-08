@@ -23,6 +23,7 @@ import type {
 } from './shared/types';
 import {
   isInDotFolder,
+  DOT_FOLDER_MIN_STARS,
   githubFetch,
   getRepoApiUrl,
   getContentsApiUrl,
@@ -475,7 +476,8 @@ async function fetchDirectoryFiles(
   name: string,
   branch: string,
   skillPath: string | null,
-  env: IndexingEnv
+  env: IndexingEnv,
+  allowDotFolders: boolean = false
 ): Promise<{ files: DirectoryFile[]; textContents: Map<string, string> }> {
   const treeUrl = `https://api.github.com/repos/${owner}/${name}/git/trees/${branch}?recursive=1`;
   const treeData = await githubFetch<GitHubTreeResponse>(treeUrl, {
@@ -514,8 +516,8 @@ async function fetchDirectoryFiles(
       relativePath = item.path;
     }
 
-    // Skip files in dot folders
-    if (isInDotFolder(relativePath)) continue;
+    // Skip files in dot folders (unless allowed for high-star repos)
+    if (!allowDotFolders && isInDotFolder(relativePath)) continue;
 
     const fileSize = item.size || 0;
 
@@ -648,16 +650,17 @@ async function getSkillMd(
   owner: string,
   name: string,
   env: IndexingEnv,
-  skillPath?: string
+  skillPath?: string,
+  allowDotFolders: boolean = false
 ): Promise<GitHubContent | null> {
   // Build paths based on skillPath
-  // Only accept SKILL.md in the specified path (not in any dot folders like .claude/, .cursor/, etc.)
+  // Only accept SKILL.md in the specified path (skip dot folders unless allowed)
   const basePath = skillPath ? `${skillPath}/` : '';
   const paths = [`${basePath}SKILL.md`, `${basePath}skill.md`];
 
   for (const path of paths) {
-    // Skip if path is in a dot folder
-    if (isInDotFolder(path)) {
+    // Skip if path is in a dot folder (unless allowed for high-star repos)
+    if (!allowDotFolders && isInDotFolder(path)) {
       continue;
     }
 
@@ -670,8 +673,8 @@ async function getSkillMd(
       }
     );
     if (content && content.type === 'file') {
-      // Double-check the returned path is not in a dot folder
-      if (content.path && isInDotFolder(content.path)) {
+      // Double-check the returned path is not in a dot folder (unless allowed)
+      if (!allowDotFolders && content.path && isInDotFolder(content.path)) {
         continue;
       }
       return content;
@@ -924,6 +927,9 @@ async function processMessage(
 
   log.log(`Repo info fetched: ${repoOwner}/${repoName}, stars: ${repo.stargazers_count}, fork: ${repo.fork}`);
 
+  // Determine if dot-folder skills are allowed based on star count
+  const allowDotFolders = repo.stargazers_count >= DOT_FOLDER_MIN_STARS;
+
   // Step 2: Get latest commit SHA
   const latestCommit = await getLatestCommitSha(repoOwner, repoName, env);
   if (!latestCommit) {
@@ -954,7 +960,7 @@ async function processMessage(
   }
 
   // Step 4: Verify SKILL.md exists
-  const skillMd = await getSkillMd(repoOwner, repoName, env, skillPath);
+  const skillMd = await getSkillMd(repoOwner, repoName, env, skillPath, allowDotFolders);
   if (!skillMd) {
     log.log(`No SKILL.md found: ${repoOwner}/${repoName}${skillPath ? `/${skillPath}` : ''}`);
     return;
@@ -972,7 +978,8 @@ async function processMessage(
       repoName,
       latestCommit.branch,
       skillPath || null,
-      env
+      env,
+      allowDotFolders
     );
     directoryFiles = result.files;
     textContents = result.textContents;
@@ -1050,6 +1057,30 @@ async function processMessage(
   // Store content hashes for future duplicate detection
   await storeContentHashes(skillId, fullHash, normalizedHash, env);
   log.log(`Content hashes stored for: ${skillId}`);
+
+  // Compute combined content hash across all files for duplicate detection
+  if (textContents.size > 0) {
+    const sortedPaths = [...textContents.keys()].sort();
+    const combinedContent = sortedPaths.map(p => textContents.get(p)!).join('\n---FILE-BOUNDARY---\n');
+    const combinedHash = await computeHash(combinedContent);
+
+    // Update skills.content_hash with combined hash
+    await env.DB.prepare('UPDATE skills SET content_hash = ? WHERE id = ?')
+      .bind(combinedHash, skillId)
+      .run();
+
+    // Store combined hash type in content_hashes table
+    await env.DB.prepare(`
+      INSERT INTO content_hashes (id, skill_id, hash_type, hash_value, created_at)
+      VALUES (?, ?, 'combined', ?, ?)
+      ON CONFLICT(skill_id, hash_type) DO UPDATE SET
+        hash_value = excluded.hash_value
+    `)
+      .bind(generateId(), skillId, combinedHash, Date.now())
+      .run();
+
+    log.log(`Combined content hash stored for: ${skillId} (${sortedPaths.length} files)`);
+  }
 
   // Save tags from frontmatter (including keywords alias)
   let tags: string[] = [];

@@ -286,6 +286,8 @@ export interface SkillRecord {
   last_accessed_at: number | null;
   access_count_7d: number;
   access_count_30d: number;
+  download_count_7d: number;
+  download_count_30d: number;
   next_update_at: number | null;
   classification_method: ClassificationMethod | null;
   created_at: number;

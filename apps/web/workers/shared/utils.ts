@@ -43,6 +43,13 @@ export function decodeBase64ToUtf8(base64: string): string {
 }
 
 // ============================================
+// Constants
+// ============================================
+
+/** Minimum stars required for a repo to allow dot-folder skills */
+export const DOT_FOLDER_MIN_STARS = 500;
+
+// ============================================
 // Path Utilities
 // ============================================
 

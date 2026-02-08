@@ -274,13 +274,14 @@ export async function getTopSkillsPaginated(
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.visibility = 'public'
+      AND (s.skill_path IS NULL OR s.skill_path = '' OR s.skill_path NOT LIKE '.%')
     ORDER BY s.stars DESC
     LIMIT ? OFFSET ?
   `)
     .bind(limit, offset)
     .all();
 
-  const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
+  const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public' AND (skill_path IS NULL OR skill_path = '' OR skill_path NOT LIKE '.%')")
     .first<{ total: number }>();
 
   const skills = await addCategoriesToSkills(env.DB, result.results as any[]);
