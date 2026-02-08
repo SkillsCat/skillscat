@@ -86,22 +86,8 @@
     background: var(--muted);
   }
 
-  /* Use squircle shape when supported */
-  @supports (corner-shape: squircle) {
-    .avatar-container {
-      border-radius: 42%;
-      corner-shape: squircle;
-    }
-  }
-
   .avatar-container.circle {
     border-radius: 50%;
-  }
-
-  @supports (corner-shape: round) {
-    .avatar-container.circle {
-      corner-shape: round;
-    }
   }
 
   .avatar-container.border {

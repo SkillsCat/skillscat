@@ -137,6 +137,7 @@
     font-size: 0.875rem;
     color: var(--fg-muted);
     display: -webkit-box;
+    line-clamp: 2;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
@@ -257,6 +258,7 @@
     .skill-desc {
       margin-top: 0.375rem;
       font-size: 0.8125rem;
+      line-clamp: 2;
       -webkit-line-clamp: 2;
     }
 
