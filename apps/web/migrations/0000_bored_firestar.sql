@@ -256,6 +256,8 @@ CREATE TABLE `skills` (
 	`access_count_7d` integer DEFAULT 0 NOT NULL,
 	`access_count_30d` integer DEFAULT 0 NOT NULL,
 	`next_update_at` integer,
+	`download_count_7d` integer DEFAULT 0 NOT NULL,
+	`download_count_30d` integer DEFAULT 0 NOT NULL,
 	`classification_method` text,
 	`created_at` integer DEFAULT (unixepoch() * 1000) NOT NULL,
 	`updated_at` integer DEFAULT (unixepoch() * 1000) NOT NULL,

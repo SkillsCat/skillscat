@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6f08a864-ed70-47df-980b-dc3811bd437c",
+  "id": "f5c71c48-dc0e-425d-a16b-fdeac1ecbf9b",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -1768,6 +1768,22 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "download_count_7d": {
+          "name": "download_count_7d",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "download_count_30d": {
+          "name": "download_count_30d",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         },
         "classification_method": {
           "name": "classification_method",
