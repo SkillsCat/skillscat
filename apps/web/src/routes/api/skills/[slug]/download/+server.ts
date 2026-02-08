@@ -1,5 +1,7 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getAuthContext } from '$lib/server/middleware/auth';
+import { checkSkillAccess } from '$lib/server/permissions';
 
 interface SkillInfo {
   id: string;
@@ -10,26 +12,35 @@ interface SkillInfo {
   repo_name: string | null;
   skill_path: string | null;
   readme: string | null;
+  visibility: string;
 }
 
 /**
- * Build R2 path for a skill's SKILL.md file
+ * Build possible R2 paths for a skill's SKILL.md file.
+ * First path is canonical (slug-based), second path is legacy (name-based upload path).
  */
-function buildR2Path(skill: SkillInfo): string {
+function buildR2Paths(skill: SkillInfo): string[] {
   if (skill.source_type === 'upload') {
+    const paths: string[] = [];
     const parts = skill.slug.split('/');
     if (parts.length >= 2) {
-      return `skills/${parts[0]}/${parts[1]}/SKILL.md`;
+      paths.push(`skills/${parts[0]}/${parts[1]}/SKILL.md`);
+      const legacyPath = `skills/${parts[0]}/${skill.name}/SKILL.md`;
+      if (legacyPath !== paths[0]) {
+        paths.push(legacyPath);
+      }
+      return paths;
     }
+    return [`skills/${skill.slug}/SKILL.md`];
   }
   const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
-  return `skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/SKILL.md`;
+  return [`skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/SKILL.md`];
 }
 
 /**
  * GET /api/skills/[slug]/download - Download skill as a zip file
  */
-export const GET: RequestHandler = async ({ params, platform }) => {
+export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
   const kv = platform?.env?.KV;
@@ -45,7 +56,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 
   // Fetch skill info
   const skill = await db.prepare(`
-    SELECT id, name, slug, source_type, repo_owner, repo_name, skill_path, readme
+    SELECT id, name, slug, source_type, repo_owner, repo_name, skill_path, readme, visibility
     FROM skills WHERE slug = ?
   `)
     .bind(slug)
@@ -55,13 +66,26 @@ export const GET: RequestHandler = async ({ params, platform }) => {
     throw error(404, 'Skill not found');
   }
 
+  if (skill.visibility === 'private') {
+    const auth = await getAuthContext(request, locals, db);
+    if (!auth.userId) {
+      throw error(401, 'Authentication required');
+    }
+    const hasAccess = await checkSkillAccess(skill.id, auth.userId, db);
+    if (!hasAccess) {
+      throw error(403, 'You do not have permission to access this skill');
+    }
+  }
+
   // Try to get SKILL.md content from R2
   let skillContent: string | null = null;
   try {
-    const r2Path = buildR2Path(skill);
-    const r2Object = await r2.get(r2Path);
-    if (r2Object) {
-      skillContent = await r2Object.text();
+    for (const r2Path of buildR2Paths(skill)) {
+      const r2Object = await r2.get(r2Path);
+      if (r2Object) {
+        skillContent = await r2Object.text();
+        break;
+      }
     }
   } catch {
     // Fall back to readme if R2 fetch fails
@@ -99,7 +123,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
     headers: {
       'Content-Type': 'application/zip',
       'Content-Disposition': `attachment; filename="${downloadName}.zip"`,
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': skill.visibility === 'private' ? 'private, no-cache' : 'public, max-age=3600',
     },
   });
 };

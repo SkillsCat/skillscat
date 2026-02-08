@@ -34,7 +34,7 @@ export interface SkillMetadata {
 export function parseSource(source: string): RepoSource | null {
   // GitHub shorthand: owner/repo
   const shorthandMatch = source.match(/^([^\/\s]+)\/([^\/\s]+)$/);
-  if (shorthandMatch && !source.includes('.')) {
+  if (shorthandMatch) {
     return {
       platform: 'github',
       owner: shorthandMatch[1],

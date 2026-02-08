@@ -67,6 +67,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
       SELECT
         s.id,
         s.name,
+        s.slug,
         s.description,
         s.repo_owner as owner,
         s.repo_name as repo,
@@ -74,6 +75,8 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
         s.updated_at as updatedAt,
         s.github_url as githubUrl,
         s.skill_path as skillPath,
+        s.source_type as sourceType,
+        s.readme,
         s.visibility,
         GROUP_CONCAT(sc.category_slug) as categories
       FROM skills s
@@ -84,6 +87,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     `).bind(slug).first<{
       id: string;
       name: string;
+      slug: string;
       description: string | null;
       owner: string | null;
       repo: string | null;
@@ -91,6 +95,8 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
       updatedAt: number;
       githubUrl: string | null;
       skillPath: string | null;
+      sourceType: string;
+      readme: string | null;
       visibility: string;
       categories: string | null;
     }>();
@@ -121,24 +127,46 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
 
     // Fetch content from R2
     let content = '';
-    if (r2 && row.owner && row.repo) {
+    if (r2) {
       try {
-        const skillPathPart = row.skillPath ? `/${row.skillPath}` : '';
-        const r2Key = `skills/${row.owner}/${row.repo}${skillPathPart}/SKILL.md`;
-        const object = await r2.get(r2Key);
-        if (object) {
-          content = await object.text();
+        if (row.sourceType === 'upload') {
+          const slugParts = row.slug.split('/');
+          if (slugParts.length >= 2) {
+            const candidateKeys = [
+              `skills/${slugParts[0]}/${slugParts[1]}/SKILL.md`,
+              `skills/${slugParts[0]}/${row.name}/SKILL.md`,
+            ];
+            for (const key of candidateKeys) {
+              const object = await r2.get(key);
+              if (object) {
+                content = await object.text();
+                break;
+              }
+            }
+          }
+        } else if (row.owner && row.repo) {
+          const skillPathPart = row.skillPath ? `/${row.skillPath}` : '';
+          const r2Key = `skills/${row.owner}/${row.repo}${skillPathPart}/SKILL.md`;
+          const object = await r2.get(r2Key);
+          if (object) {
+            content = await object.text();
+          }
         }
       } catch {
         // Content not in R2
       }
     }
+    if (!content && row.readme) {
+      content = row.readme;
+    }
+
+    const slugParts = row.slug.split('/');
 
     const skill: RegistrySkillItem = {
       name: row.name,
       description: row.description || '',
-      owner: row.owner || '',
-      repo: row.repo || '',
+      owner: row.owner || slugParts[0] || '',
+      repo: row.repo || slugParts[1] || '',
       stars: row.stars || 0,
       updatedAt: row.updatedAt,
       categories: row.categories ? row.categories.split(',') : [],

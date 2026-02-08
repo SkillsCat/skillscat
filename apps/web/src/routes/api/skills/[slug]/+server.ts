@@ -3,9 +3,9 @@ import type { RequestHandler } from './$types';
 import type { SkillDetail, SkillCardData, ApiResponse, FileNode } from '$lib/types';
 import { getCached } from '$lib/server/cache';
 import { getAuthContext } from '$lib/server/middleware/auth';
-import { isSkillOwner } from '$lib/server/permissions';
+import { isSkillOwner, checkSkillAccess } from '$lib/server/permissions';
 
-export const GET: RequestHandler = async ({ params, platform }) => {
+export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   try {
     const db = platform?.env?.DB;
 
@@ -152,6 +152,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
             LEFT JOIN authors a ON s.repo_owner = a.username
             WHERE sc.category_slug IN (${skill.categories.map(() => '?').join(',')})
               AND s.id != ?
+              AND s.visibility != 'private'
             GROUP BY s.id
             ORDER BY s.trending_score DESC
             LIMIT 6
@@ -198,12 +199,31 @@ export const GET: RequestHandler = async ({ params, platform }) => {
       } satisfies ApiResponse<never>, { status: 404 });
     }
 
+    if (data.skill.visibility === 'private') {
+      const auth = await getAuthContext(request, locals, db);
+      if (!auth.userId) {
+        return json({
+          success: false,
+          error: 'Authentication required'
+        } satisfies ApiResponse<never>, { status: 401 });
+      }
+      const hasAccess = await checkSkillAccess(data.skill.id, auth.userId, db);
+      if (!hasAccess) {
+        return json({
+          success: false,
+          error: 'You do not have permission to access this skill'
+        } satisfies ApiResponse<never>, { status: 403 });
+      }
+    }
+
+    const isPrivate = data.skill.visibility === 'private';
+
     return json({
       success: true,
       data
     } satisfies ApiResponse<{ skill: SkillDetail; relatedSkills: SkillCardData[] }>, {
       headers: {
-        'Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
+        'Cache-Control': isPrivate ? 'private, no-cache' : 'public, max-age=300, stale-while-revalidate=600',
         'X-Cache': hit ? 'HIT' : 'MISS'
       }
     });
@@ -218,6 +238,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 
 interface SkillInfo {
   id: string;
+  name: string;
   slug: string;
   owner_id: string | null;
   source_type: string;
@@ -227,20 +248,25 @@ interface SkillInfo {
 }
 
 /**
- * Build R2 path for a skill's SKILL.md file
+ * Build possible R2 paths for a skill's SKILL.md file.
  */
-function buildR2Path(skill: SkillInfo): string {
+function buildR2Paths(skill: SkillInfo): string[] {
   if (skill.source_type === 'upload') {
-    // For uploaded skills, extract owner and name from slug (owner/name)
+    const paths: string[] = [];
     const parts = skill.slug.split('/');
     if (parts.length >= 2) {
-      return `skills/${parts[0]}/${parts[1]}/SKILL.md`;
+      paths.push(`skills/${parts[0]}/${parts[1]}/SKILL.md`);
+      const legacyPath = `skills/${parts[0]}/${skill.name}/SKILL.md`;
+      if (legacyPath !== paths[0]) {
+        paths.push(legacyPath);
+      }
+      return paths;
     }
+    return [`skills/${skill.slug}/SKILL.md`];
   }
 
-  // For GitHub-sourced skills
   const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
-  return `skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/SKILL.md`;
+  return [`skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/SKILL.md`];
 }
 
 /**
@@ -270,7 +296,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
 
   // Fetch skill by slug and verify ownership
   const skill = await db.prepare(`
-    SELECT id, slug, owner_id, source_type, repo_owner, repo_name, skill_path
+    SELECT id, name, slug, owner_id, source_type, repo_owner, repo_name, skill_path
     FROM skills WHERE slug = ?
   `)
     .bind(slug)
@@ -296,8 +322,10 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
 
   // Delete R2 files
   try {
-    const r2Path = buildR2Path(skill);
-    await r2.delete(r2Path);
+    const r2Paths = buildR2Paths(skill);
+    for (const r2Path of r2Paths) {
+      await r2.delete(r2Path);
+    }
   } catch (r2Error) {
     // Log but don't fail - the DB record is already deleted
     console.error(`Failed to delete R2 file for skill ${skill.id}:`, r2Error);

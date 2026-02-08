@@ -1,8 +1,11 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getAuthContext } from '$lib/server/middleware/auth';
+import { checkSkillAccess } from '$lib/server/permissions';
 
 interface SkillInfo {
   id: string;
+  name: string;
   slug: string;
   source_type: string;
   repo_owner: string | null;
@@ -74,7 +77,7 @@ async function checkRateLimit(kv: KVNamespace, clientIp: string): Promise<boolea
 /**
  * GET /api/skills/[slug]/file?path=xxx - Get single file content
  */
-export const GET: RequestHandler = async ({ params, platform, request, url }) => {
+export const GET: RequestHandler = async ({ params, platform, request, url, locals }) => {
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
   const kv = platform?.env?.KV;
@@ -114,31 +117,55 @@ export const GET: RequestHandler = async ({ params, platform, request, url }) =>
   }
 
   const skill = await db.prepare(`
-    SELECT id, slug, source_type, repo_owner, repo_name, skill_path, readme, visibility
+    SELECT id, name, slug, source_type, repo_owner, repo_name, skill_path, readme, visibility
     FROM skills WHERE slug = ?
   `).bind(slug).first<SkillInfo>();
 
   if (!skill) throw error(404, 'Skill not found');
 
+  if (skill.visibility === 'private') {
+    const auth = await getAuthContext(request, locals, db);
+    if (!auth.userId) {
+      throw error(401, 'Authentication required');
+    }
+    const hasAccess = await checkSkillAccess(skill.id, auth.userId, db);
+    if (!hasAccess) {
+      throw error(403, 'You do not have permission to access this skill');
+    }
+  }
+
+  const cacheControl = skill.visibility === 'private' ? 'private, no-cache' : 'public, max-age=300';
+
   // Build R2 key
   let r2Key: string;
+  let r2Keys: string[];
   if (skill.source_type === 'upload') {
     const parts = slug.split('/');
-    r2Key = parts.length >= 2
-      ? `skills/${parts[0]}/${parts[1]}/${filePath}`
-      : `skills/${slug}/${filePath}`;
+    r2Keys = parts.length >= 2
+      ? [`skills/${parts[0]}/${parts[1]}/${filePath}`]
+      : [`skills/${slug}/${filePath}`];
+    if (parts.length >= 1) {
+      const legacyKey = `skills/${parts[0]}/${skill.name}/${filePath}`;
+      if (!r2Keys.includes(legacyKey)) {
+        r2Keys.push(legacyKey);
+      }
+    }
+    r2Key = r2Keys[0];
   } else {
     const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
     r2Key = `skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/${filePath}`;
+    r2Keys = [r2Key];
   }
 
   // Try R2 first
-  const r2Object = await r2.get(r2Key);
-  if (r2Object) {
-    const content = await r2Object.text();
-    return json({ path: filePath, content }, {
-      headers: { 'Cache-Control': 'public, max-age=300' }
-    });
+  for (const key of r2Keys) {
+    const r2Object = await r2.get(key);
+    if (r2Object) {
+      const content = await r2Object.text();
+      return json({ path: filePath, content }, {
+        headers: { 'Cache-Control': cacheControl }
+      });
+    }
   }
 
   // For GitHub skills, try fetching from GitHub directly
@@ -172,7 +199,7 @@ export const GET: RequestHandler = async ({ params, platform, request, url }) =>
         });
 
         return json({ path: filePath, content }, {
-          headers: { 'Cache-Control': 'public, max-age=300' }
+          headers: { 'Cache-Control': cacheControl }
         });
       }
     } catch (err) {
@@ -186,7 +213,7 @@ export const GET: RequestHandler = async ({ params, platform, request, url }) =>
   // Special case: SKILL.md might be in database
   if (filePath === 'SKILL.md' && skill.readme) {
     return json({ path: filePath, content: skill.readme }, {
-      headers: { 'Cache-Control': 'public, max-age=300' }
+      headers: { 'Cache-Control': cacheControl }
     });
   }
 

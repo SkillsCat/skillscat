@@ -367,7 +367,10 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   }
 
   // Store SKILL.md in R2
-  const r2Path = `skills/${slugOwner}/${skillName}/SKILL.md`;
+  const slugParts = slug.split('/');
+  const r2Path = slugParts.length >= 2
+    ? `skills/${slugParts[0]}/${slugParts[1]}/SKILL.md`
+    : `skills/${slug}/SKILL.md`;
   await r2.put(r2Path, skillMdContent, {
     httpMetadata: { contentType: 'text/markdown' },
     customMetadata: {
@@ -382,8 +385,8 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   await db.prepare(`
     INSERT INTO skills (
       id, name, slug, description, visibility, owner_id, org_id,
-      source_type, content_hash, created_at, updated_at, indexed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'upload', ?, ?, ?, ?)
+      source_type, readme, content_hash, created_at, updated_at, indexed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'upload', ?, ?, ?, ?, ?)
   `)
     .bind(
       skillId,
@@ -393,6 +396,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       visibility,
       auth.userId,
       orgId,
+      skillMdContent,
       contentHash,
       now,
       now,

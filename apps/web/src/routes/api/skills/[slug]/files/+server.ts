@@ -1,5 +1,7 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getAuthContext } from '$lib/server/middleware/auth';
+import { checkSkillAccess } from '$lib/server/permissions';
 
 interface SkillFile {
   path: string;
@@ -321,7 +323,7 @@ async function getR2CacheSha(r2: R2Bucket, r2Prefix: string): Promise<string | n
 /**
  * GET /api/skills/[slug]/files - Get all skill files as JSON
  */
-export const GET: RequestHandler = async ({ params, platform, request }) => {
+export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
   const kv = platform?.env?.KV;
@@ -356,6 +358,17 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
   `).bind(slug).first<SkillInfo>();
 
   if (!skill) throw error(404, 'Skill not found');
+
+  if (skill.visibility === 'private') {
+    const auth = await getAuthContext(request, locals, db);
+    if (!auth.userId) {
+      throw error(401, 'Authentication required');
+    }
+    const hasAccess = await checkSkillAccess(skill.id, auth.userId, db);
+    if (!hasAccess) {
+      throw error(403, 'You do not have permission to access this skill');
+    }
+  }
 
   const files: SkillFile[] = [];
   const folderName = skill.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
@@ -424,7 +437,16 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
     }
   } else {
     // Private/Uploaded skills: fetch directly from R2
-    const r2Files = await fetchR2Files(r2, r2Prefix);
+    let r2Files = await fetchR2Files(r2, r2Prefix);
+    if (r2Files.length === 0 && skill.source_type === 'upload') {
+      const parts = slug.split('/');
+      if (parts.length >= 1) {
+        const legacyPrefix = `skills/${parts[0]}/${skill.name}/`;
+        if (legacyPrefix !== r2Prefix) {
+          r2Files = await fetchR2Files(r2, legacyPrefix);
+        }
+      }
+    }
     files.push(...r2Files);
   }
 
@@ -449,7 +471,7 @@ export const GET: RequestHandler = async ({ params, platform, request }) => {
 
   return json({ folderName, files }, {
     headers: {
-      'Cache-Control': 'public, max-age=300',
+      'Cache-Control': skill.visibility === 'private' ? 'private, no-cache' : 'public, max-age=300',
       'X-RateLimit-Limit': String(RATE_LIMIT_MAX_REQUESTS),
       'X-RateLimit-Window': String(RATE_LIMIT_WINDOW)
     }

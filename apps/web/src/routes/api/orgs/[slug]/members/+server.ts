@@ -26,6 +26,18 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
     throw error(404, 'Organization not found');
   }
 
+  const session = await locals.auth?.();
+  let requesterRole: string | null = null;
+  if (session?.user?.id) {
+    const membership = await db.prepare(`
+      SELECT role FROM org_members WHERE org_id = ? AND user_id = ?
+    `)
+      .bind(org.id, session.user.id)
+      .first<{ role: string }>();
+    requesterRole = membership?.role || null;
+  }
+  const canViewEmails = requesterRole !== null && ['owner', 'admin'].includes(requesterRole);
+
   const results = await db.prepare(`
     SELECT om.user_id, om.role, om.joined_at, u.name, u.email, u.image
     FROM org_members om
@@ -50,7 +62,7 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
       role: m.role,
       joinedAt: m.joined_at,
       name: m.name,
-      email: m.email,
+      email: canViewEmails ? m.email : null,
       image: m.image,
     })),
   });

@@ -5,7 +5,7 @@ import { AGENTS, getAgentsByIds, getSkillPath, type Agent } from '../utils/agent
 import { getInstalledSkills, recordInstallation, type InstalledSkill } from '../utils/storage/db';
 import { fetchSkill } from '../utils/source/git';
 import { success, error, warn, info, spinner } from '../utils/core/ui';
-import { cacheSkill, getCachedSkill, calculateContentHash } from '../utils/storage/cache';
+import { cacheSkill, calculateContentHash } from '../utils/storage/cache';
 import { verboseLog } from '../utils/core/verbose';
 
 interface UpdateOptions {
@@ -62,17 +62,6 @@ export async function update(skillName: string | undefined, options: UpdateOptio
     const checkSpinner = spinner(`Checking ${skill.name}`);
 
     try {
-      // Check cache first
-      const cached = getCachedSkill(skill.source.owner, skill.source.repo, skill.path !== 'SKILL.md' ? skill.path.replace(/\/SKILL\.md$/, '') : undefined);
-
-      // If we have a cached version with matching hash, skip fetch
-      if (cached && skill.contentHash && cached.contentHash === skill.contentHash) {
-        checkSpinner.stop(true);
-        verboseLog(`${skill.name}: Using cached version (hash match)`);
-        console.log(pc.dim(`  ${skill.name}: Up to date`));
-        continue;
-      }
-
       const latestSkill = await fetchSkill(skill.source, skill.name);
 
       if (!latestSkill) {

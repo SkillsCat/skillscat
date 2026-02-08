@@ -477,22 +477,28 @@ export async function getSkillBySlug(
   // 从 R2 读取 SKILL.md 内容
   let readme = skillData.readme;
   if (env.R2 && !readme) {
-    // 根据 source_type 决定 R2 路径
-    let r2Path: string;
-    if (skillData.source_type === 'upload') {
-      // 上传的 skill 使用 slug 中的 owner 和 name
-      const slugParts = skillData.slug.split('/');
-      r2Path = `skills/${slugParts[0]}/${slugParts[1] || skillData.name}/SKILL.md`;
-    } else {
-      // Include skill_path in R2 path for multi-skill repos
-      const skillPathPart = skillData.skill_path ? `/${skillData.skill_path}` : '';
-      r2Path = `skills/${skillData.repo_owner}/${skillData.repo_name}${skillPathPart}/SKILL.md`;
-    }
-
     try {
-      const object = await env.R2.get(r2Path);
-      if (object) {
-        readme = await object.text();
+      if (skillData.source_type === 'upload') {
+        const slugParts = skillData.slug.split('/');
+        const candidatePaths = [
+          `skills/${slugParts[0]}/${slugParts[1] || skillData.name}/SKILL.md`,
+          `skills/${slugParts[0]}/${skillData.name}/SKILL.md`,
+        ];
+        for (const path of candidatePaths) {
+          const object = await env.R2.get(path);
+          if (object) {
+            readme = await object.text();
+            break;
+          }
+        }
+      } else {
+        // Include skill_path in R2 path for multi-skill repos
+        const skillPathPart = skillData.skill_path ? `/${skillData.skill_path}` : '';
+        const r2Path = `skills/${skillData.repo_owner}/${skillData.repo_name}${skillPathPart}/SKILL.md`;
+        const object = await env.R2.get(r2Path);
+        if (object) {
+          readme = await object.text();
+        }
       }
     } catch (error) {
       console.error('Error reading SKILL.md from R2:', error);

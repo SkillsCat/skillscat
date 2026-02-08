@@ -179,22 +179,34 @@ async function fetchSearchResults(
     slug: row.slug
   }));
 
-  // Get total count (only public skills for unauthenticated users)
-  let countSql = `SELECT COUNT(DISTINCT s.id) as total FROM skills s WHERE s.visibility = 'public'`;
-  let total = 0;
+  // Get total count using the same visibility logic as the result query
+  let countSql = `SELECT COUNT(DISTINCT s.id) as total FROM skills s`;
+  const countParams: (string | number)[] = [];
 
   if (category) {
-    countSql = `SELECT COUNT(DISTINCT s.id) as total FROM skills s LEFT JOIN skill_categories sc ON s.id = sc.skill_id WHERE s.visibility = 'public' AND sc.category_slug = ?`;
-    const countResult = await db.prepare(countSql).bind(category).first<{ total: number }>();
-    total = countResult?.total || 0;
-  } else if (query) {
-    countSql += ` AND (s.name LIKE ? OR s.description LIKE ?)`;
-    const countResult = await db.prepare(countSql).bind(`%${query}%`, `%${query}%`).first<{ total: number }>();
-    total = countResult?.total || 0;
-  } else {
-    const countResult = await db.prepare(countSql).first<{ total: number }>();
-    total = countResult?.total || 0;
+    countSql += ` LEFT JOIN skill_categories sc ON s.id = sc.skill_id`;
   }
+
+  countSql += ` WHERE (s.visibility = 'public'`;
+  if (accessiblePrivateIds.length > 0) {
+    const placeholders = accessiblePrivateIds.map(() => '?').join(',');
+    countSql += ` OR s.id IN (${placeholders})`;
+    countParams.push(...accessiblePrivateIds);
+  }
+  countSql += `)`;
+
+  if (query) {
+    countSql += ` AND (s.name LIKE ? OR s.description LIKE ?)`;
+    countParams.push(`%${query}%`, `%${query}%`);
+  }
+
+  if (category) {
+    countSql += ` AND sc.category_slug = ?`;
+    countParams.push(category);
+  }
+
+  const countResult = await db.prepare(countSql).bind(...countParams).first<{ total: number }>();
+  const total = countResult?.total || 0;
 
   return { skills, total };
 }

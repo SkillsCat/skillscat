@@ -103,7 +103,7 @@
       const skillDirHandle = await dirHandle.getDirectoryHandle(skillName, { create: true });
 
       // Fetch and write SKILL.md
-      const response = await fetch(`/api/skills/${repoOwner}-${repoName}/download`);
+      const response = await fetch(`/api/skills/${repoOwner}/${repoName}/download`);
       if (!response.ok) {
         throw new Error('Failed to fetch skill files');
       }
@@ -241,7 +241,7 @@
               {#if !isMobile}
                 <div class="section">
                   <a
-                    href="/api/skills/{repoOwner}-{repoName}/download?format=zip"
+                    href="/api/skills/{repoOwner}/{repoName}/download?format=zip"
                     class="btn btn-secondary w-full flex items-center justify-center gap-2"
                     download="{skillName}.zip"
                   >
