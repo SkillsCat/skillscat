@@ -152,7 +152,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
             LEFT JOIN authors a ON s.repo_owner = a.username
             WHERE sc.category_slug IN (${skill.categories.map(() => '?').join(',')})
               AND s.id != ?
-              AND s.visibility != 'private'
+              AND s.visibility = 'public'
             GROUP BY s.id
             ORDER BY s.trending_score DESC
             LIMIT 6

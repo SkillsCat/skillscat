@@ -56,7 +56,7 @@ export const GET: RequestHandler = async ({ url, platform }) => {
               LEFT JOIN skill_categories sc ON s.id = sc.skill_id
               LEFT JOIN authors a ON s.repo_owner = a.username
               WHERE (s.name LIKE ? OR s.description LIKE ?)
-                AND s.visibility != 'private'
+                AND s.visibility = 'public'
               GROUP BY s.id
               ORDER BY s.trending_score DESC
               LIMIT ?

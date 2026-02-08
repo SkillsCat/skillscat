@@ -45,13 +45,6 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
     .bind(org.id)
     .first<{ count: number }>();
 
-  // Get skill count
-  const skillCount = await db.prepare(`
-    SELECT COUNT(*) as count FROM skills WHERE org_id = ?
-  `)
-    .bind(org.id)
-    .first<{ count: number }>();
-
   // Check if current user is a member
   const session = await locals.auth?.();
   let userRole: string | null = null;
@@ -65,6 +58,14 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
 
     userRole = membership?.role || null;
   }
+
+  // Non-members should only see public skill counts
+  const skillCountQuery = userRole
+    ? `SELECT COUNT(*) as count FROM skills WHERE org_id = ?`
+    : `SELECT COUNT(*) as count FROM skills WHERE org_id = ? AND visibility = 'public'`;
+  const skillCount = await db.prepare(skillCountQuery)
+    .bind(org.id)
+    .first<{ count: number }>();
 
   return json({
     success: true,

@@ -35,7 +35,11 @@ export const GET: RequestHandler = async ({ platform }) => {
       if (db) {
         try {
           const skills = await db.prepare(`
-            SELECT slug, updated_at FROM skills ORDER BY trending_score DESC LIMIT 1000
+            SELECT slug, updated_at
+            FROM skills
+            WHERE visibility = 'public'
+            ORDER BY trending_score DESC
+            LIMIT 1000
           `).all();
 
           skillPages = skills.results.map((skill: any) => ({

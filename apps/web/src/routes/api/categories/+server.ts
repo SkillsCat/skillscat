@@ -31,8 +31,10 @@ export const GET: RequestHandler = async ({ platform }) => {
         if (db) {
           try {
             const result = await db.prepare(`
-              SELECT category_slug, COUNT(*) as count
-              FROM skill_categories
+              SELECT sc.category_slug, COUNT(*) as count
+              FROM skill_categories sc
+              INNER JOIN skills s ON sc.skill_id = s.id
+              WHERE s.visibility = 'public'
               GROUP BY category_slug
             `).all<{ category_slug: string; count: number }>();
 

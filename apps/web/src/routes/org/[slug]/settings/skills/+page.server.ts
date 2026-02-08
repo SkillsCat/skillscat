@@ -28,6 +28,17 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
         throw error(404, 'Organization not found');
     }
 
+    // Only owner/admin can access org settings skill list
+    const membership = await db.prepare(`
+    SELECT role FROM org_members WHERE org_id = ? AND user_id = ?
+  `)
+        .bind(org.id, session.user.id)
+        .first<{ role: string }>();
+
+    if (!membership || !['owner', 'admin'].includes(membership.role)) {
+        throw error(403, 'Only organization owners and admins can view this page');
+    }
+
     // Get skills directly owned by the org
     const results = await db.prepare(`
     SELECT id, name, slug, description, visibility, stars
@@ -46,6 +57,9 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
         }>();
 
     return {
+        org: {
+            userRole: membership.role as 'owner' | 'admin',
+        },
         skills: results.results.map(s => ({
             id: s.id,
             name: s.name,

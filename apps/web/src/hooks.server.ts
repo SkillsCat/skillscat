@@ -2,8 +2,26 @@ import { createAuth, linkAuthorToUser, type AuthEnv } from '$lib/server/auth';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { building } from '$app/environment';
 import type { Handle } from '@sveltejs/kit';
+import { runRequestSecurity, shouldNoIndexPath } from '$lib/server/request-security';
+
+const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
+
+function withNoIndexHeader(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set('X-Robots-Tag', NO_INDEX_VALUE);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 export const handle: Handle = async ({ event, resolve }) => {
+  const blocked = await runRequestSecurity(event);
+  if (blocked) {
+    return blocked;
+  }
+
   const env = event.platform?.env as AuthEnv | undefined;
 
   // During build or if env is not available, skip auth
@@ -11,7 +29,8 @@ export const handle: Handle = async ({ event, resolve }) => {
     event.locals.auth = async () => ({ user: null });
     event.locals.session = null;
     event.locals.user = null;
-    return resolve(event);
+    const response = await resolve(event);
+    return shouldNoIndexPath(event.url.pathname) ? withNoIndexHeader(response) : response;
   }
 
   // Get base URL from request
@@ -64,5 +83,6 @@ export const handle: Handle = async ({ event, resolve }) => {
     event.locals.user = null;
   }
 
-  return svelteKitHandler({ event, resolve, auth, building });
+  const response = await svelteKitHandler({ event, resolve, auth, building });
+  return shouldNoIndexPath(event.url.pathname) ? withNoIndexHeader(response) : response;
 };

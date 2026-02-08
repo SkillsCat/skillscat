@@ -159,6 +159,11 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
     throw error(400, 'content parameter is required (base64 encoded SKILL.md)');
   }
 
+  // Protect preview endpoint from oversized query payload abuse
+  if (contentBase64.length > 180000) {
+    throw error(400, 'content parameter is too large');
+  }
+
   // Decode content
   let skillMdContent: string;
   try {

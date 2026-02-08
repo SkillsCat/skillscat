@@ -9,3 +9,12 @@ Sitemap: https://skillscat.dev/sitemap.xml
 
 # Disallow API routes
 Disallow: /api/
+
+# Private/authenticated pages
+Disallow: /user
+Disallow: /user/
+Disallow: /device
+Disallow: /device/
+Disallow: /registry/auth/
+Disallow: /org/*/settings
+Disallow: /org/*/settings/
