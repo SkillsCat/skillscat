@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { invalidateAll } from "$app/navigation";
   import { Button, SettingsSection, ErrorState } from "$lib/components";
   import { HugeiconsIcon } from "@hugeicons/svelte";
   import {
@@ -35,11 +36,32 @@
   let error = $state<string | null>(null);
   let processingIds = $state<Set<string>>(new Set());
   let markingAllRead = $state(false);
+  let autoMarkedRead = $state(false);
 
   const hasUnread = $derived(notifications.some((n) => !n.read));
 
   $effect(() => {
     loadNotifications();
+  });
+
+  $effect(() => {
+    if (loading || !hasUnread || autoMarkedRead) return;
+
+    const timer = setTimeout(async () => {
+      if (document.visibilityState !== "visible") return;
+      autoMarkedRead = true;
+      try {
+        const res = await fetch("/api/notifications/read-all", { method: "POST" });
+        if (res.ok) {
+          notifications = notifications.map((n) => ({ ...n, read: true }));
+          await invalidateAll();
+        }
+      } catch {
+        // Silently fail
+      }
+    }, 1500);
+
+    return () => clearTimeout(timer);
   });
 
   async function loadNotifications() {
@@ -63,10 +85,12 @@
   async function markAllAsRead() {
     if (markingAllRead || !hasUnread) return;
     markingAllRead = true;
+    autoMarkedRead = true;
     try {
       const res = await fetch("/api/notifications/read-all", { method: "POST" });
       if (res.ok) {
         notifications = notifications.map((n) => ({ ...n, read: true }));
+        await invalidateAll();
       }
     } catch {
       // Silently fail
