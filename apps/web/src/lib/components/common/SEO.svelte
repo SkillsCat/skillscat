@@ -56,6 +56,9 @@
   };
 
   const jsonLd = $derived(structuredData || defaultStructuredData);
+  const safeJsonLd = $derived(
+    JSON.stringify(jsonLd).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')
+  );
 </script>
 
 <svelte:head>
@@ -100,5 +103,5 @@
   <link rel="canonical" href={fullUrl} />
 
   <!-- Structured Data -->
-  {@html `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>`}
+  {@html `<script type="application/ld+json">${safeJsonLd}</script>`}
 </svelte:head>

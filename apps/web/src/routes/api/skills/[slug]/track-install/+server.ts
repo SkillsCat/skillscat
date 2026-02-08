@@ -1,10 +1,12 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { checkSkillAccess } from '$lib/server/permissions';
 
 /**
  * POST /api/skills/[slug]/track-install - Track CLI installations
  */
-export const POST: RequestHandler = async ({ params, platform }) => {
+export const POST: RequestHandler = async ({ params, platform, request, locals }) => {
   const db = platform?.env?.DB;
   const kv = platform?.env?.KV;
 
@@ -18,12 +20,29 @@ export const POST: RequestHandler = async ({ params, platform }) => {
   }
 
   // Look up skill by slug
-  const skill = await db.prepare('SELECT id FROM skills WHERE slug = ?')
+  const skill = await db.prepare('SELECT id, visibility FROM skills WHERE slug = ?')
     .bind(slug)
-    .first<{ id: string }>();
+    .first<{ id: string; visibility: string }>();
 
   if (!skill) {
     throw error(404, 'Skill not found');
+  }
+
+  if (skill.visibility === 'private') {
+    const auth = await getAuthContext(request, locals, db);
+    if (!auth.userId) {
+      throw error(404, 'Skill not found');
+    }
+    try {
+      requireScope(auth, 'read');
+    } catch {
+      throw error(404, 'Skill not found');
+    }
+
+    const hasAccess = await checkSkillAccess(skill.id, auth.userId, db);
+    if (!hasAccess) {
+      throw error(404, 'Skill not found');
+    }
   }
 
   // Increment KV download counter (date-partitioned for true rolling window)

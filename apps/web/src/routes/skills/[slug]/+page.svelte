@@ -109,34 +109,103 @@
     return content.replace(frontmatterRegex, '');
   }
 
+  function escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function escapeAttr(value: string): string {
+    return escapeHtml(value).replace(/`/g, '&#96;');
+  }
+
+  function normalizeRelativeFilePath(path: string): string {
+    return path.trim().replace(/^\.\/+/, '').replace(/^\/+/, '');
+  }
+
+  function isRelativeMarkdownLink(href: string): boolean {
+    const value = href.trim();
+    if (!value) return false;
+    if (value.startsWith('#')) return false;
+    if (value.startsWith('//')) return false;
+    if (/^https?:\/\//i.test(value)) return false;
+    if (/^mailto:/i.test(value)) return false;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
+    return true;
+  }
+
+  function sanitizeMarkdownHref(rawHref: string): string | null {
+    const href = rawHref.trim();
+    if (!href) return null;
+
+    if (/^(javascript|data|vbscript|file):/i.test(href)) return null;
+    if (href.startsWith('//')) return null;
+
+    if (href.startsWith('#')) return href;
+    if (/^mailto:/i.test(href) || /^tel:/i.test(href)) return href;
+    if (/^https?:\/\//i.test(href)) return href;
+    if (href.startsWith('/') || href.startsWith('./') || href.startsWith('../')) return href;
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(href)) return href;
+
+    return null;
+  }
+
+  function escapeCssSelectorValue(value: string): string {
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+      return CSS.escape(value);
+    }
+    return value.replace(/["\\\]]/g, '\\$&');
+  }
+
+  function createSafeMarkdownRenderer() {
+    const renderer = new marked.Renderer();
+
+    renderer.link = function({ href, text }: { href: string; text: string }) {
+      if (!href) return escapeHtml(String(text ?? ''));
+
+      if (isRelativeMarkdownLink(href)) {
+        const safePath = normalizeRelativeFilePath(href);
+        const safeText = escapeHtml(String(text ?? ''));
+        return `<a href="#" class="file-link" data-file-path="${escapeAttr(safePath)}">${safeText}</a>`;
+      }
+
+      const safeHref = sanitizeMarkdownHref(href);
+      const safeText = escapeHtml(String(text ?? ''));
+      if (!safeHref) {
+        return safeText;
+      }
+
+      if (safeHref.startsWith('#') || safeHref.startsWith('/')) {
+        return `<a href="${escapeAttr(safeHref)}">${safeText}</a>`;
+      }
+
+      return `<a href="${escapeAttr(safeHref)}" target="_blank" rel="noopener noreferrer nofollow">${safeText}</a>`;
+    };
+
+    renderer.html = (token: unknown) => {
+      if (typeof token === 'string') {
+        return escapeHtml(token);
+      }
+      if (token && typeof token === 'object') {
+        const candidate = (token as { raw?: unknown; text?: unknown }).raw ?? (token as { text?: unknown }).text;
+        return escapeHtml(String(candidate ?? ''));
+      }
+      return '';
+    };
+
+    return renderer;
+  }
+
   // Custom marked renderer with shiki highlighting
   async function highlightReadme() {
     if (!data.skill?.readme || !highlighter) return;
 
     const strippedReadme = stripFrontmatter(data.skill.readme);
 
-    const renderer = new marked.Renderer();
-
-    // Custom link renderer for relative file links
-    renderer.link = function({ href, text }: { href: string; text: string }) {
-      if (!href) return text;
-
-      // Check if it's a relative link (not http, https, #, or mailto)
-      const isRelativeLink = href && !href.startsWith('http://') && !href.startsWith('https://') && !href.startsWith('#') && !href.startsWith('mailto:');
-
-      if (isRelativeLink) {
-        // Relative link - make it clickable to navigate to file
-        const escapedHref = href.replace(/"/g, '&quot;');
-        const escapedText = typeof text === 'string' ? text : String(text);
-        return `<a href="#" class="file-link" data-file-path="${escapedHref}">${escapedText}</a>`;
-      }
-
-      // External link or anchor - normal handling
-      if (href.startsWith('#')) {
-        return `<a href="${href}">${text}</a>`;
-      }
-      return `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
-    };
+    const renderer = createSafeMarkdownRenderer();
 
     renderer.code = function({ text, lang }: { text: string; lang?: string }) {
       const language = lang || 'plaintext';
@@ -230,20 +299,24 @@
         });
 
         if (filename) {
-          return `<div class="code-block-wrapper"><div class="code-block-header"><span>${filename}</span></div>${codeHtml}</div>`;
+          return `<div class="code-block-wrapper"><div class="code-block-header"><span>${escapeHtml(filename)}</span></div>${codeHtml}</div>`;
         }
         return codeHtml;
       } catch {
-        const escapedText = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const escapedText = escapeHtml(text);
         if (filename) {
-          return `<div class="code-block-wrapper"><div class="code-block-header"><span>${filename}</span></div><pre><code class="language-${actualLang}">${escapedText}</code></pre></div>`;
+          return `<div class="code-block-wrapper"><div class="code-block-header"><span>${escapeHtml(filename)}</span></div><pre><code class="language-${escapeAttr(actualLang)}">${escapedText}</code></pre></div>`;
         }
-        return `<pre><code class="language-${actualLang}">${escapedText}</code></pre>`;
+        return `<pre><code class="language-${escapeAttr(actualLang)}">${escapedText}</code></pre>`;
       }
     };
 
-    marked.setOptions({ renderer });
-    highlightedReadme = await marked.parse(strippedReadme);
+    highlightedReadme = await marked.parse(strippedReadme, {
+      renderer,
+      gfm: true,
+      breaks: true,
+      async: false,
+    }) as string;
   }
 
   // Determine the install identifier based on skill type
@@ -257,7 +330,7 @@
     return `${data.skill.repoOwner}/${data.skill.repoName}`;
   });
 
-  // Installation commands for different CLI tools
+  // Installation command
   const installCommands = $derived(data.skill ? [
     {
       name: 'skillscat',
@@ -266,13 +339,7 @@
       description: data.skill.visibility === 'private'
         ? 'Requires authentication. Run `skillscat login` first.'
         : 'SkillsCat registry CLI'
-    },
-    ...(data.skill.sourceType === 'github' && data.skill.visibility === 'public' ? [{
-      name: 'add-skill',
-      label: 'Vercel add-skill',
-      command: `npx add-skill ${data.skill.repoOwner}/${data.skill.repoName}`,
-      description: 'Works with Claude Code, Cursor, Codex, and 10+ agents'
-    }] : [])
+    }
   ] : []);
 
   let selectedInstaller = $state('skillscat');
@@ -362,7 +429,12 @@
   const fallbackReadme = $derived(() => {
     if (!data.skill?.readme) return '';
     const stripped = stripFrontmatter(data.skill.readme);
-    return marked.parse(stripped, { async: false });
+    return marked.parse(stripped, {
+      renderer: createSafeMarkdownRenderer(),
+      gfm: true,
+      breaks: true,
+      async: false,
+    }) as string;
   });
 
   // Use highlighted version if available, otherwise fallback
@@ -476,7 +548,8 @@
 
       // Scroll to the file in the file browser after DOM updates
       requestAnimationFrame(() => {
-        const fileElement = document.querySelector(`[data-file-path="${file.path}"]`);
+        const safeSelector = escapeCssSelectorValue(file.path);
+        const fileElement = document.querySelector(`[data-file-path="${safeSelector}"]`);
         if (fileElement) {
           fileElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
@@ -642,23 +715,22 @@
   // Highlight command syntax
   function highlightCommand(command: string): string {
     // Parse: $ npx skillscat add owner/repo
-    // or: $ npx add-skill owner/repo
     const parts = command.split(' ');
     const highlighted: string[] = [];
 
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
       if (part === 'npx') {
-        highlighted.push(`<span class="cmd-npx">${part}</span>`);
-      } else if (part === 'skillscat' || part === 'add-skill') {
-        highlighted.push(`<span class="cmd-tool">${part}</span>`);
+        highlighted.push(`<span class="cmd-npx">${escapeHtml(part)}</span>`);
+      } else if (part === 'skillscat') {
+        highlighted.push(`<span class="cmd-tool">${escapeHtml(part)}</span>`);
       } else if (part === 'add') {
-        highlighted.push(`<span class="cmd-action">${part}</span>`);
+        highlighted.push(`<span class="cmd-action">${escapeHtml(part)}</span>`);
       } else if (part.includes('/')) {
         // owner/repo format
-        highlighted.push(`<span class="cmd-repo">${part}</span>`);
+        highlighted.push(`<span class="cmd-repo">${escapeHtml(part)}</span>`);
       } else {
-        highlighted.push(`<span class="cmd-default">${part}</span>`);
+        highlighted.push(`<span class="cmd-default">${escapeHtml(part)}</span>`);
       }
     }
 
@@ -1619,7 +1691,7 @@
     top: var(--switcher-padding);
     bottom: var(--switcher-padding);
     left: var(--switcher-padding);
-    width: calc(50% - var(--switcher-padding));
+    width: calc(100% - (var(--switcher-padding) * 2));
     background: var(--primary);
     border-radius: 9999px;
     box-shadow: 0 var(--switcher-shadow) 0 0 oklch(50% 0.22 55);

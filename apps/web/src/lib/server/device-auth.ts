@@ -285,6 +285,19 @@ export async function pollDeviceToken(
   }
 
   if (result.status === 'authorized' && result.user_id) {
+    // Atomically claim the code so concurrent polling cannot mint multiple token pairs.
+    const claim = await db.prepare(`
+      UPDATE device_codes
+      SET status = 'used'
+      WHERE id = ? AND status = 'authorized'
+    `)
+      .bind(result.id)
+      .run();
+
+    if ((claim.meta?.changes || 0) === 0) {
+      return { status: 'expired' };
+    }
+
     // Generate tokens
     const accessToken = generateAccessToken();
     const refreshToken = generateRefreshToken();
@@ -325,13 +338,6 @@ export async function pollDeviceToken(
         now + REFRESH_TOKEN_EXPIRY_MS,
         now
       )
-      .run();
-
-    // Mark device code as used
-    await db.prepare(`
-      UPDATE device_codes SET status = 'used' WHERE id = ?
-    `)
-      .bind(result.id)
       .run();
 
     return {

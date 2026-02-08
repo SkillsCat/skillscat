@@ -1,5 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { checkSkillAccess } from '$lib/server/permissions';
 
 /**
  * GET /api/favorites - 获取用户收藏列表
@@ -15,6 +16,7 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
     const userId = session.user.id;
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 100);
     const offset = parseInt(url.searchParams.get('offset') || '0');
+    const now = Date.now();
 
     // 从 D1 获取收藏列表
     const db = platform?.env?.DB;
@@ -47,17 +49,52 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
       JOIN skills s ON f.skill_id = s.id
       LEFT JOIN authors a ON s.repo_owner = a.username
       WHERE f.user_id = ?
+        AND (
+          s.visibility = 'public'
+          OR s.visibility = 'unlisted'
+          OR s.owner_id = ?
+          OR EXISTS (
+            SELECT 1 FROM org_members om
+            WHERE om.org_id = s.org_id AND om.user_id = ?
+          )
+          OR EXISTS (
+            SELECT 1 FROM skill_permissions sp
+            WHERE sp.skill_id = s.id
+              AND sp.grantee_type = 'user'
+              AND sp.grantee_id = ?
+              AND (sp.expires_at IS NULL OR sp.expires_at > ?)
+          )
+        )
       ORDER BY f.created_at DESC
       LIMIT ? OFFSET ?
     `)
-      .bind(userId, limit, offset)
+      .bind(userId, userId, userId, userId, now, limit, offset)
       .all();
 
     // 获取总数
     const countResult = await db.prepare(`
-      SELECT COUNT(*) as total FROM favorites WHERE user_id = ?
+      SELECT COUNT(*) as total
+      FROM favorites f
+      JOIN skills s ON f.skill_id = s.id
+      WHERE f.user_id = ?
+        AND (
+          s.visibility = 'public'
+          OR s.visibility = 'unlisted'
+          OR s.owner_id = ?
+          OR EXISTS (
+            SELECT 1 FROM org_members om
+            WHERE om.org_id = s.org_id AND om.user_id = ?
+          )
+          OR EXISTS (
+            SELECT 1 FROM skill_permissions sp
+            WHERE sp.skill_id = s.id
+              AND sp.grantee_type = 'user'
+              AND sp.grantee_id = ?
+              AND (sp.expires_at IS NULL OR sp.expires_at > ?)
+          )
+        )
     `)
-      .bind(userId)
+      .bind(userId, userId, userId, userId, now)
       .first<{ total: number }>();
 
     // 获取每个 skill 的分类
@@ -132,6 +169,11 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 
     if (!skill) {
       throw error(404, 'Skill not found');
+    }
+
+    const hasAccess = await checkSkillAccess(skillId, userId, db);
+    if (!hasAccess) {
+      throw error(403, 'You do not have permission to favorite this skill');
     }
 
     // 检查是否已收藏

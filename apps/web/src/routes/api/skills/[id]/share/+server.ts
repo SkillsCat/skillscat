@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import {
   canWriteSkill,
   grantSkillPermission,
@@ -21,6 +21,7 @@ export const POST: RequestHandler = async ({ locals, platform, request, params }
   if (!auth.userId) {
     throw error(401, 'Authentication required');
   }
+  requireScope(auth, 'write');
 
   const { id: skillId } = params;
   if (!skillId) {
@@ -78,6 +79,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, params })
   if (!auth.userId) {
     throw error(401, 'Authentication required');
   }
+  requireScope(auth, 'read');
 
   const { id: skillId } = params;
   if (!skillId) {
@@ -111,6 +113,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
   if (!auth.userId) {
     throw error(401, 'Authentication required');
   }
+  requireScope(auth, 'write');
 
   const { id: skillId } = params;
   if (!skillId) {

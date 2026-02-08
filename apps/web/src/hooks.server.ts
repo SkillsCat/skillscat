@@ -6,14 +6,28 @@ import { runRequestSecurity, shouldNoIndexPath } from '$lib/server/request-secur
 
 const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
 
-function withNoIndexHeader(response: Response): Response {
+function cloneResponseWithHeader(response: Response, key: string, value: string): Response {
   const headers = new Headers(response.headers);
-  headers.set('X-Robots-Tag', NO_INDEX_VALUE);
+  headers.set(key, value);
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
     headers,
   });
+}
+
+function applyResponseSecurityHeaders(pathname: string, response: Response): Response {
+  let secured = response;
+
+  if (pathname.startsWith('/api/') && !secured.headers.has('Cache-Control')) {
+    secured = cloneResponseWithHeader(secured, 'Cache-Control', 'no-store');
+  }
+
+  if (shouldNoIndexPath(pathname)) {
+    secured = cloneResponseWithHeader(secured, 'X-Robots-Tag', NO_INDEX_VALUE);
+  }
+
+  return secured;
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
@@ -30,7 +44,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     event.locals.session = null;
     event.locals.user = null;
     const response = await resolve(event);
-    return shouldNoIndexPath(event.url.pathname) ? withNoIndexHeader(response) : response;
+    return applyResponseSecurityHeaders(event.url.pathname, response);
   }
 
   // Get base URL from request
@@ -84,5 +98,5 @@ export const handle: Handle = async ({ event, resolve }) => {
   }
 
   const response = await svelteKitHandler({ event, resolve, auth, building });
-  return shouldNoIndexPath(event.url.pathname) ? withNoIndexHeader(response) : response;
+  return applyResponseSecurityHeaders(event.url.pathname, response);
 };

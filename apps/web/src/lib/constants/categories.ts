@@ -394,7 +394,7 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
 ];
 
 /**
- * Flat list of all categories for backward compatibility
+ * Flat list of all categories
  */
 export const CATEGORIES: Category[] = CATEGORY_SECTIONS.flatMap(
   (section) => section.categories

@@ -10,6 +10,40 @@ interface OrgInviteMetadata {
   role: 'admin' | 'member';
 }
 
+function parseOrgInviteMetadata(raw: string): OrgInviteMetadata {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw error(400, 'Invalid invitation data');
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    throw error(400, 'Invalid invitation data');
+  }
+
+  const candidate = parsed as Record<string, unknown>;
+  const orgId = typeof candidate.orgId === 'string' ? candidate.orgId : '';
+  const orgSlug = typeof candidate.orgSlug === 'string' ? candidate.orgSlug : '';
+  const orgName = typeof candidate.orgName === 'string' ? candidate.orgName : '';
+  const inviterId = typeof candidate.inviterId === 'string' ? candidate.inviterId : '';
+  const inviterName = typeof candidate.inviterName === 'string' ? candidate.inviterName : '';
+  const role = candidate.role === 'admin' || candidate.role === 'member' ? candidate.role : null;
+
+  if (!orgId || !orgSlug || !orgName || !inviterId || !inviterName || !role) {
+    throw error(400, 'Invalid invitation data');
+  }
+
+  return {
+    orgId,
+    orgSlug,
+    orgName,
+    inviterId,
+    inviterName,
+    role,
+  };
+}
+
 /**
  * POST /api/notifications/[id]/accept - Accept an org invitation
  */
@@ -56,7 +90,7 @@ export const POST: RequestHandler = async ({ locals, platform, params }) => {
     throw error(400, 'Invalid invitation data');
   }
 
-  const metadata = JSON.parse(notification.metadata) as OrgInviteMetadata;
+  const metadata = parseOrgInviteMetadata(notification.metadata);
 
   // Check if already a member
   const existing = await db.prepare(`

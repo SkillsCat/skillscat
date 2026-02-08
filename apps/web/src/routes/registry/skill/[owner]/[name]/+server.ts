@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { checkRateLimit, getRateLimitKey, rateLimitHeaders, RATE_LIMITS } from '$lib/server/ratelimit';
-import { getAuthContext } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
 
 export interface RegistrySkillItem {
@@ -116,6 +116,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
           { status: 401, headers: { 'Access-Control-Allow-Origin': '*' } }
         );
       }
+      requireScope(auth, 'read');
       const hasAccess = await checkSkillAccess(row.id, auth.userId, db);
       if (!hasAccess) {
         return json(
@@ -132,16 +133,10 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
         if (row.sourceType === 'upload') {
           const slugParts = row.slug.split('/');
           if (slugParts.length >= 2) {
-            const candidateKeys = [
-              `skills/${slugParts[0]}/${slugParts[1]}/SKILL.md`,
-              `skills/${slugParts[0]}/${row.name}/SKILL.md`,
-            ];
-            for (const key of candidateKeys) {
-              const object = await r2.get(key);
-              if (object) {
-                content = await object.text();
-                break;
-              }
+            const key = `skills/${slugParts[0]}/${slugParts[1]}/SKILL.md`;
+            const object = await r2.get(key);
+            if (object) {
+              content = await object.text();
             }
           }
         } else if (row.owner && row.repo) {

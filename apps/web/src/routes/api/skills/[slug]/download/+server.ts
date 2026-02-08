@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
 
 interface SkillInfo {
@@ -17,19 +17,12 @@ interface SkillInfo {
 
 /**
  * Build possible R2 paths for a skill's SKILL.md file.
- * First path is canonical (slug-based), second path is legacy (name-based upload path).
  */
 function buildR2Paths(skill: SkillInfo): string[] {
   if (skill.source_type === 'upload') {
-    const paths: string[] = [];
     const parts = skill.slug.split('/');
     if (parts.length >= 2) {
-      paths.push(`skills/${parts[0]}/${parts[1]}/SKILL.md`);
-      const legacyPath = `skills/${parts[0]}/${skill.name}/SKILL.md`;
-      if (legacyPath !== paths[0]) {
-        paths.push(legacyPath);
-      }
-      return paths;
+      return [`skills/${parts[0]}/${parts[1]}/SKILL.md`];
     }
     return [`skills/${skill.slug}/SKILL.md`];
   }
@@ -71,6 +64,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     if (!auth.userId) {
       throw error(401, 'Authentication required');
     }
+    requireScope(auth, 'read');
     const hasAccess = await checkSkillAccess(skill.id, auth.userId, db);
     if (!hasAccess) {
       throw error(403, 'You do not have permission to access this skill');

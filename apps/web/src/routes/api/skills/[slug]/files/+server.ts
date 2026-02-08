@@ -1,6 +1,6 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
 
 interface SkillFile {
@@ -364,6 +364,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     if (!auth.userId) {
       throw error(401, 'Authentication required');
     }
+    requireScope(auth, 'read');
     const hasAccess = await checkSkillAccess(skill.id, auth.userId, db);
     if (!hasAccess) {
       throw error(403, 'You do not have permission to access this skill');
@@ -437,16 +438,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     }
   } else {
     // Private/Uploaded skills: fetch directly from R2
-    let r2Files = await fetchR2Files(r2, r2Prefix);
-    if (r2Files.length === 0 && skill.source_type === 'upload') {
-      const parts = slug.split('/');
-      if (parts.length >= 1) {
-        const legacyPrefix = `skills/${parts[0]}/${skill.name}/`;
-        if (legacyPrefix !== r2Prefix) {
-          r2Files = await fetchR2Files(r2, legacyPrefix);
-        }
-      }
-    }
+    const r2Files = await fetchR2Files(r2, r2Prefix);
     files.push(...r2Files);
   }
 

@@ -26,7 +26,11 @@ export async function checkSkillAccess(
 ): Promise<boolean> {
   // Get skill info
   const skill = await db.prepare(`
-    SELECT id, visibility, owner_id, org_id
+    SELECT
+      id,
+      visibility,
+      owner_id as ownerId,
+      org_id as orgId
     FROM skills
     WHERE id = ?
   `)

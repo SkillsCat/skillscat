@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { isSkillOwner } from '$lib/server/permissions';
 
 const GITHUB_API_BASE = 'https://api.github.com';
@@ -72,6 +72,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
   if (!auth.userId) {
     throw error(401, 'Authentication required');
   }
+  requireScope(auth, 'publish');
 
   const { id: skillId } = params;
   if (!skillId) {

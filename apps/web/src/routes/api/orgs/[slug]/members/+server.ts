@@ -1,6 +1,16 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
+function normalizeInviteRole(value: unknown): 'admin' | 'member' {
+  if (value === undefined || value === null || value === '') {
+    return 'member';
+  }
+  if (value === 'admin' || value === 'member') {
+    return value;
+  }
+  throw error(400, 'role must be either "admin" or "member"');
+}
+
 /**
  * GET /api/orgs/[slug]/members - List organization members
  */
@@ -102,11 +112,12 @@ export const POST: RequestHandler = async ({ locals, platform, params, request }
   }
 
   const body = await request.json() as {
-    githubUsername: string;
-    role?: 'admin' | 'member';
+    githubUsername?: string;
+    role?: unknown;
   };
 
-  const { githubUsername, role = 'member' } = body;
+  const githubUsername = typeof body.githubUsername === 'string' ? body.githubUsername : '';
+  const role = normalizeInviteRole(body.role);
 
   if (!githubUsername) {
     throw error(400, 'GitHub username is required');
@@ -114,6 +125,9 @@ export const POST: RequestHandler = async ({ locals, platform, params, request }
 
   // Clean up the username (remove @ prefix if present)
   const cleanUsername = githubUsername.replace(/^@/, '').trim();
+  if (!/^[a-zA-Z0-9-]{1,39}$/.test(cleanUsername)) {
+    throw error(400, 'Invalid GitHub username format');
+  }
 
   // Look up user in authors table by GitHub username
   const author = await db.prepare(`

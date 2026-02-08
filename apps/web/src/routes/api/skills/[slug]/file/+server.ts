@@ -1,6 +1,6 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
 
 interface SkillInfo {
@@ -128,6 +128,7 @@ export const GET: RequestHandler = async ({ params, platform, request, url, loca
     if (!auth.userId) {
       throw error(401, 'Authentication required');
     }
+    requireScope(auth, 'read');
     const hasAccess = await checkSkillAccess(skill.id, auth.userId, db);
     if (!hasAccess) {
       throw error(403, 'You do not have permission to access this skill');
@@ -136,36 +137,25 @@ export const GET: RequestHandler = async ({ params, platform, request, url, loca
 
   const cacheControl = skill.visibility === 'private' ? 'private, no-cache' : 'public, max-age=300';
 
-  // Build R2 key
+  // Build canonical R2 key
   let r2Key: string;
-  let r2Keys: string[];
   if (skill.source_type === 'upload') {
     const parts = slug.split('/');
-    r2Keys = parts.length >= 2
-      ? [`skills/${parts[0]}/${parts[1]}/${filePath}`]
-      : [`skills/${slug}/${filePath}`];
-    if (parts.length >= 1) {
-      const legacyKey = `skills/${parts[0]}/${skill.name}/${filePath}`;
-      if (!r2Keys.includes(legacyKey)) {
-        r2Keys.push(legacyKey);
-      }
-    }
-    r2Key = r2Keys[0];
+    r2Key = parts.length >= 2
+      ? `skills/${parts[0]}/${parts[1]}/${filePath}`
+      : `skills/${slug}/${filePath}`;
   } else {
     const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
     r2Key = `skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/${filePath}`;
-    r2Keys = [r2Key];
   }
 
   // Try R2 first
-  for (const key of r2Keys) {
-    const r2Object = await r2.get(key);
-    if (r2Object) {
-      const content = await r2Object.text();
-      return json({ path: filePath, content }, {
-        headers: { 'Cache-Control': cacheControl }
-      });
-    }
+  const r2Object = await r2.get(r2Key);
+  if (r2Object) {
+    const content = await r2Object.text();
+    return json({ path: filePath, content }, {
+      headers: { 'Cache-Control': cacheControl }
+    });
   }
 
   // For GitHub skills, try fetching from GitHub directly

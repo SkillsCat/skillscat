@@ -4,12 +4,25 @@ import { CATEGORIES } from '$lib/constants';
 import type { SkillCardData, ApiResponse } from '$lib/types';
 import { getCached } from '$lib/server/cache';
 
+const MIN_QUERY_LENGTH = 2;
+const MAX_QUERY_LENGTH = 120;
+const DEFAULT_LIMIT = 10;
+const MAX_LIMIT = 20;
+
+function parseLimit(rawLimit: string | null): number {
+  const parsed = Number.parseInt(rawLimit || String(DEFAULT_LIMIT), 10);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_LIMIT;
+  }
+  return Math.min(Math.max(parsed, 1), MAX_LIMIT);
+}
+
 export const GET: RequestHandler = async ({ url, platform }) => {
   try {
-    const query = url.searchParams.get('q')?.toLowerCase();
-    const limit = Math.min(parseInt(url.searchParams.get('limit') || '10'), 20);
+    const query = (url.searchParams.get('q') || '').trim().toLowerCase().slice(0, MAX_QUERY_LENGTH);
+    const limit = parseLimit(url.searchParams.get('limit'));
 
-    if (!query || query.length < 2) {
+    if (!query || query.length < MIN_QUERY_LENGTH) {
       return json({
         success: true,
         data: {

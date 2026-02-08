@@ -1,9 +1,41 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { checkRateLimit, getRateLimitKey, rateLimitHeaders, RATE_LIMITS } from '$lib/server/ratelimit';
-import { getAuthContext } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { getAccessibleSkillIds } from '$lib/server/permissions';
 import { getCached } from '$lib/server/cache';
+
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+const MAX_OFFSET = 5000;
+const MAX_QUERY_LENGTH = 120;
+const MAX_CATEGORY_LENGTH = 64;
+
+function parseClampedInt(raw: string | null, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseInt(raw || String(fallback), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(Math.max(parsed, min), max);
+}
+
+function normalizeQuery(value: string | null): string {
+  return (value || '').trim().slice(0, MAX_QUERY_LENGTH);
+}
+
+function normalizeCategory(value: string | null): string {
+  const normalized = (value || '').trim().toLowerCase();
+  if (!normalized) {
+    return '';
+  }
+  if (normalized.length > MAX_CATEGORY_LENGTH) {
+    return '';
+  }
+  if (!/^[a-z0-9-]+$/.test(normalized)) {
+    return '';
+  }
+  return normalized;
+}
 
 export interface RegistrySkillItem {
   name: string;
@@ -23,10 +55,10 @@ export interface RegistrySearchResult {
 }
 
 export const GET: RequestHandler = async ({ url, platform, request, locals }) => {
-  const query = url.searchParams.get('q') || '';
-  const category = url.searchParams.get('category') || '';
-  const limit = Math.min(parseInt(url.searchParams.get('limit') || '20', 10), 100);
-  const offset = parseInt(url.searchParams.get('offset') || '0', 10);
+  const query = normalizeQuery(url.searchParams.get('q'));
+  const category = normalizeCategory(url.searchParams.get('category'));
+  const limit = parseClampedInt(url.searchParams.get('limit'), DEFAULT_LIMIT, 1, MAX_LIMIT);
+  const offset = parseClampedInt(url.searchParams.get('offset'), 0, 0, MAX_OFFSET);
   const includePrivate = url.searchParams.get('include_private') === 'true';
 
   const kv = platform?.env?.KV;
@@ -79,6 +111,7 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
       hit = cached.hit;
     } else {
       // Include private skills for authenticated users
+      requireScope(auth, 'read');
       const accessiblePrivateIds = await getAccessibleSkillIds(auth.userId!, db);
       response = await fetchSearchResults(db, query, category, limit, offset, accessiblePrivateIds);
     }

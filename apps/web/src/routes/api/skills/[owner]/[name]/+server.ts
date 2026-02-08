@@ -2,7 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { SkillDetail, SkillCardData, ApiResponse, FileNode } from '$lib/types';
 import { getCached } from '$lib/server/cache';
-import { getAuthContext } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { isSkillOwner, checkSkillAccess } from '$lib/server/permissions';
 
 /**
@@ -216,6 +216,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
           error: 'Authentication required'
         } satisfies ApiResponse<never>, { status: 401 });
       }
+      requireScope(auth, 'read');
       const hasAccess = await checkSkillAccess(data.skill.id, auth.userId, db);
       if (!hasAccess) {
         return json({
@@ -247,7 +248,6 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
 
 interface SkillInfo {
   id: string;
-  name: string;
   slug: string;
   owner_id: string | null;
   source_type: string;
@@ -261,16 +261,9 @@ interface SkillInfo {
  */
 function buildR2Paths(skill: SkillInfo): string[] {
   if (skill.source_type === 'upload') {
-    // For uploaded skills, extract owner and name from slug (owner/name)
-    const paths: string[] = [];
     const parts = skill.slug.split('/');
     if (parts.length >= 2) {
-      paths.push(`skills/${parts[0]}/${parts[1]}/SKILL.md`);
-      const legacyPath = `skills/${parts[0]}/${skill.name}/SKILL.md`;
-      if (legacyPath !== paths[0]) {
-        paths.push(legacyPath);
-      }
-      return paths;
+      return [`skills/${parts[0]}/${parts[1]}/SKILL.md`];
     }
     return [`skills/${skill.slug}/SKILL.md`];
   }
@@ -299,13 +292,14 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
   if (!auth.userId) {
     throw error(401, 'Authentication required');
   }
+  requireScope(auth, 'write');
 
   const { owner, name } = params;
   const slug = `${owner}/${name}`;
 
   // Fetch skill by slug and verify ownership
   const skill = await db.prepare(`
-    SELECT id, name, slug, owner_id, source_type, repo_owner, repo_name, skill_path
+    SELECT id, slug, owner_id, source_type, repo_owner, repo_name, skill_path
     FROM skills WHERE slug = ?
   `)
     .bind(slug)

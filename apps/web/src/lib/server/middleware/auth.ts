@@ -66,7 +66,7 @@ export async function getAuthContext(
         user: session.user,
         authMethod: 'session',
         tokenInfo: null,
-        scopes: ['read', 'write'], // Session has full access
+        scopes: ['read', 'write', 'publish'], // Session has full access
       };
     }
   }

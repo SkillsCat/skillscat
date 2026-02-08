@@ -58,13 +58,20 @@ const AUTH_ROUTE_IDS = new Set([
   '/registry/auth/token',
 ]);
 
+const CSRF_EXEMPT_PATHS = [
+  /^\/api\/auth\//,
+  /^\/api\/device\/(authorize|code|token|refresh)$/,
+  /^\/registry\/auth\/(authorize|init|token)$/,
+  /^\/api\/admin\/(archive|resurrection)$/,
+  /^\/api\/skills\/[^/]+\/track-install$/,
+];
+
 const UA_PROTECTED_ROUTE_IDS = new Set([
   '/api/skills/upload',
   '/api/skills/[slug]/download',
   '/api/skills/[slug]/files',
   '/api/skills/[slug]/file',
   '/api/skills/[slug]/track-install',
-  '/registry/skill/[identifier]',
   '/registry/skill/[owner]/[name]',
 ]);
 
@@ -167,6 +174,41 @@ function hasTokenAuthHeader(request: Request): boolean {
   return /^bearer\s+/i.test(authorization);
 }
 
+function isMutationMethod(method: string): boolean {
+  return !['GET', 'HEAD', 'OPTIONS'].includes(method);
+}
+
+function isCsrfExemptPath(pathname: string): boolean {
+  return CSRF_EXEMPT_PATHS.some((pattern) => pattern.test(pathname));
+}
+
+function hasSessionCookie(request: Request): boolean {
+  const cookie = request.headers.get('cookie') || '';
+  return /(better-auth|session|auth\.session|session_token)/i.test(cookie);
+}
+
+function getRequestSourceOrigin(request: Request): string | null {
+  const origin = request.headers.get('origin');
+  if (origin) {
+    return origin;
+  }
+
+  const referer = request.headers.get('referer');
+  if (!referer) {
+    return null;
+  }
+
+  try {
+    return new URL(referer).origin;
+  } catch {
+    return null;
+  }
+}
+
+function getCurrentRequestOrigin(url: URL): string {
+  return `${url.protocol}//${url.host}`;
+}
+
 function pickRateLimitConfig(routeId: string | null, pathname: string, method: string): RateLimitConfig {
   if (routeId === '/api/submit' || pathname === '/api/submit') {
     return RATE_LIMITS.submit;
@@ -183,7 +225,6 @@ function pickRateLimitConfig(routeId: string | null, pathname: string, method: s
   if (
     routeId === '/api/skills/[slug]/files' ||
     routeId === '/api/skills/[slug]/download' ||
-    routeId === '/registry/skill/[identifier]' ||
     routeId === '/registry/skill/[owner]/[name]'
   ) {
     return HEAVY_TRANSFER_LIMIT;
@@ -231,6 +272,25 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
 
   const routeId = route.id ?? null;
   const cors = pathname.startsWith('/registry/');
+  const tokenAuth = hasTokenAuthHeader(request);
+
+  if (
+    isMutationMethod(method) &&
+    !tokenAuth &&
+    !isCsrfExemptPath(pathname) &&
+    hasSessionCookie(request)
+  ) {
+    const sourceOrigin = getRequestSourceOrigin(request);
+    const requestOrigin = getCurrentRequestOrigin(url);
+    if (!sourceOrigin || sourceOrigin !== requestOrigin) {
+      return securityJsonResponse(
+        403,
+        { error: 'Invalid request origin' },
+        { 'X-Security-Block': 'csrf-origin' },
+        cors
+      );
+    }
+  }
 
   if (routeNeedsUaProtection(routeId, pathname)) {
     const ua = normalizeUserAgent(request.headers.get('user-agent'));
@@ -244,9 +304,8 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
     }
 
     if (!isAllowedCrawler(ua)) {
-      const hasTokenAuth = hasTokenAuthHeader(request);
       const allowedClient = isBrowserOrTrustedClient(ua);
-      if (!hasTokenAuth && (!allowedClient || isBlockedAutomation(ua))) {
+      if (!tokenAuth && (!allowedClient || isBlockedAutomation(ua))) {
         return securityJsonResponse(
           403,
           { error: 'Request blocked by abuse protection policy' },
