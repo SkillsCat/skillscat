@@ -1,7 +1,7 @@
 /**
  * Rate limiting utility using Cloudflare KV
  *
- * Implements a sliding window rate limiter with configurable limits.
+ * Implements a fixed-window counter with configurable limits.
  */
 
 interface RateLimitConfig {
@@ -28,42 +28,31 @@ export async function checkRateLimit(
   config: RateLimitConfig
 ): Promise<RateLimitResult> {
   const prefix = config.prefix || 'ratelimit';
-  const kvKey = `${prefix}:${key}`;
   const now = Math.floor(Date.now() / 1000);
-  const windowStart = now - config.windowSeconds;
+  const windowSeconds = Math.max(1, config.windowSeconds);
+  const windowBucket = Math.floor(now / windowSeconds);
+  const kvKey = `${prefix}:${key}:${windowBucket}`;
+  const resetAt = (windowBucket + 1) * windowSeconds;
 
   try {
-    // Get current rate limit data
-    const data = await kv.get<{ requests: number[]; }>(kvKey, 'json');
-    let requests = data?.requests || [];
+    const raw = await kv.get(kvKey);
+    const count = raw ? Number.parseInt(raw, 10) : 0;
+    const current = Number.isFinite(count) && count > 0 ? count : 0;
 
-    // Remove expired requests (outside the window)
-    requests = requests.filter(timestamp => timestamp > windowStart);
-
-    // Check if limit exceeded
-    if (requests.length >= config.limit) {
-      const oldestRequest = Math.min(...requests);
-      const resetAt = oldestRequest + config.windowSeconds;
-
-      return {
-        allowed: false,
-        remaining: 0,
-        resetAt
-      };
+    if (current >= config.limit) {
+      return { allowed: false, remaining: 0, resetAt };
     }
 
-    // Add current request
-    requests.push(now);
+    const next = current + 1;
 
-    // Save updated data
-    await kv.put(kvKey, JSON.stringify({ requests }), {
-      expirationTtl: config.windowSeconds * 2 // Keep data a bit longer than window
+    await kv.put(kvKey, String(next), {
+      expirationTtl: windowSeconds * 2
     });
 
     return {
       allowed: true,
-      remaining: config.limit - requests.length,
-      resetAt: now + config.windowSeconds
+      remaining: Math.max(0, config.limit - next),
+      resetAt
     };
   } catch (error) {
     // On error, allow the request but log
@@ -71,7 +60,7 @@ export async function checkRateLimit(
     return {
       allowed: true,
       remaining: config.limit,
-      resetAt: now + config.windowSeconds
+      resetAt
     };
   }
 }

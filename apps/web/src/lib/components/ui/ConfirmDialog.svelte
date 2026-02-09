@@ -2,7 +2,7 @@
   /**
    * ConfirmDialog - Reusable confirmation dialog component
    */
-  import { Button } from '$lib/components';
+  import Button from '$lib/components/ui/Button.svelte';
 
   interface Props {
     open: boolean;

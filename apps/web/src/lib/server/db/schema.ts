@@ -125,6 +125,9 @@ export const skills = sqliteTable('skills', {
   index('skills_stars_idx').on(table.stars),
   index('skills_indexed_idx').on(table.indexedAt),
   index('skills_visibility_idx').on(table.visibility),
+  index('skills_visibility_trending_desc_idx').on(table.visibility, table.trendingScore),
+  index('skills_visibility_stars_desc_idx').on(table.visibility, table.stars),
+  index('skills_visibility_recent_expr_idx').on(table.visibility, sql`COALESCE(${table.lastCommitAt}, ${table.indexedAt})`),
   index('skills_owner_idx').on(table.ownerId),
   index('skills_content_hash_idx').on(table.contentHash),
   // Cost optimization indexes
@@ -254,7 +257,9 @@ export const userActions = sqliteTable('user_actions', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
   index('user_actions_skill_idx').on(table.skillId),
-  index('user_actions_user_idx').on(table.userId)
+  index('user_actions_user_idx').on(table.userId),
+  index('user_actions_action_created_idx').on(table.actionType, table.createdAt),
+  index('user_actions_action_skill_created_idx').on(table.actionType, table.skillId, table.createdAt)
 ]);
 
 // ========== Device Codes (CLI Device Authorization Flow) ==========

@@ -2,10 +2,10 @@
   /**
    * UserMenu - 用户菜单组件
    * 使用 Bits UI DropdownMenu 组件实现
-   */
+  */
   import { DropdownMenu } from 'bits-ui';
   import { signOut, useSession } from '$lib/auth-client';
-  import { LoginDialog, Avatar } from '$lib/components';
+  import Avatar from '$lib/components/common/Avatar.svelte';
   import { fly } from 'svelte/transition';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { ArrowDown01Icon, Bookmark02Icon, Settings01Icon, Logout01Icon, Login03Icon, SparklesIcon, Mail01Icon } from '@hugeicons/core-free-icons';
@@ -19,9 +19,27 @@
   const session = useSession();
 
   let showLoginDialog = $state(false);
+  let LoginDialogComponent = $state<any>(null);
+  let isLoadingLoginDialog = $state(false);
 
   function handleSignOut() {
     signOut();
+  }
+
+  async function ensureLoginDialogLoaded() {
+    if (LoginDialogComponent || isLoadingLoginDialog) return;
+    isLoadingLoginDialog = true;
+    try {
+      const module = await import('$lib/components/dialog/LoginDialog.svelte');
+      LoginDialogComponent = module.default;
+    } finally {
+      isLoadingLoginDialog = false;
+    }
+  }
+
+  async function openLoginDialog() {
+    await ensureLoginDialogLoaded();
+    showLoginDialog = true;
   }
 </script>
 
@@ -110,14 +128,18 @@
 {:else}
   <!-- Logged out state -->
   <button
-    onclick={() => (showLoginDialog = true)}
+    onclick={openLoginDialog}
+    onpointerenter={() => void ensureLoginDialogLoaded()}
+    onfocus={() => void ensureLoginDialogLoaded()}
     class="sign-in-btn"
   >
     <HugeiconsIcon icon={Login03Icon} size={16} />
     <span class="hidden sm:inline">Sign In</span>
   </button>
 
-  <LoginDialog isOpen={showLoginDialog} onClose={() => (showLoginDialog = false)} />
+  {#if LoginDialogComponent}
+    <LoginDialogComponent isOpen={showLoginDialog} onClose={() => (showLoginDialog = false)} />
+  {/if}
 {/if}
 
 <style>

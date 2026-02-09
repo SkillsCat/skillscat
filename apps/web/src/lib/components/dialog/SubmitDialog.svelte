@@ -2,10 +2,11 @@
   /**
    * SubmitDialog - 提交 Skill 对话框组件
    * 使用 Bits UI Dialog 组件实现
-   */
+  */
   import { Dialog } from 'bits-ui';
   import { fade, fly } from 'svelte/transition';
-  import { Button, Input } from '$lib/components';
+  import Button from '$lib/components/ui/Button.svelte';
+  import Input from '$lib/components/ui/Input.svelte';
 
   interface Props {
     isOpen?: boolean;

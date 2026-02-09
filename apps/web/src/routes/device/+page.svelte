@@ -1,6 +1,7 @@
 <script lang="ts">
   import { signIn } from '$lib/auth-client';
-  import { Avatar, toast } from '$lib/components';
+  import Avatar from '$lib/components/common/Avatar.svelte';
+  import { toast } from '$lib/components/ui/Toast.svelte';
 
   interface Props {
     data: {

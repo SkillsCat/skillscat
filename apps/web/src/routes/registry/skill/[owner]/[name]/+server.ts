@@ -1,6 +1,5 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { checkRateLimit, getRateLimitKey, rateLimitHeaders, RATE_LIMITS } from '$lib/server/ratelimit';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
 
@@ -27,32 +26,8 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
   const { owner, name } = params;
   const slug = `${owner}/${name}`;
 
-  const kv = platform?.env?.KV;
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
-
-  // Get auth context for permission checks
-  const auth = await getAuthContext(request, locals, db);
-
-  // Rate limiting
-  if (kv) {
-    const clientKey = getRateLimitKey(request);
-    const rateLimitResult = await checkRateLimit(kv, clientKey, RATE_LIMITS.skill);
-
-    if (!rateLimitResult.allowed) {
-      return json(
-        { error: 'Rate limit exceeded. Please try again later.' },
-        {
-          status: 429,
-          headers: {
-            ...rateLimitHeaders(rateLimitResult, RATE_LIMITS.skill),
-            'Retry-After': String(rateLimitResult.resetAt - Math.floor(Date.now() / 1000)),
-            'Access-Control-Allow-Origin': '*'
-          }
-        }
-      );
-    }
-  }
 
   try {
     if (!db) {
@@ -110,6 +85,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
 
     // Check access permission for private skills
     if (row.visibility === 'private') {
+      const auth = await getAuthContext(request, locals, db);
       if (!auth.userId) {
         return json(
           { error: 'Authentication required to access this skill' },

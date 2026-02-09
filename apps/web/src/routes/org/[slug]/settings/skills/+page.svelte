@@ -1,7 +1,10 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { browser } from '$app/environment';
-  import { CopyButton, SettingsSection, SkillsList, Pagination } from '$lib/components';
+  import CopyButton from '$lib/components/ui/CopyButton.svelte';
+  import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
+  import SkillsList from '$lib/components/settings/SkillsList.svelte';
+  import Pagination from '$lib/components/ui/Pagination.svelte';
 
   interface Skill {
     id: string;

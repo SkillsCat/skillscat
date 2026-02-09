@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ListPage } from '$lib/components';
+  import ListPage from '$lib/components/layout/ListPage.svelte';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { Notification01Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';

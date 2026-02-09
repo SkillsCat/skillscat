@@ -1,7 +1,11 @@
 <script lang="ts">
-  import { CopyButton, SkillCardCompact, ErrorState, toast, Avatar, VisibilityBadge } from '$lib/components';
+  import CopyButton from '$lib/components/ui/CopyButton.svelte';
+  import SkillCardCompact from '$lib/components/skill/SkillCardCompact.svelte';
+  import ErrorState from '$lib/components/feedback/ErrorState.svelte';
+  import { toast } from '$lib/components/ui/Toast.svelte';
+  import Avatar from '$lib/components/common/Avatar.svelte';
+  import VisibilityBadge from '$lib/components/ui/VisibilityBadge.svelte';
   import { getCategoryBySlug } from '$lib/constants/categories';
-  import { marked } from 'marked';
   import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
   import type { Highlighter } from 'shiki';
 
@@ -13,6 +17,7 @@
       isOwner?: boolean;
       isBookmarked?: boolean;
       isAuthenticated?: boolean;
+      renderedReadme?: string;
     };
   }
 
@@ -57,12 +62,38 @@
   // Shiki highlighter (lazy loaded)
   let highlighter = $state<Highlighter | null>(null);
   let highlightedReadme = $state('');
+  let isLoadingShiki = $state(false);
 
-  // Load shiki on mount
+  // Reset highlighted HTML whenever server-rendered markdown changes.
   $effect(() => {
-    if (data.skill?.readme && !highlighter) {
-      loadShiki();
+    data.renderedReadme;
+    highlightedReadme = '';
+  });
+
+  // Lazy-load shiki during idle time so it doesn't compete with first paint.
+  $effect(() => {
+    if (!data.renderedReadme || highlighter || isLoadingShiki) return;
+
+    const run = () => {
+      void loadShiki();
+    };
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      (
+        window as Window & {
+          requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
+        }
+      ).requestIdleCallback(run, { timeout: 1200 });
+      return;
     }
+
+    setTimeout(run, 250);
+  });
+
+  // If shiki is already available (client-side navigation), highlight immediately.
+  $effect(() => {
+    if (!highlighter || !data.renderedReadme || highlightedReadme) return;
+    void highlightReadmeHtml();
   });
 
   // Handle clicks on relative file links in markdown content
@@ -86,6 +117,9 @@
   });
 
   async function loadShiki() {
+    if (highlighter || isLoadingShiki) return;
+    isLoadingShiki = true;
+
     try {
       const { createHighlighter } = await import('shiki');
       highlighter = await createHighlighter({
@@ -96,16 +130,12 @@
           'svelte', 'vue', 'c', 'cpp', 'java', 'kotlin', 'swift', 'ruby', 'php', 'dockerfile'
         ]
       });
-      await highlightReadme();
+      await highlightReadmeHtml();
     } catch (e) {
       console.error('Failed to load shiki:', e);
+    } finally {
+      isLoadingShiki = false;
     }
-  }
-
-  // Strip frontmatter from markdown
-  function stripFrontmatter(content: string): string {
-    const frontmatterRegex = /^---\s*\n[\s\S]*?\n---\s*\n/;
-    return content.replace(frontmatterRegex, '');
   }
 
   function escapeHtml(value: string): string {
@@ -117,41 +147,6 @@
       .replace(/'/g, '&#39;');
   }
 
-  function escapeAttr(value: string): string {
-    return escapeHtml(value).replace(/`/g, '&#96;');
-  }
-
-  function normalizeRelativeFilePath(path: string): string {
-    return path.trim().replace(/^\.\/+/, '').replace(/^\/+/, '');
-  }
-
-  function isRelativeMarkdownLink(href: string): boolean {
-    const value = href.trim();
-    if (!value) return false;
-    if (value.startsWith('#')) return false;
-    if (value.startsWith('//')) return false;
-    if (/^https?:\/\//i.test(value)) return false;
-    if (/^mailto:/i.test(value)) return false;
-    if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
-    return true;
-  }
-
-  function sanitizeMarkdownHref(rawHref: string): string | null {
-    const href = rawHref.trim();
-    if (!href) return null;
-
-    if (/^(javascript|data|vbscript|file):/i.test(href)) return null;
-    if (href.startsWith('//')) return null;
-
-    if (href.startsWith('#')) return href;
-    if (/^mailto:/i.test(href) || /^tel:/i.test(href)) return href;
-    if (/^https?:\/\//i.test(href)) return href;
-    if (href.startsWith('/') || href.startsWith('./') || href.startsWith('../')) return href;
-    if (!/^[a-z][a-z0-9+.-]*:/i.test(href)) return href;
-
-    return null;
-  }
-
   function escapeCssSelectorValue(value: string): string {
     if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
       return CSS.escape(value);
@@ -159,163 +154,64 @@
     return value.replace(/["\\\]]/g, '\\$&');
   }
 
-  function createSafeMarkdownRenderer() {
-    const renderer = new marked.Renderer();
+  function getCodeLanguage(node: HTMLElement): string {
+    const dataLanguage = node.dataset.language?.trim().toLowerCase();
+    if (dataLanguage) return dataLanguage;
 
-    renderer.link = function({ href, text }: { href: string; text: string }) {
-      if (!href) return escapeHtml(String(text ?? ''));
-
-      if (isRelativeMarkdownLink(href)) {
-        const safePath = normalizeRelativeFilePath(href);
-        const safeText = escapeHtml(String(text ?? ''));
-        return `<a href="#" class="file-link" data-file-path="${escapeAttr(safePath)}">${safeText}</a>`;
+    for (const className of node.classList) {
+      if (className.startsWith('language-')) {
+        const fromClass = className.slice('language-'.length).trim().toLowerCase();
+        if (fromClass) return fromClass;
       }
+    }
 
-      const safeHref = sanitizeMarkdownHref(href);
-      const safeText = escapeHtml(String(text ?? ''));
-      if (!safeHref) {
-        return safeText;
-      }
-
-      if (safeHref.startsWith('#') || safeHref.startsWith('/')) {
-        return `<a href="${escapeAttr(safeHref)}">${safeText}</a>`;
-      }
-
-      return `<a href="${escapeAttr(safeHref)}" target="_blank" rel="noopener noreferrer nofollow">${safeText}</a>`;
-    };
-
-    renderer.html = (token: unknown) => {
-      if (typeof token === 'string') {
-        return escapeHtml(token);
-      }
-      if (token && typeof token === 'object') {
-        const candidate = (token as { raw?: unknown; text?: unknown }).raw ?? (token as { text?: unknown }).text;
-        return escapeHtml(String(candidate ?? ''));
-      }
-      return '';
-    };
-
-    return renderer;
+    return 'plaintext';
   }
 
-  // Custom marked renderer with shiki highlighting
-  async function highlightReadme() {
-    if (!data.skill?.readme || !highlighter) return;
+  async function highlightReadmeHtml() {
+    if (!highlighter || !data.renderedReadme) return;
 
-    const strippedReadme = stripFrontmatter(data.skill.readme);
+    const container = document.createElement('div');
+    container.innerHTML = data.renderedReadme;
 
-    const renderer = createSafeMarkdownRenderer();
+    const codeBlocks = Array.from(container.querySelectorAll('pre > code')) as HTMLElement[];
+    if (codeBlocks.length === 0) {
+      highlightedReadme = data.renderedReadme;
+      return;
+    }
 
-    renderer.code = function({ text, lang }: { text: string; lang?: string }) {
-      const language = lang || 'plaintext';
-      // Extract filename if present (e.g., "js:filename.js" or just "filename.js")
-      let filename = '';
-      let actualLang = language;
+    const supportedLanguages = new Set(highlighter.getLoadedLanguages().map((lang) => String(lang)));
+    const BATCH_SIZE = 6;
 
-      if (language.includes(':')) {
-        const parts = language.split(':');
-        actualLang = parts[0];
-        filename = parts[1];
-      } else if (language.includes('.')) {
-        // If it looks like a filename, extract extension
-        filename = language;
-        const ext = language.split('.').pop()?.toLowerCase() || '';
-        const extToLang: Record<string, string> = {
-          // JavaScript variants
-          'js': 'javascript',
-          'mjs': 'javascript',
-          'cjs': 'javascript',
-          'jsx': 'jsx',
-          // TypeScript variants
-          'ts': 'typescript',
-          'mts': 'typescript',
-          'cts': 'typescript',
-          'tsx': 'tsx',
-          // Python
-          'py': 'python',
-          'pyw': 'python',
-          'pyi': 'python',
-          // Rust
-          'rs': 'rust',
-          // Go
-          'go': 'go',
-          // Shell/Bash
-          'sh': 'bash',
-          'bash': 'bash',
-          'zsh': 'bash',
-          // PowerShell
-          'ps1': 'powershell',
-          'psm1': 'powershell',
-          'psd1': 'powershell',
-          // Windows batch/cmd
-          'bat': 'bat',
-          'cmd': 'bat',
-          // Config files
-          'yml': 'yaml',
-          'yaml': 'yaml',
-          'toml': 'toml',
-          'json': 'json',
-          'jsonc': 'json',
-          // Markup
-          'md': 'markdown',
-          'mdx': 'markdown',
-          'html': 'html',
-          'htm': 'html',
-          'xml': 'xml',
-          'svg': 'xml',
-          // Styles
-          'css': 'css',
-          'scss': 'css',
-          'sass': 'css',
-          'less': 'css',
-          // Other languages
-          'sql': 'sql',
-          'c': 'c',
-          'h': 'c',
-          'cpp': 'cpp',
-          'cc': 'cpp',
-          'cxx': 'cpp',
-          'hpp': 'cpp',
-          'java': 'java',
-          'kt': 'kotlin',
-          'kts': 'kotlin',
-          'swift': 'swift',
-          'rb': 'ruby',
-          'php': 'php',
-          'svelte': 'svelte',
-          'vue': 'vue',
-          'dockerfile': 'dockerfile',
-        };
-        actualLang = extToLang[ext] || ext || 'plaintext';
-      }
+    for (let i = 0; i < codeBlocks.length; i++) {
+      const codeBlock = codeBlocks[i];
+      const pre = codeBlock.closest('pre');
+      if (!pre || !pre.parentNode) continue;
+
+      const requestedLanguage = getCodeLanguage(codeBlock);
+      const language = supportedLanguages.has(requestedLanguage) ? requestedLanguage : 'plaintext';
 
       try {
-        const supportedLangs = highlighter!.getLoadedLanguages();
-        const langToUse = supportedLangs.includes(actualLang) ? actualLang : 'plaintext';
-        const codeHtml = highlighter!.codeToHtml(text, {
-          lang: langToUse,
+        const codeHtml = highlighter.codeToHtml(codeBlock.textContent || '', {
+          lang: language,
           themes: { light: 'github-light', dark: 'github-dark' }
         });
-
-        if (filename) {
-          return `<div class="code-block-wrapper"><div class="code-block-header"><span>${escapeHtml(filename)}</span></div>${codeHtml}</div>`;
+        const template = document.createElement('template');
+        template.innerHTML = codeHtml.trim();
+        const shikiNode = template.content.firstElementChild;
+        if (shikiNode) {
+          pre.parentNode.replaceChild(shikiNode, pre);
         }
-        return codeHtml;
       } catch {
-        const escapedText = escapeHtml(text);
-        if (filename) {
-          return `<div class="code-block-wrapper"><div class="code-block-header"><span>${escapeHtml(filename)}</span></div><pre><code class="language-${escapeAttr(actualLang)}">${escapedText}</code></pre></div>`;
-        }
-        return `<pre><code class="language-${escapeAttr(actualLang)}">${escapedText}</code></pre>`;
+        // Keep server-rendered <pre><code> output if highlighting fails.
       }
-    };
 
-    highlightedReadme = await marked.parse(strippedReadme, {
-      renderer,
-      gfm: true,
-      breaks: true,
-      async: false,
-    }) as string;
+      if ((i + 1) % BATCH_SIZE === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+
+    highlightedReadme = container.innerHTML;
   }
 
   // Determine the install identifier based on skill type
@@ -424,20 +320,8 @@
     window.location.href = `/api/skills/${data.skill.slug}/download`;
   }
 
-  // Fallback rendered README (without shiki)
-  const fallbackReadme = $derived(() => {
-    if (!data.skill?.readme) return '';
-    const stripped = stripFrontmatter(data.skill.readme);
-    return marked.parse(stripped, {
-      renderer: createSafeMarkdownRenderer(),
-      gfm: true,
-      breaks: true,
-      async: false,
-    }) as string;
-  });
-
-  // Use highlighted version if available, otherwise fallback
-  const renderedReadme = $derived(highlightedReadme || fallbackReadme());
+  // Use delayed-highlighted version if available, otherwise server-rendered HTML.
+  const renderedReadme = $derived(highlightedReadme || data.renderedReadme || '');
 
   // File browser state
   let expandedFolders = $state<Set<string>>(new Set());

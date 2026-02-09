@@ -3,7 +3,7 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { useSession } from '$lib/auth-client';
-  import { Avatar } from '$lib/components';
+  import Avatar from '$lib/components/common/Avatar.svelte';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import {
     SparklesIcon,

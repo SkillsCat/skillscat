@@ -520,85 +520,88 @@ async function detectReclassificationNeeded(
 }
 
 /**
- * Flush download counts from KV to D1 (true rolling window).
+ * Flush download/install counts from user_actions to skills rolling counters.
  *
- * KV stores date-partitioned keys: `dl:{skillId}:{YYYY-MM-DD}` → daily count.
- * This function lists all keys, groups by skillId, sums the last 7/30 days,
- * and SETs (not increments) the D1 columns. Idempotent — safe to re-run.
- *
- * Runs at most once per day (guarded by `dl:last_flush` KV key) to save reads.
+ * This avoids per-request KV read/write amplification by writing events directly
+ * to D1 (`user_actions`) and running one daily aggregation job.
  */
 async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
   try {
     // Guard: only flush once per day
-    const lastFlush = await env.KV.get('dl:last_flush');
+    const lastFlush = await env.KV.get('dl:last_flush_actions');
     const today = new Date().toISOString().slice(0, 10);
     if (lastFlush === today) return 0;
 
-    // List all dl:* keys (paginate if >1000)
-    const allKeys: { name: string }[] = [];
-    let cursor: string | undefined;
-    do {
-      const list = await env.KV.list({ prefix: 'dl:', cursor });
-      allKeys.push(...list.keys);
-      cursor = list.list_complete ? undefined : list.cursor;
-    } while (cursor);
+    const now = Date.now();
+    const sevenDaysAgo = now - 7 * 86400000;
+    const thirtyDaysAgo = now - 30 * 86400000;
+    const cleanupBefore = now - 35 * 86400000;
 
-    if (allKeys.length === 0) {
-      await env.KV.put('dl:last_flush', today, { expirationTtl: 86400 });
+    // Keep event table bounded so daily aggregation stays cheap.
+    await env.DB.prepare(`
+      DELETE FROM user_actions
+      WHERE action_type IN ('download', 'install')
+        AND created_at < ?
+    `)
+      .bind(cleanupBefore)
+      .run();
+
+    const aggregated = await env.DB.prepare(`
+      SELECT
+        skill_id as skillId,
+        SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as sum7d,
+        COUNT(*) as sum30d
+      FROM user_actions
+      WHERE action_type IN ('download', 'install')
+        AND skill_id IS NOT NULL
+        AND created_at >= ?
+      GROUP BY skill_id
+    `)
+      .bind(sevenDaysAgo, thirtyDaysAgo)
+      .all<{ skillId: string; sum7d: number; sum30d: number }>();
+
+    if ((aggregated.results || []).length === 0) {
+      await env.DB.prepare(`
+        UPDATE skills
+        SET download_count_7d = 0, download_count_30d = 0
+        WHERE download_count_7d != 0 OR download_count_30d != 0
+      `).run();
+      await env.KV.put('dl:last_flush_actions', today, { expirationTtl: 86400 });
       return 0;
     }
 
-    // Read all values and parse key structure
-    const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000).toISOString().slice(0, 10);
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10);
-
-    // Group counts by skillId
-    const skillCounts = new Map<string, { sum7d: number; sum30d: number }>();
-
-    for (const key of allKeys) {
-      // Skip non-daily keys (e.g., dl:last_flush)
-      const parts = key.name.split(':');
-      if (parts.length !== 3) continue;
-
-      const [, skillId, date] = parts;
-      if (date < thirtyDaysAgo) continue; // Skip expired (TTL should handle, but be safe)
-
-      const countStr = await env.KV.get(key.name);
-      const count = parseInt(countStr || '0');
-      if (count <= 0) continue;
-
-      const entry = skillCounts.get(skillId) || { sum7d: 0, sum30d: 0 };
-      entry.sum30d += count;
-      if (date >= sevenDaysAgo) {
-        entry.sum7d += count;
-      }
-      skillCounts.set(skillId, entry);
-    }
-
-    if (skillCounts.size === 0) {
-      await env.KV.put('dl:last_flush', today, { expirationTtl: 86400 });
-      return 0;
-    }
-
-    // D1 batch SET (not increment — these are computed totals)
-    const entries = [...skillCounts.entries()];
+    const entries = aggregated.results || [];
     const BATCH_SIZE = 100;
     for (let i = 0; i < entries.length; i += BATCH_SIZE) {
       const chunk = entries.slice(i, i + BATCH_SIZE);
-      const stmts = chunk.map(([skillId, counts]) =>
+      const stmts = chunk.map((entry) =>
         env.DB.prepare(`
           UPDATE skills
           SET download_count_7d = ?, download_count_30d = ?
           WHERE id = ?
-        `).bind(counts.sum7d, counts.sum30d, skillId)
+        `).bind(Number(entry.sum7d || 0), Number(entry.sum30d || 0), entry.skillId)
       );
       await env.DB.batch(stmts);
     }
 
-    await env.KV.put('dl:last_flush', today, { expirationTtl: 86400 });
-    return skillCounts.size;
+    // Clear stale counters for skills with no download/install events in 30 days.
+    await env.DB.prepare(`
+      UPDATE skills
+      SET download_count_7d = 0, download_count_30d = 0
+      WHERE (download_count_7d != 0 OR download_count_30d != 0)
+        AND id NOT IN (
+          SELECT DISTINCT skill_id
+          FROM user_actions
+          WHERE action_type IN ('download', 'install')
+            AND skill_id IS NOT NULL
+            AND created_at >= ?
+        )
+    `)
+      .bind(thirtyDaysAgo)
+      .run();
+
+    await env.KV.put('dl:last_flush_actions', today, { expirationTtl: 86400 });
+    return entries.length;
   } catch (err) {
     console.error('Failed to flush download counts:', err);
     return 0;
@@ -730,7 +733,7 @@ export default {
       console.log(`Queued ${reclassifications} skills for AI reclassification`);
     }
 
-    // 6. Flush download counts from KV to D1
+    // 6. Flush download/install rolling counts from user_actions to skills
     const downloadsFlushed = await flushDownloadCounts(env);
     if (downloadsFlushed > 0) {
       console.log(`Flushed download counts for ${downloadsFlushed} skills`);

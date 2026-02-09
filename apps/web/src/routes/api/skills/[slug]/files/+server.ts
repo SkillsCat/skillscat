@@ -2,6 +2,7 @@ import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
+import { getCached } from '$lib/server/cache';
 
 interface SkillFile {
   path: string;
@@ -27,15 +28,6 @@ interface GitHubTreeItem {
   size?: number;
 }
 
-interface CachedCommitInfo {
-  sha: string;
-  branch: string;
-  timestamp: number;
-}
-
-// Rate limit configuration
-const RATE_LIMIT_WINDOW = 60; // 60 seconds
-const RATE_LIMIT_MAX_REQUESTS = 10; // max 10 requests per window per IP
 const COMMIT_CACHE_TTL = 300; // 5 minutes cache for commit SHA
 
 // Text file extensions that we should include
@@ -75,131 +67,47 @@ function decodeBase64ToUtf8(base64: string): string {
 }
 
 /**
- * Check rate limit using KV
- * Returns true if request is allowed, false if rate limited
- */
-async function checkRateLimit(kv: KVNamespace, clientIp: string): Promise<boolean> {
-  const key = `ratelimit:files:${clientIp}`;
-  const now = Math.floor(Date.now() / 1000);
-  const windowStart = now - RATE_LIMIT_WINDOW;
-
-  try {
-    const data = await kv.get(key, 'json') as { requests: number[]; } | null;
-    const requests = data?.requests || [];
-
-    // Filter out old requests outside the window
-    const recentRequests = requests.filter(t => t > windowStart);
-
-    if (recentRequests.length >= RATE_LIMIT_MAX_REQUESTS) {
-      return false;
-    }
-
-    // Add current request and save
-    recentRequests.push(now);
-    await kv.put(key, JSON.stringify({ requests: recentRequests }), {
-      expirationTtl: RATE_LIMIT_WINDOW * 2
-    });
-
-    return true;
-  } catch {
-    // If KV fails, allow the request but log
-    console.error('Rate limit check failed');
-    return true;
-  }
-}
-
-/**
- * Get cached commit info from KV
- */
-async function getCachedCommitInfo(
-  kv: KVNamespace,
-  owner: string,
-  repo: string
-): Promise<CachedCommitInfo | null> {
-  const key = `commit:${owner}/${repo}`;
-  try {
-    const cached = await kv.get(key, 'json') as CachedCommitInfo | null;
-    if (cached && (Date.now() / 1000 - cached.timestamp) < COMMIT_CACHE_TTL) {
-      return cached;
-    }
-  } catch {
-    // Cache miss or error
-  }
-  return null;
-}
-
-/**
- * Cache commit info in KV
- */
-async function cacheCommitInfo(
-  kv: KVNamespace,
-  owner: string,
-  repo: string,
-  sha: string,
-  branch: string
-): Promise<void> {
-  const key = `commit:${owner}/${repo}`;
-  try {
-    await kv.put(key, JSON.stringify({
-      sha,
-      branch,
-      timestamp: Math.floor(Date.now() / 1000)
-    }), {
-      expirationTtl: COMMIT_CACHE_TTL * 2
-    });
-  } catch {
-    // Ignore cache write errors
-  }
-}
-
-/**
- * Get the latest commit SHA from GitHub repository (with KV caching)
+ * Get the latest commit SHA from GitHub repository (with Cache API caching)
  */
 async function getLatestCommitSha(
   owner: string,
   repo: string,
-  kv: KVNamespace | undefined,
   githubToken?: string
 ): Promise<{ sha: string; branch: string } | null> {
-  // Try KV cache first
-  if (kv) {
-    const cached = await getCachedCommitInfo(kv, owner, repo);
-    if (cached) {
-      return { sha: cached.sha, branch: cached.branch };
-    }
-  }
+  const { data } = await getCached(
+    `commit:${owner}/${repo}`,
+    async () => {
+      const headers: Record<string, string> = {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'SkillsCat'
+      };
+      if (githubToken) {
+        headers['Authorization'] = `Bearer ${githubToken}`;
+      }
 
-  const headers: Record<string, string> = {
-    'Accept': 'application/vnd.github.v3+json',
-    'User-Agent': 'SkillsCat'
-  };
-  if (githubToken) {
-    headers['Authorization'] = `Bearer ${githubToken}`;
-  }
+      // Get repository info (includes default branch)
+      const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
+      if (!repoRes.ok) {
+        if (repoRes.status === 404) return null;
+        throw new Error(`Failed to fetch repo: ${repoRes.status}`);
+      }
+      const repoInfo = await repoRes.json() as { default_branch: string };
+      const branch = repoInfo.default_branch;
 
-  // Get repository info (includes default branch)
-  const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
-  if (!repoRes.ok) {
-    if (repoRes.status === 404) return null;
-    throw new Error(`Failed to fetch repo: ${repoRes.status}`);
-  }
-  const repoInfo = await repoRes.json() as { default_branch: string };
-  const branch = repoInfo.default_branch;
+      // Get latest commit
+      const commitRes = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/commits/${branch}`,
+        { headers }
+      );
+      if (!commitRes.ok) return null;
+      const commitInfo = await commitRes.json() as { sha: string };
 
-  // Get latest commit
-  const commitRes = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/commits/${branch}`,
-    { headers }
+      return { sha: commitInfo.sha, branch };
+    },
+    COMMIT_CACHE_TTL
   );
-  if (!commitRes.ok) return null;
-  const commitInfo = await commitRes.json() as { sha: string };
 
-  // Cache the result
-  if (kv) {
-    await cacheCommitInfo(kv, owner, repo, commitInfo.sha, branch);
-  }
-
-  return { sha: commitInfo.sha, branch };
+  return data;
 }
 
 /**
@@ -326,23 +234,9 @@ async function getR2CacheSha(r2: R2Bucket, r2Prefix: string): Promise<string | n
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
-  const kv = platform?.env?.KV;
   const githubToken = platform?.env?.GITHUB_TOKEN;
 
   if (!db || !r2) throw error(503, 'Storage not available');
-
-  // Get client IP for rate limiting
-  const clientIp = request.headers.get('cf-connecting-ip') ||
-                   request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-                   'unknown';
-
-  // Check rate limit
-  if (kv && clientIp !== 'unknown') {
-    const allowed = await checkRateLimit(kv, clientIp);
-    if (!allowed) {
-      throw error(429, 'Too many requests. Please try again later.');
-    }
-  }
 
   const { slug } = params;
   if (!slug) throw error(400, 'Skill slug is required');
@@ -393,7 +287,6 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
       const latestCommit = await getLatestCommitSha(
         skill.repo_owner,
         skill.repo_name,
-        kv,
         githubToken
       );
 
@@ -451,21 +344,19 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     throw error(404, 'Skill files not found');
   }
 
-  // Track download count in KV (date-partitioned for true rolling window)
-  if (kv) {
-    try {
-      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-      const key = `dl:${skill.id}:${today}`;
-      const current = parseInt(await kv.get(key) || '0');
-      await kv.put(key, String(current + 1), { expirationTtl: 31 * 86400 });
-    } catch { /* non-critical */ }
-  }
+  // Track download in D1 to avoid high-cost KV write amplification.
+  try {
+    await db.prepare(`
+      INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
+      VALUES (?, NULL, ?, 'download', ?)
+    `)
+      .bind(crypto.randomUUID(), skill.id, Date.now())
+      .run();
+  } catch { /* non-critical */ }
 
   return json({ folderName, files }, {
     headers: {
       'Cache-Control': skill.visibility === 'private' ? 'private, no-cache' : 'public, max-age=300',
-      'X-RateLimit-Limit': String(RATE_LIMIT_MAX_REQUESTS),
-      'X-RateLimit-Window': String(RATE_LIMIT_WINDOW)
     }
   });
 };

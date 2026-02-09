@@ -1,7 +1,7 @@
 <script lang="ts">
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { StarIcon } from '@hugeicons/core-free-icons';
-  import { Avatar } from '$lib/components';
+  import Avatar from '$lib/components/common/Avatar.svelte';
 
   interface Props {
     skill: {

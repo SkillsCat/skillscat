@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { Section, Grid, SkillCard, EmptyState } from '$lib/components';
+  import Section from '$lib/components/layout/Section.svelte';
+  import Grid from '$lib/components/layout/Grid.svelte';
+  import SkillCard from '$lib/components/skill/SkillCard.svelte';
+  import EmptyState from '$lib/components/feedback/EmptyState.svelte';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import {
     Fire03Icon,

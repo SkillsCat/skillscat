@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { SearchBox, Grid, SkillCard, EmptyState, Pagination } from '$lib/components';
+  import SearchBox from '$lib/components/common/SearchBox.svelte';
+  import Grid from '$lib/components/layout/Grid.svelte';
+  import SkillCard from '$lib/components/skill/SkillCard.svelte';
+  import EmptyState from '$lib/components/feedback/EmptyState.svelte';
+  import Pagination from '$lib/components/ui/Pagination.svelte';
   import type { Category } from '$lib/constants/categories';
   import type { SkillCardData } from '$lib/types';
   import { HugeiconsIcon } from '@hugeicons/svelte';

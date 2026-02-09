@@ -2,7 +2,7 @@
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { StarIcon, Clock01Icon } from '@hugeicons/core-free-icons';
   import { getCategoryBySlug } from '$lib/constants/categories';
-  import { Avatar } from '$lib/components';
+  import Avatar from '$lib/components/common/Avatar.svelte';
 
   interface Props {
     skill: {

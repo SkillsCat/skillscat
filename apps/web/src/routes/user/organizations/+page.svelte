@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { Avatar, Button, ErrorState } from '$lib/components';
+  import Avatar from '$lib/components/common/Avatar.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
+  import ErrorState from '$lib/components/feedback/ErrorState.svelte';
 
   interface Org {
     id: string;

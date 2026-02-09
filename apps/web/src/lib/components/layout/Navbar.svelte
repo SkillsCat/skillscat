@@ -1,7 +1,11 @@
 <script lang="ts">
   import { NavigationMenu } from 'bits-ui';
-  import { Logo, ThemeToggle, SearchBox, UserMenu, SubmitDialog, Button, LoginDialog, Avatar } from '$lib/components';
-  import { CATEGORY_SECTIONS } from '$lib/constants/categories';
+  import Logo from '$lib/components/common/Logo.svelte';
+  import ThemeToggle from '$lib/components/ui/ThemeToggle.svelte';
+  import SearchBox from '$lib/components/common/SearchBox.svelte';
+  import UserMenu from '$lib/components/common/UserMenu.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
+  import Avatar from '$lib/components/common/Avatar.svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { useSession, signOut } from '$lib/auth-client';
@@ -11,52 +15,12 @@
     ArrowDown01Icon,
     Menu01Icon,
     Cancel01Icon,
-    GitBranchIcon,
     CodeIcon,
-    RefreshIcon,
-    Bug01Icon,
-    EyeIcon,
-    TestTubeIcon,
-    SecurityLockIcon,
-    SpeedTrain01Icon,
-    FileScriptIcon,
-    EarthIcon,
-    Link01Icon,
-    Database01Icon,
-    DatabaseExportIcon,
-    PaintBrush01Icon,
-    AccessIcon,
     Settings01Icon,
-    Activity01Icon,
     Folder01Icon,
-    WorkflowSquare01Icon,
     SparklesIcon,
-    CloudIcon,
-    FlowIcon,
-    SmartPhone01Icon,
-    AiGenerativeIcon,
-    AiBrain01Icon,
-    AiChat01Icon,
     Mail01Icon,
-    Share01Icon,
-    Edit01Icon,
-    MessageIcon,
-    LockPasswordIcon,
-    Loading01Icon,
-    Analytics01Icon,
-    ConsoleIcon,
-    DocumentCodeIcon,
-    LayoutIcon,
-    CheckListIcon,
-    CubeIcon,
-    Search01Icon,
     Add01Icon,
-    MoneyBag01Icon,
-    BitcoinIcon,
-    JusticeScale01Icon,
-    MortarboardIcon,
-    GameboyIcon,
-    Calculator01Icon,
     Bookmark02Icon,
     Logout01Icon,
     Login03Icon
@@ -72,6 +36,12 @@
   let searchQuery = $state('');
   let showSubmitDialog = $state(false);
   let showLoginDialog = $state(false);
+  let CategoriesMenuContentComponent = $state<any>(null);
+  let SubmitDialogComponent = $state<any>(null);
+  let LoginDialogComponent = $state<any>(null);
+  let isLoadingCategoriesMenu = $state(false);
+  let isLoadingSubmitDialog = $state(false);
+  let isLoadingLoginDialog = $state(false);
 
   const session = useSession();
 
@@ -86,78 +56,80 @@
     signOut();
   }
 
-  // Icon mapping for categories (by slug)
-  const categoryIcons: Record<string, any> = {
-    // Development
-    'code-generation': CodeIcon,
-    'refactoring': RefreshIcon,
-    'debugging': Bug01Icon,
-    'testing': TestTubeIcon,
-    'code-review': EyeIcon,
-    'git': GitBranchIcon,
-    // Backend
-    'api': Link01Icon,
-    'database': Database01Icon,
-    'auth': LockPasswordIcon,
-    'caching': Loading01Icon,
-    // Frontend
-    'ui-components': PaintBrush01Icon,
-    'accessibility': AccessIcon,
-    'animation': SparklesIcon,
-    'responsive': SmartPhone01Icon,
-    // DevOps
-    'ci-cd': FlowIcon,
-    'docker': CubeIcon,
-    'kubernetes': Settings01Icon,
-    'cloud': CloudIcon,
-    'monitoring': Activity01Icon,
-    // Quality
-    'security': SecurityLockIcon,
-    'performance': SpeedTrain01Icon,
-    'linting': CheckListIcon,
-    'types': DocumentCodeIcon,
-    // Docs
-    'documentation': FileScriptIcon,
-    'comments': MessageIcon,
-    'i18n': EarthIcon,
-    // Data
-    'data-processing': DatabaseExportIcon,
-    'analytics': Analytics01Icon,
-    'scraping': Search01Icon,
-    'math': Calculator01Icon,
-    // AI
-    'prompts': AiChat01Icon,
-    'embeddings': AiBrain01Icon,
-    'agents': AiGenerativeIcon,
-    'ml-ops': AiGenerativeIcon,
-    // Productivity
-    'automation': WorkflowSquare01Icon,
-    'file-ops': Folder01Icon,
-    'cli': ConsoleIcon,
-    'templates': LayoutIcon,
-    // Content
-    'writing': Edit01Icon,
-    'email': Mail01Icon,
-    'social': Share01Icon,
-    'seo': Search01Icon,
-    // Lifestyle
-    'finance': MoneyBag01Icon,
-    'web3-crypto': BitcoinIcon,
-    'legal': JusticeScale01Icon,
-    'academic': MortarboardIcon,
-    'game-dev': GameboyIcon
-  };
-
   function handleSearch(query: string) {
     if (query.trim()) {
       goto(`/search?q=${encodeURIComponent(query.trim())}`);
     }
   }
 
-  // Get sections for dropdown display
-  const displaySections = CATEGORY_SECTIONS.filter(s =>
-    ['development', 'backend', 'frontend', 'devops', 'quality', 'lifestyle'].includes(s.id)
-  );
+  async function ensureCategoriesMenuLoaded() {
+    if (CategoriesMenuContentComponent || isLoadingCategoriesMenu) return;
+    isLoadingCategoriesMenu = true;
+    try {
+      const module = await import('$lib/components/layout/NavbarCategoriesContent.svelte');
+      CategoriesMenuContentComponent = module.default;
+    } finally {
+      isLoadingCategoriesMenu = false;
+    }
+  }
+
+  async function ensureSubmitDialogLoaded() {
+    if (SubmitDialogComponent || isLoadingSubmitDialog) return;
+    isLoadingSubmitDialog = true;
+    try {
+      const module = await import('$lib/components/dialog/SubmitDialog.svelte');
+      SubmitDialogComponent = module.default;
+    } finally {
+      isLoadingSubmitDialog = false;
+    }
+  }
+
+  async function ensureLoginDialogLoaded() {
+    if (LoginDialogComponent || isLoadingLoginDialog) return;
+    isLoadingLoginDialog = true;
+    try {
+      const module = await import('$lib/components/dialog/LoginDialog.svelte');
+      LoginDialogComponent = module.default;
+    } finally {
+      isLoadingLoginDialog = false;
+    }
+  }
+
+  async function openSubmitDialog() {
+    await ensureSubmitDialogLoaded();
+    showSubmitDialog = true;
+  }
+
+  async function openLoginDialog() {
+    await ensureLoginDialogLoaded();
+    showLoginDialog = true;
+  }
+
+  // Preload categories dropdown content in idle time.
+  $effect(() => {
+    if (typeof window === 'undefined' || CategoriesMenuContentComponent) return;
+
+    const run = () => {
+      void ensureCategoriesMenuLoaded();
+    };
+
+    if ('requestIdleCallback' in window) {
+      const callbackId = (
+        window as Window & {
+          requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
+          cancelIdleCallback: (id: number) => void;
+        }
+      ).requestIdleCallback(run, { timeout: 1200 });
+      return () => (
+        window as Window & {
+          cancelIdleCallback: (id: number) => void;
+        }
+      ).cancelIdleCallback(callbackId);
+    }
+
+    const timer = setTimeout(run, 250);
+    return () => clearTimeout(timer);
+  });
 </script>
 
 <nav class="navbar">
@@ -191,7 +163,11 @@
 
             <!-- Categories Dropdown -->
             <NavigationMenu.Item value="categories">
-              <NavigationMenu.Trigger class="nav-link nav-trigger">
+              <NavigationMenu.Trigger
+                class="nav-link nav-trigger"
+                onpointerenter={() => void ensureCategoriesMenuLoaded()}
+                onfocus={() => void ensureCategoriesMenuLoaded()}
+              >
                 Categories
                 <span class="chevron-icon">
                   <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2} />
@@ -199,33 +175,9 @@
               </NavigationMenu.Trigger>
 
               <NavigationMenu.Content class="nav-content" forceMount>
-                <div class="dropdown-sections">
-                  {#each displaySections as section}
-                    <div class="section-group">
-                      <div class="section-title">{section.name}</div>
-                      <ul class="category-list">
-                        {#each section.categories as category}
-                          <li>
-                            <NavigationMenu.Link
-                              href="/category/{category.slug}"
-                              class="category-item"
-                            >
-                              <div class="category-icon">
-                                <HugeiconsIcon icon={categoryIcons[category.slug] || SparklesIcon} size={16} strokeWidth={2} />
-                              </div>
-                              <div class="category-name">{category.name}</div>
-                            </NavigationMenu.Link>
-                          </li>
-                        {/each}
-                      </ul>
-                    </div>
-                  {/each}
-                </div>
-                <div class="dropdown-footer">
-                  <NavigationMenu.Link href="/categories" class="view-all-link">
-                    View all categories →
-                  </NavigationMenu.Link>
-                </div>
+                {#if CategoriesMenuContentComponent}
+                  <CategoriesMenuContentComponent />
+                {/if}
               </NavigationMenu.Content>
             </NavigationMenu.Item>
 
@@ -247,7 +199,7 @@
             <Button
               variant="cute"
               size="sm"
-              onclick={() => showSubmitDialog = true}
+              onclick={openSubmitDialog}
             >
               <HugeiconsIcon icon={Add01Icon} size={16} strokeWidth={2} />
               <span class="submit-btn-text">Submit</span>
@@ -294,7 +246,10 @@
           {:else}
             <button
               class="mobile-sign-in-btn"
-              onclick={() => { mobileMenuOpen = false; showLoginDialog = true; }}
+              onclick={async () => {
+                mobileMenuOpen = false;
+                await openLoginDialog();
+              }}
             >
               <HugeiconsIcon icon={Login03Icon} size={16} strokeWidth={2} />
               Sign In with GitHub
@@ -316,7 +271,10 @@
           {#if $session.data?.user}
             <button
               class="mobile-link"
-              onclick={() => { mobileMenuOpen = false; showSubmitDialog = true; }}
+              onclick={async () => {
+                mobileMenuOpen = false;
+                await openSubmitDialog();
+              }}
             >
               <HugeiconsIcon icon={Add01Icon} size={16} strokeWidth={2} />
               Submit a Skill
@@ -370,8 +328,19 @@
   </div>
 </nav>
 
-<SubmitDialog isOpen={showSubmitDialog} onClose={() => showSubmitDialog = false} />
-<LoginDialog isOpen={showLoginDialog} onClose={() => showLoginDialog = false} />
+{#if SubmitDialogComponent}
+  <SubmitDialogComponent
+    isOpen={showSubmitDialog}
+    onClose={() => showSubmitDialog = false}
+  />
+{/if}
+
+{#if LoginDialogComponent}
+  <LoginDialogComponent
+    isOpen={showLoginDialog}
+    onClose={() => showLoginDialog = false}
+  />
+{/if}
 
 <style>
   .navbar {
@@ -545,114 +514,6 @@
     transform: rotate(45deg);
     border-top-left-radius: 3px;
     background-color: var(--border-sketch);
-  }
-
-  /* Dropdown Content Layout - Grouped by Sections */
-  .dropdown-sections {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(140px, 1fr));
-    gap: 0.25rem;
-    padding: 1rem;
-    min-width: 450px;
-    max-width: 500px;
-  }
-
-  @media (min-width: 1024px) {
-    .dropdown-sections {
-      grid-template-columns: repeat(6, minmax(130px, 1fr));
-      min-width: 800px;
-      max-width: 900px;
-    }
-  }
-
-  .section-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .section-title {
-    font-size: 0.6875rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--muted-foreground);
-    padding: 0.25rem 0.5rem;
-    margin-bottom: 0.125rem;
-  }
-
-  .category-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.125rem;
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  :global(.category-item) {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.375rem 0.5rem;
-    border-radius: var(--radius-md);
-    text-decoration: none;
-    transition: all 0.15s ease;
-  }
-
-  :global(.category-item:hover),
-  :global(.category-item[data-highlighted]) {
-    background-color: var(--primary-subtle);
-  }
-
-  .category-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.5rem;
-    height: 1.5rem;
-    border-radius: var(--radius-sm);
-    background: var(--primary-subtle);
-    color: var(--primary);
-    flex-shrink: 0;
-    transition: all 0.15s ease;
-  }
-
-  :global(.category-item:hover) .category-icon {
-    background: var(--primary);
-    color: var(--primary-foreground);
-    transform: scale(1.1);
-  }
-
-  .category-name {
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--foreground);
-    line-height: 1.25;
-  }
-
-  :global(.category-item:hover) .category-name {
-    color: var(--primary);
-  }
-
-  .dropdown-footer {
-    padding: 0.75rem 1rem;
-    border-top: 2px solid var(--border);
-    background-color: var(--bg-muted);
-  }
-
-  :global(.view-all-link) {
-    display: block;
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--primary);
-    text-decoration: none;
-    text-align: center;
-    transition: transform 0.2s ease;
-  }
-
-  :global(.view-all-link:hover) {
-    transform: translateX(4px);
   }
 
   /* Right Side */

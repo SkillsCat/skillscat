@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { SearchBox, Grid, SkillCard, EmptyState, Pagination } from '$lib/components';
+  import SearchBox from '$lib/components/common/SearchBox.svelte';
+  import Grid from '$lib/components/layout/Grid.svelte';
+  import SkillCard from '$lib/components/skill/SkillCard.svelte';
+  import EmptyState from '$lib/components/feedback/EmptyState.svelte';
+  import Pagination from '$lib/components/ui/Pagination.svelte';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { Search01Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
@@ -22,7 +26,7 @@
     pagination?: PaginationData;
   }
 
-  let { title, icon, description, skills, emptyMessage = 'No skills found', pagination }: Props = $props();
+  let { title, icon: titleIcon, description, skills, emptyMessage = 'No skills found', pagination }: Props = $props();
   let searchQuery = $state('');
 
   const filteredSkills = $derived(
@@ -47,7 +51,7 @@
   <div class="mb-8">
     <h1 class="page-title">
       <span class="page-title-icon">
-        {@render icon()}
+        {@render titleIcon()}
       </span>
       {title}
     </h1>
@@ -110,8 +114,8 @@
       actionHref="/categories"
     >
       {#snippet icon()}
-        {#if icon}
-          {@render icon()}
+        {#if titleIcon}
+          {@render titleIcon()}
         {/if}
       {/snippet}
     </EmptyState>

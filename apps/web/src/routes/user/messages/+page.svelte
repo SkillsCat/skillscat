@@ -1,6 +1,8 @@
 <script lang="ts">
   import { invalidateAll } from "$app/navigation";
-  import { Button, SettingsSection, ErrorState } from "$lib/components";
+  import Button from '$lib/components/ui/Button.svelte';
+  import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
+  import ErrorState from '$lib/components/feedback/ErrorState.svelte';
   import { HugeiconsIcon } from "@hugeicons/svelte";
   import {
     Building04Icon,

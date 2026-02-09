@@ -1,6 +1,12 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { ErrorState, EmptyState, SkillCard, Grid, Section, Button, Avatar } from '$lib/components';
+  import ErrorState from '$lib/components/feedback/ErrorState.svelte';
+  import EmptyState from '$lib/components/feedback/EmptyState.svelte';
+  import SkillCard from '$lib/components/skill/SkillCard.svelte';
+  import Grid from '$lib/components/layout/Grid.svelte';
+  import Section from '$lib/components/layout/Section.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
+  import Avatar from '$lib/components/common/Avatar.svelte';
 
   interface UserProfile {
     id: string;

@@ -1,6 +1,9 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { Avatar, Button, SettingsSection, ErrorState } from '$lib/components';
+  import Avatar from '$lib/components/common/Avatar.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
+  import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
+  import ErrorState from '$lib/components/feedback/ErrorState.svelte';
 
   interface Org {
     id: string;

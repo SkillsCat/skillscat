@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from '$lib/components';
+  import Button from '$lib/components/ui/Button.svelte';
   import type { Snippet } from 'svelte';
 
   interface Props {

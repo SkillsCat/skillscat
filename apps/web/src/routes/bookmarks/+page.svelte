@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { Grid, SkillCard, EmptyState, SearchBox } from '$lib/components';
+  import Grid from '$lib/components/layout/Grid.svelte';
+  import SkillCard from '$lib/components/skill/SkillCard.svelte';
+  import EmptyState from '$lib/components/feedback/EmptyState.svelte';
+  import SearchBox from '$lib/components/common/SearchBox.svelte';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import { SecurityLockIcon, Search01Icon, Bookmark02Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';

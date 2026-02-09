@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { VisibilityBadge } from '$lib/components';
+  import VisibilityBadge from '$lib/components/ui/VisibilityBadge.svelte';
 
 interface Skill {
     id: string;

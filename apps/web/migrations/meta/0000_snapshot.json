@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f5c71c48-dc0e-425d-a16b-fdeac1ecbf9b",
+  "id": "bf345dae-4815-4ef4-9c45-763d209d34a1",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -2029,6 +2029,23 @@
           "name": "user_actions_user_idx",
           "columns": [
             "user_id"
+          ],
+          "isUnique": false
+        },
+        "user_actions_action_created_idx": {
+          "name": "user_actions_action_created_idx",
+          "columns": [
+            "action_type",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "user_actions_action_skill_created_idx": {
+          "name": "user_actions_action_skill_created_idx",
+          "columns": [
+            "action_type",
+            "skill_id",
+            "created_at"
           ],
           "isUnique": false
         }

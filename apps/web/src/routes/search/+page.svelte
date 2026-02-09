@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { SearchBox, Grid, SkillCard, Section, EmptyState } from '$lib/components';
+  import SearchBox from '$lib/components/common/SearchBox.svelte';
+  import Grid from '$lib/components/layout/Grid.svelte';
+  import SkillCard from '$lib/components/skill/SkillCard.svelte';
+  import Section from '$lib/components/layout/Section.svelte';
+  import EmptyState from '$lib/components/feedback/EmptyState.svelte';
   import { CATEGORIES } from '$lib/constants';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import {

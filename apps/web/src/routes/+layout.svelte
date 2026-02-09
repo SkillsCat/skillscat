@@ -1,6 +1,8 @@
 <script lang="ts">
   import '../app.css';
-  import { Navbar, Footer, Toast } from '$lib/components';
+  import Navbar from '$lib/components/layout/Navbar.svelte';
+  import Footer from '$lib/components/layout/Footer.svelte';
+  import Toast from '$lib/components/ui/Toast.svelte';
   import { onMount } from 'svelte';
 
   let { children, data } = $props();
@@ -9,8 +11,13 @@
   let isScrolled = $derived(scrollY > 20);
 
   onMount(() => {
+    let rafId = 0;
     const handleScroll = () => {
-      scrollY = window.scrollY;
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        scrollY = window.scrollY;
+        rafId = 0;
+      });
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -19,7 +26,7 @@
     // 注册 Service Worker (仅生产环境)
     const isDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     if (!isDev && 'serviceWorker' in navigator) {
-      navigator.serviceWorker
+      const registerServiceWorker = () => navigator.serviceWorker
         .register('/sw.js')
         .then((registration) => {
           registration.addEventListener('updatefound', () => {
@@ -36,10 +43,23 @@
         .catch((error) => {
           console.error('[SW] Registration failed:', error);
         });
+
+      if ('requestIdleCallback' in window) {
+        (
+          window as Window & {
+            requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
+          }
+        ).requestIdleCallback(registerServiceWorker, { timeout: 2000 });
+      } else {
+        setTimeout(registerServiceWorker, 1200);
+      }
     }
 
     return () => {
       window.removeEventListener('scroll', handleScroll);
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+      }
     };
   });
 </script>

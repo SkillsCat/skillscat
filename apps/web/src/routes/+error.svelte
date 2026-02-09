@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { ErrorState } from '$lib/components';
+  import ErrorState from '$lib/components/feedback/ErrorState.svelte';
 
   // 根据状态码获取默认标题
   function getDefaultTitle(status: number): string {

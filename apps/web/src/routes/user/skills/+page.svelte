@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { CopyButton, SettingsSection, SkillsList, ConfirmDialog, Pagination } from '$lib/components';
+  import CopyButton from '$lib/components/ui/CopyButton.svelte';
+  import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
+  import SkillsList from '$lib/components/settings/SkillsList.svelte';
+  import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
+  import Pagination from '$lib/components/ui/Pagination.svelte';
   import { invalidateAll } from '$app/navigation';
   import { browser } from '$app/environment';
 

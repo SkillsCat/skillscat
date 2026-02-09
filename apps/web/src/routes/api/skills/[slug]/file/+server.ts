@@ -15,10 +15,6 @@ interface SkillInfo {
   visibility: string;
 }
 
-// Rate limit configuration
-const RATE_LIMIT_WINDOW = 60;
-const RATE_LIMIT_MAX_REQUESTS = 30; // Higher limit for single file requests
-
 // Text file extensions
 const TEXT_EXTENSIONS = new Set([
   'md', 'txt', 'json', 'yaml', 'yml', 'toml',
@@ -49,52 +45,15 @@ function decodeBase64ToUtf8(base64: string): string {
   return new TextDecoder('utf-8').decode(bytes);
 }
 
-async function checkRateLimit(kv: KVNamespace, clientIp: string): Promise<boolean> {
-  const key = `ratelimit:file:${clientIp}`;
-  const now = Math.floor(Date.now() / 1000);
-  const windowStart = now - RATE_LIMIT_WINDOW;
-
-  try {
-    const data = await kv.get(key, 'json') as { requests: number[] } | null;
-    const requests = data?.requests || [];
-    const recentRequests = requests.filter(t => t > windowStart);
-
-    if (recentRequests.length >= RATE_LIMIT_MAX_REQUESTS) {
-      return false;
-    }
-
-    recentRequests.push(now);
-    await kv.put(key, JSON.stringify({ requests: recentRequests }), {
-      expirationTtl: RATE_LIMIT_WINDOW * 2
-    });
-
-    return true;
-  } catch {
-    return true;
-  }
-}
-
 /**
  * GET /api/skills/[slug]/file?path=xxx - Get single file content
  */
 export const GET: RequestHandler = async ({ params, platform, request, url, locals }) => {
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
-  const kv = platform?.env?.KV;
   const githubToken = platform?.env?.GITHUB_TOKEN;
 
   if (!db || !r2) throw error(503, 'Storage not available');
-
-  const clientIp = request.headers.get('cf-connecting-ip') ||
-                   request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-                   'unknown';
-
-  if (kv && clientIp !== 'unknown') {
-    const allowed = await checkRateLimit(kv, clientIp);
-    if (!allowed) {
-      throw error(429, 'Too many requests. Please try again later.');
-    }
-  }
 
   const { slug } = params;
   const filePath = url.searchParams.get('path');

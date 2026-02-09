@@ -36,7 +36,6 @@ function buildR2Paths(skill: SkillInfo): string[] {
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
-  const kv = platform?.env?.KV;
 
   if (!db || !r2) {
     throw error(503, 'Storage not available');
@@ -103,15 +102,15 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
   // Generate download filename
   const downloadName = skill.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
 
-  // Track download count in KV (date-partitioned for true rolling window)
-  if (kv) {
-    try {
-      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-      const key = `dl:${skill.id}:${today}`;
-      const current = parseInt(await kv.get(key) || '0');
-      await kv.put(key, String(current + 1), { expirationTtl: 31 * 86400 });
-    } catch { /* non-critical */ }
-  }
+  // Track download in D1 to avoid high-cost KV write amplification.
+  try {
+    await db.prepare(`
+      INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
+      VALUES (?, NULL, ?, 'download', ?)
+    `)
+      .bind(crypto.randomUUID(), skill.id, Date.now())
+      .run();
+  } catch { /* non-critical */ }
 
   return new Response(zipBuffer as unknown as BodyInit, {
     headers: {

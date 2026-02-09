@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Logo } from '$lib/components';
+  import Logo from '$lib/components/common/Logo.svelte';
 </script>
 
 <footer class="border-t border-border mt-16 bg-bg-subtle/50">

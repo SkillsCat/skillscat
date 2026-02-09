@@ -297,6 +297,8 @@ CREATE TABLE `user_actions` (
 --> statement-breakpoint
 CREATE INDEX `user_actions_skill_idx` ON `user_actions` (`skill_id`);--> statement-breakpoint
 CREATE INDEX `user_actions_user_idx` ON `user_actions` (`user_id`);--> statement-breakpoint
+CREATE INDEX `user_actions_action_created_idx` ON `user_actions` (`action_type`,`created_at`);--> statement-breakpoint
+CREATE INDEX `user_actions_action_skill_created_idx` ON `user_actions` (`action_type`,`skill_id`,`created_at`);--> statement-breakpoint
 CREATE TABLE `verification` (
 	`id` text PRIMARY KEY NOT NULL,
 	`identifier` text NOT NULL,

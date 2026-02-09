@@ -6,7 +6,8 @@
    */
   import { Dialog } from 'bits-ui';
   import { fade, fly } from 'svelte/transition';
-  import { CopyButton, Button } from '$lib/components';
+  import CopyButton from '$lib/components/ui/CopyButton.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
 
   interface Props {
     skillName: string;

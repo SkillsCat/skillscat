@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Button, Avatar } from '$lib/components';
+  import Button from '$lib/components/ui/Button.svelte';
+  import Avatar from '$lib/components/common/Avatar.svelte';
   import { useSession, signOut } from '$lib/auth-client';
 
   const session = useSession();

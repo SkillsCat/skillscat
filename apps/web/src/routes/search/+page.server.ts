@@ -1,8 +1,19 @@
 import type { PageServerLoad } from './$types';
 import { CATEGORIES } from '$lib/constants';
 import { searchSkills } from '$lib/server/db/utils';
+import { getCached } from '$lib/server/cache';
+import { setPublicPageCache } from '$lib/server/page-cache';
 
-export const load: PageServerLoad = async ({ url, platform }) => {
+export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, request, cookies }) => {
+  setPublicPageCache({
+    setHeaders,
+    request,
+    isAuthenticated: Boolean(locals.user),
+    hasCookies: cookies.getAll().length > 0,
+    sMaxAge: 60,
+    staleWhileRevalidate: 300,
+  });
+
   const query = url.searchParams.get('q') || '';
 
   if (!query) {
@@ -29,7 +40,11 @@ export const load: PageServerLoad = async ({ url, platform }) => {
     R2: platform?.env?.R2,
   };
 
-  const skills = await searchSkills(env, query, 50);
+  const { data: skills } = await getCached(
+    `page:search:v1:${lowerQuery}`,
+    () => searchSkills(env, query, 50),
+    60
+  );
 
   return {
     query,

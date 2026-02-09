@@ -879,22 +879,78 @@ const TIER_CONFIG = {
 
 type SkillTier = keyof typeof TIER_CONFIG;
 
+const ACCESS_DEDUPE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+const NEEDS_UPDATE_MARK_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_ACCESS_DEDUPE_ENTRIES = 10_000;
+const MAX_MARKED_UPDATE_ENTRIES = 5_000;
+
+const recentAccessByClient = new Map<string, number>();
+const recentNeedsUpdateMark = new Map<string, number>();
+
+function pruneExpiredEntries(map: Map<string, number>, now: number, windowMs: number): void {
+  for (const [key, timestamp] of map.entries()) {
+    if (now - timestamp > windowMs) {
+      map.delete(key);
+    }
+  }
+}
+
+function shouldSkipAccessCount(
+  skillId: string,
+  clientKey: string | undefined,
+  now: number
+): boolean {
+  if (!clientKey) return false;
+
+  const dedupeKey = `${skillId}:${clientKey}`;
+  const lastSeen = recentAccessByClient.get(dedupeKey);
+
+  if (lastSeen && now - lastSeen < ACCESS_DEDUPE_WINDOW_MS) {
+    return true;
+  }
+
+  recentAccessByClient.set(dedupeKey, now);
+  if (recentAccessByClient.size > MAX_ACCESS_DEDUPE_ENTRIES) {
+    pruneExpiredEntries(recentAccessByClient, now, ACCESS_DEDUPE_WINDOW_MS);
+  }
+
+  return false;
+}
+
+function shouldWriteNeedsUpdateMarker(skillId: string, now: number): boolean {
+  const lastMarkedAt = recentNeedsUpdateMark.get(skillId);
+  if (lastMarkedAt && now - lastMarkedAt < NEEDS_UPDATE_MARK_WINDOW_MS) {
+    return false;
+  }
+
+  recentNeedsUpdateMark.set(skillId, now);
+  if (recentNeedsUpdateMark.size > MAX_MARKED_UPDATE_ENTRIES) {
+    pruneExpiredEntries(recentNeedsUpdateMark, now, NEEDS_UPDATE_MARK_WINDOW_MS);
+  }
+
+  return true;
+}
+
 /**
  * Record skill access and check if update is needed
  * This is called asynchronously when a user views a skill detail page
  */
 export async function recordSkillAccess(
   env: DbEnv,
-  skillId: string
+  skillId: string,
+  clientKey?: string
 ): Promise<void> {
-  if (!env.DB || !env.KV) return;
+  if (!env.DB) return;
 
   const now = Date.now();
+  if (shouldSkipAccessCount(skillId, clientKey, now)) {
+    return;
+  }
 
   try {
     // Get current skill data
     const skill = await env.DB.prepare(`
-      SELECT tier, next_update_at, last_accessed_at, access_count_7d, access_count_30d
+      SELECT tier, next_update_at, last_accessed_at
       FROM skills WHERE id = ?
     `)
       .bind(skillId)
@@ -902,8 +958,6 @@ export async function recordSkillAccess(
         tier: SkillTier;
         next_update_at: number | null;
         last_accessed_at: number | null;
-        access_count_7d: number;
-        access_count_30d: number;
       }>();
 
     if (!skill) return;
@@ -936,19 +990,12 @@ export async function recordSkillAccess(
       skill.next_update_at < now ||
       (tier === 'cold' && (!skill.last_accessed_at || now - skill.last_accessed_at > updateInterval));
 
-    if (needsUpdate) {
+    if (needsUpdate && env.KV && shouldWriteNeedsUpdateMarker(skillId, now)) {
       // Mark for update in KV (will be processed by trending worker)
       await env.KV.put(`needs_update:${skillId}`, '1', {
         expirationTtl: 60 * 60, // 1 hour TTL
       });
     }
-
-    // Record access metric
-    const hourKey = `metrics:access:${new Date().toISOString().slice(0, 13)}`;
-    const existing = await env.KV.get(hourKey, 'json') as { count: number } | null;
-    await env.KV.put(hourKey, JSON.stringify({ count: (existing?.count || 0) + 1 }), {
-      expirationTtl: 7 * 24 * 60 * 60, // 7 days
-    });
   } catch (error) {
     console.error('Error recording skill access:', error);
   }

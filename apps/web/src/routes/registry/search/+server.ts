@@ -1,6 +1,5 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { checkRateLimit, getRateLimitKey, rateLimitHeaders, RATE_LIMITS } from '$lib/server/ratelimit';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { getAccessibleSkillIds } from '$lib/server/permissions';
 import { getCached } from '$lib/server/cache';
@@ -61,31 +60,7 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
   const offset = parseClampedInt(url.searchParams.get('offset'), 0, 0, MAX_OFFSET);
   const includePrivate = url.searchParams.get('include_private') === 'true';
 
-  const kv = platform?.env?.KV;
   const db = platform?.env?.DB;
-
-  // Get auth context for private skill access
-  const auth = await getAuthContext(request, locals, db);
-
-  // Rate limiting (keep using KV for atomic counters)
-  if (kv) {
-    const clientKey = getRateLimitKey(request);
-    const rateLimitResult = await checkRateLimit(kv, clientKey, RATE_LIMITS.search);
-
-    if (!rateLimitResult.allowed) {
-      return json(
-        { error: 'Rate limit exceeded. Please try again later.' },
-        {
-          status: 429,
-          headers: {
-            ...rateLimitHeaders(rateLimitResult, RATE_LIMITS.search),
-            'Retry-After': String(rateLimitResult.resetAt - Math.floor(Date.now() / 1000)),
-            'Access-Control-Allow-Origin': '*'
-          }
-        }
-      );
-    }
-  }
 
   try {
     if (!db) {
@@ -95,8 +70,20 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
       );
     }
 
+    let canIncludePrivate = false;
+    let accessiblePrivateIds: string[] = [];
+
+    if (includePrivate) {
+      const auth = await getAuthContext(request, locals, db);
+      if (auth.userId) {
+        requireScope(auth, 'read');
+        canIncludePrivate = true;
+        accessiblePrivateIds = await getAccessibleSkillIds(auth.userId, db);
+      }
+    }
+
     // For public-only searches, use Cache API
-    const canCache = !includePrivate || !auth.userId;
+    const canCache = !canIncludePrivate;
     let response: RegistrySearchResult;
     let hit = false;
 
@@ -110,9 +97,6 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
       response = cached.data;
       hit = cached.hit;
     } else {
-      // Include private skills for authenticated users
-      requireScope(auth, 'read');
-      const accessiblePrivateIds = await getAccessibleSkillIds(auth.userId!, db);
       response = await fetchSearchResults(db, query, category, limit, offset, accessiblePrivateIds);
     }
 

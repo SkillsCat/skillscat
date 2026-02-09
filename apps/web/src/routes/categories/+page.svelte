@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SearchBox } from '$lib/components';
+  import SearchBox from '$lib/components/common/SearchBox.svelte';
   import { CATEGORY_SECTIONS, type CategoryWithCount } from '$lib/constants/categories';
   import { HugeiconsIcon } from '@hugeicons/svelte';
   import {

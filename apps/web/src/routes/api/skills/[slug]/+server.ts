@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { SkillDetail, SkillCardData, ApiResponse, FileNode } from '$lib/types';
-import { getCached } from '$lib/server/cache';
+import { getCached, invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { isSkillOwner, checkSkillAccess } from '$lib/server/permissions';
 
@@ -272,7 +272,6 @@ function buildR2Paths(skill: SkillInfo): string[] {
 export const DELETE: RequestHandler = async ({ locals, platform, request, params }) => {
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
-  const kv = platform?.env?.KV;
 
   if (!db || !r2) {
     throw error(500, 'Storage not available');
@@ -312,6 +311,12 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
     throw error(400, 'Cannot delete GitHub-sourced skills. Remove the SKILL.md from your repository instead.');
   }
 
+  const categoryResult = await db
+    .prepare('SELECT category_slug FROM skill_categories WHERE skill_id = ?')
+    .bind(skill.id)
+    .all<{ category_slug: string }>();
+  const categorySlugs = (categoryResult.results || []).map((row) => row.category_slug);
+
   // Delete from database (cascades handle related tables like skill_categories, skill_tags, etc.)
   await db.prepare('DELETE FROM skills WHERE id = ?').bind(skill.id).run();
 
@@ -326,15 +331,26 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
     console.error(`Failed to delete R2 file for skill ${skill.id}:`, r2Error);
   }
 
-  // Invalidate cache
-  if (kv) {
-    try {
-      await kv.delete(`api:skill:${skill.slug}`);
-      await kv.delete(`skill:${skill.id}`);
-    } catch (kvError) {
-      // Log but don't fail
-      console.error(`Failed to invalidate cache for skill ${skill.id}:`, kvError);
+  try {
+    const cacheKeys = new Set<string>([
+      `api:skill:${skill.slug}`,
+      `skill:${skill.id}`,
+      `related:${skill.id}`,
+      'page:home:v1',
+      'page:trending:v1:1',
+      'page:recent:v1:1',
+      'page:top:v1:1',
+      'page:categories:v1',
+    ]);
+
+    for (const categorySlug of categorySlugs) {
+      cacheKeys.add(`page:category:v1:${categorySlug}:1`);
     }
+
+    await Promise.all(Array.from(cacheKeys, (cacheKey) => invalidateCache(cacheKey)));
+  } catch (cacheError) {
+    // Log but don't fail
+    console.error(`Failed to invalidate cache for skill ${skill.id}:`, cacheError);
   }
 
   return json({
