@@ -5,7 +5,7 @@
   import Section from '$lib/components/layout/Section.svelte';
   import EmptyState from '$lib/components/feedback/EmptyState.svelte';
   import { CATEGORIES } from '$lib/constants';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     Search01Icon,
     GitBranchIcon,

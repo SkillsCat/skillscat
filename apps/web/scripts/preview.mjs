@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const webDir = resolve(__dirname, '..');
+const pnpmCmd = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 
 // 检查是否跳过构建
 const skipBuild = process.argv.includes('--skip-build');
@@ -46,10 +47,9 @@ if (missingConfigs.length > 0) {
 // Step 1: 构建 SvelteKit 应用
 if (!skipBuild) {
   console.log('Building SvelteKit application...\n');
-  const buildResult = spawnSync('npx', ['vite', 'build'], {
+  const buildResult = spawnSync(pnpmCmd, ['exec', 'vite', 'build'], {
     cwd: webDir,
     stdio: 'inherit',
-    shell: true,
   });
 
   if (buildResult.status !== 0) {
@@ -63,7 +63,7 @@ if (!skipBuild) {
 
 // Step 2: 启动 wrangler dev
 const wranglerArgs = [
-  'wrangler', 'dev',
+  'exec', 'wrangler', 'dev',
   ...configs.flatMap((config) => ['-c', config]),
   '--persist-to', './.wrangler/state',
   '--port', '3000',
@@ -72,13 +72,12 @@ const wranglerArgs = [
 console.log('Starting preview with configuration:');
 configs.forEach((config) => console.log(`  - ${config}`));
 console.log(`\nWorking directory: ${webDir}`);
-console.log(`Command: npx ${wranglerArgs.join(' ')}\n`);
+console.log(`Command: ${pnpmCmd} ${wranglerArgs.join(' ')}\n`);
 
 // 启动 wrangler
-const wrangler = spawn('npx', wranglerArgs, {
+const wrangler = spawn(pnpmCmd, wranglerArgs, {
   cwd: webDir,
   stdio: 'inherit',
-  shell: true,
 });
 
 wrangler.on('error', (error) => {

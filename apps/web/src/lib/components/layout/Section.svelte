@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { ArrowRight01Icon } from '@hugeicons/core-free-icons';
 
   interface Props {

@@ -6,7 +6,7 @@
   import { Dialog } from 'bits-ui';
   import { signIn } from '$lib/auth-client';
   import { fade, fly } from 'svelte/transition';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Cancel01Icon } from '@hugeicons/core-free-icons';
 
   interface Props {

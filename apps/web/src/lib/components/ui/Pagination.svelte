@@ -4,7 +4,7 @@
    * Features: page numbers, prev/next arrows, goto input
    */
   import { goto } from '$app/navigation';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
 
   interface Props {

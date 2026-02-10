@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { HTMLInputAttributes } from 'svelte/elements';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Search01Icon, Link01Icon, UserCircleIcon, Mail01Icon } from '@hugeicons/core-free-icons';
 
   interface Props extends Omit<HTMLInputAttributes, 'value'> {

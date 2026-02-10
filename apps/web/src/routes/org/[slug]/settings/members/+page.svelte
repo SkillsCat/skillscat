@@ -4,7 +4,7 @@
   import Button from '$lib/components/ui/Button.svelte';
   import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
   import { Select } from "bits-ui";
-  import { HugeiconsIcon } from "@hugeicons/svelte";
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 
   interface Member {

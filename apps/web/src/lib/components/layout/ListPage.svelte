@@ -4,7 +4,7 @@
   import SkillCard from '$lib/components/skill/SkillCard.svelte';
   import EmptyState from '$lib/components/feedback/EmptyState.svelte';
   import Pagination from '$lib/components/ui/Pagination.svelte';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Search01Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
   import type { Snippet } from 'svelte';

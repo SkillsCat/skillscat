@@ -1,7 +1,7 @@
 <script lang="ts">
   import SearchBox from '$lib/components/common/SearchBox.svelte';
   import { CATEGORY_SECTIONS, type CategoryWithCount } from '$lib/constants/categories';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     GitBranchIcon,
     CodeIcon,

@@ -99,6 +99,7 @@
   .app-wrapper {
     position: relative;
     min-height: 100vh;
+    min-height: 100dvh;
     background: var(--background);
     overflow-x: hidden;
   }
@@ -277,6 +278,7 @@
   .app-content {
     position: relative;
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
   }
@@ -289,6 +291,7 @@
     box-shadow: 0 8px 0 0 oklch(88% 0.01 75);
     margin-bottom: 1rem;
     min-height: calc(100vh - 4rem);
+    min-height: calc(100dvh - 4rem);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -311,6 +314,7 @@
   .app-content :global(footer) {
     margin-top: -1.75rem;
     padding-top: 1.5rem;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   /* Responsive */

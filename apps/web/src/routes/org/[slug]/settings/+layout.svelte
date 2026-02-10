@@ -4,7 +4,7 @@
   import { goto } from '$app/navigation';
   import { useSession } from '$lib/auth-client';
   import Avatar from '$lib/components/common/Avatar.svelte';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     SparklesIcon,
     UserMultiple02Icon,

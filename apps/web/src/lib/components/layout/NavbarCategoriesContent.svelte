@@ -1,7 +1,7 @@
 <script lang="ts">
   import { NavigationMenu } from 'bits-ui';
   import { CATEGORY_SECTIONS } from '$lib/constants/categories';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     GitBranchIcon,
     CodeIcon,

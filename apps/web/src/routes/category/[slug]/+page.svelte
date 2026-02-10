@@ -6,7 +6,7 @@
   import Pagination from '$lib/components/ui/Pagination.svelte';
   import type { Category } from '$lib/constants/categories';
   import type { SkillCardData } from '$lib/types';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     GitBranchIcon,
     CodeIcon,
@@ -177,13 +177,17 @@
     </nav>
 
     <!-- Header -->
-    <div class="mb-8">
-      <div class="flex items-center gap-4 mb-2">
+    <div class="category-header">
+      <div class="category-title-row">
         <div class="category-icon-large" class:category-icon-dynamic={data.isDynamic}>
-          <HugeiconsIcon icon={getCategoryIcon(data.category.slug, data.isDynamic)} size={32} strokeWidth={2} />
+          <HugeiconsIcon
+            icon={getCategoryIcon(data.category.slug, data.isDynamic)}
+            size={32}
+            strokeWidth={2}
+          />
         </div>
-        <div>
-          <h1 class="text-3xl md:text-4xl font-bold text-fg">
+        <div class="category-heading-content">
+          <h1 class="category-heading">
             {data.category.name}
           </h1>
           {#if data.isDynamic}
@@ -191,7 +195,7 @@
           {/if}
         </div>
       </div>
-      <p class="text-fg-muted">{data.category.description}</p>
+      <p class="category-header-description">{data.category.description}</p>
     </div>
 
     {#if data.skills.length > 0}
@@ -272,17 +276,55 @@
 {/if}
 
 <style>
+  .category-header {
+    margin-bottom: 1.5rem;
+  }
+
+  .category-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .category-heading-content {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .category-heading {
+    margin: 0;
+    font-size: clamp(1.5rem, 7vw, 2.125rem);
+    line-height: 1.1;
+    font-weight: 800;
+    letter-spacing: -0.015em;
+    color: var(--foreground);
+    word-break: break-word;
+  }
+
+  .category-header-description {
+    margin: 0;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: var(--muted-foreground);
+  }
+
   .category-icon-large {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 4rem;
-    height: 4rem;
+    width: 3rem;
+    height: 3rem;
     background: var(--primary-subtle);
-    border: 3px solid var(--primary);
-    border-radius: var(--radius-xl);
+    border: 2px solid var(--primary);
+    border-radius: var(--radius-lg);
     color: var(--primary);
     flex-shrink: 0;
+  }
+
+  .category-icon-large :global(svg) {
+    width: 1.5rem;
+    height: 1.5rem;
   }
 
   .category-icon-dynamic {
@@ -302,5 +344,37 @@
     color: var(--primary);
     border-radius: var(--radius-full);
     margin-top: 0.25rem;
+  }
+
+  @media (min-width: 640px) {
+    .category-header {
+      margin-bottom: 2rem;
+    }
+
+    .category-title-row {
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 0.625rem;
+    }
+
+    .category-heading {
+      font-size: clamp(2rem, 4vw, 2.5rem);
+    }
+
+    .category-header-description {
+      font-size: 1rem;
+    }
+
+    .category-icon-large {
+      width: 4rem;
+      height: 4rem;
+      border-width: 3px;
+      border-radius: var(--radius-xl);
+    }
+
+    .category-icon-large :global(svg) {
+      width: 2rem;
+      height: 2rem;
+    }
   }
 </style>

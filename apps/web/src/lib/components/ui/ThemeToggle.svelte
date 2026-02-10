@@ -1,6 +1,6 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Sun02Icon, Moon02Icon } from '@hugeicons/core-free-icons';
 
   let isDark = $state(false);

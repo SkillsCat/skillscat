@@ -10,20 +10,20 @@
   import { goto } from '$app/navigation';
   import { useSession, signOut } from '$lib/auth-client';
   import { slide } from 'svelte/transition';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     ArrowDown01Icon,
     Menu01Icon,
     Cancel01Icon,
+    Add01Icon,
     CodeIcon,
     Settings01Icon,
     Folder01Icon,
     SparklesIcon,
     Mail01Icon,
-    Add01Icon,
     Bookmark02Icon,
     Logout01Icon,
-    Login03Icon
+    Login03Icon,
   } from '@hugeicons/core-free-icons';
 
   interface Props {
@@ -105,6 +105,10 @@
     showLoginDialog = true;
   }
 
+  function toggleMobileMenu() {
+    mobileMenuOpen = !mobileMenuOpen;
+  }
+
   // Preload categories dropdown content in idle time.
   $effect(() => {
     if (typeof window === 'undefined' || CategoriesMenuContentComponent) return;
@@ -130,6 +134,7 @@
     const timer = setTimeout(run, 250);
     return () => clearTimeout(timer);
   });
+
 </script>
 
 <nav class="navbar">
@@ -212,7 +217,7 @@
         <!-- Mobile Menu Button -->
         <button
           class="mobile-menu-btn"
-          onclick={() => mobileMenuOpen = !mobileMenuOpen}
+          onclick={toggleMobileMenu}
           aria-label="Toggle menu"
         >
           {#if mobileMenuOpen}
@@ -227,9 +232,18 @@
     <!-- Mobile Menu -->
     {#if mobileMenuOpen}
       <div class="mobile-menu" transition:slide={{ duration: 200 }}>
-        <!-- User Profile Section -->
-        <div class="mobile-user-section">
-          {#if $session.data?.user}
+        <!-- Search -->
+        <div class="mobile-search">
+          <SearchBox
+            bind:value={searchQuery}
+            onSearch={handleSearch}
+            placeholder="Search skills..."
+          />
+        </div>
+
+        <!-- User Profile Section (logged in only) -->
+        {#if $session.data?.user}
+          <div class="mobile-user-section">
             <div class="mobile-user-info">
               <Avatar
                 src={$session.data.user.image}
@@ -243,28 +257,8 @@
                 <div class="mobile-user-email">{$session.data.user.email}</div>
               </div>
             </div>
-          {:else}
-            <button
-              class="mobile-sign-in-btn"
-              onclick={async () => {
-                mobileMenuOpen = false;
-                await openLoginDialog();
-              }}
-            >
-              <HugeiconsIcon icon={Login03Icon} size={16} strokeWidth={2} />
-              Sign In with GitHub
-            </button>
-          {/if}
-        </div>
-
-        <!-- Search -->
-        <div class="mobile-search">
-          <SearchBox
-            bind:value={searchQuery}
-            onSearch={handleSearch}
-            placeholder="Search skills..."
-          />
-        </div>
+          </div>
+        {/if}
 
         <!-- Submit (logged in only) + Nav Links -->
         <div class="mobile-links">
@@ -320,6 +314,19 @@
             <button class="mobile-link mobile-link-danger" onclick={handleSignOut}>
               <HugeiconsIcon icon={Logout01Icon} size={16} strokeWidth={2} />
               Sign Out
+            </button>
+          </div>
+        {:else}
+          <div class="mobile-sign-in-wrap">
+            <button
+              class="mobile-sign-in-btn"
+              onclick={async () => {
+                mobileMenuOpen = false;
+                await openLoginDialog();
+              }}
+            >
+              <HugeiconsIcon icon={Login03Icon} size={16} strokeWidth={2} />
+              Sign In with GitHub
             </button>
           </div>
         {/if}
@@ -573,7 +580,8 @@
 
   /* Mobile Menu */
   .mobile-menu {
-    display: block;
+    display: flex;
+    flex-direction: column;
     padding: 0.75rem 0;
     border-top: 2px solid var(--border);
     max-height: calc(100dvh - 4.5rem);
@@ -626,7 +634,7 @@
     min-height: 40px;
     font-size: 0.875rem;
     font-weight: 600;
-    color: var(--primary-foreground);
+    color: #fff;
     background: var(--primary);
     border: 2px solid var(--primary);
     border-radius: var(--radius-full);
@@ -643,6 +651,11 @@
   .mobile-sign-in-btn:active {
     transform: translateY(3px);
     box-shadow: 0 1px 0 0 oklch(50% 0.22 55);
+  }
+
+  .mobile-sign-in-wrap {
+    margin-top: auto;
+    padding: 0.5rem 1rem 0;
   }
 
   .mobile-separator {

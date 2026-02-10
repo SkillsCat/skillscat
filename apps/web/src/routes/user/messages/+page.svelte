@@ -3,7 +3,7 @@
   import Button from '$lib/components/ui/Button.svelte';
   import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
-  import { HugeiconsIcon } from "@hugeicons/svelte";
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     Building04Icon,
     SparklesIcon,

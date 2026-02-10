@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { HugeiconsIcon } from '@hugeicons/svelte';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Copy01Icon, Tick01Icon } from '@hugeicons/core-free-icons';
 
   interface Props {

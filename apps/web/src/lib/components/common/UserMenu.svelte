@@ -7,8 +7,16 @@
   import { signOut, useSession } from '$lib/auth-client';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import { fly } from 'svelte/transition';
-  import { HugeiconsIcon } from '@hugeicons/svelte';
-  import { ArrowDown01Icon, Bookmark02Icon, Settings01Icon, Logout01Icon, Login03Icon, SparklesIcon, Mail01Icon } from '@hugeicons/core-free-icons';
+  import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
+  import {
+    ArrowDown01Icon,
+    Login03Icon,
+    Bookmark02Icon,
+    Settings01Icon,
+    Logout01Icon,
+    SparklesIcon,
+    Mail01Icon,
+  } from '@hugeicons/core-free-icons';
 
   interface Props {
     unreadCount?: number;
@@ -46,9 +54,7 @@
 {#if $session.data?.user}
   <!-- Logged in state -->
   <DropdownMenu.Root>
-    <DropdownMenu.Trigger
-      class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-bg-muted transition-colors"
-    >
+    <DropdownMenu.Trigger class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-bg-muted transition-colors">
       <div class="avatar-wrapper">
         <Avatar
           src={$session.data.user.image}
