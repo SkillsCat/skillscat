@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bf345dae-4815-4ef4-9c45-763d209d34a1",
+  "id": "0680e5f3-44ab-4d05-9add-9a84a079e860",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -1853,6 +1853,30 @@
           ],
           "isUnique": false
         },
+        "skills_visibility_trending_desc_idx": {
+          "name": "skills_visibility_trending_desc_idx",
+          "columns": [
+            "visibility",
+            "trending_score"
+          ],
+          "isUnique": false
+        },
+        "skills_visibility_stars_desc_idx": {
+          "name": "skills_visibility_stars_desc_idx",
+          "columns": [
+            "visibility",
+            "stars"
+          ],
+          "isUnique": false
+        },
+        "skills_visibility_recent_expr_idx": {
+          "name": "skills_visibility_recent_expr_idx",
+          "columns": [
+            "visibility",
+            "CASE WHEN last_commit_at IS NULL THEN indexed_at ELSE last_commit_at END DESC"
+          ],
+          "isUnique": false
+        },
         "skills_owner_idx": {
           "name": "skills_owner_idx",
           "columns": [
@@ -2130,6 +2154,14 @@
     "columns": {}
   },
   "internal": {
-    "indexes": {}
+    "indexes": {
+      "skills_visibility_recent_expr_idx": {
+        "columns": {
+          "CASE WHEN last_commit_at IS NULL THEN indexed_at ELSE last_commit_at END DESC": {
+            "isExpression": true
+          }
+        }
+      }
+    }
   }
 }

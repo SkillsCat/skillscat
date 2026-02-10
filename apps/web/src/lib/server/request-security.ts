@@ -305,7 +305,7 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
 
     if (!isAllowedCrawler(ua)) {
       const allowedClient = isBrowserOrTrustedClient(ua);
-      if (!tokenAuth && (!allowedClient || isBlockedAutomation(ua))) {
+      if (!allowedClient || isBlockedAutomation(ua)) {
         return securityJsonResponse(
           403,
           { error: 'Request blocked by abuse protection policy' },

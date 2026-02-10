@@ -55,6 +55,7 @@ async function getPreview(content: string, org?: string): Promise<PreviewRespons
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
+        'User-Agent': 'skillscat-cli/0.1.0',
       },
     }
   );
@@ -177,6 +178,7 @@ export async function publish(skillPath: string, options: PublishOptions): Promi
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${uploadToken}`,
+        'User-Agent': 'skillscat-cli/0.1.0',
         'Origin': baseUrl,
       },
       body: formData,

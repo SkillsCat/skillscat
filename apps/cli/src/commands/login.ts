@@ -88,13 +88,16 @@ export async function login(options: LoginOptions): Promise<void> {
   box(authUrl, 'Authorize in Browser');
   console.log();
 
-  // Try to open browser
-  const { exec } = await import('child_process');
+  // Try to open browser without invoking a shell
+  const { execFile } = await import('child_process');
   const platformName = process.platform;
-  const openCommand = platformName === 'darwin' ? 'open' :
-                      platformName === 'win32' ? 'start' : 'xdg-open';
+  const browserCommand = platformName === 'darwin'
+    ? { command: 'open', args: [authUrl] }
+    : platformName === 'win32'
+      ? { command: 'rundll32', args: ['url.dll,FileProtocolHandler', authUrl] }
+      : { command: 'xdg-open', args: [authUrl] };
 
-  exec(`${openCommand} "${authUrl}"`, (err) => {
+  execFile(browserCommand.command, browserCommand.args, (err) => {
     if (!err) {
       info('Browser opened automatically');
     }

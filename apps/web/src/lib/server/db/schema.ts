@@ -127,7 +127,10 @@ export const skills = sqliteTable('skills', {
   index('skills_visibility_idx').on(table.visibility),
   index('skills_visibility_trending_desc_idx').on(table.visibility, table.trendingScore),
   index('skills_visibility_stars_desc_idx').on(table.visibility, table.stars),
-  index('skills_visibility_recent_expr_idx').on(table.visibility, sql`COALESCE(${table.lastCommitAt}, ${table.indexedAt})`),
+  index('skills_visibility_recent_expr_idx').on(
+    table.visibility,
+    sql`CASE WHEN last_commit_at IS NULL THEN indexed_at ELSE last_commit_at END DESC`
+  ),
   index('skills_owner_idx').on(table.ownerId),
   index('skills_content_hash_idx').on(table.contentHash),
   // Cost optimization indexes

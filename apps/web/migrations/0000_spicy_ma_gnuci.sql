@@ -270,6 +270,9 @@ CREATE INDEX `skills_trending_idx` ON `skills` (`trending_score`);--> statement-
 CREATE INDEX `skills_stars_idx` ON `skills` (`stars`);--> statement-breakpoint
 CREATE INDEX `skills_indexed_idx` ON `skills` (`indexed_at`);--> statement-breakpoint
 CREATE INDEX `skills_visibility_idx` ON `skills` (`visibility`);--> statement-breakpoint
+CREATE INDEX `skills_visibility_trending_desc_idx` ON `skills` (`visibility`,`trending_score`);--> statement-breakpoint
+CREATE INDEX `skills_visibility_stars_desc_idx` ON `skills` (`visibility`,`stars`);--> statement-breakpoint
+CREATE INDEX `skills_visibility_recent_expr_idx` ON `skills` (`visibility`,CASE WHEN last_commit_at IS NULL THEN indexed_at ELSE last_commit_at END DESC);--> statement-breakpoint
 CREATE INDEX `skills_owner_idx` ON `skills` (`owner_id`);--> statement-breakpoint
 CREATE INDEX `skills_content_hash_idx` ON `skills` (`content_hash`);--> statement-breakpoint
 CREATE INDEX `skills_tier_idx` ON `skills` (`tier`);--> statement-breakpoint

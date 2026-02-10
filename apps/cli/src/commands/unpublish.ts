@@ -32,6 +32,7 @@ async function findSkillBySlug(slug: string): Promise<SkillInfo | null> {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
+        'User-Agent': 'skillscat-cli/0.1.0',
       },
     }
   );
@@ -105,6 +106,7 @@ export async function unpublishSkill(slug: string, options: UnpublishOptions): P
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
+          'User-Agent': 'skillscat-cli/0.1.0',
           'Origin': baseUrl,
         },
       }

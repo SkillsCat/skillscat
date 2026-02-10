@@ -151,7 +151,10 @@ export async function getRecentSkills(
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.visibility = 'public'
-    ORDER BY COALESCE(s.last_commit_at, s.indexed_at) DESC
+    ORDER BY CASE
+      WHEN s.last_commit_at IS NULL THEN s.indexed_at
+      ELSE s.last_commit_at
+    END DESC
     LIMIT ?
   `)
     .bind(limit)
@@ -188,7 +191,10 @@ export async function getRecentSkillsPaginated(
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.visibility = 'public'
-    ORDER BY COALESCE(s.last_commit_at, s.indexed_at) DESC
+    ORDER BY CASE
+      WHEN s.last_commit_at IS NULL THEN s.indexed_at
+      ELSE s.last_commit_at
+    END DESC
     LIMIT ? OFFSET ?
   `)
     .bind(limit, offset)

@@ -9,6 +9,23 @@ export interface Agent {
   globalPath: string;
 }
 
+function sanitizeSkillDirName(skillName: string): string {
+  const sanitized = skillName
+    .replace(/[\\/]/g, '-')
+    .replace(/[<>:"|?*]/g, '-')
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/^\.+/, '')
+    .replace(/[. ]+$/, '');
+
+  if (!sanitized || sanitized === '.' || sanitized === '..') {
+    return 'skill';
+  }
+
+  return sanitized;
+}
+
 export const AGENTS: Agent[] = [
   {
     id: 'amp',
@@ -156,5 +173,5 @@ export function getAgentsByIds(ids: string[]): Agent[] {
  */
 export function getSkillPath(agent: Agent, skillName: string, global: boolean): string {
   const basePath = global ? agent.globalPath : join(process.cwd(), agent.projectPath);
-  return join(basePath, skillName);
+  return join(basePath, sanitizeSkillDirName(skillName));
 }
