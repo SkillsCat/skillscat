@@ -3,6 +3,7 @@ packages:
   - packages/*
 
 onlyBuiltDependencies:
+  - '@hugeicons/svelte'
   - esbuild
   - sharp
   - workerd
