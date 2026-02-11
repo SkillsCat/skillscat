@@ -19,6 +19,7 @@
     "lint:fix": "eslint . --fix",
     "db:generate": "pnpm --filter @skillscat/web db:generate",
     "db:migrate": "pnpm --filter @skillscat/web db:migrate",
+    "db:migrate:prod": "pnpm --filter @skillscat/web db:migrate:prod",
     "deploy": "pnpm --filter @skillscat/web deploy",
     "publish:cli": "pnpm --filter skillscat publish",
     "test:cli": "pnpm --filter skillscat test"

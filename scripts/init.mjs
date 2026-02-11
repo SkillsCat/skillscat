@@ -20,7 +20,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { createInterface } from 'readline';
 import { randomBytes } from 'crypto';
 
@@ -249,23 +249,67 @@ function createDevVars(vars, force = false) {
 }
 
 /**
- * 更新 wrangler.toml 文件中的值
+ * 更新 wrangler.toml 中 D1 / KV 资源 ID
+ * @param {string} configFile
+ * @param {{ databaseId?: string, kvId?: string }} resourceIds
+ * @param {{ replaceLocal?: boolean }} options
  */
-function updateWranglerConfig(configFile, updates) {
+function updateWranglerConfig(configFile, resourceIds, options = {}) {
+  const { replaceLocal = false } = options;
   const configPath = resolve(WEB_DIR, configFile);
 
   if (!existsSync(configPath)) {
-    return false;
+    return { exists: false, updated: false };
   }
 
-  let content = readFileSync(configPath, 'utf-8');
+  const lines = readFileSync(configPath, 'utf-8').split('\n');
+  let currentBlock = '';
+  let updated = false;
 
-  for (const [placeholder, value] of Object.entries(updates)) {
-    content = content.replace(new RegExp(placeholder, 'g'), value);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // 跟踪当前 TOML block，避免误替换其他字段中的 id
+    if (trimmed === '[[d1_databases]]') {
+      currentBlock = 'd1';
+      continue;
+    }
+    if (trimmed === '[[kv_namespaces]]') {
+      currentBlock = 'kv';
+      continue;
+    }
+    if (trimmed.startsWith('[[') || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      currentBlock = '';
+    }
+
+    if (currentBlock === 'd1' && resourceIds.databaseId) {
+      const match = line.match(/^(\s*database_id\s*=\s*")([^"]*)(".*)$/);
+      if (match) {
+        const currentValue = match[2];
+        if (currentValue === '<your-database-id>' || (replaceLocal && currentValue === 'local')) {
+          lines[i] = `${match[1]}${resourceIds.databaseId}${match[3]}`;
+          updated = true;
+        }
+      }
+    }
+
+    if (currentBlock === 'kv' && resourceIds.kvId) {
+      const match = line.match(/^(\s*id\s*=\s*")([^"]*)(".*)$/);
+      if (match) {
+        const currentValue = match[2];
+        if (currentValue === '<your-kv-namespace-id>' || (replaceLocal && currentValue === 'local')) {
+          lines[i] = `${match[1]}${resourceIds.kvId}${match[3]}`;
+          updated = true;
+        }
+      }
+    }
   }
 
-  writeFileSync(configPath, content);
-  return true;
+  if (updated) {
+    writeFileSync(configPath, lines.join('\n'));
+  }
+  return { exists: true, updated };
 }
 
 /**
@@ -334,7 +378,7 @@ async function createKVNamespace(title) {
       if (listResult.success) {
         try {
           const namespaces = JSON.parse(listResult.output);
-          const ns = namespaces.find((n) => n.title.includes(title));
+          const ns = namespaces.find((n) => n.title === title);
           if (ns) {
             return { success: true, id: ns.id };
           }
@@ -374,15 +418,22 @@ async function createQueue(name) {
  */
 async function setSecret(workerName, secretName, secretValue) {
   logInfo(`Setting secret ${secretName} for ${workerName}`);
-  try {
-    execSync(`echo "${secretValue}" | npx wrangler secret put ${secretName} --name ${workerName}`, {
-      cwd: WEB_DIR,
-      stdio: 'pipe',
-    });
+  const result = spawnSync('npx', ['wrangler', 'secret', 'put', secretName, '--name', workerName], {
+    cwd: WEB_DIR,
+    encoding: 'utf-8',
+    input: `${secretValue}\n`,
+  });
+
+  if (result.status === 0) {
     return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
   }
+
+  const errorMessage = [result.stderr, result.stdout]
+    .filter(Boolean)
+    .join('\n')
+    .trim() || `Exit code: ${result.status ?? 'unknown'}`;
+
+  return { success: false, error: errorMessage };
 }
 
 /**
@@ -437,6 +488,7 @@ ${colors.cyan}╔═════════════════════
 
     if (isProduction) {
       logStep('2/5', '创建 Cloudflare 资源');
+      const resourceErrors = [];
 
       // D1 Database
       const d1Result = await createD1Database('skillscat-db');
@@ -444,7 +496,9 @@ ${colors.cyan}╔═════════════════════
         resourceIds.databaseId = d1Result.id;
         logSuccess(`D1 Database: ${d1Result.id}`);
       } else {
-        logError(`Failed to create D1 database: ${d1Result.error}`);
+        const error = `Failed to create D1 database: ${d1Result.error || 'database id missing'}`;
+        resourceErrors.push(error);
+        logError(error);
       }
 
       // R2 Bucket
@@ -452,7 +506,9 @@ ${colors.cyan}╔═════════════════════
       if (r2Result.success) {
         logSuccess(`R2 Bucket: skillscat-storage`);
       } else {
-        logError(`Failed to create R2 bucket: ${r2Result.error}`);
+        const error = `Failed to create R2 bucket: ${r2Result.error}`;
+        resourceErrors.push(error);
+        logError(error);
       }
 
       // KV Namespace
@@ -461,7 +517,9 @@ ${colors.cyan}╔═════════════════════
         resourceIds.kvId = kvResult.id;
         logSuccess(`KV Namespace: ${kvResult.id}`);
       } else {
-        logError(`Failed to create KV namespace: ${kvResult.error}`);
+        const error = `Failed to create KV namespace: ${kvResult.error || 'namespace id missing'}`;
+        resourceErrors.push(error);
+        logError(error);
       }
 
       // Queues
@@ -477,8 +535,15 @@ ${colors.cyan}╔═════════════════════
         if (queueResult.success) {
           logSuccess(`Queue: ${queue}`);
         } else {
-          logError(`Failed to create queue ${queue}: ${queueResult.error}`);
+          const error = `Failed to create queue ${queue}: ${queueResult.error}`;
+          resourceErrors.push(error);
+          logError(error);
         }
+      }
+
+      if (resourceErrors.length > 0) {
+        logError('Production initialization aborted due to Cloudflare resource errors');
+        process.exit(1);
       }
     }
 
@@ -498,17 +563,14 @@ ${colors.cyan}╔═════════════════════
     if (isProduction && (resourceIds.databaseId || resourceIds.kvId)) {
       logInfo('Updating wrangler config files with resource IDs...');
 
-      const updates = {};
-      if (resourceIds.databaseId) {
-        updates['<your-database-id>'] = resourceIds.databaseId;
-      }
-      if (resourceIds.kvId) {
-        updates['<your-kv-namespace-id>'] = resourceIds.kvId;
-      }
-
       for (const configFile of CONFIG_FILES) {
-        if (updateWranglerConfig(configFile, updates)) {
+        const result = updateWranglerConfig(configFile, resourceIds, { replaceLocal: true });
+        if (!result.exists) {
+          logWarning(`Config file not found: ${configFile}`);
+        } else if (result.updated) {
           logSuccess(`Updated ${configFile}`);
+        } else {
+          logWarning(`No resource IDs updated in ${configFile}`);
         }
       }
     }
@@ -562,13 +624,24 @@ ${colors.gray}以下变量需要手动配置:
         if (deepseekApiKey) secrets.DEEPSEEK_API_KEY = deepseekApiKey;
 
         // 为每个 worker 设置 secrets
+        const secretErrors = [];
         for (const worker of WORKERS) {
           logInfo(`Setting secrets for ${worker}...`);
           for (const [name, value] of Object.entries(secrets)) {
             if (value) {
-              await setSecret(worker, name, value);
+              const result = await setSecret(worker, name, value);
+              if (!result.success) {
+                const error = `Failed to set ${name} for ${worker}: ${result.error}`;
+                secretErrors.push(error);
+                logError(error);
+              }
             }
           }
+        }
+
+        if (secretErrors.length > 0) {
+          logError('Production initialization aborted due to secret configuration errors');
+          process.exit(1);
         }
 
         logSuccess('Secrets configured');
@@ -668,17 +741,9 @@ ${colors.gray}以下变量需要手动配置:
           if (resourceIds.databaseId || resourceIds.kvId) {
             logInfo('Updating wrangler config files...');
 
-            const updates = {};
-            if (resourceIds.databaseId) {
-              updates['<your-database-id>'] = resourceIds.databaseId;
-              updates['local'] = resourceIds.databaseId; // 替换之前设置的 local
-            }
-            if (resourceIds.kvId) {
-              updates['<your-kv-namespace-id>'] = resourceIds.kvId;
-            }
-
             for (const configFile of CONFIG_FILES) {
-              if (updateWranglerConfig(configFile, updates)) {
+              const result = updateWranglerConfig(configFile, resourceIds, { replaceLocal: true });
+              if (result.exists && result.updated) {
                 logSuccess(`Updated ${configFile}`);
               }
             }
@@ -710,8 +775,8 @@ ${colors.bold}资源 ID:${colors.reset}
 ${colors.bold}下一步:${colors.reset}
 
 1. 检查 ${colors.cyan}apps/web/wrangler.*.toml${colors.reset} 文件中的配置
-2. 运行 ${colors.cyan}pnpm db:migrate${colors.reset} 执行数据库迁移
-3. 运行 ${colors.cyan}pnpm deploy${colors.reset} 部署所有 Workers
+2. 运行 ${colors.cyan}pnpm db:migrate:prod${colors.reset} 执行数据库迁移
+3. 在 ${colors.cyan}apps/web${colors.reset} 下按 wrangler.*.toml 逐个执行 ${colors.cyan}wrangler deploy -c <config>${colors.reset}
 
 ${colors.gray}本地开发环境配置请运行: pnpm init:project${colors.reset}
 ${colors.gray}更多信息请查看 CLAUDE.md${colors.reset}
