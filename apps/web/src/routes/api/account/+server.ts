@@ -96,10 +96,67 @@ export const DELETE: RequestHandler = async ({ locals, platform }) => {
 
     for (const org of ownedOrgsResult.results) {
       if (org.public_skills_count > 0) {
-        // Orphan organization with public skills
-        await db.prepare(`
-          UPDATE organizations SET owner_id = NULL WHERE id = ?
-        `).bind(org.id).run();
+        // Keep orgs with public skills: transfer ownership if possible.
+        const replacementOwner = await db.prepare(`
+          SELECT user_id
+          FROM org_members
+          WHERE org_id = ? AND user_id != ?
+          ORDER BY
+            CASE role
+              WHEN 'owner' THEN 0
+              WHEN 'admin' THEN 1
+              ELSE 2
+            END,
+            joined_at ASC
+          LIMIT 1
+        `)
+          .bind(org.id, userId)
+          .first<{ user_id: string }>();
+
+        const transferAt = Date.now();
+
+        if (replacementOwner?.user_id) {
+          await db.prepare(`
+            UPDATE organizations
+            SET owner_id = ?, updated_at = ?
+            WHERE id = ?
+          `)
+            .bind(replacementOwner.user_id, transferAt, org.id)
+            .run();
+
+          await db.prepare(`
+            UPDATE org_members
+            SET role = 'owner'
+            WHERE org_id = ? AND user_id = ?
+          `)
+            .bind(org.id, replacementOwner.user_id)
+            .run();
+        } else {
+          // No remaining member to transfer to.
+          // Treat org as deleted: remove non-public org skills, keep public skills.
+          const orgPrivateSkillsResult = await db.prepare(`
+            SELECT id FROM skills WHERE org_id = ? AND visibility != 'public'
+          `).bind(org.id).all<{ id: string }>();
+
+          const orgPrivateSkillIds = orgPrivateSkillsResult.results.map(s => s.id);
+          if (orgPrivateSkillIds.length > 0) {
+            for (const skillId of orgPrivateSkillIds) {
+              await db.prepare(`DELETE FROM skill_categories WHERE skill_id = ?`).bind(skillId).run();
+              await db.prepare(`DELETE FROM skill_tags WHERE skill_id = ?`).bind(skillId).run();
+              await db.prepare(`DELETE FROM skill_permissions WHERE skill_id = ?`).bind(skillId).run();
+              await db.prepare(`DELETE FROM content_hashes WHERE skill_id = ?`).bind(skillId).run();
+            }
+
+            await db.prepare(`
+              DELETE FROM skills WHERE org_id = ? AND visibility != 'public'
+            `).bind(org.id).run();
+          }
+
+          // Delete org members first (explicit), then org.
+          // Public skills are preserved and detached via ON DELETE SET NULL (skills.org_id).
+          await db.prepare(`DELETE FROM org_members WHERE org_id = ?`).bind(org.id).run();
+          await db.prepare(`DELETE FROM organizations WHERE id = ?`).bind(org.id).run();
+        }
       } else {
         // Delete organization without public skills
         await db.prepare(`DELETE FROM org_members WHERE org_id = ?`).bind(org.id).run();

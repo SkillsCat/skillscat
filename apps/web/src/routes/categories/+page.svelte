@@ -190,11 +190,6 @@
     />
   </div>
 
-  <!-- Results count -->
-  <div class="mb-6 text-sm text-fg-muted">
-    {totalCount} categories
-  </div>
-
   <!-- Categories Grid - Grouped by Section -->
   {#each groupedCategories() as section}
     <div class="section-group">
@@ -216,9 +211,6 @@
                 {category.description}
               </p>
             </div>
-            <span class="category-count">
-              {category.skillCount}
-            </span>
           </a>
         {/each}
       </div>
@@ -249,9 +241,6 @@
                 {category.description || 'AI-suggested category'}
               </p>
             </div>
-            <span class="category-count">
-              {category.skillCount}
-            </span>
           </a>
         {/each}
       </div>
@@ -414,21 +403,6 @@
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-  }
-
-  .category-count {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 2rem;
-    height: 2rem;
-    padding: 0 0.5rem;
-    font-size: 0.8125rem;
-    font-weight: 700;
-    color: var(--primary);
-    background: var(--primary-subtle);
-    border-radius: var(--radius-full);
-    flex-shrink: 0;
   }
 
   /* Empty state */

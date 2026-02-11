@@ -70,9 +70,10 @@ export const POST: RequestHandler = async ({ locals, platform, params }) => {
     avatar_url: string;
   };
 
-  // Check if user is an admin of the GitHub org using memberships API
+  // Check if authenticated user is an admin of the GitHub org.
+  // Use /user/memberships/orgs/:org to avoid relying on local display names.
   const membershipResponse = await fetch(
-    `${GITHUB_API_BASE}/orgs/${org.name}/memberships/${session.user.name}`,
+    `${GITHUB_API_BASE}/user/memberships/orgs/${org.name}`,
     { headers }
   );
 

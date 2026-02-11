@@ -117,13 +117,13 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
 
       // Get user's GitHub ID for verification
       const account = await db.prepare(`
-        SELECT provider_account_id FROM account
+        SELECT account_id FROM account
         WHERE user_id = ? AND provider_id = 'github'
       `)
         .bind(auth.userId)
-        .first<{ provider_account_id: string }>();
+        .first<{ account_id: string }>();
 
-      const userGithubId = account ? parseInt(account.provider_account_id, 10) : null;
+      const userGithubId = account ? parseInt(account.account_id, 10) : null;
       const githubToken = platform?.env?.GITHUB_TOKEN;
 
       const verification = await verifyGitHubRepo(repoUrl, userGithubId, githubToken);
