@@ -1,7 +1,7 @@
 import pc from 'picocolors';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { isAuthenticated, getValidToken } from '../utils/auth/auth';
+import { getValidToken } from '../utils/auth/auth';
 import { getRegistryUrl } from '../utils/config/config';
 import { box, prompt, warn } from '../utils/core/ui';
 
@@ -41,22 +41,22 @@ interface UploadResponse {
 /**
  * Get preview of skill metadata before publishing
  */
-async function getPreview(content: string, org?: string): Promise<PreviewResponse> {
-  const contentBase64 = Buffer.from(content).toString('base64');
-  const params = new URLSearchParams({ content: contentBase64 });
-  if (org) {
-    params.append('org', org);
-  }
-
-  const token = await getValidToken();
+async function getPreview(content: string, token: string, org?: string): Promise<PreviewResponse> {
+  const baseUrl = getRegistryUrl().replace('/registry', '');
   const response = await fetch(
-    `${getRegistryUrl().replace('/registry', '')}/api/skills/upload?${params.toString()}`,
+    `${baseUrl}/api/skills/upload/preview`,
     {
-      method: 'GET',
+      method: 'POST',
       headers: {
+        'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
         'User-Agent': 'skillscat-cli/0.1.0',
+        'Origin': baseUrl,
       },
+      body: JSON.stringify({
+        content,
+        org: org || undefined,
+      }),
     }
   );
 
@@ -64,10 +64,11 @@ async function getPreview(content: string, org?: string): Promise<PreviewRespons
 }
 
 export async function publish(skillPath: string, options: PublishOptions): Promise<void> {
-  // Check authentication
-  if (!isAuthenticated()) {
-    console.error(pc.red('Authentication required.'));
-    console.log(pc.dim('Run `skillscat login` first.'));
+  // Check authentication/session validity
+  const token = await getValidToken();
+  if (!token) {
+    console.error(pc.red('Authentication required or session expired.'));
+    console.log(pc.dim('Run `skillscat login` to authenticate.'));
     process.exit(1);
   }
 
@@ -93,7 +94,7 @@ export async function publish(skillPath: string, options: PublishOptions): Promi
   console.log();
 
   try {
-    const previewResult = await getPreview(content, options.org);
+    const previewResult = await getPreview(content, token, options.org);
 
     if (!previewResult.success || !previewResult.preview) {
       console.error(pc.red(`Failed to analyze skill: ${previewResult.error || 'Unknown error'}`));
@@ -173,6 +174,10 @@ export async function publish(skillPath: string, options: PublishOptions): Promi
     }
 
     const uploadToken = await getValidToken();
+    if (!uploadToken) {
+      console.error(pc.red('Session expired. Please run `skillscat login` and try again.'));
+      process.exit(1);
+    }
     const baseUrl = getRegistryUrl().replace('/registry', '');
     const response = await fetch(`${baseUrl}/api/skills/upload`, {
       method: 'POST',

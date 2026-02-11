@@ -1,6 +1,6 @@
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const DEFAULT_REGISTRY_URL = 'https://skills.cat/registry';
 
@@ -62,7 +62,14 @@ export function getCacheDir(): string {
 export function ensureConfigDir(): void {
   const configDir = getConfigDir();
   if (!existsSync(configDir)) {
-    mkdirSync(configDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true, mode: 0o700 });
+  }
+  if (process.platform !== 'win32') {
+    try {
+      chmodSync(configDir, 0o700);
+    } catch {
+      // Best-effort permissions hardening.
+    }
   }
 }
 

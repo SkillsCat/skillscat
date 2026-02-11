@@ -2,10 +2,14 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { getInstalledDbPath, ensureConfigDir } from '../config/config';
 import type { RepoSource } from '../source/source';
 
+export type UpdateStrategy = 'git' | 'registry';
+
 export interface InstalledSkill {
   name: string;
   description: string;
-  source: RepoSource;
+  source?: RepoSource;
+  registrySlug?: string;
+  updateStrategy?: UpdateStrategy;
   agents: string[];
   global: boolean;
   installedAt: number;
@@ -19,25 +23,128 @@ export interface InstalledSkillsDb {
   skills: InstalledSkill[];
 }
 
+const CURRENT_DB_VERSION = 2;
+
+function defaultDb(): InstalledSkillsDb {
+  return { version: CURRENT_DB_VERSION, skills: [] };
+}
+
+function normalizeSource(raw: unknown): RepoSource | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const source = raw as Partial<RepoSource>;
+
+  if (
+    (source.platform !== 'github' && source.platform !== 'gitlab') ||
+    typeof source.owner !== 'string' ||
+    typeof source.repo !== 'string'
+  ) {
+    return undefined;
+  }
+
+  return {
+    platform: source.platform,
+    owner: source.owner,
+    repo: source.repo,
+    branch: typeof source.branch === 'string' ? source.branch : undefined,
+    path: typeof source.path === 'string' ? source.path : undefined,
+  };
+}
+
+function getUpdateStrategy(skill: Pick<InstalledSkill, 'updateStrategy' | 'registrySlug'>): UpdateStrategy {
+  if (skill.updateStrategy === 'registry') return 'registry';
+  if (skill.updateStrategy === 'git') return 'git';
+  return skill.registrySlug ? 'registry' : 'git';
+}
+
+function normalizeSkill(raw: unknown): InstalledSkill | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const candidate = raw as Partial<InstalledSkill>;
+
+  if (typeof candidate.name !== 'string') return null;
+  if (!Array.isArray(candidate.agents)) return null;
+  if (typeof candidate.global !== 'boolean') return null;
+  if (typeof candidate.installedAt !== 'number') return null;
+
+  const path = typeof candidate.path === 'string' && candidate.path ? candidate.path : 'SKILL.md';
+  const registrySlug = typeof candidate.registrySlug === 'string' ? candidate.registrySlug : undefined;
+  const source = normalizeSource(candidate.source);
+
+  return {
+    name: candidate.name,
+    description: typeof candidate.description === 'string' ? candidate.description : '',
+    source,
+    registrySlug,
+    updateStrategy: getUpdateStrategy({
+      updateStrategy: candidate.updateStrategy,
+      registrySlug,
+    }),
+    agents: Array.from(new Set(candidate.agents.filter((id): id is string => typeof id === 'string'))),
+    global: candidate.global,
+    installedAt: candidate.installedAt,
+    sha: typeof candidate.sha === 'string' ? candidate.sha : undefined,
+    path,
+    contentHash: typeof candidate.contentHash === 'string' ? candidate.contentHash : undefined,
+  };
+}
+
 function loadDb(): InstalledSkillsDb {
   const dbPath = getInstalledDbPath();
 
   if (!existsSync(dbPath)) {
-    return { version: 1, skills: [] };
+    return defaultDb();
   }
 
   try {
     const content = readFileSync(dbPath, 'utf-8');
-    return JSON.parse(content) as InstalledSkillsDb;
+    const parsed = JSON.parse(content) as Partial<InstalledSkillsDb> | null;
+    if (!parsed || !Array.isArray(parsed.skills)) {
+      return defaultDb();
+    }
+
+    const normalized = parsed.skills
+      .map((skill) => normalizeSkill(skill))
+      .filter((skill): skill is InstalledSkill => skill !== null);
+
+    return {
+      version: CURRENT_DB_VERSION,
+      skills: normalized,
+    };
   } catch {
-    return { version: 1, skills: [] };
+    return defaultDb();
   }
 }
 
 function saveDb(db: InstalledSkillsDb): void {
   ensureConfigDir();
   const dbPath = getInstalledDbPath();
-  writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf-8');
+  writeFileSync(
+    dbPath,
+    JSON.stringify({ version: CURRENT_DB_VERSION, skills: db.skills }, null, 2),
+    'utf-8'
+  );
+}
+
+function sameSource(a?: RepoSource, b?: RepoSource): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return (
+    a.platform === b.platform &&
+    a.owner === b.owner &&
+    a.repo === b.repo &&
+    (a.branch ?? '') === (b.branch ?? '') &&
+    (a.path ?? '') === (b.path ?? '')
+  );
+}
+
+function sameInstallationIdentity(a: InstalledSkill, b: InstalledSkill): boolean {
+  return (
+    a.name === b.name &&
+    a.global === b.global &&
+    a.path === b.path &&
+    (a.registrySlug ?? '') === (b.registrySlug ?? '') &&
+    getUpdateStrategy(a) === getUpdateStrategy(b) &&
+    sameSource(a.source, b.source)
+  );
 }
 
 /**
@@ -45,13 +152,15 @@ function saveDb(db: InstalledSkillsDb): void {
  */
 export function recordInstallation(skill: InstalledSkill): void {
   const db = loadDb();
+  const normalized = normalizeSkill(skill);
+  if (!normalized) {
+    return;
+  }
 
-  // Remove existing entry for same skill
-  db.skills = db.skills.filter(
-    s => !(s.name === skill.name && s.source.owner === skill.source.owner && s.source.repo === skill.source.repo)
-  );
+  // Replace only exact same installation identity.
+  db.skills = db.skills.filter((existing) => !sameInstallationIdentity(existing, normalized));
 
-  db.skills.push(skill);
+  db.skills.push(normalized);
   saveDb(db);
 }
 
@@ -75,10 +184,7 @@ export function removeInstallation(
     }
 
     if (options?.source) {
-      const sameSource =
-        skill.source.owner === options.source.owner &&
-        skill.source.repo === options.source.repo;
-      if (!sameSource) {
+      if (!sameSource(skill.source, options.source)) {
         return [skill];
       }
     }
@@ -125,7 +231,7 @@ export function isSkillInstalled(skillName: string, source?: RepoSource): boolea
 
   if (source) {
     return db.skills.some(
-      s => s.name === skillName && s.source.owner === source.owner && s.source.repo === source.repo
+      s => s.name === skillName && !!s.source && sameSource(s.source, source)
     );
   }
 

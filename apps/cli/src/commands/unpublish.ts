@@ -1,5 +1,5 @@
 import pc from 'picocolors';
-import { isAuthenticated, getValidToken, getBaseUrl } from '../utils/auth/auth';
+import { getValidToken, getBaseUrl } from '../utils/auth/auth';
 import { prompt, warn } from '../utils/core/ui';
 import { parseSlug } from '../utils/core/slug';
 
@@ -23,8 +23,7 @@ interface UnpublishResponse {
 /**
  * Find skill by slug using two-segment path
  */
-async function findSkillBySlug(slug: string): Promise<SkillInfo | null> {
-  const token = await getValidToken();
+async function findSkillBySlug(slug: string, token: string): Promise<SkillInfo | null> {
   const { owner, name } = parseSlug(slug);
   const response = await fetch(
     `${getBaseUrl()}/api/skills/${owner}/${name}`,
@@ -46,10 +45,11 @@ async function findSkillBySlug(slug: string): Promise<SkillInfo | null> {
 }
 
 export async function unpublishSkill(slug: string, options: UnpublishOptions): Promise<void> {
-  // Check authentication
-  if (!isAuthenticated()) {
-    console.error(pc.red('Authentication required.'));
-    console.log(pc.dim('Run `skillscat login` first.'));
+  // Check authentication/session validity.
+  const token = await getValidToken();
+  if (!token) {
+    console.error(pc.red('Authentication required or session expired.'));
+    console.log(pc.dim('Run `skillscat login` to authenticate.'));
     process.exit(1);
   }
 
@@ -63,7 +63,7 @@ export async function unpublishSkill(slug: string, options: UnpublishOptions): P
 
   try {
     // Find the skill first
-    const skill = await findSkillBySlug(slug);
+    const skill = await findSkillBySlug(slug, token);
 
     if (!skill) {
       console.error(pc.red(`Skill not found: ${slug}`));
@@ -97,7 +97,11 @@ export async function unpublishSkill(slug: string, options: UnpublishOptions): P
     // Unpublish the skill using two-segment path
     console.log(pc.cyan('Unpublishing skill...'));
 
-    const token = await getValidToken();
+    const latestToken = await getValidToken();
+    if (!latestToken) {
+      console.error(pc.red('Session expired. Please run `skillscat login` and try again.'));
+      process.exit(1);
+    }
     const baseUrl = getBaseUrl();
     const { owner, name } = parseSlug(slug);
     const response = await fetch(
@@ -105,7 +109,7 @@ export async function unpublishSkill(slug: string, options: UnpublishOptions): P
       {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${latestToken}`,
           'User-Agent': 'skillscat-cli/0.1.0',
           'Origin': baseUrl,
         },

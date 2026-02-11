@@ -1,5 +1,5 @@
 import { hostname, platform, release } from 'node:os';
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
 import { getAuthPath, ensureConfigDir as ensureNewConfigDir, getRegistryUrl } from '../config/config';
 
@@ -36,7 +36,14 @@ export function loadConfig(): AuthConfig {
 
 export function saveConfig(config: AuthConfig): void {
   ensureConfigDir();
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), { mode: 0o600 });
+  if (process.platform !== 'win32') {
+    try {
+      chmodSync(CONFIG_FILE, 0o600);
+    } catch {
+      // Best-effort permissions hardening.
+    }
+  }
 }
 
 export function clearConfig(): void {

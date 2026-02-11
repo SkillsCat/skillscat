@@ -1,6 +1,7 @@
 {
   "name": "skillscat",
   "version": "0.1.0",
+  "private": true,
   "author": "BackRunner",
   "repository": "https://github.com/BackRunner/skillscat",
   "license": "AGPL-3.0",
@@ -13,7 +14,7 @@
     "dev:web": "pnpm --filter @skillscat/web dev",
     "preview:web": "pnpm --filter @skillscat/web preview",
     "build": "pnpm --filter @skillscat/web build",
-    "build:cli": "pnpm --filter skillscat build",
+    "build:cli": "pnpm --filter ./apps/cli build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -21,8 +22,8 @@
     "db:migrate": "pnpm --filter @skillscat/web db:migrate",
     "db:migrate:prod": "pnpm --filter @skillscat/web db:migrate:prod",
     "deploy": "pnpm --filter @skillscat/web deploy",
-    "publish:cli": "pnpm --filter skillscat publish",
-    "test:cli": "pnpm --filter skillscat test"
+    "publish:cli": "pnpm --filter ./apps/cli publish",
+    "test:cli": "pnpm --filter ./apps/cli test"
   },
   "devDependencies": {
     "eslint": "^9.39.2",

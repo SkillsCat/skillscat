@@ -10,7 +10,8 @@ import { trackInstallation } from '../utils/api/tracking';
 import { success, error, warn, info, spinner, prompt } from '../utils/core/ui';
 import { cacheSkill, getCachedSkill } from '../utils/storage/cache';
 import { verboseLog } from '../utils/core/verbose';
-import type { SkillInfo } from '../utils/source/source';
+import type { SkillRegistryItem } from '../utils/api/registry';
+import type { SkillInfo, RepoSource } from '../utils/source/source';
 
 interface AddOptions {
   global?: boolean;
@@ -44,6 +45,13 @@ export async function add(source: string, options: AddOptions): Promise<void> {
   // Discover skills
   const discoverSpinner = spinner('Discovering skills');
   let skills: SkillInfo[];
+  let installSource: RepoSource | undefined = repoSource;
+  let trackingSlug = `${repoSource.owner}/${repoSource.repo}`;
+  let updateStrategy: 'git' | 'registry' = 'git';
+  let cacheOwner = repoSource.owner;
+  let cacheRepo = repoSource.repo;
+  let cachePath = repoSource.path;
+  let registrySlug: string | undefined;
 
   try {
     skills = await discoverSkills(repoSource);
@@ -55,11 +63,29 @@ export async function add(source: string, options: AddOptions): Promise<void> {
     try {
       const registrySkill = await fetchSkill(source);
       if (registrySkill && registrySkill.content) {
+        const parsedGitSource = getSourceFromRegistrySkill(registrySkill);
+        installSource = parsedGitSource ?? installSource;
+        updateStrategy = 'registry';
+        registrySlug = getRegistrySlug(registrySkill, source);
+        trackingSlug = registrySlug;
+        if (parsedGitSource) {
+          cacheOwner = parsedGitSource.owner;
+          cacheRepo = parsedGitSource.repo;
+          cachePath = parsedGitSource.path || registrySkill.skillPath;
+        } else if (registrySkill.owner && registrySkill.repo) {
+          cacheOwner = registrySkill.owner;
+          cacheRepo = registrySkill.repo;
+          cachePath = registrySkill.skillPath;
+        }
+
         skills = [{
           name: registrySkill.name,
           description: registrySkill.description || '',
-          path: 'SKILL.md',
+          path: registrySkill.skillPath
+            ? (registrySkill.skillPath.endsWith('SKILL.md') ? registrySkill.skillPath : `${registrySkill.skillPath}/SKILL.md`)
+            : 'SKILL.md',
           content: registrySkill.content,
+          contentHash: registrySkill.contentHash,
         }];
       } else {
         discoverSpinner.stop(false);
@@ -238,15 +264,20 @@ export async function add(source: string, options: AddOptions): Promise<void> {
         activeAgentIds.add(agent.id);
 
         // Cache the skill content
-        cacheSkill(
-          repoSource.owner,
-          repoSource.repo,
-          skill.content,
-          'github',
-          skill.path !== 'SKILL.md' ? skill.path.replace(/\/SKILL\.md$/, '') : undefined,
-          skill.sha
-        );
-        verboseLog(`Cached skill: ${skill.name}`);
+        if (cacheOwner && cacheRepo) {
+          const cacheSkillPath = skill.path !== 'SKILL.md'
+            ? skill.path.replace(/\/SKILL\.md$/, '')
+            : cachePath?.replace(/\/SKILL\.md$/, '');
+          cacheSkill(
+            cacheOwner,
+            cacheRepo,
+            skill.content,
+            updateStrategy === 'registry' ? 'registry' : 'github',
+            cacheSkillPath,
+            skill.sha
+          );
+          verboseLog(`Cached skill: ${skill.name}`);
+        }
       } catch (err) {
         if (existedBefore) {
           activeAgentIds.add(agent.id);
@@ -259,7 +290,9 @@ export async function add(source: string, options: AddOptions): Promise<void> {
       recordInstallation({
         name: skill.name,
         description: skill.description,
-        source: repoSource,
+        source: installSource,
+        registrySlug,
+        updateStrategy,
         agents: Array.from(activeAgentIds),
         global: isGlobal,
         installedAt: Date.now(),
@@ -269,8 +302,7 @@ export async function add(source: string, options: AddOptions): Promise<void> {
       });
 
       // Track installation on server (non-blocking, fail-silent)
-      const slug = `${repoSource.owner}/${repoSource.repo}`;
-      trackInstallation(slug).catch(() => {});
+      trackInstallation(trackingSlug).catch(() => {});
     }
   }
 
@@ -287,4 +319,38 @@ export async function add(source: string, options: AddOptions): Promise<void> {
   console.log();
   console.log(pc.dim('Skills are now available in your coding agents.'));
   console.log(pc.dim('Restart your agent or start a new session to use them.'));
+}
+
+function getSourceFromRegistrySkill(skill: SkillRegistryItem): RepoSource | null {
+  if (skill.githubUrl) {
+    const source = parseSource(skill.githubUrl);
+    if (source) {
+      return source;
+    }
+  }
+
+  if (skill.owner && skill.repo) {
+    return {
+      platform: 'github',
+      owner: skill.owner,
+      repo: skill.repo,
+      path: skill.skillPath,
+    };
+  }
+
+  return null;
+}
+
+function getRegistrySlug(skill: SkillRegistryItem, fallback: string): string {
+  if (skill.slug && skill.slug.includes('/')) {
+    return skill.slug;
+  }
+  if (skill.owner && skill.repo) {
+    return `${skill.owner}/${skill.repo}`;
+  }
+  const parsedFallback = parseSource(fallback);
+  if (parsedFallback) {
+    return `${parsedFallback.owner}/${parsedFallback.repo}`;
+  }
+  return fallback;
 }

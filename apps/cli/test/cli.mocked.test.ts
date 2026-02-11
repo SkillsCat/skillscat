@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { configureAuth, configureRegistry, createWorkspace, resetTestCacheDir, resetTestConfigDir } from './helpers/env';
 import { runCommand } from './helpers/output';
@@ -185,5 +185,78 @@ describe('CLI commands with mocked network', () => {
     const result = await runCommand(() => submit('testowner/testrepo'));
 
     expect(result.stdout).toContain('Skill submitted successfully');
+  });
+
+  it('updates registry-fallback installs via registry strategy', async () => {
+    let registryFetchCount = 0;
+    const fetchMock = vi.fn(async (input: any) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      // Force git discovery failure so add() falls back to registry.
+      if (url.includes('https://api.github.com/repos/testowner/testrepo')) {
+        return mockResponse({ message: 'Not Found' }, 404);
+      }
+
+      if (url === `${REGISTRY_URL}/skill/testowner/testrepo`) {
+        registryFetchCount += 1;
+        return mockResponse({
+          name: 'Private Registry Skill',
+          description: 'Private skill from registry',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: registryFetchCount === 1 ? SKILL_MD_V1 : SKILL_MD_V2,
+          githubUrl: '',
+          visibility: 'private',
+          slug: 'testowner/testrepo',
+        }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { add } = await import('../src/commands/add');
+    const { update } = await import('../src/commands/update');
+
+    await runCommand(() => add('testowner/testrepo', { yes: true }));
+
+    const skillFile = join(process.cwd(), '.claude/skills', 'Private Registry Skill', 'SKILL.md');
+    expect(existsSync(skillFile)).toBe(true);
+    expect(readFileSync(skillFile, 'utf-8')).toContain('Hello from v1');
+
+    const updateResult = await runCommand(() => update(undefined, {}));
+    expect(updateResult.stdout).toContain('Updated');
+    expect(readFileSync(skillFile, 'utf-8')).toContain('Hello from v2');
+  });
+
+  it('publish and unpublish fail fast when token is expired', async () => {
+    const { setTokens } = await import('../src/utils/auth/auth');
+    const now = Date.now();
+    setTokens({
+      accessToken: TEST_TOKEN,
+      accessTokenExpiresAt: now - 60_000,
+      refreshToken: 'expired-refresh-token',
+      refreshTokenExpiresAt: now - 1_000,
+      user: { id: 'user_test_1' },
+    });
+
+    const skillDir = join(process.cwd(), 'expired-token-skill');
+    const skillFile = join(skillDir, 'SKILL.md');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(skillFile, SKILL_MD_V1, 'utf-8');
+
+    const { publish } = await import('../src/commands/publish');
+    const publishResult = await runCommand(() => publish(skillDir, { yes: true }));
+    expect(publishResult.exitCode).toBe(1);
+    expect(publishResult.stderr).toContain('Authentication required or session expired');
+
+    const { unpublishSkill } = await import('../src/commands/unpublish');
+    const unpublishResult = await runCommand(() => unpublishSkill('testowner/test-skill', { yes: true }));
+    expect(unpublishResult.exitCode).toBe(1);
+    expect(unpublishResult.stderr).toContain('Authentication required or session expired');
   });
 });
