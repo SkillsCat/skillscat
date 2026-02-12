@@ -43,11 +43,11 @@ function printUsage() {
   console.log(`
 Usage:
   node scripts/deploy-workers.mjs --all [--env production|local] [--dry-run] [--yes]
-                                  [--skip-wrong-env-check] [--skip-wrong-env-cleanup]
+                                  [--skip-wrong-env-check] [--skip-wrong-env-cleanup|--cleanup-wrong-env]
                                   [--cleanup-only] [--include-suffix-guesses]
   node scripts/deploy-workers.mjs --worker <name> [--worker <name> ...] [--env production|local]
                                   [--dry-run] [--yes]
-                                  [--skip-wrong-env-check] [--skip-wrong-env-cleanup]
+                                  [--skip-wrong-env-check] [--skip-wrong-env-cleanup|--cleanup-wrong-env]
                                   [--cleanup-only] [--include-suffix-guesses]
   node scripts/deploy-workers.mjs --list [--env production|local]
 
@@ -57,6 +57,7 @@ Examples:
   node scripts/deploy-workers.mjs --worker trending
   node scripts/deploy-workers.mjs --all --yes
   node scripts/deploy-workers.mjs --all --cleanup-only --yes
+  node scripts/deploy-workers.mjs --all --cleanup-wrong-env
   node scripts/deploy-workers.mjs --all --cleanup-only --include-suffix-guesses
   node scripts/deploy-workers.mjs --worker indexing --worker classification --env production --dry-run
 `.trim());
@@ -92,6 +93,7 @@ function parseArgs(argv) {
     env: DEFAULT_ENV,
     skipWrongEnvCheck: false,
     skipWrongEnvCleanup: false,
+    cleanupWrongEnv: false,
     cleanupOnly: false,
     includeSuffixGuesses: false,
     workers: []
@@ -131,6 +133,11 @@ function parseArgs(argv) {
 
     if (arg === '--skip-wrong-env-cleanup' || arg === '--no-cleanup') {
       options.skipWrongEnvCleanup = true;
+      continue;
+    }
+
+    if (arg === '--cleanup-wrong-env') {
+      options.cleanupWrongEnv = true;
       continue;
     }
 
@@ -757,6 +764,9 @@ async function runProductionPreflight(requestedWorkers, options) {
   }
 
   if (options.skipWrongEnvCleanup) {
+    if (!options.cleanupOnly) {
+      console.log('[preflight] Deploy default: cleanup disabled. Use --cleanup-wrong-env or run pnpm cleanup:workers.');
+    }
     console.log('[preflight] Skip cleanup enabled (--skip-wrong-env-cleanup).');
     return;
   }
@@ -808,6 +818,15 @@ async function main() {
   }
 
   const options = parseArgs(argv);
+  if (options.cleanupWrongEnv && options.skipWrongEnvCleanup) {
+    throw new Error('Cannot use --cleanup-wrong-env with --skip-wrong-env-cleanup');
+  }
+
+  // Deploy defaults to check-only; cleanup is opt-in.
+  if (!options.cleanupOnly && !options.cleanupWrongEnv) {
+    options.skipWrongEnvCleanup = true;
+  }
+
   const availableWorkers = discoverWorkers();
 
   if (options.list) {
