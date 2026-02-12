@@ -6,6 +6,13 @@ main = ".svelte-kit/cloudflare/_worker.js"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [assets]
 binding = "ASSETS"
 directory = ".svelte-kit/cloudflare"

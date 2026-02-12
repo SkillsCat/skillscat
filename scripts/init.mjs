@@ -614,6 +614,85 @@ function ensureProductionWorkerName(configFile) {
   return { exists: true, updated: true };
 }
 
+function ensureWorkerRuntimeSettings(configFile) {
+  const configPath = resolve(WEB_DIR, configFile);
+  if (!existsSync(configPath)) {
+    return { exists: false, updated: false };
+  }
+
+  const originalContent = readFileSync(configPath, 'utf-8');
+  let lines = originalContent.split('\n');
+
+  lines = lines.filter((line) => {
+    const trimmed = line.trim();
+    return !/^workers_dev\s*=/.test(trimmed) && !/^preview_urls\s*=/.test(trimmed);
+  });
+
+  const withoutObservability = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i].trim();
+    if (trimmed === '[observability]') {
+      i += 1;
+      while (i < lines.length) {
+        const current = lines[i].trim();
+        if (current.startsWith('[')) {
+          i -= 1;
+          break;
+        }
+        i += 1;
+      }
+      continue;
+    }
+    withoutObservability.push(lines[i]);
+  }
+  lines = withoutObservability;
+
+  let anchorIndex = lines.findIndex((line) => /^\s*account_id\s*=/.test(line));
+  if (anchorIndex === -1) {
+    anchorIndex = lines.findIndex((line) => /^\s*compatibility_flags\s*=/.test(line));
+  }
+  if (anchorIndex === -1) {
+    anchorIndex = lines.findIndex((line) => /^\s*compatibility_date\s*=/.test(line));
+  }
+  if (anchorIndex === -1) {
+    anchorIndex = lines.findIndex((line) => /^\s*main\s*=/.test(line));
+  }
+  if (anchorIndex === -1) {
+    anchorIndex = lines.findIndex((line) => /^\s*name\s*=/.test(line));
+  }
+
+  let insertAt = anchorIndex >= 0 ? anchorIndex + 1 : 0;
+  if (insertAt === 0) {
+    const firstSection = lines.findIndex((line) => line.trim().startsWith('['));
+    insertAt = firstSection >= 0 ? firstSection : lines.length;
+  }
+
+  lines.splice(
+    insertAt,
+    0,
+    '',
+    'workers_dev = false',
+    'preview_urls = false',
+    '',
+    '[observability]',
+    'enabled = true',
+    'head_sampling_rate = 1'
+  );
+
+  const nextContent = `${lines.join('\n').replace(/\n+$/g, '')}\n`;
+  if (nextContent === originalContent) {
+    return { exists: true, updated: false };
+  }
+
+  if (DRY_RUN) {
+    logDryRun(`Would enforce workers_dev/preview_urls/observability in ${configFile}`);
+    return { exists: true, updated: true };
+  }
+
+  writeFileSync(configPath, nextContent);
+  return { exists: true, updated: true };
+}
+
 function setProductionPublicAppUrl(url) {
   const configPath = resolve(WEB_DIR, 'wrangler.preview.toml');
   if (!existsSync(configPath)) return { exists: false, updated: false };
@@ -1208,6 +1287,16 @@ ${colors.cyan}╔═════════════════════
     }
     for (const file of skipped) {
       logWarning(`Skipped ${file} (already exists, use --force to overwrite)`);
+    }
+
+    logInfo('Enforcing worker runtime settings (workers_dev=false, preview_urls=false, observability.enabled=true)...');
+    for (const configFile of CONFIG_FILES) {
+      const result = ensureWorkerRuntimeSettings(configFile);
+      if (!result.exists) {
+        logWarning(`Config file not found: ${configFile}`);
+      } else if (result.updated) {
+        logSuccess(`Updated runtime settings in ${configFile}`);
+      }
     }
 
     if (isProduction) {

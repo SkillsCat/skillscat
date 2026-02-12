@@ -7,7 +7,15 @@ main = "workers/indexing.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 # Queue Consumer - 消费 indexing 队列
+
 [[queues.consumers]]
 queue = "skillscat-indexing"
 max_batch_size = 10
