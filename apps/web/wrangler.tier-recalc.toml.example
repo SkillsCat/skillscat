@@ -28,7 +28,7 @@ binding = "KV"
 id = "<your-kv-namespace-id>"
 
 [env.production]
-name = "skillscat-tier-recalc"
+name = "skillscat-tier-recalc-production"
 
 [env.production.triggers]
 crons = ["0 3 * * *"]

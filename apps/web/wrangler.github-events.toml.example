@@ -36,7 +36,7 @@ queue = "skillscat-indexing"
 GITHUB_EVENTS_PER_PAGE = "100"
 
 [env.production]
-name = "skillscat-github-events"
+name = "skillscat-github-events-production"
 
 [env.production.triggers]
 crons = ["*/5 * * * *"]

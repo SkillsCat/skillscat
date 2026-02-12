@@ -33,15 +33,26 @@ let DRY_RUN = false;
 
 // Workers 列表 (用于生产环境设置 secrets)
 const WORKERS = [
-  'skillscat-web',
-  'skillscat-github-events',
-  'skillscat-indexing',
-  'skillscat-classification',
-  'skillscat-trending',
-  'skillscat-tier-recalc',
-  'skillscat-archive',
-  'skillscat-resurrection',
+  'skillscat-web-production',
+  'skillscat-github-events-production',
+  'skillscat-indexing-production',
+  'skillscat-classification-production',
+  'skillscat-trending-production',
+  'skillscat-tier-recalc-production',
+  'skillscat-archive-production',
+  'skillscat-resurrection-production',
 ];
+
+const PRODUCTION_WORKER_NAMES = {
+  'wrangler.preview.toml': 'skillscat-web-production',
+  'wrangler.github-events.toml': 'skillscat-github-events-production',
+  'wrangler.indexing.toml': 'skillscat-indexing-production',
+  'wrangler.classification.toml': 'skillscat-classification-production',
+  'wrangler.trending.toml': 'skillscat-trending-production',
+  'wrangler.tier-recalc.toml': 'skillscat-tier-recalc-production',
+  'wrangler.archive.toml': 'skillscat-archive-production',
+  'wrangler.resurrection.toml': 'skillscat-resurrection-production',
+};
 
 // 配置文件列表 (单文件，通过 env.production 区分生产环境)
 const CONFIG_FILES = [
@@ -315,7 +326,7 @@ function copyWranglerConfigs(force = false) {
 const PRODUCTION_ENV_SNIPPETS = {
   'wrangler.preview.toml': `
 [env.production]
-name = "skillscat-web"
+name = "skillscat-web-production"
 
 [env.production.assets]
 binding = "ASSETS"
@@ -347,7 +358,7 @@ PUBLIC_APP_URL = "https://your-domain.com"
 `.trim(),
   'wrangler.github-events.toml': `
 [env.production]
-name = "skillscat-github-events"
+name = "skillscat-github-events-production"
 
 [env.production.triggers]
 crons = ["*/5 * * * *"]
@@ -374,7 +385,7 @@ GITHUB_EVENTS_PER_PAGE = "100"
 `.trim(),
   'wrangler.indexing.toml': `
 [env.production]
-name = "skillscat-indexing"
+name = "skillscat-indexing-production"
 
 [[env.production.queues.consumers]]
 queue = "skillscat-indexing"
@@ -405,7 +416,7 @@ GITHUB_API_VERSION = "2022-11-28"
 `.trim(),
   'wrangler.classification.toml': `
 [env.production]
-name = "skillscat-classification"
+name = "skillscat-classification-production"
 
 [[env.production.queues.consumers]]
 queue = "skillscat-classification"
@@ -429,7 +440,7 @@ id = "<your-production-kv-namespace-id>"
 `.trim(),
   'wrangler.trending.toml': `
 [env.production]
-name = "skillscat-trending"
+name = "skillscat-trending-production"
 
 [env.production.triggers]
 crons = ["0 * * * *"]
@@ -455,7 +466,7 @@ TRENDING_VIEW_WEIGHT = "0.1"
 `.trim(),
   'wrangler.tier-recalc.toml': `
 [env.production]
-name = "skillscat-tier-recalc"
+name = "skillscat-tier-recalc-production"
 
 [env.production.triggers]
 crons = ["0 3 * * *"]
@@ -475,7 +486,7 @@ id = "<your-production-kv-namespace-id>"
 `.trim(),
   'wrangler.archive.toml': `
 [env.production]
-name = "skillscat-archive"
+name = "skillscat-archive-production"
 
 [env.production.triggers]
 crons = ["0 4 1 * *"]
@@ -495,7 +506,7 @@ id = "<your-production-kv-namespace-id>"
 `.trim(),
   'wrangler.resurrection.toml': `
 [env.production]
-name = "skillscat-resurrection"
+name = "skillscat-resurrection-production"
 
 [env.production.triggers]
 crons = ["0 5 1 1,4,7,10 *"]
@@ -539,6 +550,68 @@ function ensureProductionEnvSection(configFile) {
   const next = `${content.trim()}\n\n${snippet}\n`;
   writeFileSync(configPath, next);
   return { exists: true, added: true };
+}
+
+function ensureProductionWorkerName(configFile) {
+  const expectedName = PRODUCTION_WORKER_NAMES[configFile];
+  if (!expectedName) return { exists: false, updated: false };
+
+  const configPath = resolve(WEB_DIR, configFile);
+  if (!existsSync(configPath)) {
+    return { exists: false, updated: false };
+  }
+
+  const lines = readFileSync(configPath, 'utf-8').split('\n');
+  let inProduction = false;
+  let productionStart = -1;
+  let nameLineIndex = -1;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i].trim();
+    if (trimmed === '[env.production]') {
+      inProduction = true;
+      productionStart = i;
+      continue;
+    }
+
+    if (inProduction && /^\[/.test(trimmed)) {
+      break;
+    }
+
+    if (inProduction && /^name\s*=/.test(trimmed)) {
+      nameLineIndex = i;
+      break;
+    }
+  }
+
+  if (productionStart === -1) {
+    return { exists: true, updated: false };
+  }
+
+  if (nameLineIndex !== -1) {
+    const current = lines[nameLineIndex].trim();
+    if (current === `name = "${expectedName}"`) {
+      return { exists: true, updated: false };
+    }
+
+    if (DRY_RUN) {
+      logDryRun(`Would set env.production name in ${configFile} -> ${expectedName}`);
+      return { exists: true, updated: true };
+    }
+
+    lines[nameLineIndex] = `name = "${expectedName}"`;
+    writeFileSync(configPath, `${lines.join('\n')}\n`);
+    return { exists: true, updated: true };
+  }
+
+  if (DRY_RUN) {
+    logDryRun(`Would insert env.production name in ${configFile} -> ${expectedName}`);
+    return { exists: true, updated: true };
+  }
+
+  lines.splice(productionStart + 1, 0, `name = "${expectedName}"`);
+  writeFileSync(configPath, `${lines.join('\n')}\n`);
+  return { exists: true, updated: true };
 }
 
 function setProductionPublicAppUrl(url) {
@@ -1145,6 +1218,16 @@ ${colors.cyan}╔═════════════════════
           logWarning(`Config file not found: ${configFile}`);
         } else if (result.added) {
           logSuccess(`Added env.production to ${configFile}`);
+        }
+      }
+
+      logInfo('Ensuring env.production worker names use *-production...');
+      for (const configFile of CONFIG_FILES) {
+        const result = ensureProductionWorkerName(configFile);
+        if (!result.exists) {
+          logWarning(`Config file not found: ${configFile}`);
+        } else if (result.updated) {
+          logSuccess(`Updated env.production name in ${configFile}`);
         }
       }
 

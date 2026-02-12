@@ -47,7 +47,7 @@ id = "<your-kv-namespace-id>"
 # FREE_MODELS = "liquid/lfm-2.5-1.2b-thinking:free,google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free"
 
 [env.production]
-name = "skillscat-classification"
+name = "skillscat-classification-production"
 
 [[env.production.queues.consumers]]
 queue = "skillscat-classification"

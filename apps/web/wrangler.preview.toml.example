@@ -40,7 +40,7 @@ queue = "skillscat-classification"
 PUBLIC_APP_URL = "http://localhost:3000"
 
 [env.production]
-name = "skillscat-web"
+name = "skillscat-web-production"
 
 [env.production.assets]
 binding = "ASSETS"

@@ -28,7 +28,7 @@ binding = "KV"
 id = "<your-kv-namespace-id>"
 
 [env.production]
-name = "skillscat-resurrection"
+name = "skillscat-resurrection-production"
 
 [env.production.triggers]
 crons = ["0 5 1 1,4,7,10 *"]

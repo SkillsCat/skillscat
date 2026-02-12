@@ -365,6 +365,9 @@ function runWorkersDeploy(options) {
   if (options.dryRun) {
     args.push('--dry-run');
   }
+  if (options.yes) {
+    args.push('--yes');
+  }
 
   runStep('deploy:workers', 'node', args, {
     cwd: projectRoot,

@@ -40,7 +40,7 @@ queue = "skillscat-classification"
 GITHUB_API_VERSION = "2022-11-28"
 
 [env.production]
-name = "skillscat-indexing"
+name = "skillscat-indexing-production"
 
 [[env.production.queues.consumers]]
 queue = "skillscat-indexing"
