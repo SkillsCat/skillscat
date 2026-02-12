@@ -9,26 +9,35 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const projectRoot = resolve(__dirname, '..');
 const webDir = resolve(projectRoot, 'apps/web');
+const ALLOWED_ENVS = new Set(['production', 'local']);
+const DEFAULT_ENV = 'production';
 
 function printUsage() {
   console.log(`
 Usage:
-  node scripts/deploy-workers.mjs --all [--dry-run]
-  node scripts/deploy-workers.mjs --worker <name> [--worker <name> ...] [--dry-run]
-  node scripts/deploy-workers.mjs --list
+  node scripts/deploy-workers.mjs --all [--env production|local] [--dry-run]
+  node scripts/deploy-workers.mjs --worker <name> [--worker <name> ...] [--env production|local] [--dry-run]
+  node scripts/deploy-workers.mjs --list [--env production|local]
 
 Examples:
   node scripts/deploy-workers.mjs --all
+  node scripts/deploy-workers.mjs --all --env local
   node scripts/deploy-workers.mjs --worker trending
-  node scripts/deploy-workers.mjs --worker indexing --worker classification --dry-run
+  node scripts/deploy-workers.mjs --worker indexing --worker classification --env production --dry-run
 `.trim());
 }
 
 function discoverWorkers() {
   return readdirSync(webDir)
     .filter((name) => name.startsWith('wrangler.') && name.endsWith('.toml'))
-    .filter((name) => name !== 'wrangler.preview.toml')
-    .map((name) => name.slice('wrangler.'.length, -'.toml'.length))
+    .map((name) => {
+      const match = /^wrangler\.(.+)\.toml$/.exec(name);
+      if (!match) return null;
+      const worker = match[1];
+      if (worker === 'preview') return null;
+      return worker;
+    })
+    .filter(Boolean)
     .sort();
 }
 
@@ -44,6 +53,7 @@ function parseArgs(argv) {
     all: false,
     dryRun: false,
     list: false,
+    env: DEFAULT_ENV,
     workers: []
   };
 
@@ -69,6 +79,28 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === '--env') {
+      const value = argv[i + 1];
+      if (!value) {
+        throw new Error('--env requires a value: production | local');
+      }
+      if (!ALLOWED_ENVS.has(value)) {
+        throw new Error(`Invalid env "${value}". Allowed: production | local`);
+      }
+      options.env = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--env=')) {
+      const value = arg.slice('--env='.length);
+      if (!ALLOWED_ENVS.has(value)) {
+        throw new Error(`Invalid env "${value}". Allowed: production | local`);
+      }
+      options.env = value;
+      continue;
+    }
+
     if (arg === '--worker') {
       const value = argv[i + 1];
       if (!value) {
@@ -91,11 +123,18 @@ function parseArgs(argv) {
   return options;
 }
 
-function runDeploy(worker, dryRun) {
-  const config = `wrangler.${worker}.toml`;
+function getConfigFile(worker) {
+  return `wrangler.${worker}.toml`;
+}
+
+function runDeploy(worker, env, dryRun) {
+  const config = getConfigFile(worker);
   const args = ['exec', 'wrangler', 'deploy', '-c', config];
+  if (env === 'production') {
+    args.push('--env', 'production');
+  }
   const display = `pnpm ${args.join(' ')}`;
-  console.log(`[deploy:${worker}] ${display}`);
+  console.log(`[deploy:${env}:${worker}] ${display}`);
 
   if (dryRun) {
     return;
@@ -123,7 +162,7 @@ function main() {
   const availableWorkers = discoverWorkers();
 
   if (options.list) {
-    console.log('Available workers:');
+    console.log(`Available workers:`);
     for (const worker of availableWorkers) {
       console.log(`- ${worker}`);
     }
@@ -145,12 +184,18 @@ function main() {
     );
   }
 
+  if (availableWorkers.length === 0) {
+    throw new Error(
+      'No worker config files found. Run init first to generate wrangler configs.'
+    );
+  }
+
   console.log(
-    `Deploy target: ${requestedWorkers.join(', ')}${options.dryRun ? ' (dry-run)' : ''}`
+    `Deploy target (${options.env}): ${requestedWorkers.join(', ')}${options.dryRun ? ' (dry-run)' : ''}`
   );
 
   for (const worker of requestedWorkers) {
-    runDeploy(worker, options.dryRun);
+    runDeploy(worker, options.env, options.dryRun);
   }
 }
 

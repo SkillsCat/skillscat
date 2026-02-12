@@ -26,3 +26,22 @@ bucket_name = "skillscat-storage"
 [[kv_namespaces]]
 binding = "KV"
 id = "<your-kv-namespace-id>"
+
+[env.production]
+name = "skillscat-resurrection"
+
+[env.production.triggers]
+crons = ["0 5 1 1,4,7,10 *"]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "<your-production-kv-namespace-id>"

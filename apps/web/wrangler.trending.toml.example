@@ -32,3 +32,28 @@ TRENDING_DECAY_HOURS = "72"
 TRENDING_STAR_WEIGHT = "1.0"
 TRENDING_FORK_WEIGHT = "2.0"
 TRENDING_VIEW_WEIGHT = "0.1"
+
+[env.production]
+name = "skillscat-trending"
+
+[env.production.triggers]
+crons = ["0 * * * *"]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "<your-production-kv-namespace-id>"
+
+[env.production.vars]
+TRENDING_DECAY_HOURS = "72"
+TRENDING_STAR_WEIGHT = "1.0"
+TRENDING_FORK_WEIGHT = "2.0"
+TRENDING_VIEW_WEIGHT = "0.1"

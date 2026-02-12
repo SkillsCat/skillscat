@@ -6,7 +6,7 @@
   "repository": "https://github.com/BackRunner/skillscat",
   "license": "AGPL-3.0",
   "type": "module",
-  "packageManager": "pnpm@10.29.2",
+  "packageManager": "pnpm@10.29.3",
   "scripts": {
     "init:project": "node scripts/init.mjs",
     "init:local": "node scripts/init.mjs --local",
@@ -21,7 +21,7 @@
     "db:generate": "pnpm --filter @skillscat/web db:generate",
     "db:migrate": "pnpm --filter @skillscat/web db:migrate",
     "db:migrate:prod": "pnpm --filter @skillscat/web db:migrate:prod",
-    "deploy": "pnpm --filter @skillscat/web deploy",
+    "deploy": "pnpm --filter @skillscat/web run deploy",
     "deploy:workers": "node scripts/deploy-workers.mjs --all",
     "deploy:workers:list": "node scripts/deploy-workers.mjs --list",
     "deploy:worker:archive": "node scripts/deploy-workers.mjs --worker archive",
@@ -48,7 +48,7 @@
   "pnpm": {
     "overrides": {
       "@esbuild-kit/core-utils>esbuild": "^0.25.12",
-      "cookie": "^0.7.0"
+      "cookie": "^0.7.2"
     }
   }
 }

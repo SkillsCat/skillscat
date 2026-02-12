@@ -45,3 +45,26 @@ id = "<your-kv-namespace-id>"
 # [vars]
 # AI_MODEL = "liquid/lfm-2.5-1.2b-thinking:free"
 # FREE_MODELS = "liquid/lfm-2.5-1.2b-thinking:free,google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free"
+
+[env.production]
+name = "skillscat-classification"
+
+[[env.production.queues.consumers]]
+queue = "skillscat-classification"
+max_batch_size = 5
+max_batch_timeout = 60
+max_retries = 3
+dead_letter_queue = "skillscat-classification-dlq"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "<your-production-kv-namespace-id>"

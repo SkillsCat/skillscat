@@ -34,3 +34,29 @@ queue = "skillscat-indexing"
 
 [vars]
 GITHUB_EVENTS_PER_PAGE = "100"
+
+[env.production]
+name = "skillscat-github-events"
+
+[env.production.triggers]
+crons = ["*/5 * * * *"]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "<your-production-kv-namespace-id>"
+
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+[[env.production.queues.producers]]
+binding = "INDEXING_QUEUE"
+queue = "skillscat-indexing"
+
+[env.production.vars]
+GITHUB_EVENTS_PER_PAGE = "100"

@@ -38,3 +38,33 @@ queue = "skillscat-classification"
 
 [vars]
 GITHUB_API_VERSION = "2022-11-28"
+
+[env.production]
+name = "skillscat-indexing"
+
+[[env.production.queues.consumers]]
+queue = "skillscat-indexing"
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+dead_letter_queue = "skillscat-indexing-dlq"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "<your-production-kv-namespace-id>"
+
+[[env.production.queues.producers]]
+binding = "CLASSIFICATION_QUEUE"
+queue = "skillscat-classification"
+
+[env.production.vars]
+GITHUB_API_VERSION = "2022-11-28"

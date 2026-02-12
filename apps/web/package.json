@@ -10,10 +10,10 @@
     "preview": "node scripts/preview.mjs",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint .",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler deploy -c wrangler.preview.toml --env production",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply skillscat-db --local -c wrangler.preview.toml",
-    "db:migrate:prod": "wrangler d1 migrations apply skillscat-db --remote -c wrangler.preview.toml",
+    "db:migrate:prod": "wrangler d1 migrations apply skillscat-db --remote -c wrangler.preview.toml --env production",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
