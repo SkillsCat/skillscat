@@ -821,9 +821,14 @@ async function main() {
   if (options.cleanupWrongEnv && options.skipWrongEnvCleanup) {
     throw new Error('Cannot use --cleanup-wrong-env with --skip-wrong-env-cleanup');
   }
+  if (options.cleanupWrongEnv && options.skipWrongEnvCheck) {
+    throw new Error('Cannot use --cleanup-wrong-env with --skip-wrong-env-check');
+  }
 
-  // Deploy defaults to check-only; cleanup is opt-in.
+  // Deploy defaults to skip wrong-env preflight entirely.
+  // Explicit cleanup/check is opt-in via --cleanup-wrong-env or --cleanup-only.
   if (!options.cleanupOnly && !options.cleanupWrongEnv) {
+    options.skipWrongEnvCheck = true;
     options.skipWrongEnvCleanup = true;
   }
 

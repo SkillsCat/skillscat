@@ -362,6 +362,7 @@ function runWebDeploy(options) {
 
 function runWorkersDeploy(options) {
   const args = ['scripts/deploy-workers.mjs', '--all', '--env', options.workersEnv];
+  args.push('--skip-wrong-env-check');
   if (options.dryRun) {
     args.push('--dry-run');
   }
