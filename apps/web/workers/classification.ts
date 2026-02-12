@@ -424,6 +424,11 @@ async function saveClassification(
   env: ClassificationEnv
 ): Promise<void> {
   const now = Date.now();
+  const previousCategories = await env.DB.prepare('SELECT category_slug FROM skill_categories WHERE skill_id = ?')
+    .bind(skillId)
+    .all<{ category_slug: string }>();
+  const previousCategorySlugs = (previousCategories.results || []).map((row) => row.category_slug);
+  const assignedCategorySlugs = new Set<string>();
 
   await env.DB.prepare('DELETE FROM skill_categories WHERE skill_id = ?')
     .bind(skillId)
@@ -443,27 +448,23 @@ async function saveClassification(
       if (!existing) {
         // Insert new AI-suggested category
         await env.DB.prepare(`
-          INSERT INTO categories (id, slug, name, description, type, suggested_by_skill_id, skill_count, created_at, updated_at)
-          VALUES (?, ?, ?, ?, 'ai-suggested', ?, 1, ?, ?)
+          INSERT INTO categories (id, slug, name, description, type, suggested_by_skill_id, created_at, updated_at)
+          VALUES (?, ?, ?, ?, 'ai-suggested', ?, ?, ?)
         `)
           .bind(categoryId, slug, name, description, skillId, now, now)
           .run();
 
         log.log(`Created new AI-suggested category: ${slug} (${name})`);
-      } else {
-        // Increment skill count for existing category
-        await env.DB.prepare('UPDATE categories SET skill_count = skill_count + 1, updated_at = ? WHERE slug = ?')
-          .bind(now, slug)
-          .run();
       }
 
       // Add the suggested category to the skill's categories
       await env.DB.prepare(`
-        INSERT INTO skill_categories (skill_id, category_slug)
+        INSERT OR IGNORE INTO skill_categories (skill_id, category_slug)
         VALUES (?, ?)
       `)
         .bind(skillId, slug)
         .run();
+      assignedCategorySlugs.add(slug);
     } catch (error) {
       log.error(`Failed to save suggested category ${slug}:`, error);
       // Continue with predefined categories even if suggested category fails
@@ -475,17 +476,41 @@ async function saveClassification(
     const categorySlug = result.categories[i];
 
     await env.DB.prepare(`
-      INSERT INTO skill_categories (skill_id, category_slug)
+      INSERT OR IGNORE INTO skill_categories (skill_id, category_slug)
       VALUES (?, ?)
     `)
       .bind(skillId, categorySlug)
       .run();
+    assignedCategorySlugs.add(categorySlug);
   }
 
   // Update skill with classification method
   await env.DB.prepare('UPDATE skills SET classification_method = ?, updated_at = ? WHERE id = ?')
     .bind(method, now, skillId)
     .run();
+
+  // Keep categories.skill_count consistent with actual public skill mappings.
+  const affectedCategorySlugs = new Set<string>([
+    ...previousCategorySlugs,
+    ...Array.from(assignedCategorySlugs),
+  ]);
+
+  for (const categorySlug of affectedCategorySlugs) {
+    await env.DB.prepare(`
+      UPDATE categories
+      SET skill_count = (
+        SELECT COUNT(*)
+        FROM skill_categories sc
+        INNER JOIN skills s ON s.id = sc.skill_id
+        WHERE sc.category_slug = categories.slug
+          AND s.visibility = 'public'
+      ),
+      updated_at = ?
+      WHERE slug = ?
+    `)
+      .bind(now, categorySlug)
+      .run();
+  }
 }
 
 /**

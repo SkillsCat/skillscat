@@ -553,9 +553,9 @@ async function submitMultipleSkills({
         const existing = await db.prepare(`
           SELECT slug, tier FROM skills
           WHERE repo_owner = ? AND repo_name = ?
-          AND (skill_path = ? OR (skill_path IS NULL AND ? = '') OR (skill_path = '' AND ? = ''))
+          AND COALESCE(skill_path, '') = ?
         `)
-          .bind(owner, repo, skillPath || '', skillPath || '', skillPath || '')
+          .bind(owner, repo, skillPath || '')
           .first<{ slug: string; tier: string }>();
 
         if (existing && existing.tier !== 'archived') {
@@ -638,9 +638,9 @@ async function submitSingleSkill({
     const existing = await db.prepare(`
       SELECT id, slug, tier FROM skills
       WHERE repo_owner = ? AND repo_name = ?
-      AND (skill_path = ? OR (skill_path IS NULL AND ? = '') OR (skill_path = '' AND ? = ''))
+      AND COALESCE(skill_path, '') = ?
     `)
-      .bind(owner, repo, path || '', path || '', path || '')
+      .bind(owner, repo, path || '')
       .first<{ id: string; slug: string; tier: string }>();
 
     if (existing) {
@@ -755,9 +755,9 @@ export const GET: RequestHandler = async ({ platform, url }) => {
         const existing = await db.prepare(`
           SELECT slug, tier FROM skills
           WHERE repo_owner = ? AND repo_name = ?
-          AND (skill_path = ? OR (skill_path IS NULL AND ? = '') OR (skill_path = '' AND ? = ''))
+          AND COALESCE(skill_path, '') = ?
         `)
-          .bind(owner, repo, path || '', path || '', path || '')
+          .bind(owner, repo, path || '')
           .first<{ slug: string; tier: string }>();
 
         if (existing) {
@@ -823,9 +823,9 @@ export const GET: RequestHandler = async ({ platform, url }) => {
       const existing = await db.prepare(`
         SELECT slug, tier FROM skills
         WHERE repo_owner = ? AND repo_name = ?
-        AND (skill_path = ? OR (skill_path IS NULL AND ? = '') OR (skill_path = '' AND ? = ''))
+        AND COALESCE(skill_path, '') = ?
       `)
-        .bind(owner, repo, singlePath || '', singlePath || '', singlePath || '')
+        .bind(owner, repo, singlePath || '')
         .first<{ slug: string; tier: string }>();
 
       if (existing) {

@@ -427,10 +427,10 @@ async function getStoredCommitSha(
 
   const result = await env.DB.prepare(`
     SELECT commit_sha FROM skills
-    WHERE repo_owner = ? AND repo_name = ? AND (skill_path = ? OR (skill_path IS NULL AND ? = ''))
+    WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, '') = ?
     LIMIT 1
   `)
-    .bind(owner, name, normalizedPath, normalizedPath)
+    .bind(owner, name, normalizedPath)
     .first<{ commit_sha: string | null }>();
 
   return result?.commit_sha || null;
@@ -694,9 +694,9 @@ async function skillExists(
   const normalizedPath = skillPath || '';
 
   const result = await env.DB.prepare(
-    'SELECT id FROM skills WHERE repo_owner = ? AND repo_name = ? AND (skill_path = ? OR (skill_path IS NULL AND ? = \'\')) LIMIT 1'
+    'SELECT id FROM skills WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, \'\') = ? LIMIT 1'
   )
-    .bind(owner, name, normalizedPath, normalizedPath)
+    .bind(owner, name, normalizedPath)
     .first();
 
   return result !== null;
@@ -822,7 +822,7 @@ async function updateSkill(
       forks = ?,
       updated_at = ?,
       indexed_at = ?
-    WHERE repo_owner = ? AND repo_name = ? AND (skill_path = ? OR (skill_path IS NULL AND ? = ''))
+    WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, '') = ?
     RETURNING id
   `)
     .bind(
@@ -833,7 +833,6 @@ async function updateSkill(
       owner,
       name,
       normalizedPath,
-      normalizedPath
     )
     .first<{ id: string }>();
 

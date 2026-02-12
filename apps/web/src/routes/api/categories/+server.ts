@@ -44,10 +44,19 @@ export const GET: RequestHandler = async ({ platform }) => {
 
             // Fetch AI-suggested categories
             const dynamicResult = await db.prepare(`
-              SELECT slug, name, description, type, skill_count as skillCount
-              FROM categories
-              WHERE type = 'ai-suggested' AND skill_count > 0
-              ORDER BY skill_count DESC
+              SELECT
+                c.slug,
+                c.name,
+                c.description,
+                c.type,
+                COUNT(s.id) as skillCount
+              FROM categories c
+              LEFT JOIN skill_categories sc ON c.slug = sc.category_slug
+              LEFT JOIN skills s ON sc.skill_id = s.id AND s.visibility = 'public'
+              WHERE c.type = 'ai-suggested'
+              GROUP BY c.id, c.slug, c.name, c.description, c.type
+              HAVING COUNT(s.id) > 0
+              ORDER BY skillCount DESC
               LIMIT 50
             `).all<DynamicCategory>();
             dynamicCategories = dynamicResult.results || [];

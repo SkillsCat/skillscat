@@ -120,7 +120,7 @@ export const skills = sqliteTable('skills', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
   indexedAt: integer('indexed_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
-  index('skills_slug_idx').on(table.slug),
+  uniqueIndex('skills_slug_unique').on(table.slug),
   index('skills_trending_idx').on(table.trendingScore),
   index('skills_stars_idx').on(table.stars),
   index('skills_indexed_idx').on(table.indexedAt),
@@ -132,12 +132,17 @@ export const skills = sqliteTable('skills', {
     sql`CASE WHEN last_commit_at IS NULL THEN indexed_at ELSE last_commit_at END DESC`
   ),
   index('skills_owner_idx').on(table.ownerId),
+  index('skills_org_stars_created_idx').on(table.orgId, table.stars, table.createdAt),
   index('skills_content_hash_idx').on(table.contentHash),
   // Cost optimization indexes
   index('skills_tier_idx').on(table.tier),
   index('skills_next_update_idx').on(table.nextUpdateAt),
   // Unique constraint for multi-skill repos (same repo can have multiple skills with different paths)
-  uniqueIndex('skills_repo_path_unique').on(table.repoOwner, table.repoName, table.skillPath)
+  uniqueIndex('skills_repo_path_unique').on(
+    table.repoOwner,
+    table.repoName,
+    sql`COALESCE(${table.skillPath}, '')`
+  )
 ]);
 
 // ========== Authors ==========
@@ -190,8 +195,7 @@ export const apiTokens = sqliteTable('api_tokens', {
   revokedAt: integer('revoked_at', { mode: 'timestamp_ms' })
 }, (table) => [
   index('api_tokens_user_idx').on(table.userId),
-  index('api_tokens_org_idx').on(table.orgId),
-  index('api_tokens_hash_idx').on(table.tokenHash)
+  index('api_tokens_org_idx').on(table.orgId)
 ]);
 
 // ========== Content Hashes (Anti-Abuse) ==========
@@ -228,8 +232,7 @@ export const categories = sqliteTable('categories', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
-  index('categories_type_idx').on(table.type),
-  index('categories_slug_idx').on(table.slug)
+  index('categories_type_idx').on(table.type)
 ]);
 
 // ========== Skill Tags (from SKILL.md frontmatter) ==========
@@ -278,8 +281,6 @@ export const deviceCodes = sqliteTable('device_codes', {
   authorizedAt: integer('authorized_at', { mode: 'timestamp_ms' }),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
-  index('device_codes_device_code_idx').on(table.deviceCode),
-  index('device_codes_user_code_idx').on(table.userCode),
   index('device_codes_status_idx').on(table.status)
 ]);
 
@@ -311,8 +312,7 @@ export const refreshTokens = sqliteTable('refresh_tokens', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
   revokedAt: integer('revoked_at', { mode: 'timestamp_ms' })
 }, (table) => [
-  index('refresh_tokens_user_idx').on(table.userId),
-  index('refresh_tokens_hash_idx').on(table.tokenHash)
+  index('refresh_tokens_user_idx').on(table.userId)
 ]);
 
 // ========== CLI Auth Sessions (OAuth-style callback flow) ==========
