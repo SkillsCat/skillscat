@@ -389,27 +389,35 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 
   // Insert skill into database
   const now = Date.now();
-  await db.prepare(`
-    INSERT INTO skills (
-      id, name, slug, description, visibility, owner_id, org_id,
-      source_type, readme, content_hash, created_at, updated_at, indexed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'upload', ?, ?, ?, ?, ?)
-  `)
-    .bind(
-      skillId,
-      skillName,
-      slug,
-      description || validation.description || null,
-      visibility,
-      auth.userId,
-      orgId,
-      skillMdContent,
-      contentHash,
-      now,
-      now,
-      now
-    )
-    .run();
+  try {
+    await db.prepare(`
+      INSERT INTO skills (
+        id, name, slug, description, visibility, owner_id, org_id,
+        source_type, readme, content_hash, created_at, updated_at, indexed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'upload', ?, ?, ?, ?, ?)
+    `)
+      .bind(
+        skillId,
+        skillName,
+        slug,
+        description || validation.description || null,
+        visibility,
+        auth.userId,
+        orgId,
+        skillMdContent,
+        contentHash,
+        now,
+        now,
+        now
+      )
+      .run();
+  } catch (err) {
+    const message = String(err);
+    if (message.includes('skills_slug_unique') || message.includes('skills.slug')) {
+      throw error(409, `A skill with slug ${slug} already exists`);
+    }
+    throw err;
+  }
 
   return json({
     success: true,

@@ -761,49 +761,87 @@ async function createSkill(
   }
 
   // Generate slug with collision handling
-  let slug: string;
   const normalizedPath = skillPath || '';
+  const baseSlug = generateSlug(repo.owner.login, repo.name, normalizedPath || undefined);
+  const slugCandidates: string[] = [];
 
   if (normalizedPath && frontmatter?.name) {
-    // Try displayName-based slug first for subfolder skills
-    const displayNameSlug = generateSlug(repo.owner.login, repo.name, normalizedPath, frontmatter.name);
-    const hasCollision = await checkSlugCollision(env.DB, displayNameSlug);
-    if (hasCollision) {
-      // Fallback to path-based slug
-      slug = generateSlug(repo.owner.login, repo.name, normalizedPath);
-    } else {
-      slug = displayNameSlug;
-    }
-  } else {
-    // Root skill or no displayName
-    slug = generateSlug(repo.owner.login, repo.name, normalizedPath || undefined);
+    slugCandidates.push(generateSlug(repo.owner.login, repo.name, normalizedPath, frontmatter.name));
+  }
+  slugCandidates.push(baseSlug);
+
+  // Deterministic suffix avoids infinite retries if sanitized slugs collide across repos.
+  const repoSuffix = repo.id.toString(36);
+  slugCandidates.push(`${baseSlug}-${repoSuffix}`);
+  for (let i = 2; i <= 10; i++) {
+    slugCandidates.push(`${baseSlug}-${repoSuffix}-${i}`);
   }
 
-  await env.DB.prepare(`
-    INSERT INTO skills (
-      id, name, slug, description, repo_owner, repo_name, skill_path, github_url,
-      stars, forks, trending_score, created_at, updated_at, indexed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `)
-    .bind(
-      skillId,
-      name,
-      slug,
-      description,
-      repo.owner.login,
-      repo.name,
-      normalizedPath,
-      repo.html_url,
-      repo.stargazers_count,
-      repo.forks_count,
-      0,
-      now,
-      now,
-      now
-    )
-    .run();
+  const seen = new Set<string>();
 
-  return skillId;
+  for (const candidateSlug of slugCandidates) {
+    if (seen.has(candidateSlug)) continue;
+    seen.add(candidateSlug);
+
+    // Fast pre-check to avoid obvious unique conflicts.
+    if (await checkSlugCollision(env.DB, candidateSlug)) {
+      continue;
+    }
+
+    try {
+      await env.DB.prepare(`
+        INSERT INTO skills (
+          id, name, slug, description, repo_owner, repo_name, skill_path, github_url,
+          stars, forks, trending_score, created_at, updated_at, indexed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+        .bind(
+          skillId,
+          name,
+          candidateSlug,
+          description,
+          repo.owner.login,
+          repo.name,
+          normalizedPath,
+          repo.html_url,
+          repo.stargazers_count,
+          repo.forks_count,
+          0,
+          now,
+          now,
+          now
+        )
+        .run();
+
+      return skillId;
+    } catch (error) {
+      const message = String(error);
+
+      // Another worker could have inserted the same repo/path first.
+      if (message.includes('skills_repo_path_unique') || (message.includes('repo_owner') && message.includes('repo_name'))) {
+        const existing = await env.DB.prepare(`
+          SELECT id FROM skills
+          WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, '') = ?
+          LIMIT 1
+        `)
+          .bind(repo.owner.login, repo.name, normalizedPath)
+          .first<{ id: string }>();
+
+        if (existing?.id) {
+          return existing.id;
+        }
+      }
+
+      // Slug conflict could still happen under concurrent inserts, try next candidate.
+      if (message.includes('skills_slug_unique') || message.includes('skills.slug')) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error(`Unable to create unique slug for ${repo.owner.login}/${repo.name}${normalizedPath ? `/${normalizedPath}` : ''}`);
 }
 
 async function updateSkill(
