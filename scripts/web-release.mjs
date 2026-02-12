@@ -30,9 +30,9 @@ function printUsage() {
 Usage:
   node scripts/web-release.mjs build [--dry-run]
   node scripts/web-release.mjs deploy [--bump major|minor|patch] [--skip-build] [--dry-run] [--yes]
-                                      [--no-tag] [--tag <tag>] [--push-tag]
+                                      [--no-tag] [--tag <tag>] [--no-push-tag]
   node scripts/web-release.mjs deploy-all [--bump major|minor|patch] [--skip-build] [--dry-run] [--yes]
-                                          [--no-tag] [--tag <tag>] [--push-tag]
+                                          [--no-tag] [--tag <tag>] [--no-push-tag]
                                           [--workers-env production|local]
                                           (interactive bump prompt when --bump is omitted)
 
@@ -52,7 +52,7 @@ function parseArgs(argv) {
     yes: false,
     noTag: false,
     tag: '',
-    pushTag: false,
+    pushTag: true,
     workersEnv: 'production'
   };
 
@@ -79,6 +79,10 @@ function parseArgs(argv) {
     }
     if (arg === '--push-tag') {
       options.pushTag = true;
+      continue;
+    }
+    if (arg === '--no-push-tag') {
+      options.pushTag = false;
       continue;
     }
     if (arg === '--bump') {
@@ -138,9 +142,6 @@ function parseArgs(argv) {
 
   if (options.noTag && options.tag) {
     throw new Error('Cannot use --no-tag and --tag together');
-  }
-  if (options.noTag && options.pushTag) {
-    throw new Error('Cannot use --push-tag with --no-tag');
   }
 
   return options;
@@ -340,7 +341,7 @@ function printPlan(mode, versionInfo, tag, options) {
     console.log(`- Deploy workers: run (env: ${options.workersEnv})`);
   }
   console.log(`- Tag: ${tag ? `create ${tag} (after successful deploy)` : 'skip'}`);
-  console.log(`- Push tag: ${options.pushTag ? 'yes' : 'no'}`);
+  console.log(`- Push tag: ${tag ? (options.pushTag ? 'yes' : 'no') : 'n/a (no tag)'}`);
   if (options.dryRun) {
     console.log('- Mode: dry-run');
   }

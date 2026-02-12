@@ -22,7 +22,7 @@ function printUsage() {
 Usage:
   node scripts/cli-release.mjs build [--skip-test] [--dry-run]
   node scripts/cli-release.mjs publish [--bump major|minor|patch] [--skip-test] [--dry-run] [--yes]
-                                      [--no-tag] [--tag <tag>] [--push-tag]
+                                      [--no-tag] [--tag <tag>] [--no-push-tag]
 
 Examples:
   node scripts/cli-release.mjs build
@@ -41,7 +41,7 @@ function parseArgs(argv) {
     yes: false,
     noTag: false,
     tag: '',
-    pushTag: false
+    pushTag: true
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -67,6 +67,10 @@ function parseArgs(argv) {
     }
     if (arg === '--push-tag') {
       options.pushTag = true;
+      continue;
+    }
+    if (arg === '--no-push-tag') {
+      options.pushTag = false;
       continue;
     }
     if (arg === '--bump') {
@@ -109,10 +113,6 @@ function parseArgs(argv) {
 
   if (options.noTag && options.tag) {
     throw new Error('Cannot use --no-tag and --tag together');
-  }
-
-  if (options.noTag && options.pushTag) {
-    throw new Error('Cannot use --push-tag with --no-tag');
   }
 
   return options;
@@ -247,7 +247,7 @@ function printPublishPlan(versionInfo, tag, options) {
   console.log('- Build: run');
   console.log('- Publish: npm publish --access public');
   console.log(`- Tag: ${tag ? `create ${tag} (after publish)` : 'skip'}`);
-  console.log(`- Push tag: ${options.pushTag ? 'yes' : 'no'}`);
+  console.log(`- Push tag: ${tag ? (options.pushTag ? 'yes' : 'no') : 'n/a (no tag)'}`);
   if (options.dryRun) {
     console.log('- Mode: dry-run');
   }
