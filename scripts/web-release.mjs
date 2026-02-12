@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 
-const INITIAL_VERSION = '0.0.1';
+const INITIAL_VERSION = '0.1.0';
 const DEFAULT_TAG_PREFIX = 'web/v';
 const ALLOWED_BUMPS = new Set(['major', 'minor', 'patch']);
 const ALLOWED_WORKER_ENVS = new Set(['production', 'local']);
@@ -27,12 +27,13 @@ Usage:
   node scripts/web-release.mjs deploy-all [--bump major|minor|patch] [--skip-build] [--dry-run] [--yes]
                                           [--no-tag] [--tag <tag>] [--push-tag]
                                           [--workers-env production|local]
+                                          (interactive bump prompt when --bump is omitted)
 
 Examples:
   node scripts/web-release.mjs deploy --bump patch
   node scripts/web-release.mjs deploy --no-tag
   node scripts/web-release.mjs deploy-all --bump minor
-  node scripts/web-release.mjs deploy-all --dry-run
+  node scripts/web-release.mjs deploy-all --dry-run --yes
 `.trim());
 }
 
@@ -259,6 +260,56 @@ async function confirmOrExit(options, question) {
   }
 }
 
+async function ensureDeployAllBump(options) {
+  if (options.bump) return;
+
+  if (options.yes) {
+    options.bump = 'patch';
+    console.log('[bump] --yes provided without --bump, defaulting to patch.');
+    return;
+  }
+
+  if (!input.isTTY) {
+    throw new Error('deploy-all requires --bump major|minor|patch in non-interactive mode.');
+  }
+
+  const currentVersion = getWebVersion();
+  const nextMajor = bumpVersion(currentVersion, 'major');
+  const nextMinor = bumpVersion(currentVersion, 'minor');
+  const nextPatch = bumpVersion(currentVersion, 'patch');
+
+  console.log('\nSelect version bump for deploy-all:');
+  console.log(`1) major: ${currentVersion} -> ${nextMajor}`);
+  console.log(`2) minor: ${currentVersion} -> ${nextMinor}`);
+  console.log(`3) patch: ${currentVersion} -> ${nextPatch} (recommended)`);
+
+  const rl = createInterface({ input, output });
+  try {
+    while (true) {
+      const answer = (await rl.question('Choose [1/2/3] (default: 3): ')).trim().toLowerCase();
+
+      if (!answer || answer === '3' || answer === 'patch') {
+        options.bump = 'patch';
+        break;
+      }
+      if (answer === '2' || answer === 'minor') {
+        options.bump = 'minor';
+        break;
+      }
+      if (answer === '1' || answer === 'major') {
+        options.bump = 'major';
+        break;
+      }
+
+      console.log('Invalid choice. Please input 1, 2, 3, major, minor, or patch.');
+    }
+  } finally {
+    rl.close();
+  }
+
+  console.log(`[bump] Selected: ${options.bump}`);
+}
+
 function printPlan(mode, versionInfo, tag, options) {
   console.log(`\nRelease plan (Web: ${mode}):`);
   console.log(`- Version: ${versionInfo.currentVersion} -> ${versionInfo.nextVersion}`);
@@ -317,6 +368,10 @@ function runTagFlow(tag, version, options) {
 }
 
 async function runDeploy(command, options) {
+  if (command === 'deploy-all') {
+    await ensureDeployAllBump(options);
+  }
+
   const versionInfo = maybeBumpWebVersion(options);
   const tag = resolveTag(versionInfo.nextVersion, options);
 
