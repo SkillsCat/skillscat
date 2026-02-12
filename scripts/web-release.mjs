@@ -11,6 +11,13 @@ const INITIAL_VERSION = '0.1.0';
 const DEFAULT_TAG_PREFIX = 'web/v';
 const ALLOWED_BUMPS = new Set(['major', 'minor', 'patch']);
 const ALLOWED_WORKER_ENVS = new Set(['production', 'local']);
+const ANSI = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  cyan: '\x1b[36m',
+  yellow: '\x1b[33m',
+  dim: '\x1b[2m'
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -147,6 +154,10 @@ function writeJson(filePath, value) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function style(text, code) {
+  return output.isTTY ? `${code}${text}${ANSI.reset}` : text;
+}
+
 function bumpVersion(version, bumpType) {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
   if (!match) {
@@ -278,17 +289,27 @@ async function ensureDeployAllBump(options) {
   const nextMinor = bumpVersion(currentVersion, 'minor');
   const nextPatch = bumpVersion(currentVersion, 'patch');
 
-  console.log('\nSelect version bump for deploy-all:');
-  console.log(`1) major: ${currentVersion} -> ${nextMajor}`);
-  console.log(`2) minor: ${currentVersion} -> ${nextMinor}`);
-  console.log(`3) patch: ${currentVersion} -> ${nextPatch} (recommended)`);
+  const sep = '------------------------------------------------------------';
+  console.log(`\n${sep}`);
+  console.log(style('Deploy-All Version Selection', `${ANSI.bold}${ANSI.cyan}`));
+  console.log(`Current version : ${currentVersion}`);
+  console.log(`1) major        : ${currentVersion} -> ${nextMajor}`);
+  console.log(`2) minor        : ${currentVersion} -> ${nextMinor}`);
+  console.log(`3) patch        : ${currentVersion} -> ${nextPatch} ${style('(recommended)', ANSI.dim)}`);
+  console.log(`4) no bump      : keep ${currentVersion}`);
+  console.log(style('Tip: no bump may conflict with an existing tag unless you use --no-tag or --tag.', ANSI.dim));
+  console.log(sep);
 
   const rl = createInterface({ input, output });
   try {
     while (true) {
-      const answer = (await rl.question('Choose [1/2/3] (default: 3): ')).trim().toLowerCase();
+      const answer = (await rl.question(style('Choose [1/2/3/4] (default: 4): ', ANSI.yellow))).trim().toLowerCase();
 
-      if (!answer || answer === '3' || answer === 'patch') {
+      if (!answer || answer === '4' || answer === 'no-bump' || answer === 'none' || answer === 'skip') {
+        options.bump = null;
+        break;
+      }
+      if (answer === '3' || answer === 'patch') {
         options.bump = 'patch';
         break;
       }
@@ -301,13 +322,13 @@ async function ensureDeployAllBump(options) {
         break;
       }
 
-      console.log('Invalid choice. Please input 1, 2, 3, major, minor, or patch.');
+      console.log('Invalid choice. Please input 1, 2, 3, 4, major, minor, patch, or none.');
     }
   } finally {
     rl.close();
   }
 
-  console.log(`[bump] Selected: ${options.bump}`);
+  console.log(`[bump] Selected: ${options.bump ?? 'no bump'}`);
 }
 
 function printPlan(mode, versionInfo, tag, options) {
