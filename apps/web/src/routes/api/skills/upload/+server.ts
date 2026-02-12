@@ -373,20 +373,6 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     }
   }
 
-  // Store SKILL.md in R2
-  const slugParts = slug.split('/');
-  const r2Path = slugParts.length >= 2
-    ? `skills/${slugParts[0]}/${slugParts[1]}/SKILL.md`
-    : `skills/${slug}/SKILL.md`;
-  await r2.put(r2Path, skillMdContent, {
-    httpMetadata: { contentType: 'text/markdown' },
-    customMetadata: {
-      skillId,
-      uploadedBy: auth.userId,
-      uploadedAt: new Date().toISOString(),
-    },
-  });
-
   // Insert skill into database
   const now = Date.now();
   try {
@@ -417,6 +403,33 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       throw error(409, `A skill with slug ${slug} already exists`);
     }
     throw err;
+  }
+
+  // Store SKILL.md in R2 after DB insert succeeds to avoid accidental overwrite
+  // during concurrent uploads that race on slug uniqueness.
+  const slugParts = slug.split('/');
+  const r2Path = slugParts.length >= 2
+    ? `skills/${slugParts[0]}/${slugParts[1]}/SKILL.md`
+    : `skills/${slug}/SKILL.md`;
+
+  try {
+    await r2.put(r2Path, skillMdContent, {
+      httpMetadata: { contentType: 'text/markdown' },
+      customMetadata: {
+        skillId,
+        uploadedBy: auth.userId,
+        uploadedAt: new Date().toISOString(),
+      },
+    });
+  } catch (err) {
+    console.error(`Failed to write upload content to R2 for skill ${skillId}:`, err);
+    // Roll back DB record so upload remains all-or-nothing.
+    try {
+      await db.prepare('DELETE FROM skills WHERE id = ?').bind(skillId).run();
+    } catch (rollbackErr) {
+      console.error(`Rollback failed for uploaded skill ${skillId}:`, rollbackErr);
+    }
+    throw error(500, 'Failed to store skill content');
   }
 
   return json({
