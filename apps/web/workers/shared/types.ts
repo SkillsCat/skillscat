@@ -54,6 +54,7 @@ export interface BaseEnv {
   R2: R2Bucket;
   GITHUB_TOKEN?: string;
   WORKER_SECRET?: string;
+  CACHE_VERSION?: string;
 }
 
 export interface GithubEventsEnv extends BaseEnv {
@@ -415,12 +416,12 @@ export interface SkillListItem {
   name: string;
   slug: string;
   description: string | null;
-  repo_owner: string;
-  repo_name: string;
+  repoOwner: string;
+  repoName: string;
   stars: number;
   forks: number;
-  trending_score: number;
-  updated_at: number;
-  author_avatar?: string;
+  trendingScore: number;
+  updatedAt: number;
+  authorAvatar?: string;
   categories?: string[];
 }

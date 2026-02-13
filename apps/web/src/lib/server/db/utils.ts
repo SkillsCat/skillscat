@@ -10,6 +10,117 @@ export interface DbEnv {
   KV?: KVNamespace;
   WORKER_SECRET?: string;
   RESURRECTION_WORKER_URL?: string;
+  CACHE_VERSION?: string;
+}
+
+const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
+
+interface CachedSkillCardRaw {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  repoOwner?: string;
+  repo_owner?: string;
+  repoName?: string;
+  repo_name?: string;
+  stars?: number;
+  forks?: number;
+  trendingScore?: number;
+  trending_score?: number;
+  updatedAt?: number;
+  updated_at?: number;
+  authorAvatar?: string | null;
+  author_avatar?: string | null;
+  categories?: string[];
+}
+
+function normalizeCachedSkill(item: CachedSkillCardRaw): SkillCardData {
+  return {
+    id: item.id,
+    name: item.name,
+    slug: item.slug,
+    description: item.description ?? null,
+    repoOwner: item.repoOwner ?? item.repo_owner ?? '',
+    repoName: item.repoName ?? item.repo_name ?? '',
+    stars: Number(item.stars ?? 0),
+    forks: Number(item.forks ?? 0),
+    trendingScore: Number(item.trendingScore ?? item.trending_score ?? 0),
+    updatedAt: Number(item.updatedAt ?? item.updated_at ?? 0),
+    authorAvatar: (item.authorAvatar ?? item.author_avatar) || undefined,
+    categories: Array.isArray(item.categories) ? item.categories : [],
+  };
+}
+
+async function hydrateCachedSkills(
+  db: D1Database,
+  skills: SkillCardData[]
+): Promise<SkillCardData[]> {
+  if (skills.length === 0) return [];
+
+  const skillIds = skills.map((s) => s.id);
+  const placeholders = skillIds.map(() => '?').join(',');
+
+  const result = await db.prepare(`
+    SELECT
+      s.id,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
+      a.avatar_url as authorAvatar
+    FROM skills s
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    WHERE s.id IN (${placeholders})
+  `)
+    .bind(...skillIds)
+    .all<{
+      id: string;
+      repoOwner: string;
+      repoName: string;
+      updatedAt: number;
+      authorAvatar: string | null;
+    }>();
+
+  const skillMap = new Map<string, {
+    repoOwner: string;
+    repoName: string;
+    updatedAt: number;
+    authorAvatar?: string;
+  }>();
+
+  for (const row of result.results || []) {
+    skillMap.set(row.id, {
+      repoOwner: row.repoOwner,
+      repoName: row.repoName,
+      updatedAt: row.updatedAt,
+      authorAvatar: row.authorAvatar || undefined,
+    });
+  }
+
+  return skills.map((skill) => {
+    const latest = skillMap.get(skill.id);
+    if (!latest) return skill;
+
+    return {
+      ...skill,
+      repoOwner: latest.repoOwner || skill.repoOwner,
+      repoName: latest.repoName || skill.repoName,
+      updatedAt: latest.updatedAt ?? skill.updatedAt,
+      authorAvatar: latest.authorAvatar ?? skill.authorAvatar,
+    };
+  });
+}
+
+function buildListCacheKeys(key: string, cacheVersion?: string): string[] {
+  const normalizedVersion = (cacheVersion || '').trim();
+  const keys: string[] = [];
+
+  if (normalizedVersion && CACHE_VERSION_PATTERN.test(normalizedVersion)) {
+    keys.push(`cache/lists/${normalizedVersion}/${key}.json`);
+  }
+
+  keys.push(`cache/${key}.json`);
+  return keys;
 }
 
 /**
@@ -17,16 +128,42 @@ export interface DbEnv {
  */
 export async function getCachedList(
   r2: R2Bucket | undefined,
-  key: string
+  key: string,
+  cacheVersion?: string
 ): Promise<{ data: SkillCardData[]; generatedAt: number } | null> {
   if (!r2) return null;
 
   try {
-    const object = await r2.get(`cache/${key}.json`);
-    if (!object) return null;
+    const cacheKeys = buildListCacheKeys(key, cacheVersion);
+    const primaryKey = cacheKeys[0];
 
-    const text = await object.text();
-    return JSON.parse(text);
+    for (const cacheKey of cacheKeys) {
+      const object = await r2.get(cacheKey);
+      if (!object) continue;
+
+      const text = await object.text();
+      const parsed = JSON.parse(text) as {
+        data?: CachedSkillCardRaw[];
+        generatedAt?: number;
+      };
+
+      if (!Array.isArray(parsed.data)) {
+        continue;
+      }
+
+      // If we read from legacy key, promote to versioned key asynchronously.
+      if (cacheKey !== primaryKey) {
+        void r2.put(primaryKey, text, {
+          httpMetadata: { contentType: 'application/json' },
+        });
+      }
+
+      return {
+        data: parsed.data.map(normalizeCachedSkill),
+        generatedAt: Number(parsed.generatedAt ?? Date.now()),
+      };
+    }
+    return null;
   } catch (error) {
     console.error(`Error reading cache ${key}:`, error);
     return null;
@@ -41,9 +178,11 @@ export async function getTrendingSkills(
   limit: number = 12
 ): Promise<SkillCardData[]> {
   // 先尝试从 R2 缓存读取
-  const cached = await getCachedList(env.R2, 'trending');
+  const cached = await getCachedList(env.R2, 'trending', env.CACHE_VERSION);
   if (cached?.data) {
-    return cached.data.slice(0, limit);
+    const top = cached.data.slice(0, limit);
+    if (!env.DB) return top;
+    return hydrateCachedSkills(env.DB, top);
   }
 
   // 从 D1 读取
@@ -60,7 +199,7 @@ export async function getTrendingSkills(
       s.stars,
       s.forks,
       s.trending_score as trendingScore,
-      s.updated_at as updatedAt,
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
@@ -97,7 +236,7 @@ export async function getTrendingSkillsPaginated(
       s.stars,
       s.forks,
       s.trending_score as trendingScore,
-      s.updated_at as updatedAt,
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
@@ -127,9 +266,11 @@ export async function getRecentSkills(
   limit: number = 12
 ): Promise<SkillCardData[]> {
   // 先尝试从 R2 缓存读取
-  const cached = await getCachedList(env.R2, 'recent');
+  const cached = await getCachedList(env.R2, 'recent', env.CACHE_VERSION);
   if (cached?.data) {
-    return cached.data.slice(0, limit);
+    const top = cached.data.slice(0, limit);
+    if (!env.DB) return top;
+    return hydrateCachedSkills(env.DB, top);
   }
 
   // 从 D1 读取
@@ -146,7 +287,7 @@ export async function getRecentSkills(
       s.stars,
       s.forks,
       s.trending_score as trendingScore,
-      s.updated_at as updatedAt,
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
@@ -186,7 +327,7 @@ export async function getRecentSkillsPaginated(
       s.stars,
       s.forks,
       s.trending_score as trendingScore,
-      s.updated_at as updatedAt,
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
@@ -219,9 +360,11 @@ export async function getTopSkills(
   limit: number = 12
 ): Promise<SkillCardData[]> {
   // 先尝试从 R2 缓存读取
-  const cached = await getCachedList(env.R2, 'top');
+  const cached = await getCachedList(env.R2, 'top', env.CACHE_VERSION);
   if (cached?.data) {
-    return cached.data.slice(0, limit);
+    const top = cached.data.slice(0, limit);
+    if (!env.DB) return top;
+    return hydrateCachedSkills(env.DB, top);
   }
 
   // 从 D1 读取
@@ -238,7 +381,7 @@ export async function getTopSkills(
       s.stars,
       s.forks,
       s.trending_score as trendingScore,
-      s.updated_at as updatedAt,
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
@@ -275,7 +418,7 @@ export async function getTopSkillsPaginated(
       s.stars,
       s.forks,
       s.trending_score as trendingScore,
-      s.updated_at as updatedAt,
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
@@ -320,7 +463,7 @@ export async function getSkillsByCategory(
       s.stars,
       s.forks,
       s.trending_score as trendingScore,
-      s.updated_at as updatedAt,
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       a.avatar_url as authorAvatar
     FROM skills s
     JOIN skill_categories sc ON s.id = sc.skill_id
@@ -384,7 +527,7 @@ export async function searchSkills(
       s.stars,
       s.forks,
       s.trending_score as trendingScore,
-      s.updated_at as updatedAt,
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
@@ -540,7 +683,7 @@ export async function getSkillBySlug(
     stars: skillData.stars || 0,
     forks: skillData.forks || 0,
     trendingScore: skillData.trending_score || 0,
-    updatedAt: skillData.updated_at,
+    updatedAt: skillData.last_commit_at ?? skillData.updated_at,
     lastCommitAt: skillData.last_commit_at || null,
     createdAt: skillData.created_at || skillData.indexed_at,
     indexedAt: skillData.indexed_at,
@@ -602,7 +745,7 @@ export async function getRelatedSkills(
     s.id, s.name, s.slug, s.description,
     s.repo_owner as repoOwner, s.repo_name as repoName,
     s.stars, s.forks, s.trending_score as trendingScore,
-    s.updated_at as updatedAt, s.last_commit_at as lastCommitAt,
+    COALESCE(s.last_commit_at, s.updated_at) as updatedAt, s.last_commit_at as lastCommitAt,
     a.avatar_url as authorAvatar`;
 
   const addCandidates = (rows: any[], tier: number) => {

@@ -26,6 +26,20 @@ const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql';
 const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
 const AI_CLASSIFICATION_THRESHOLD = 100; // Stars threshold for AI classification
+const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
+
+function getListCachePaths(listName: string, cacheVersion?: string): string[] {
+  const normalizedVersion = (cacheVersion || '').trim();
+  const paths: string[] = [];
+
+  if (normalizedVersion && CACHE_VERSION_PATTERN.test(normalizedVersion)) {
+    paths.push(`cache/lists/${normalizedVersion}/${listName}.json`);
+  }
+
+  // Keep writing legacy key for backward compatibility / smooth rollouts.
+  paths.push(`cache/${listName}.json`);
+  return paths;
+}
 
 export function calculateTrendingScore(skill: {
   stars: number;
@@ -263,7 +277,6 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
     stars: number;
     forks: number;
     starSnapshots: string;
-    lastCommitAt: number;
     score: number;
     tier: SkillTier;
     nextUpdateAt: number | null;
@@ -307,7 +320,6 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
       stars: newStars,
       forks: ghData.forkCount,
       starSnapshots: JSON.stringify(compressed),
-      lastCommitAt: pushedAt,
       score,
       tier: newTier,
       nextUpdateAt: getNextUpdateTime(newTier),
@@ -315,14 +327,13 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
   }
 
   if (updates.length > 0) {
-    const now = Date.now();
     const statements = updates.map((u) =>
       env.DB.prepare(`
         UPDATE skills
-        SET stars = ?, forks = ?, star_snapshots = ?, last_commit_at = ?,
-            trending_score = ?, tier = ?, next_update_at = ?, updated_at = ?
+        SET stars = ?, forks = ?, star_snapshots = ?,
+            trending_score = ?, tier = ?, next_update_at = ?
         WHERE id = ?
-      `).bind(u.stars, u.forks, u.starSnapshots, u.lastCommitAt, u.score, u.tier, u.nextUpdateAt, now, u.id)
+      `).bind(u.stars, u.forks, u.starSnapshots, u.score, u.tier, u.nextUpdateAt, u.id)
     );
 
     await env.DB.batch(statements);
@@ -385,7 +396,6 @@ async function updateSkillsByTier(
       stars: number;
       forks: number;
       starSnapshots: string;
-      lastCommitAt: number;
       score: number;
       tier: SkillTier;
       nextUpdateAt: number | null;
@@ -431,7 +441,6 @@ async function updateSkillsByTier(
         stars: newStars,
         forks: newForks,
         starSnapshots: JSON.stringify(compressed),
-        lastCommitAt: pushedAt || 0,
         score,
         tier: newTier,
         nextUpdateAt: getNextUpdateTime(newTier),
@@ -442,10 +451,10 @@ async function updateSkillsByTier(
       const statements = updates.map((u) =>
         env.DB.prepare(`
           UPDATE skills
-          SET stars = ?, forks = ?, star_snapshots = ?, last_commit_at = ?,
-              trending_score = ?, tier = ?, next_update_at = ?, updated_at = ?
+          SET stars = ?, forks = ?, star_snapshots = ?,
+              trending_score = ?, tier = ?, next_update_at = ?
           WHERE id = ?
-        `).bind(u.stars, u.forks, u.starSnapshots, u.lastCommitAt, u.score, u.tier, u.nextUpdateAt, now, u.id)
+        `).bind(u.stars, u.forks, u.starSnapshots, u.score, u.tier, u.nextUpdateAt, u.id)
       );
 
       await env.DB.batch(statements);
@@ -612,9 +621,13 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   const now = Date.now();
 
   const trending = await env.DB.prepare(`
-    SELECT s.id, s.name, s.slug, s.description, s.repo_owner, s.repo_name,
-           s.stars, s.forks, s.trending_score, s.updated_at,
-           a.avatar_url as author_avatar
+    SELECT s.id, s.name, s.slug, s.description,
+           s.repo_owner as repoOwner,
+           s.repo_name as repoName,
+           s.stars, s.forks,
+           s.trending_score as trendingScore,
+           COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
+           a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.visibility = 'public'
@@ -622,16 +635,21 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
     LIMIT 100
   `).all<SkillListItem>();
 
-  await env.R2.put(
-    'cache/trending.json',
-    JSON.stringify({ data: trending.results, generatedAt: now }),
-    { httpMetadata: { contentType: 'application/json' } }
+  const trendingPayload = JSON.stringify({ data: trending.results, generatedAt: now });
+  await Promise.all(
+    getListCachePaths('trending', env.CACHE_VERSION).map((path) =>
+      env.R2.put(path, trendingPayload, { httpMetadata: { contentType: 'application/json' } })
+    )
   );
 
   const top = await env.DB.prepare(`
-    SELECT s.id, s.name, s.slug, s.description, s.repo_owner, s.repo_name,
-           s.stars, s.forks, s.trending_score, s.updated_at,
-           a.avatar_url as author_avatar
+    SELECT s.id, s.name, s.slug, s.description,
+           s.repo_owner as repoOwner,
+           s.repo_name as repoName,
+           s.stars, s.forks,
+           s.trending_score as trendingScore,
+           COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
+           a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.visibility = 'public'
@@ -640,27 +658,36 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
     LIMIT 100
   `).all<SkillListItem>();
 
-  await env.R2.put(
-    'cache/top.json',
-    JSON.stringify({ data: top.results, generatedAt: now }),
-    { httpMetadata: { contentType: 'application/json' } }
+  const topPayload = JSON.stringify({ data: top.results, generatedAt: now });
+  await Promise.all(
+    getListCachePaths('top', env.CACHE_VERSION).map((path) =>
+      env.R2.put(path, topPayload, { httpMetadata: { contentType: 'application/json' } })
+    )
   );
 
   const recent = await env.DB.prepare(`
-    SELECT s.id, s.name, s.slug, s.description, s.repo_owner, s.repo_name,
-           s.stars, s.forks, s.trending_score, s.updated_at,
-           a.avatar_url as author_avatar
+    SELECT s.id, s.name, s.slug, s.description,
+           s.repo_owner as repoOwner,
+           s.repo_name as repoName,
+           s.stars, s.forks,
+           s.trending_score as trendingScore,
+           COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
+           a.avatar_url as authorAvatar
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.visibility = 'public'
-    ORDER BY s.indexed_at DESC
+    ORDER BY CASE
+      WHEN s.last_commit_at IS NULL THEN s.indexed_at
+      ELSE s.last_commit_at
+    END DESC
     LIMIT 100
   `).all<SkillListItem>();
 
-  await env.R2.put(
-    'cache/recent.json',
-    JSON.stringify({ data: recent.results, generatedAt: now }),
-    { httpMetadata: { contentType: 'application/json' } }
+  const recentPayload = JSON.stringify({ data: recent.results, generatedAt: now });
+  await Promise.all(
+    getListCachePaths('recent', env.CACHE_VERSION).map((path) =>
+      env.R2.put(path, recentPayload, { httpMetadata: { contentType: 'application/json' } })
+    )
   );
 
   console.log('Cache lists regenerated');

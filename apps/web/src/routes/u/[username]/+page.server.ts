@@ -64,13 +64,13 @@ export const load: PageServerLoad = async ({ params, platform }) => {
         s.slug,
         s.description,
         s.stars,
-        s.updated_at as updatedAt,
+        COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
         GROUP_CONCAT(sc.category_slug) as categories
       FROM skills s
       LEFT JOIN skill_categories sc ON s.id = sc.skill_id
       WHERE s.owner_id = ? AND s.visibility = 'public'
       GROUP BY s.id
-      ORDER BY s.stars DESC, s.updated_at DESC
+      ORDER BY s.stars DESC, COALESCE(s.last_commit_at, s.updated_at) DESC
     `)
       .bind(user.id)
       .all<{
@@ -174,13 +174,13 @@ export const load: PageServerLoad = async ({ params, platform }) => {
       s.slug,
       s.description,
       s.stars,
-      s.updated_at as updatedAt,
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       GROUP_CONCAT(sc.category_slug) as categories
     FROM skills s
     LEFT JOIN skill_categories sc ON s.id = sc.skill_id
     WHERE s.repo_owner = ? AND s.visibility = 'public'
     GROUP BY s.id
-    ORDER BY s.stars DESC, s.updated_at DESC
+    ORDER BY s.stars DESC, COALESCE(s.last_commit_at, s.updated_at) DESC
   `)
     .bind(username)
     .all<{

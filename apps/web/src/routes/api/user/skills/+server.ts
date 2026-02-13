@@ -18,7 +18,7 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
 
   const [results, countResult] = await Promise.all([
     db.prepare(`
-      SELECT id, name, slug, description, visibility, stars, updated_at
+      SELECT id, name, slug, description, visibility, stars, COALESCE(last_commit_at, updated_at) as updated_at
       FROM skills
       WHERE owner_id = ?
       ORDER BY created_at DESC

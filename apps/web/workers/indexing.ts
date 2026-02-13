@@ -377,18 +377,16 @@ async function getLatestCommitSha(
 }
 
 /**
- * Get the latest commit date for a specific path in the repository
- * This returns the date of the most recent commit that modified files in that path
+ * Get the latest commit date for SKILL.md in the repository
+ * This returns the date of the most recent commit that modified that file
  */
 async function getLastCommitDate(
   owner: string,
   name: string,
-  skillPath: string | null,
+  skillMdPath: string,
   env: IndexingEnv
 ): Promise<number | null> {
-  // Build the path parameter - if skillPath is provided, use it; otherwise use root
-  const pathParam = skillPath ? `&path=${encodeURIComponent(skillPath)}` : '';
-  const commitsUrl = `https://api.github.com/repos/${owner}/${name}/commits?per_page=1${pathParam}`;
+  const commitsUrl = `https://api.github.com/repos/${owner}/${name}/commits?per_page=1&path=${encodeURIComponent(skillMdPath)}`;
 
   const commits = await githubFetch<Array<{
     sha: string;
@@ -404,12 +402,12 @@ async function getLastCommitDate(
   });
 
   if (!commits || commits.length === 0) {
-    log.log(`No commits found for path: ${skillPath || 'root'}`);
+    log.log(`No commits found for path: ${skillMdPath}`);
     return null;
   }
 
   const commitDate = new Date(commits[0].commit.committer.date).getTime();
-  log.log(`Last commit date for ${skillPath || 'root'}: ${commits[0].commit.committer.date} (${commitDate})`);
+  log.log(`Last commit date for ${skillMdPath}: ${commits[0].commit.committer.date} (${commitDate})`);
 
   return commitDate;
 }
@@ -614,17 +612,17 @@ async function updateSkillMetadata(
   lastCommitAt: number | null,
   env: IndexingEnv
 ): Promise<void> {
-  const now = Date.now();
+  const updatedAt = lastCommitAt ?? null;
 
   await env.DB.prepare(`
     UPDATE skills SET
       commit_sha = ?,
       file_structure = ?,
-      last_commit_at = ?,
-      updated_at = ?
+      last_commit_at = COALESCE(?, last_commit_at),
+      updated_at = COALESCE(?, updated_at)
     WHERE id = ?
   `)
-    .bind(commitSha, JSON.stringify(fileStructure), lastCommitAt, now, skillId)
+    .bind(commitSha, JSON.stringify(fileStructure), lastCommitAt, updatedAt, skillId)
     .run();
 
   log.log(`Updated skill metadata: ${skillId}, commitSha: ${commitSha}, files: ${fileStructure.files.length}, lastCommitAt: ${lastCommitAt}`);
@@ -858,7 +856,6 @@ async function updateSkill(
     UPDATE skills SET
       stars = ?,
       forks = ?,
-      updated_at = ?,
       indexed_at = ?
     WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, '') = ?
     RETURNING id
@@ -866,7 +863,6 @@ async function updateSkill(
     .bind(
       repo.stargazers_count,
       repo.forks_count,
-      now,
       now,
       owner,
       name,
@@ -1152,8 +1148,8 @@ async function processMessage(
     throw r2Error;
   }
 
-  // Step 10: Get last commit date for the skill path
-  const lastCommitAt = await getLastCommitDate(repoOwner, repoName, skillPath || null, env);
+  // Step 10: Get last commit date for SKILL.md
+  const lastCommitAt = await getLastCommitDate(repoOwner, repoName, skillMd.path, env);
 
   // Step 11: Update commit_sha, file_structure, and last_commit_at
   const fileStructure: FileStructure = {

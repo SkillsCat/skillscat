@@ -17,6 +17,7 @@ declare global {
         DEEPSEEK_API_KEY: string;
         GITHUB_TOKEN?: string;
         WORKER_SECRET?: string;
+        CACHE_VERSION?: string;
       };
       context: ExecutionContext;
       caches: CacheStorage & { default: Cache };

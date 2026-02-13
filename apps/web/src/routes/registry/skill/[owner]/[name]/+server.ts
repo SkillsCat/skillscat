@@ -47,7 +47,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
         s.repo_owner as owner,
         s.repo_name as repo,
         s.stars,
-        s.updated_at as updatedAt,
+        COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
         s.github_url as githubUrl,
         s.skill_path as skillPath,
         s.source_type as sourceType,

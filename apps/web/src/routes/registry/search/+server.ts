@@ -139,7 +139,7 @@ async function fetchSearchResults(
       s.repo_owner as owner,
       s.repo_name as repo,
       s.stars,
-      s.updated_at as updatedAt,
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       s.visibility,
       GROUP_CONCAT(sc.category_slug) as categories
     FROM skills s

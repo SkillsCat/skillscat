@@ -42,7 +42,7 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
         s.stars,
         s.forks,
         s.trending_score as trendingScore,
-        s.updated_at as updatedAt,
+        COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
         a.avatar_url as authorAvatar,
         f.created_at as favoritedAt
       FROM favorites f

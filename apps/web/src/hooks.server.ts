@@ -3,6 +3,7 @@ import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { building } from '$app/environment';
 import type { Handle } from '@sveltejs/kit';
 import { runRequestSecurity, shouldNoIndexPath } from '$lib/server/request-security';
+import { setCacheVersion } from '$lib/server/cache';
 
 const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
 const AUTHOR_LINK_COOKIE = 'sc-author-linked';
@@ -33,6 +34,8 @@ function applyResponseSecurityHeaders(pathname: string, response: Response): Res
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
+  setCacheVersion((event.platform?.env as { CACHE_VERSION?: string } | undefined)?.CACHE_VERSION);
+
   const blocked = await runRequestSecurity(event);
   if (blocked) {
     return blocked;

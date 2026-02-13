@@ -62,7 +62,7 @@ export const GET: RequestHandler = async ({ url, platform }) => {
                 s.stars,
                 s.forks,
                 s.trending_score as trendingScore,
-                s.updated_at as updatedAt,
+                COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
                 GROUP_CONCAT(sc.category_slug) as categories,
                 a.avatar_url as authorAvatar
               FROM skills s

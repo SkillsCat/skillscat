@@ -6,9 +6,35 @@
  */
 
 const CACHE_DOMAIN = 'https://skillscat.dev/cache';
+const DEFAULT_CACHE_VERSION = 'v1';
+const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 
 // Cloudflare Workers extends CacheStorage with a 'default' property
 declare const caches: CacheStorage & { default: Cache };
+
+let activeCacheVersion = DEFAULT_CACHE_VERSION;
+
+function normalizeCacheVersion(version: string | undefined | null): string {
+  const normalized = (version || '').trim();
+  if (!normalized) return DEFAULT_CACHE_VERSION;
+  return CACHE_VERSION_PATTERN.test(normalized) ? normalized : DEFAULT_CACHE_VERSION;
+}
+
+function getVersionedCacheKey(cacheKey: string): string {
+  return `v/${activeCacheVersion}/${cacheKey}`;
+}
+
+function buildCacheRequest(cacheKey: string): Request {
+  return new Request(`${CACHE_DOMAIN}/${cacheKey}`);
+}
+
+/**
+ * Set cache namespace version.
+ * Call this once per request from hooks using runtime env vars.
+ */
+export function setCacheVersion(version: string | undefined | null): void {
+  activeCacheVersion = normalizeCacheVersion(version);
+}
 
 /**
  * Get cached data or fetch fresh data
@@ -26,11 +52,24 @@ export async function getCached<T>(
   // Try to get from cache
   try {
     const cache = caches.default;
-    const cacheUrl = new Request(`${CACHE_DOMAIN}/${cacheKey}`);
-    const cached = await cache.match(cacheUrl);
+    const versionedKey = getVersionedCacheKey(cacheKey);
+    const versionedRequest = buildCacheRequest(versionedKey);
+    const legacyRequest = buildCacheRequest(cacheKey);
+
+    const cached = await cache.match(versionedRequest);
 
     if (cached) {
       const data = await cached.json() as T;
+      return { data, hit: true };
+    }
+
+    // Backward-compatible fallback:
+    // keep serving legacy cache after deploy, and promote it to current version.
+    const legacyCached = await cache.match(legacyRequest);
+    if (legacyCached) {
+      const promoted = legacyCached.clone();
+      const data = await legacyCached.json() as T;
+      void cache.put(versionedRequest, promoted);
       return { data, hit: true };
     }
   } catch {
@@ -43,7 +82,7 @@ export async function getCached<T>(
   // Store in cache (fire and forget)
   try {
     const cache = caches.default;
-    const cacheUrl = new Request(`${CACHE_DOMAIN}/${cacheKey}`);
+    const cacheUrl = buildCacheRequest(getVersionedCacheKey(cacheKey));
     const response = new Response(JSON.stringify(data), {
       headers: {
         'Cache-Control': `public, max-age=${ttl}`,
@@ -69,11 +108,22 @@ export async function getCachedText(
 ): Promise<{ data: string; hit: boolean }> {
   try {
     const cache = caches.default;
-    const cacheUrl = new Request(`${CACHE_DOMAIN}/${cacheKey}`);
-    const cached = await cache.match(cacheUrl);
+    const versionedKey = getVersionedCacheKey(cacheKey);
+    const versionedRequest = buildCacheRequest(versionedKey);
+    const legacyRequest = buildCacheRequest(cacheKey);
+
+    const cached = await cache.match(versionedRequest);
 
     if (cached) {
       const data = await cached.text();
+      return { data, hit: true };
+    }
+
+    const legacyCached = await cache.match(legacyRequest);
+    if (legacyCached) {
+      const promoted = legacyCached.clone();
+      const data = await legacyCached.text();
+      void cache.put(versionedRequest, promoted);
       return { data, hit: true };
     }
   } catch {
@@ -84,7 +134,7 @@ export async function getCachedText(
 
   try {
     const cache = caches.default;
-    const cacheUrl = new Request(`${CACHE_DOMAIN}/${cacheKey}`);
+    const cacheUrl = buildCacheRequest(getVersionedCacheKey(cacheKey));
     const response = new Response(data, {
       headers: {
         'Cache-Control': `public, max-age=${ttl}`,
@@ -105,8 +155,12 @@ export async function getCachedText(
 export async function invalidateCache(cacheKey: string): Promise<void> {
   try {
     const cache = caches.default;
-    const cacheUrl = new Request(`${CACHE_DOMAIN}/${cacheKey}`);
-    await cache.delete(cacheUrl);
+    const versionedUrl = buildCacheRequest(getVersionedCacheKey(cacheKey));
+    const legacyUrl = buildCacheRequest(cacheKey);
+    await Promise.all([
+      cache.delete(versionedUrl),
+      cache.delete(legacyUrl),
+    ]);
   } catch {
     // Ignore errors
   }

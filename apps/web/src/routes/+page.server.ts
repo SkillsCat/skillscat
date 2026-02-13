@@ -21,6 +21,7 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
   const env = {
     DB: platform?.env?.DB,
     R2: platform?.env?.R2,
+    CACHE_VERSION: platform?.env?.CACHE_VERSION,
   };
 
   const { data } = await getCached(

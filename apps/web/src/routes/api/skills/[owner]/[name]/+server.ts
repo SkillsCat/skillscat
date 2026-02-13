@@ -41,7 +41,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
             s.stars,
             s.forks,
             s.trending_score as trendingScore,
-            s.updated_at as updatedAt,
+            COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
             s.readme,
             s.file_structure as fileStructure,
             s.last_commit_at as lastCommitAt,
@@ -151,7 +151,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
               s.stars,
               s.forks,
               s.trending_score as trendingScore,
-              s.updated_at as updatedAt,
+              COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
               GROUP_CONCAT(sc2.category_slug) as categories,
               a.avatar_url as authorAvatar
             FROM skills s
