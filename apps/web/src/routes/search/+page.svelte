@@ -129,7 +129,7 @@
 
 <svelte:head>
   <title>{data.query ? `Search: ${data.query}` : 'Search'} - SkillsCat</title>
-  <meta name="description" content="Search Claude Code skills and categories." />
+  <meta name="description" content="Search AI agent skills and categories." />
 </svelte:head>
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">

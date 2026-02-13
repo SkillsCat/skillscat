@@ -23,10 +23,10 @@
 
     <h2>2. Description of Service</h2>
     <p>
-      SkillsCat is a platform for discovering, sharing, and installing Claude Code skills. We provide:
+      SkillsCat is an open platform for discovering, sharing, and installing AI agent skills. We provide:
     </p>
     <ul>
-      <li>A catalog of Claude Code skills from the community</li>
+      <li>A catalog of AI agent skills from the community</li>
       <li>Tools to browse, search, and install skills</li>
       <li>The ability to submit and share your own skills</li>
     </ul>

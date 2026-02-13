@@ -4,7 +4,10 @@
 
 <svelte:head>
   <title>Privacy Policy - SkillsCat</title>
-  <meta name="description" content="SkillsCat Privacy Policy - How we collect, use, and protect your data." />
+  <meta
+    name="description"
+    content="Privacy Policy for SkillsCat, an open platform for discovering, sharing, and installing AI agent skills."
+  />
 </svelte:head>
 
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -13,7 +16,7 @@
     <p class="lead">Last updated: January 2025</p>
 
     <p>
-      SkillsCat ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, and safeguard your information when you use our website and services.
+      SkillsCat ("we", "our", or "us") is an open platform for discovering, sharing, and installing AI agent skills. We are committed to protecting your privacy. This Privacy Policy explains how we collect, use, and safeguard your information when you use our website and services.
     </p>
 
     <h2>1. Information We Collect</h2>

@@ -37,10 +37,10 @@
 </script>
 
 <svelte:head>
-  <title>SkillsCat - Claude Code Skills Collection</title>
-  <meta name="description" content="Discover, install, and share Claude Code agent skills. The cutest collection of AI-powered development tools." />
-  <meta property="og:title" content="SkillsCat - Claude Code Skills Collection" />
-  <meta property="og:description" content="Discover, install, and share Claude Code agent skills." />
+  <title>SkillsCat - Open AI Agent Skills Platform</title>
+  <meta name="description" content="An open platform for discovering, sharing, and installing AI agent skills." />
+  <meta property="og:title" content="SkillsCat - Open AI Agent Skills Platform" />
+  <meta property="og:description" content="An open platform for discovering, sharing, and installing AI agent skills." />
   <meta property="og:type" content="website" />
 </svelte:head>
 
@@ -54,9 +54,9 @@
         <div class="hero-circle hero-circle-blue"></div>
 
         <div class="hero-content">
-          <h1 class="hero-title">Supercharge your Agent with community skills.</h1>
+          <h1 class="hero-title">An open platform for discovering, sharing, and installing AI agent skills.</h1>
           <p class="hero-subtitle">
-            Browse over {displayCount} skills to extend agent capabilities.
+            Browse over {displayCount} community skills to extend agent capabilities.
           </p>
         </div>
       </div>

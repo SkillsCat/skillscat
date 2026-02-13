@@ -44,7 +44,7 @@
     '@type': 'WebSite',
     name: siteName,
     url: siteUrl,
-    description: 'Discover and install Claude Code skills. A community-driven collection of AI agent skills.',
+    description: 'An open platform for discovering, sharing, and installing AI agent skills.',
     potentialAction: {
       '@type': 'SearchAction',
       target: {

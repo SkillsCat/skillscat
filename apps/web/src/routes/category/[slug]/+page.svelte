@@ -157,7 +157,7 @@
 <svelte:head>
   {#if data.category}
     <title>{data.category.name} Skills{data.pagination && data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat</title>
-    <meta name="description" content="{data.category.description}. Browse Claude Code skills in this category." />
+    <meta name="description" content="{data.category.description}. Browse AI agent skills in this category." />
   {:else}
     <title>Category Not Found - SkillsCat</title>
   {/if}

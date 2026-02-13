@@ -9,7 +9,7 @@
       <div class="md:col-span-1">
         <Logo size="sm" />
         <p class="mt-3 text-sm text-fg-muted">
-          The cutest collection of Claude Code agent skills.
+          An open platform for discovering, sharing, and installing AI agent skills.
         </p>
       </div>
 

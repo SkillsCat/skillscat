@@ -24,7 +24,7 @@
 
 <svelte:head>
   <title>Recently Added Skills{data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat</title>
-  <meta name="description" content="Discover the newest Claude Code skills added to the collection." />
+  <meta name="description" content="Discover the newest AI agent skills added to the collection." />
 </svelte:head>
 
 <ListPage

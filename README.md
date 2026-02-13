@@ -5,7 +5,7 @@
 <h1 align="center">SkillsCat</h1>
 
 <p align="center">
-  <strong>An open AGPL-3.0 platform for discovering, sharing, and installing AI agent skills.</strong>
+  <strong>An open platform for discovering, sharing, and installing AI agent skills.</strong>
 </p>
 
 <p align="center">

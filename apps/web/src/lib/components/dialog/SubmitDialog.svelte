@@ -181,7 +181,7 @@
                 </div>
               {:else}
                 <Dialog.Description class="dialog-description">
-                  Share a Claude Code skill with the community. Enter the GitHub URL of a repository containing SKILL.md file(s).
+                  Share an AI agent skill with the community. Enter the GitHub URL of a repository containing SKILL.md file(s).
                 </Dialog.Description>
 
                 <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
@@ -240,7 +240,7 @@
                   <ul class="guidelines-list">
                     <li><span class="guidelines-icon">📦</span> The repository must be public</li>
                     <li><span class="guidelines-icon">📄</span> Must contain valid SKILL.md file(s)</li>
-                    <li><span class="guidelines-icon">🎯</span> Skills should be useful for Claude Code users</li>
+                    <li><span class="guidelines-icon">🎯</span> Skills should be useful for AI agent users</li>
                     <li><span class="guidelines-icon">🛡️</span> No malicious or harmful content</li>
                   </ul>
                 </div>

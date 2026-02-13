@@ -627,7 +627,7 @@
 <svelte:head>
   {#if data.skill}
     <title>{data.skill.name} - SkillsCat</title>
-    <meta name="description" content={data.skill.description || `Claude Code skill: ${data.skill.name}`} />
+    <meta name="description" content={data.skill.description || `AI agent skill: ${data.skill.name}`} />
     {#if data.skill.visibility !== 'public'}
       <meta name="robots" content="noindex, nofollow" />
     {/if}

@@ -24,7 +24,7 @@
 
 <svelte:head>
   <title>Trending Skills{data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat</title>
-  <meta name="description" content="Discover the hottest trending Claude Code skills right now." />
+  <meta name="description" content="Discover the hottest trending AI agent skills right now." />
 </svelte:head>
 
 <ListPage

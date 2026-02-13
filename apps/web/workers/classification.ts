@@ -106,7 +106,7 @@ function buildClassificationPrompt(skillMdContent: string, tags?: string[]): str
     tagsHint = `\n\nAuthor-provided tags (use as hints for classification): ${tags.join(', ')}\n`;
   }
 
-  return `You are a skill classifier for Claude Code skills. Analyze the following SKILL.md content and classify it into 1-3 most relevant categories.
+  return `You are a skill classifier for AI agent skills. Analyze the following SKILL.md content and classify it into 1-3 most relevant categories.
 
 IMPORTANT RULES:
 1. You MUST always provide at least 1 category - never return an empty categories array

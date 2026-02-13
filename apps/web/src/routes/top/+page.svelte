@@ -24,7 +24,7 @@
 
 <svelte:head>
   <title>Top Rated Skills{data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat</title>
-  <meta name="description" content="The most starred and loved Claude Code skills by the community." />
+  <meta name="description" content="The most starred and loved AI agent skills by the community." />
 </svelte:head>
 
 <ListPage

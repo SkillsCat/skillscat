@@ -1,7 +1,7 @@
 {
   "name": "skillscat",
   "version": "0.1.0",
-  "description": "CLI for installing Claude Code skills from SkillsCat registry",
+  "description": "CLI for installing AI agent skills from SkillsCat registry",
   "type": "module",
   "bin": {
     "skillscat": "./dist/index.js"
