@@ -12,7 +12,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = resolve(__dirname, '..');
 const WRANGLER_CONFIG = resolve(ROOT_DIR, 'apps/web/wrangler.preview.toml');
 
-const token = process.env.SKILLSCAT_TEST_TOKEN || 'sk_test_cli_token_00000000000000000000000000000000';
+const DEFAULT_TEST_TOKEN = 'sk_test_local_token';
+const token = process.env.SKILLSCAT_TEST_TOKEN || DEFAULT_TEST_TOKEN;
+const tokenProvidedByEnv = Boolean(process.env.SKILLSCAT_TEST_TOKEN);
 const userId = process.env.SKILLSCAT_TEST_USER_ID || 'user_cli_test';
 const userName = process.env.SKILLSCAT_TEST_USER_NAME || 'testuser';
 const userEmail = process.env.SKILLSCAT_TEST_USER_EMAIL || 'test@skillscat.local';
@@ -94,8 +96,12 @@ try {
 
    
   console.log(`Seeded local test account: ${userName} (${userEmail})`);
-   
-  console.log(`Test token: ${token}`);
+
+  if (tokenProvidedByEnv) {
+    console.log('Test token: <redacted> (from SKILLSCAT_TEST_TOKEN)');
+  } else {
+    console.log('Test token: <redacted> (default local test token)');
+  }
 } catch (error) {
    
   console.error('Failed to seed test account:', error);

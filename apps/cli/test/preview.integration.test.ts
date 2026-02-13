@@ -5,7 +5,7 @@ import { configureAuth, configureRegistry, createWorkspace, resetTestConfigDir }
 import { runCommand } from './helpers/output';
 
 const REGISTRY_URL = process.env.SKILLSCAT_TEST_REGISTRY_URL || 'http://localhost:3000/registry';
-const TEST_TOKEN = process.env.SKILLSCAT_TEST_TOKEN || 'sk_test_cli_token_00000000000000000000000000000000';
+const TEST_TOKEN = process.env.SKILLSCAT_TEST_TOKEN || 'sk_test_local_token';
 
 describe('CLI preview integration', () => {
   beforeEach(async () => {

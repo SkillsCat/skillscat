@@ -38,7 +38,7 @@ Usage:
 Examples:
   node scripts/reset-worker-secrets.mjs --dry-run
   node scripts/reset-worker-secrets.mjs --yes --from-file apps/web/.dev.vars
-  node scripts/reset-worker-secrets.mjs --set GITHUB_TOKEN=ghp_xxx --only GITHUB_TOKEN
+  SKILLSCAT_GITHUB_TOKEN=your-token node scripts/reset-worker-secrets.mjs --set GITHUB_TOKEN=$SKILLSCAT_GITHUB_TOKEN --only GITHUB_TOKEN
 `.trim());
 }
 
@@ -420,6 +420,9 @@ function runSecretPut(workerName, key, value, options) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  if (options.sets.size > 0) {
+    console.warn('[reset-worker-secrets] Warning: --set can leak secrets via shell history/process list. Prefer --from-file or environment variables.');
+  }
   const selectedKeys = resolveSelectedKeys(options);
   const workers = discoverTargetWorkers(options.env);
   const secretsToWrite = await resolveSecrets(options, selectedKeys);

@@ -8,7 +8,7 @@ const ROOT_DIR = resolve(__dirname, '../../..');
 const WEB_DIR = resolve(ROOT_DIR, 'apps/web');
 const WORKER_PATH = resolve(WEB_DIR, '.svelte-kit/cloudflare/_worker.js');
 
-const DEFAULT_TOKEN = 'sk_test_cli_token_00000000000000000000000000000000';
+const DEFAULT_TOKEN = 'sk_test_local_token';
 const DEFAULT_USER_ID = 'user_cli_test';
 const DEFAULT_USER_NAME = 'testuser';
 const DEFAULT_USER_EMAIL = 'test@skillscat.local';
