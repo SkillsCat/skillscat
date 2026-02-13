@@ -239,6 +239,48 @@ function maybeBumpWebVersion(options) {
   return { currentVersion, nextVersion };
 }
 
+function buildDeployAllBumpChoices(currentVersion) {
+  return [
+    {
+      key: '1',
+      label: 'major',
+      bump: 'major',
+      nextVersion: bumpVersion(currentVersion, 'major'),
+      aliases: ['major']
+    },
+    {
+      key: '2',
+      label: 'minor',
+      bump: 'minor',
+      nextVersion: bumpVersion(currentVersion, 'minor'),
+      aliases: ['minor']
+    },
+    {
+      key: '3',
+      label: 'patch',
+      bump: 'patch',
+      nextVersion: bumpVersion(currentVersion, 'patch'),
+      aliases: ['patch'],
+      recommended: true
+    },
+    {
+      key: '4',
+      label: 'no bump',
+      bump: null,
+      nextVersion: currentVersion,
+      aliases: ['no-bump', 'no bump', 'none', 'skip']
+    }
+  ];
+}
+
+function getRecommendedDeployAllBumpChoice(choices) {
+  return (
+    choices.find((choice) => choice.recommended) ??
+    choices.find((choice) => choice.bump === 'patch') ??
+    choices[0]
+  );
+}
+
 function resolveTag(version, options) {
   if (options.noTag) return '';
   return options.tag || `${DEFAULT_TAG_PREFIX}${version}`;
@@ -275,9 +317,13 @@ async function confirmOrExit(options, question) {
 async function ensureDeployAllBump(options) {
   if (options.bump) return;
 
+  const currentVersion = getWebVersion();
+  const bumpChoices = buildDeployAllBumpChoices(currentVersion);
+  const recommendedChoice = getRecommendedDeployAllBumpChoice(bumpChoices);
+
   if (options.yes) {
-    options.bump = 'patch';
-    console.log('[bump] --yes provided without --bump, defaulting to patch.');
+    options.bump = recommendedChoice.bump;
+    console.log(`[bump] --yes provided without --bump, defaulting to ${recommendedChoice.label}.`);
     return;
   }
 
@@ -285,41 +331,45 @@ async function ensureDeployAllBump(options) {
     throw new Error('deploy-all requires --bump major|minor|patch in non-interactive mode.');
   }
 
-  const currentVersion = getWebVersion();
-  const nextMajor = bumpVersion(currentVersion, 'major');
-  const nextMinor = bumpVersion(currentVersion, 'minor');
-  const nextPatch = bumpVersion(currentVersion, 'patch');
-
   const sep = '------------------------------------------------------------';
   console.log(`\n${sep}`);
   console.log(style('Deploy-All Version Selection', `${ANSI.bold}${ANSI.cyan}`));
   console.log(`Current version : ${currentVersion}`);
-  console.log(`1) major        : ${currentVersion} -> ${nextMajor}`);
-  console.log(`2) minor        : ${currentVersion} -> ${nextMinor}`);
-  console.log(`3) patch        : ${currentVersion} -> ${nextPatch} ${style('(recommended)', ANSI.dim)}`);
-  console.log(`4) no bump      : keep ${currentVersion}`);
+  for (const choice of bumpChoices) {
+    const versionDisplay =
+      choice.bump === null
+        ? `keep ${currentVersion}`
+        : `${currentVersion} -> ${choice.nextVersion}`;
+    const recommendDisplay = choice.recommended ? ` ${style('(recommended)', ANSI.dim)}` : '';
+    console.log(`${choice.key}) ${choice.label.padEnd(12)}: ${versionDisplay}${recommendDisplay}`);
+  }
   console.log(style('Tip: no bump may conflict with an existing tag unless you use --no-tag or --tag.', ANSI.dim));
   console.log(sep);
 
   const rl = createInterface({ input, output });
   try {
     while (true) {
-      const answer = (await rl.question(style('Choose [1/2/3/4] (default: 4): ', ANSI.yellow))).trim().toLowerCase();
+      const answer = (
+        await rl.question(
+          style(
+            `Choose [${bumpChoices.map((choice) => choice.key).join('/')}] (default: ${recommendedChoice.key}): `,
+            ANSI.yellow
+          )
+        )
+      )
+        .trim()
+        .toLowerCase();
 
-      if (!answer || answer === '4' || answer === 'no-bump' || answer === 'none' || answer === 'skip') {
-        options.bump = null;
+      if (!answer) {
+        options.bump = recommendedChoice.bump;
         break;
       }
-      if (answer === '3' || answer === 'patch') {
-        options.bump = 'patch';
-        break;
-      }
-      if (answer === '2' || answer === 'minor') {
-        options.bump = 'minor';
-        break;
-      }
-      if (answer === '1' || answer === 'major') {
-        options.bump = 'major';
+
+      const selectedChoice = bumpChoices.find(
+        (choice) => answer === choice.key || choice.aliases.includes(answer)
+      );
+      if (selectedChoice) {
+        options.bump = selectedChoice.bump;
         break;
       }
 
