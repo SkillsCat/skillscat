@@ -52,3 +52,6 @@ coverage/
 *.tgz
 .cache/
 tmp/
+
+# ========== Generated assets ==========
+apps/web/static/sw.js
