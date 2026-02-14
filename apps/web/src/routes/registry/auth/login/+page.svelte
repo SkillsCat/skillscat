@@ -99,6 +99,7 @@
 
 <svelte:head>
   <title>Authorize CLI - SkillsCat</title>
+  <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
 <div class="cli-auth-page">

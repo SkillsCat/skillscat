@@ -1,8 +1,11 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import Avatar from '$lib/components/common/Avatar.svelte';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     Search01Icon,
     Cancel01Icon,
+    StarIcon,
     GitBranchIcon,
     CodeIcon,
     RefreshIcon,
@@ -30,20 +33,80 @@
     value?: string;
     placeholder?: string;
     onSearch?: (query: string) => void;
+    onSelectSkill?: (skill: SkillSuggestion) => void;
     class?: string;
     showSuggestions?: boolean;
+    suggestionMode?: 'categories' | 'skills';
+  }
+
+  interface SkillSuggestion {
+    id: string;
+    name: string;
+    slug: string;
+    repoOwner: string;
+    repoName: string;
+    description: string | null;
+    stars: number;
+    authorAvatar?: string;
+  }
+
+  interface SearchApiSkill {
+    id?: string;
+    name?: string;
+    slug?: string;
+    repoOwner?: string;
+    repoName?: string;
+    description?: string | null;
+    stars?: number;
+    authorAvatar?: string | null;
   }
 
   let {
     value = $bindable(''),
     placeholder = 'Search skills...',
     onSearch,
+    onSelectSkill,
     class: className = '',
-    showSuggestions = true
+    showSuggestions = true,
+    suggestionMode = 'categories'
   }: Props = $props();
 
   let isFocused = $state(false);
   let inputElement: HTMLInputElement;
+  let skillSuggestions = $state<SkillSuggestion[]>([]);
+  let suggestionLimit = $state(5);
+
+  const MOBILE_SUGGESTION_LIMIT = 4;
+  const DESKTOP_LIMIT_SHORT = 6;
+  const DESKTOP_LIMIT_MEDIUM = 7;
+  const DESKTOP_LIMIT_TALL = 8;
+
+  function getSuggestionLimit(): number {
+    if (typeof window === 'undefined') return 5;
+
+    const isDesktop = window.matchMedia('(min-width: 768px)').matches;
+    if (!isDesktop) {
+      return MOBILE_SUGGESTION_LIMIT;
+    }
+
+    const viewportHeight = window.innerHeight;
+    if (viewportHeight >= 1000) return DESKTOP_LIMIT_TALL;
+    if (viewportHeight >= 820) return DESKTOP_LIMIT_MEDIUM;
+    return DESKTOP_LIMIT_SHORT;
+  }
+
+  onMount(() => {
+    const updateSuggestionLimit = () => {
+      suggestionLimit = getSuggestionLimit();
+    };
+
+    updateSuggestionLimit();
+    window.addEventListener('resize', updateSuggestionLimit);
+
+    return () => {
+      window.removeEventListener('resize', updateSuggestionLimit);
+    };
+  });
 
   // Icon mapping for categories
   const categoryIcons: Record<string, any> = {
@@ -69,8 +132,8 @@
     'productivity': SparklesIcon
   };
 
-  // Filter suggestions based on input
-  const suggestions = $derived(() => {
+  // Filter category suggestions based on input
+  const categorySuggestions = $derived(() => {
     if (!value.trim() || !isFocused || !showSuggestions) return [];
 
     const query = value.toLowerCase();
@@ -79,7 +142,65 @@
         cat.name.toLowerCase().includes(query) ||
         cat.slug.toLowerCase().includes(query)
       )
-      .slice(0, 5);
+      .slice(0, suggestionLimit);
+  });
+
+  // Fetch skill suggestions from the database-backed search API.
+  $effect(() => {
+    if (suggestionMode !== 'skills') {
+      skillSuggestions = [];
+      return;
+    }
+
+    const query = value.trim();
+    if (!query || query.length < 2 || !isFocused || !showSuggestions) {
+      skillSuggestions = [];
+      return;
+    }
+
+    const requestQuery = query.toLowerCase();
+    const controller = new AbortController();
+    let disposed = false;
+
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=${suggestionLimit}`, {
+          signal: controller.signal
+        });
+        if (!response.ok) return;
+
+        const payload = await response.json() as {
+          data?: {
+            skills?: SearchApiSkill[];
+          };
+        };
+        if (disposed || value.trim().toLowerCase() !== requestQuery) return;
+
+        const skills = Array.isArray(payload?.data?.skills) ? payload.data.skills : [];
+        skillSuggestions = skills
+          .filter((skill): skill is SearchApiSkill & { slug: string; name: string } => Boolean(skill?.slug && skill?.name))
+          .map((skill) => ({
+            id: skill.id || skill.slug,
+            name: skill.name,
+            slug: skill.slug,
+            repoOwner: skill.repoOwner || '',
+            repoName: skill.repoName || '',
+            description: skill.description || null,
+            stars: Number(skill.stars || 0),
+            authorAvatar: skill.authorAvatar || undefined
+          }));
+      } catch (error) {
+        if ((error as DOMException).name !== 'AbortError') {
+          skillSuggestions = [];
+        }
+      }
+    }, 160);
+
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      controller.abort();
+    };
   });
 
   function handleSubmit(e: Event) {
@@ -98,15 +219,34 @@
     }
   }
 
-  function selectSuggestion(categoryName: string) {
+  function selectCategorySuggestion(categoryName: string) {
     value = categoryName;
     isFocused = false;
     onSearch?.(value);
   }
 
+  function selectSkillSuggestion(skill: SkillSuggestion) {
+    value = skill.name;
+    isFocused = false;
+
+    if (onSelectSkill) {
+      onSelectSkill(skill);
+      return;
+    }
+
+    onSearch?.(skill.name);
+  }
+
   function clearSearch() {
     value = '';
     inputElement?.focus();
+  }
+
+  function formatStars(stars: number): string {
+    if (stars >= 1000) {
+      return `${(stars / 1000).toFixed(1).replace(/\.0$/, '')}K`;
+    }
+    return String(stars);
   }
 </script>
 
@@ -142,23 +282,56 @@
   </div>
 
   <!-- Suggestions Dropdown -->
-  {#if suggestions().length > 0}
+  {#if suggestionMode === 'skills' ? skillSuggestions.length > 0 : categorySuggestions().length > 0}
     <div class="suggestions-dropdown">
       <div class="suggestions-list">
-        {#each suggestions() as category (category.slug)}
-          <button
-            type="button"
-            onclick={() => selectSuggestion(category.name)}
-            class="suggestion-item"
-          >
-            <span class="suggestion-icon">
-              <HugeiconsIcon icon={categoryIcons[category.slug]} size={18} strokeWidth={2} />
-            </span>
-            <span class="suggestion-name">
-              {category.name}
-            </span>
-          </button>
-        {/each}
+        {#if suggestionMode === 'skills'}
+          {#each skillSuggestions as skill (skill.id)}
+            <button
+              type="button"
+              onclick={() => selectSkillSuggestion(skill)}
+              class="suggestion-item"
+            >
+              <span class="suggestion-avatar">
+                <Avatar
+                  src={skill.authorAvatar}
+                  fallback={skill.repoOwner || skill.name}
+                  alt={skill.repoOwner || skill.name}
+                  size="sm"
+                  shape="circle"
+                  useGithubFallback
+                />
+              </span>
+              <span class="suggestion-content">
+                <span class="suggestion-name">{skill.name}</span>
+                <span class="suggestion-meta-row">
+                  <span class="suggestion-author">
+                    by {skill.repoOwner}{skill.repoName ? `/${skill.repoName}` : ''}
+                  </span>
+                  <span class="suggestion-stars">
+                    <HugeiconsIcon icon={StarIcon} size={12} strokeWidth={2} />
+                    {formatStars(skill.stars)}
+                  </span>
+                </span>
+              </span>
+            </button>
+          {/each}
+        {:else}
+          {#each categorySuggestions() as category (category.slug)}
+            <button
+              type="button"
+              onclick={() => selectCategorySuggestion(category.name)}
+              class="suggestion-item"
+            >
+              <span class="suggestion-icon">
+                <HugeiconsIcon icon={categoryIcons[category.slug]} size={18} strokeWidth={2} />
+              </span>
+              <span class="suggestion-name">
+                {category.name}
+              </span>
+            </button>
+          {/each}
+        {/if}
       </div>
     </div>
   {/if}
@@ -223,6 +396,19 @@
     transition: border-color 0.15s ease, background-color 0.15s ease;
   }
 
+  .search-input[type='search'] {
+    appearance: textfield;
+  }
+
+  .search-input::-webkit-search-decoration,
+  .search-input::-webkit-search-cancel-button,
+  .search-input::-webkit-search-results-button,
+  .search-input::-webkit-search-results-decoration {
+    appearance: none;
+    -webkit-appearance: none;
+    display: none;
+  }
+
   .search-input:focus {
     border-color: var(--primary);
     background: var(--background);
@@ -248,7 +434,7 @@
     border: none;
     color: var(--fg-subtle);
     cursor: pointer;
-    border-radius: var(--radius-sm);
+    border-radius: 9999px;
     transition: all 0.15s ease;
   }
 
@@ -319,7 +505,54 @@
     color: var(--foreground);
   }
 
+  .suggestion-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    gap: 0.125rem;
+  }
+
+  .suggestion-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .suggestion-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    font-size: 0.75rem;
+    color: var(--fg-subtle);
+  }
+
+  .suggestion-author {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .suggestion-stars {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  .suggestion-item:hover .suggestion-stars {
+    color: var(--primary);
+  }
+
+  .suggestion-item:hover .suggestion-author {
+    color: var(--fg);
+  }
+
   .suggestion-item:hover .suggestion-name {
     color: var(--primary);
   }
+
 </style>

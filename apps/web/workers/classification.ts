@@ -149,7 +149,7 @@ async function callOpenRouter(
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
-      'HTTP-Referer': 'https://skillscat.dev',
+      'HTTP-Referer': 'https://skills.cat',
       'X-Title': 'SkillsCat Classification Worker',
     },
     body: JSON.stringify({

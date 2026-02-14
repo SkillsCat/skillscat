@@ -6,6 +6,7 @@
   import EmptyState from '$lib/components/feedback/EmptyState.svelte';
   import { CATEGORIES } from '$lib/constants';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
+  import { SITE_DESCRIPTION } from '$lib/seo/constants';
   import {
     Search01Icon,
     GitBranchIcon,
@@ -129,7 +130,9 @@
 
 <svelte:head>
   <title>{data.query ? `Search: ${data.query}` : 'Search'} - SkillsCat</title>
-  <meta name="description" content="Search AI agent skills and categories." />
+  <meta name="description" content={SITE_DESCRIPTION} />
+  <link rel="canonical" href="https://skills.cat/search" />
+  <meta name="robots" content="noindex, follow" />
 </svelte:head>
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">

@@ -1,18 +1,21 @@
 # SkillsCat robots.txt
-# https://skillscat.dev/robots.txt
+# https://skills.cat/robots.txt
 
 User-agent: *
 Allow: /
 
 # Sitemap
-Sitemap: https://skillscat.dev/sitemap.xml
+Sitemap: https://skills.cat/sitemap.xml
 
 # Disallow API routes
 Disallow: /api/
+Disallow: /registry/
 
 # Private/authenticated pages
 Disallow: /user
 Disallow: /user/
+Disallow: /bookmarks
+Disallow: /bookmarks/
 Disallow: /device
 Disallow: /device/
 Disallow: /registry/auth/

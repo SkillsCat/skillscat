@@ -125,6 +125,7 @@
 
 <svelte:head>
   <title>Authorize Device - SkillsCat</title>
+  <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
 <div class="device-page">

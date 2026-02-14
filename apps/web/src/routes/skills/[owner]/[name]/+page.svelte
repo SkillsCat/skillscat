@@ -6,8 +6,11 @@
   import Avatar from '$lib/components/common/Avatar.svelte';
   import VisibilityBadge from '$lib/components/ui/VisibilityBadge.svelte';
   import { getCategoryBySlug } from '$lib/constants/categories';
+  import { encodeSkillSlugForPath } from '$lib/skill-path';
   import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
   import type { Highlighter } from 'shiki';
+  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
+  import { SITE_DESCRIPTION } from '$lib/seo/constants';
 
   interface Props {
     data: {
@@ -17,6 +20,7 @@
       isOwner?: boolean;
       isBookmarked?: boolean;
       isAuthenticated?: boolean;
+      isDotFolderSkill?: boolean;
       renderedReadme?: string;
     };
   }
@@ -225,7 +229,15 @@
     return `${data.skill.repoOwner}/${data.skill.repoName}`;
   });
 
-  // Installation command
+  const canUseVercelInstaller = $derived(Boolean(
+    data.skill &&
+    data.skill.visibility === 'public' &&
+    data.skill.sourceType === 'github' &&
+    data.skill.repoOwner &&
+    data.skill.repoName
+  ));
+
+  // Installation commands
   const installCommands = $derived(data.skill ? [
     {
       name: 'skillscat',
@@ -234,11 +246,28 @@
       description: data.skill.visibility === 'private'
         ? 'Requires authentication. Run `skillscat login` first.'
         : 'SkillsCat registry CLI'
-    }
+    },
+    ...(canUseVercelInstaller ? [{
+      name: 'skills',
+      label: 'Vercel Skills CLI',
+      command: `npx skills ${data.skill.repoOwner}/${data.skill.repoName}`,
+      description: 'Works with Claude Code, Cursor, Codex, and 10+ agents'
+    }] : [])
   ] : []);
 
   let selectedInstaller = $state('skillscat');
-  const currentCommand = $derived(installCommands.find(c => c.name === selectedInstaller)?.command || '');
+  const selectedInstallerIndex = $derived(
+    Math.max(installCommands.findIndex((command) => command.name === selectedInstaller), 0)
+  );
+  const currentInstaller = $derived(installCommands[selectedInstallerIndex] || null);
+  const currentCommand = $derived(currentInstaller?.command || '');
+
+  $effect(() => {
+    if (installCommands.length === 0) return;
+    if (!installCommands.some((command) => command.name === selectedInstaller)) {
+      selectedInstaller = installCommands[0].name;
+    }
+  });
 
   // Download state
   let isDownloading = $state(false);
@@ -598,6 +627,7 @@
   // Highlight command syntax
   function highlightCommand(command: string): string {
     // Parse: $ npx skillscat add owner/repo
+    // or: $ npx skills owner/repo
     const parts = command.split(' ');
     const highlighted: string[] = [];
 
@@ -605,7 +635,7 @@
       const part = parts[i];
       if (part === 'npx') {
         highlighted.push(`<span class="cmd-npx">${escapeHtml(part)}</span>`);
-      } else if (part === 'skillscat') {
+      } else if (part === 'skillscat' || part === 'skills') {
         highlighted.push(`<span class="cmd-tool">${escapeHtml(part)}</span>`);
       } else if (part === 'add') {
         highlighted.push(`<span class="cmd-action">${escapeHtml(part)}</span>`);
@@ -621,19 +651,44 @@
   }
 
   const highlightedCommand = $derived(highlightCommand(currentCommand));
+  const canonicalSkillUrl = $derived(
+    data.skill ? `https://skills.cat/skills/${encodeSkillSlugForPath(data.skill.slug)}` : 'https://skills.cat'
+  );
+  const skillDescription = $derived(
+    data.skill?.description || (data.skill ? `AI agent skill: ${data.skill.name}` : '')
+  );
+  const ogImageUrl = $derived(
+    data.skill
+      ? buildOgImageUrl({ type: 'skill', slug: data.skill.slug })
+      : buildOgImageUrl({ type: 'page', slug: '404' })
+  );
 </script>
 
 <svelte:head>
   {#if data.skill}
     <title>{data.skill.name} - SkillsCat</title>
-    <meta name="description" content={data.skill.description || `AI agent skill: ${data.skill.name}`} />
+    <meta name="description" content={SITE_DESCRIPTION} />
     {#if data.skill.visibility !== 'public'}
       <meta name="robots" content="noindex, nofollow" />
     {/if}
-    <meta property="og:title" content="{data.skill.name} - SkillsCat" />
-    <meta property="og:description" content={data.skill.description || ''} />
+    <link rel="canonical" href={canonicalSkillUrl} />
+    <meta property="og:title" content={`${data.skill.name} - SkillsCat`} />
+    <meta property="og:description" content={SITE_DESCRIPTION} />
+    <meta property="og:type" content="article" />
+    <meta property="og:url" content={canonicalSkillUrl} />
+    <meta property="og:image" content={ogImageUrl} />
+    <meta property="og:image:secure_url" content={ogImageUrl} />
+    <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
+    <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
+    <meta property="og:image:alt" content={`${data.skill.name} skill social preview image`} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={`${data.skill.name} - SkillsCat`} />
+    <meta name="twitter:description" content={SITE_DESCRIPTION} />
+    <meta name="twitter:image" content={ogImageUrl} />
   {:else}
     <title>Skill Not Found - SkillsCat</title>
+    <meta name="description" content={SITE_DESCRIPTION} />
+    <meta name="robots" content="noindex, nofollow" />
   {/if}
 </svelte:head>
 
@@ -979,7 +1034,8 @@
             {/each}
             <div
               class="cli-switcher-indicator"
-              style="transform: translateX({installCommands.findIndex(c => c.name === selectedInstaller) * 100}%)"
+              style:width={`calc((100% - (var(--switcher-padding) * 2)) / ${Math.max(installCommands.length, 1)})`}
+              style:transform={`translateX(${selectedInstallerIndex * 100}%)`}
             ></div>
           </div>
 
@@ -991,7 +1047,7 @@
 
           <!-- Description -->
           <p class="command-description">
-            {installCommands.find(c => c.name === selectedInstaller)?.description}
+            {currentInstaller?.description}
           </p>
         </div>
 
@@ -1010,6 +1066,28 @@
                 <code class="block mt-2 text-xs bg-yellow-100 dark:bg-yellow-900/40 px-2 py-1 rounded">
                   skillscat login
                 </code>
+              </div>
+            </div>
+          </div>
+        {/if}
+
+        <!-- Dot-Folder Skill Notice -->
+        {#if data.isDotFolderSkill}
+          <div class="card bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
+            <div class="flex items-start gap-3">
+              <svg class="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <h4 class="font-medium text-blue-800 dark:text-blue-200">Repository Stars</h4>
+                <p class="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                  The star count shown is for the parent repository ({data.skill.repoOwner}/{data.skill.repoName}), not this specific skill.
+                </p>
+                {#if data.skill.skillPath}
+                  <code class="block mt-2 text-xs bg-blue-100 dark:bg-blue-900/40 px-2 py-1 rounded">
+                    {data.skill.skillPath}
+                  </code>
+                {/if}
               </div>
             </div>
           </div>

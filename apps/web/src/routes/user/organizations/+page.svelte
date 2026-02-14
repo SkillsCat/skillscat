@@ -193,7 +193,7 @@
         <div class="form-group">
           <label for="org-slug">URL Slug</label>
           <div class="slug-input">
-            <span class="slug-prefix">skillscat.dev/org/</span>
+            <span class="slug-prefix">skills.cat/org/</span>
             <input
               id="org-slug"
               type="text"

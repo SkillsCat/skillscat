@@ -1,8 +1,10 @@
 import type { PageServerLoad } from './$types';
+import { redirect } from '@sveltejs/kit';
 import { getSkillBySlug, getRelatedSkills, recordSkillAccess } from '$lib/server/db/utils';
 import { getCached } from '$lib/server/cache';
 import { renderReadmeMarkdown } from '$lib/server/markdown';
 import { setPublicPageCache } from '$lib/server/page-cache';
+import { normalizeSkillOwner } from '$lib/skill-path';
 
 const BOT_UA_PATTERN = /\b(bot|crawler|spider|slurp|preview|headless|lighthouse)\b/i;
 
@@ -66,7 +68,20 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
 
   const userId = locals.user?.id || null;
 
-  const slug = `${params.owner}/${params.name}`;
+  const normalizedOwner = normalizeSkillOwner(params.owner);
+  if (!normalizedOwner) {
+    return {
+      skill: null,
+      relatedSkills: [],
+      error: 'Skill not found or you do not have permission to view it.',
+    };
+  }
+
+  if (normalizedOwner !== params.owner) {
+    throw redirect(308, `/skills/${encodeURIComponent(normalizedOwner)}/${encodeURIComponent(params.name)}`);
+  }
+
+  const slug = `${normalizedOwner}/${params.name}`;
 
   try {
     const skill = await getSkillBySlug(env, slug, userId);
@@ -117,6 +132,9 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       isBookmarked = !!bookmark;
     }
 
+    // Determine if this is a dot-folder skill (e.g., .claude/SKILL.md)
+    const isDotFolderSkill = skill.skillPath ? /^\.[\w-]+/.test(skill.skillPath) : false;
+
     return {
       skill,
       renderedReadme,
@@ -124,6 +142,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       isOwner: skill.ownerId === userId,
       isBookmarked,
       isAuthenticated: !!userId,
+      isDotFolderSkill,
     };
   } catch (error) {
     console.error('Error loading skill:', error);

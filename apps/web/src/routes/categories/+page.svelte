@@ -50,6 +50,8 @@
     Calculator01Icon,
     Tag01Icon
   } from '@hugeicons/core-free-icons';
+  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
+  import { SITE_DESCRIPTION } from '$lib/seo/constants';
 
   interface DynamicCategory {
     slug: string;
@@ -166,11 +168,26 @@
   });
 
   const totalCount = $derived(filteredCategories.length + filteredDynamicCategories.length);
+  const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'categories' });
 </script>
 
 <svelte:head>
   <title>Categories - SkillsCat</title>
-  <meta name="description" content="Browse AI agent skills by category." />
+  <meta name="description" content={SITE_DESCRIPTION} />
+  <link rel="canonical" href="https://skills.cat/categories" />
+  <meta property="og:title" content="Categories - SkillsCat" />
+  <meta property="og:description" content={SITE_DESCRIPTION} />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://skills.cat/categories" />
+  <meta property="og:image" content={ogImageUrl} />
+  <meta property="og:image:secure_url" content={ogImageUrl} />
+  <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
+  <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
+  <meta property="og:image:alt" content="Categories page social preview image" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Categories - SkillsCat" />
+  <meta name="twitter:description" content={SITE_DESCRIPTION} />
+  <meta name="twitter:image" content={ogImageUrl} />
 </svelte:head>
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">

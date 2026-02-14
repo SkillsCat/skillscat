@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
+  import { SITE_DESCRIPTION } from '$lib/seo/constants';
 
   // 根据状态码获取默认标题
   function getDefaultTitle(status: number): string {
@@ -37,6 +38,8 @@
 
 <svelte:head>
   <title>{status} - SkillsCat</title>
+  <meta name="description" content={SITE_DESCRIPTION} />
+  <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
 <ErrorState

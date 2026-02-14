@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
+import { normalizeSkillOwner } from '$lib/skill-path';
 
 export interface RegistrySkillItem {
   name: string;
@@ -23,7 +24,14 @@ export interface RegistrySkillItem {
  * /registry/skill/testuser/my-skill instead of /registry/skill/%40testuser%2Fmy-skill
  */
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
-  const { owner, name } = params;
+  const owner = normalizeSkillOwner(params.owner);
+  const { name } = params;
+  if (!owner || !name) {
+    return json(
+      { error: 'Invalid skill identifier' },
+      { status: 400, headers: { 'Access-Control-Allow-Origin': '*' } }
+    );
+  }
   const slug = `${owner}/${name}`;
 
   const db = platform?.env?.DB;

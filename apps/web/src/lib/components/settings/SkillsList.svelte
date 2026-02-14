@@ -1,5 +1,6 @@
 <script lang="ts">
   import VisibilityBadge from '$lib/components/ui/VisibilityBadge.svelte';
+  import { buildSkillPath } from '$lib/skill-path';
 
 interface Skill {
     id: string;
@@ -77,7 +78,7 @@ interface Skill {
   {#if filteredSkills.length > 0}
     <div class="skills-list">
       {#each filteredSkills as skill (skill.id)}
-        <a href="/skills/{skill.slug}" class="skill-card">
+        <a href={buildSkillPath(skill.slug)} class="skill-card">
           <div class="skill-info">
             <div class="skill-header">
               <h3 class="skill-name">{skill.name}</h3>

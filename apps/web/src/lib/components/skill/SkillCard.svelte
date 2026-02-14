@@ -3,6 +3,7 @@
   import { StarIcon, Clock01Icon } from '@hugeicons/core-free-icons';
   import { getCategoryBySlug } from '$lib/constants/categories';
   import Avatar from '$lib/components/common/Avatar.svelte';
+  import { buildSkillPath } from '$lib/skill-path';
 
   interface Props {
     skill: {
@@ -41,7 +42,7 @@
 </script>
 
 <a
-  href="/skills/{skill.slug}"
+  href={buildSkillPath(skill.slug)}
   class="skill-card group block"
 >
   <div class="card-layout">

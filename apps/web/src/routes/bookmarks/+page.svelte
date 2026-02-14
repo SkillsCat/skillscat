@@ -6,6 +6,7 @@
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { SecurityLockIcon, Search01Icon, Bookmark02Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
+  import { SITE_DESCRIPTION } from '$lib/seo/constants';
 
   interface Props {
     data: {
@@ -31,7 +32,9 @@
 
 <svelte:head>
   <title>Bookmarks - SkillsCat</title>
-  <meta name="description" content="Your bookmarked AI agent skills collection." />
+  <meta name="description" content={SITE_DESCRIPTION} />
+  <link rel="canonical" href="https://skills.cat/bookmarks" />
+  <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">

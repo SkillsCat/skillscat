@@ -346,6 +346,10 @@ export function shouldNoIndexPath(pathname: string): boolean {
     return true;
   }
 
+  if (pathname.startsWith('/registry/')) {
+    return true;
+  }
+
   if (pathname === '/user' || pathname.startsWith('/user/')) {
     return true;
   }
@@ -354,7 +358,11 @@ export function shouldNoIndexPath(pathname: string): boolean {
     return true;
   }
 
-  if (pathname.startsWith('/registry/auth/')) {
+  if (pathname === '/bookmarks' || pathname.startsWith('/bookmarks/')) {
+    return true;
+  }
+
+  if (pathname === '/search' || pathname.startsWith('/search/')) {
     return true;
   }
 

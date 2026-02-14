@@ -2,6 +2,7 @@
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { StarIcon } from '@hugeicons/core-free-icons';
   import Avatar from '$lib/components/common/Avatar.svelte';
+  import { buildSkillPath } from '$lib/skill-path';
 
   interface Props {
     skill: {
@@ -37,7 +38,7 @@
 </script>
 
 <a
-  href="/skills/{skill.slug}"
+  href={buildSkillPath(skill.slug)}
   class="skill-card-compact group"
 >
   <!-- Avatar -->

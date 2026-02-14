@@ -4,6 +4,7 @@ import type { SkillDetail, SkillCardData, ApiResponse, FileNode } from '$lib/typ
 import { getCached, invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { isSkillOwner, checkSkillAccess } from '$lib/server/permissions';
+import { normalizeSkillOwner } from '$lib/skill-path';
 
 /**
  * GET /api/skills/[owner]/[name] - Get skill by owner and name
@@ -12,7 +13,11 @@ import { isSkillOwner, checkSkillAccess } from '$lib/server/permissions';
  * /api/skills/testuser/my-skill instead of /api/skills/%40testuser%2Fmy-skill
  */
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
-  const { owner, name } = params;
+  const owner = normalizeSkillOwner(params.owner);
+  const { name } = params;
+  if (!owner || !name) {
+    throw error(400, 'Invalid skill identifier');
+  }
   const slug = `${owner}/${name}`;
 
   try {
@@ -293,7 +298,11 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
   }
   requireScope(auth, 'write');
 
-  const { owner, name } = params;
+  const owner = normalizeSkillOwner(params.owner);
+  const { name } = params;
+  if (!owner || !name) {
+    throw error(400, 'Invalid skill identifier');
+  }
   const slug = `${owner}/${name}`;
 
   // Fetch skill by slug and verify ownership

@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
+  import { SITE_DESCRIPTION } from '$lib/seo/constants';
+
   /**
    * SEO Component - 结构化数据和 Meta 标签
    */
@@ -8,6 +11,7 @@
     description: string;
     url?: string;
     image?: string;
+    imageAlt?: string;
     type?: 'website' | 'article' | 'product';
     publishedTime?: string;
     modifiedTime?: string;
@@ -21,7 +25,8 @@
     title,
     description,
     url = '',
-    image = '/og-image.png',
+    image = buildOgImageUrl({ type: 'page', slug: 'home' }),
+    imageAlt = title,
     type = 'website',
     publishedTime,
     modifiedTime,
@@ -32,7 +37,7 @@
   }: Props = $props();
 
   const siteName = 'SkillsCat';
-  const siteUrl = 'https://skillscat.dev';
+  const siteUrl = 'https://skills.cat';
 
   // Use $derived for computed values that depend on props
   const fullUrl = $derived(url ? `${siteUrl}${url}` : siteUrl);
@@ -44,7 +49,7 @@
     '@type': 'WebSite',
     name: siteName,
     url: siteUrl,
-    description: 'An open platform for discovering, sharing, and installing AI agent skills.',
+    description: SITE_DESCRIPTION,
     potentialAction: {
       '@type': 'SearchAction',
       target: {
@@ -81,6 +86,10 @@
   <meta property="og:title" content={title} />
   <meta property="og:description" content={description} />
   <meta property="og:image" content={fullImage} />
+  <meta property="og:image:secure_url" content={fullImage} />
+  <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
+  <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
+  <meta property="og:image:alt" content={imageAlt} />
   <meta property="og:site_name" content={siteName} />
   {#if publishedTime}
     <meta property="article:published_time" content={publishedTime} />
@@ -93,11 +102,12 @@
   {/if}
 
   <!-- Twitter -->
-  <meta property="twitter:card" content="summary_large_image" />
-  <meta property="twitter:url" content={fullUrl} />
-  <meta property="twitter:title" content={title} />
-  <meta property="twitter:description" content={description} />
-  <meta property="twitter:image" content={fullImage} />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:url" content={fullUrl} />
+  <meta name="twitter:title" content={title} />
+  <meta name="twitter:description" content={description} />
+  <meta name="twitter:image" content={fullImage} />
+  <meta name="twitter:image:alt" content={imageAlt} />
 
   <!-- Canonical URL -->
   <link rel="canonical" href={fullUrl} />

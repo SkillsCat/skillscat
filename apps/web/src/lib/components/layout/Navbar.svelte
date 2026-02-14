@@ -6,6 +6,7 @@
   import UserMenu from '$lib/components/common/UserMenu.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
+  import { buildSkillPath } from '$lib/skill-path';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { useSession, signOut } from '$lib/auth-client';
@@ -60,6 +61,11 @@
     if (query.trim()) {
       goto(`/search?q=${encodeURIComponent(query.trim())}`);
     }
+  }
+
+  function handleSkillSuggestionSelect(skill: { slug: string }) {
+    mobileMenuOpen = false;
+    goto(buildSkillPath(skill.slug));
   }
 
   async function ensureCategoriesMenuLoaded() {
@@ -148,6 +154,8 @@
         <SearchBox
           bind:value={searchQuery}
           onSearch={handleSearch}
+          onSelectSkill={handleSkillSuggestionSelect}
+          suggestionMode="skills"
           placeholder="Search skills..."
         />
       </div>
@@ -237,6 +245,8 @@
           <SearchBox
             bind:value={searchQuery}
             onSearch={handleSearch}
+            onSelectSkill={handleSkillSuggestionSelect}
+            suggestionMode="skills"
             placeholder="Search skills..."
           />
         </div>

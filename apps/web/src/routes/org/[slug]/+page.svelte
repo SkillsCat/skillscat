@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { page } from "$app/stores";
   import Avatar from '$lib/components/common/Avatar.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
+  import { buildSkillPath } from '$lib/skill-path';
+  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
+  import { SITE_DESCRIPTION } from '$lib/seo/constants';
 
   interface Org {
     id: string;
@@ -35,27 +37,53 @@
 
   type Tab = "skills" | "members";
 
-  let org = $state<Org | null>(null);
-  let members = $state<Member[]>([]);
-  let skills = $state<Skill[]>([]);
-  let loading = $state(true);
-  let error = $state<string | null>(null);
+  interface Props {
+    data: {
+      slug: string;
+      org: Org | null;
+      members: Member[];
+      skills: Skill[];
+      error: string | null;
+    };
+  }
+
+  let { data }: Props = $props();
+
+  let loadedOrg = $state<Org | null | undefined>(undefined);
+  let loadedMembers = $state<Member[] | undefined>(undefined);
+  let loadedSkills = $state<Skill[] | undefined>(undefined);
+  let loadedError = $state<string | null | undefined>(undefined);
+  let loading = $state(false);
+  let activeSlug = $state('');
   let activeTab = $state<Tab>("skills");
 
-  const slug = $derived($page.params.slug);
+  const org = $derived(loadedOrg === undefined ? data.org : loadedOrg);
+  const members = $derived(loadedMembers === undefined ? data.members : loadedMembers);
+  const skills = $derived(loadedSkills === undefined ? data.skills : loadedSkills);
+  const error = $derived(loadedError === undefined ? data.error : loadedError);
+  const slug = $derived(data.slug);
   const isAdmin = $derived(
     org?.userRole && ["owner", "admin"].includes(org.userRole),
   );
+  const orgName = $derived(org?.displayName || slug);
+  const canonicalUrl = $derived(`https://skills.cat/org/${slug}`);
+  const ogImageUrl = $derived(
+    buildOgImageUrl({ type: 'org', slug })
+  );
 
   $effect(() => {
-    if (slug) {
-      loadOrg();
-    }
+    if (activeSlug === data.slug) return;
+    activeSlug = data.slug;
+    loadedOrg = undefined;
+    loadedMembers = undefined;
+    loadedSkills = undefined;
+    loadedError = undefined;
+    loading = false;
   });
 
   async function loadOrg() {
     loading = true;
-    error = null;
+    loadedError = null;
 
     try {
       const [orgRes, membersRes, skillsRes] = await Promise.all([
@@ -66,23 +94,24 @@
 
       if (orgRes.ok) {
         const data = (await orgRes.json()) as { organization?: Org };
-        org = data.organization ?? null;
+        loadedOrg = data.organization ?? null;
       } else {
-        error = "Organization not found";
+        loadedOrg = null;
+        loadedError = "Organization not found";
         return;
       }
 
       if (membersRes.ok) {
         const data = (await membersRes.json()) as { members?: Member[] };
-        members = data.members || [];
+        loadedMembers = data.members || [];
       }
 
       if (skillsRes.ok) {
         const data = (await skillsRes.json()) as { skills?: Skill[] };
-        skills = data.skills || [];
+        loadedSkills = data.skills || [];
       }
     } catch {
-      error = "Failed to load organization";
+      loadedError = "Failed to load organization";
     } finally {
       loading = false;
     }
@@ -90,7 +119,27 @@
 </script>
 
 <svelte:head>
-  <title>{org?.displayName || slug} - SkillsCat</title>
+  <title>{orgName} - SkillsCat</title>
+  {#if org}
+    <meta name="description" content={SITE_DESCRIPTION} />
+    <link rel="canonical" href={canonicalUrl} />
+    <meta property="og:title" content={`${orgName} - SkillsCat`} />
+    <meta property="og:description" content={SITE_DESCRIPTION} />
+    <meta property="og:type" content="profile" />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={ogImageUrl} />
+    <meta property="og:image:secure_url" content={ogImageUrl} />
+    <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
+    <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
+    <meta property="og:image:alt" content={`${orgName} organization social preview image`} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={`${orgName} - SkillsCat`} />
+    <meta name="twitter:description" content={SITE_DESCRIPTION} />
+    <meta name="twitter:image" content={ogImageUrl} />
+  {:else}
+    <meta name="description" content={SITE_DESCRIPTION} />
+    <meta name="robots" content="noindex, nofollow" />
+  {/if}
 </svelte:head>
 
 <div class="org-page">
@@ -223,7 +272,7 @@
         {#if skills.length > 0}
           <div class="skills-grid">
             {#each skills as skill (skill.id)}
-              <a href="/skills/{skill.slug}" class="skill-card">
+              <a href={buildSkillPath(skill.slug)} class="skill-card">
                 <h3>{skill.name}</h3>
                 {#if skill.description}
                   <p>{skill.description}</p>

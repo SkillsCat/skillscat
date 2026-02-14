@@ -7,6 +7,8 @@
   import Section from '$lib/components/layout/Section.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
+  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
+  import { SITE_DESCRIPTION } from '$lib/seo/constants';
 
   interface UserProfile {
     id: string;
@@ -45,6 +47,12 @@
   const profile = $derived(data.profile);
   const skills = $derived(data.skills);
   const error = $derived(data.error);
+  const profileDisplayName = $derived(profile?.name || username);
+  const profileCanonicalUrl = $derived(`https://skills.cat/u/${username}`);
+  const profileDescription = $derived(`View ${profileDisplayName}'s public AI agent skills on SkillsCat.`);
+  const ogImageUrl = $derived(
+    buildOgImageUrl({ type: 'user', slug: username ?? '' })
+  );
 
   function formatDate(timestamp: number): string {
     return new Date(timestamp).toLocaleDateString('en-US', {
@@ -69,8 +77,30 @@
 </script>
 
 <svelte:head>
-  <title>{profile?.name || username} - SkillsCat</title>
-  <meta name="description" content="View {profile?.name || username}'s skills on SkillsCat" />
+  <title>{profileDisplayName} - SkillsCat</title>
+  {#if profile && !error}
+    <meta
+      name="description"
+      content={SITE_DESCRIPTION}
+    />
+    <link rel="canonical" href={profileCanonicalUrl} />
+    <meta property="og:title" content={`${profileDisplayName} - SkillsCat`} />
+    <meta property="og:description" content={SITE_DESCRIPTION} />
+    <meta property="og:type" content="profile" />
+    <meta property="og:url" content={profileCanonicalUrl} />
+    <meta property="og:image" content={ogImageUrl} />
+    <meta property="og:image:secure_url" content={ogImageUrl} />
+    <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
+    <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
+    <meta property="og:image:alt" content={`${profileDisplayName} profile social preview image`} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={`${profileDisplayName} - SkillsCat`} />
+    <meta name="twitter:description" content={SITE_DESCRIPTION} />
+    <meta name="twitter:image" content={ogImageUrl} />
+  {:else}
+    <meta name="description" content={SITE_DESCRIPTION} />
+    <meta name="robots" content="noindex, nofollow" />
+  {/if}
 </svelte:head>
 
 <div class="profile-page">

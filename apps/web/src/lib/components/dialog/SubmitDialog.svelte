@@ -7,6 +7,7 @@
   import { fade, fly } from 'svelte/transition';
   import Button from '$lib/components/ui/Button.svelte';
   import Input from '$lib/components/ui/Input.svelte';
+  import { buildSkillPath } from '$lib/skill-path';
 
   interface Props {
     isOpen?: boolean;
@@ -204,7 +205,7 @@
                     <div class="error-message">
                       <p>{error}</p>
                       {#if existingSkillSlug}
-                        <a href="/skills/{existingSkillSlug}" class="error-link">
+                        <a href={buildSkillPath(existingSkillSlug)} class="error-link">
                           View existing skill →
                         </a>
                       {/if}

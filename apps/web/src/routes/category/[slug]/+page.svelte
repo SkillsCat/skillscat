@@ -7,6 +7,8 @@
   import type { Category } from '$lib/constants/categories';
   import type { SkillCardData } from '$lib/types';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
+  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
+  import { SITE_DESCRIPTION } from '$lib/seo/constants';
   import {
     GitBranchIcon,
     CodeIcon,
@@ -152,14 +154,47 @@
   // Calculate display counts
   const startItem = $derived(data.pagination ? (data.pagination.currentPage - 1) * data.pagination.itemsPerPage + 1 : 1);
   const endItem = $derived(data.pagination ? Math.min(data.pagination.currentPage * data.pagination.itemsPerPage, data.pagination.totalItems) : data.skills.length);
+  const canonicalUrl = $derived(
+    data.category
+      ? `https://skills.cat/category/${data.category.slug}${
+          data.pagination && data.pagination.currentPage > 1 ? `?page=${data.pagination.currentPage}` : ''
+        }`
+      : 'https://skills.cat/categories'
+  );
+  const categoryDescription = $derived(
+    data.category
+      ? `${data.category.description}. Browse AI agent skills in this category.`
+      : 'Category not found on SkillsCat.'
+  );
+  const ogImageUrl = $derived(
+    data.category
+      ? buildOgImageUrl({ type: 'category', slug: data.category.slug })
+      : buildOgImageUrl({ type: 'page', slug: '404' })
+  );
 </script>
 
 <svelte:head>
   {#if data.category}
     <title>{data.category.name} Skills{data.pagination && data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat</title>
-    <meta name="description" content="{data.category.description}. Browse AI agent skills in this category." />
+    <meta name="description" content={SITE_DESCRIPTION} />
+    <link rel="canonical" href={canonicalUrl} />
+    <meta property="og:title" content={`${data.category.name} Skills - SkillsCat`} />
+    <meta property="og:description" content={SITE_DESCRIPTION} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={ogImageUrl} />
+    <meta property="og:image:secure_url" content={ogImageUrl} />
+    <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
+    <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
+    <meta property="og:image:alt" content={`${data.category.name} category social preview image`} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={`${data.category.name} Skills - SkillsCat`} />
+    <meta name="twitter:description" content={SITE_DESCRIPTION} />
+    <meta name="twitter:image" content={ogImageUrl} />
   {:else}
     <title>Category Not Found - SkillsCat</title>
+    <meta name="description" content={SITE_DESCRIPTION} />
+    <meta name="robots" content="noindex, nofollow" />
   {/if}
 </svelte:head>
 
