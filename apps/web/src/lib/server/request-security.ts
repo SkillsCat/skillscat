@@ -4,6 +4,7 @@ import {
   checkRateLimit,
   getRateLimitKey,
   rateLimitHeaders,
+  type AdaptiveRateLimitOptions,
 } from '$lib/server/ratelimit';
 
 interface RateLimitConfig {
@@ -13,37 +14,37 @@ interface RateLimitConfig {
 }
 
 const DEFAULT_API_READ_LIMIT: RateLimitConfig = {
-  limit: 180,
+  limit: 300,
   windowSeconds: 60,
   prefix: 'rl:api:read',
 };
 
 const DEFAULT_API_WRITE_LIMIT: RateLimitConfig = {
-  limit: 60,
+  limit: 90,
   windowSeconds: 60,
   prefix: 'rl:api:write',
 };
 
 const AUTH_FLOW_LIMIT: RateLimitConfig = {
-  limit: 20,
+  limit: 30,
   windowSeconds: 60,
   prefix: 'rl:api:auth',
 };
 
 const TRANSFER_LIMIT: RateLimitConfig = {
-  limit: 40,
+  limit: 80,
   windowSeconds: 60,
   prefix: 'rl:api:transfer',
 };
 
 const HEAVY_TRANSFER_LIMIT: RateLimitConfig = {
-  limit: 15,
+  limit: 30,
   windowSeconds: 60,
   prefix: 'rl:api:transfer:heavy',
 };
 
 const UPLOAD_LIMIT: RateLimitConfig = {
-  limit: 20,
+  limit: 40,
   windowSeconds: 3600,
   prefix: 'rl:api:upload',
 };
@@ -209,6 +210,24 @@ function getCurrentRequestOrigin(url: URL): string {
   return `${url.protocol}//${url.host}`;
 }
 
+function parseOptionalPositiveInt(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
+
+function getAdaptiveRateLimitOptions(env: App.Platform['env'] | undefined): AdaptiveRateLimitOptions {
+  return {
+    burstViolationWindowSeconds: parseOptionalPositiveInt(env?.RATE_LIMIT_BURST_WINDOW_SECONDS),
+    burstViolationThreshold: parseOptionalPositiveInt(env?.RATE_LIMIT_BURST_THRESHOLD),
+    maxPenaltyLevel: parseOptionalPositiveInt(env?.RATE_LIMIT_MAX_PENALTY_LEVEL),
+    penaltyTtlLevel1Seconds: parseOptionalPositiveInt(env?.RATE_LIMIT_PENALTY_TTL_LEVEL_1_SECONDS),
+    penaltyTtlLevel2Seconds: parseOptionalPositiveInt(env?.RATE_LIMIT_PENALTY_TTL_LEVEL_2_SECONDS),
+    penaltyTtlLevel3Seconds: parseOptionalPositiveInt(env?.RATE_LIMIT_PENALTY_TTL_LEVEL_3_SECONDS),
+  };
+}
+
 function pickRateLimitConfig(routeId: string | null, pathname: string, method: string): RateLimitConfig {
   if (routeId === '/api/submit' || pathname === '/api/submit') {
     return RATE_LIMITS.submit;
@@ -323,15 +342,16 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
 
   const config = pickRateLimitConfig(routeId, pathname, method);
   const clientKey = getRateLimitKey(request);
+  const adaptiveOptions = getAdaptiveRateLimitOptions(platform?.env);
   const key = `${routeId ?? pathname}:${clientKey}`;
-  const result = await checkRateLimit(kv, key, config);
+  const result = await checkRateLimit(kv, key, config, adaptiveOptions);
 
   if (!result.allowed) {
     return securityJsonResponse(
       429,
       { error: 'Rate limit exceeded. Please try again later.' },
       {
-        ...rateLimitHeaders(result, config),
+        ...rateLimitHeaders(result),
         'Retry-After': String(Math.max(0, result.resetAt - Math.floor(Date.now() / 1000))),
       },
       cors

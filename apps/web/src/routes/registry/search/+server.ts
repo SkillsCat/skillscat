@@ -92,7 +92,7 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
       const cached = await getCached(
         cacheKey,
         async () => fetchSearchResults(db, query, category, limit, offset, []),
-        60
+        30
       );
       response = cached.data;
       hit = cached.hit;
@@ -102,7 +102,7 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
 
     return json(response, {
       headers: {
-        'Cache-Control': canCache ? 'public, max-age=60, stale-while-revalidate=120' : 'private, no-cache',
+        'Cache-Control': canCache ? 'public, max-age=30, stale-while-revalidate=90' : 'private, no-cache',
         'X-Cache': hit ? 'HIT' : 'MISS',
         'Access-Control-Allow-Origin': '*'
       }

@@ -70,17 +70,22 @@ export function calculateTrendingScore(skill: {
     Math.max(1.0, 1.0 + Math.log2(dailyGrowth7d + 1) * Math.min(acceleration, 3) * 0.4)
   );
 
-  const daysSinceIndexed = (now - skill.indexedAt) / 86400000;
-  const recencyBoost = Math.max(1.0, 1.5 - daysSinceIndexed / 14);
+  // Use last commit time as the primary time anchor for trending decay.
+  // Fall back to indexedAt only when commit time is unavailable.
+  const activityAnchor = skill.lastCommitAt ?? skill.indexedAt;
+  const daysSinceActivity = Math.max(0, (now - activityAnchor) / 86400000);
+
+  // Time watershed decay: fresher repositories get explicit boost bands.
+  let recencyBoost = 1.0;
+  if (daysSinceActivity <= 7) recencyBoost = 1.5;
+  else if (daysSinceActivity <= 30) recencyBoost = 1.25;
+  else if (daysSinceActivity <= 90) recencyBoost = 1.1;
 
   let activityPenalty = 1.0;
-  if (skill.lastCommitAt) {
-    const daysSinceCommit = (now - skill.lastCommitAt) / 86400000;
-    if (daysSinceCommit > 365) activityPenalty = 0.3;
-    else if (daysSinceCommit > 180) activityPenalty = 0.5;
-    else if (daysSinceCommit > 90) activityPenalty = 0.7;
-    else if (daysSinceCommit > 30) activityPenalty = 0.9;
-  }
+  if (daysSinceActivity > 365) activityPenalty = 0.3;
+  else if (daysSinceActivity > 180) activityPenalty = 0.5;
+  else if (daysSinceActivity > 90) activityPenalty = 0.7;
+  else if (daysSinceActivity > 30) activityPenalty = 0.9;
 
   // Download boost: 0 downloads → 1.0x, 10 → ~1.52x, 100 → 2.0x (capped)
   const downloads7d = skill.downloadCount7d ?? 0;

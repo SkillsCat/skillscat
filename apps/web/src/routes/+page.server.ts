@@ -14,8 +14,8 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
     request,
     isAuthenticated: Boolean(locals.user),
     hasCookies: cookies.getAll().length > 0,
-    sMaxAge: 60,
-    staleWhileRevalidate: 300,
+    sMaxAge: 30,
+    staleWhileRevalidate: 120,
   });
 
   const env = {
@@ -41,7 +41,7 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
         top,
       };
     },
-    60
+    30
   );
 
   return data;

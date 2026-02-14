@@ -18,6 +18,12 @@ declare global {
         GITHUB_TOKEN?: string;
         WORKER_SECRET?: string;
         CACHE_VERSION?: string;
+        RATE_LIMIT_BURST_WINDOW_SECONDS?: string;
+        RATE_LIMIT_BURST_THRESHOLD?: string;
+        RATE_LIMIT_MAX_PENALTY_LEVEL?: string;
+        RATE_LIMIT_PENALTY_TTL_LEVEL_1_SECONDS?: string;
+        RATE_LIMIT_PENALTY_TTL_LEVEL_2_SECONDS?: string;
+        RATE_LIMIT_PENALTY_TTL_LEVEL_3_SECONDS?: string;
       };
       context: ExecutionContext;
       caches: CacheStorage & { default: Cache };

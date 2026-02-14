@@ -34,3 +34,13 @@ AI_MODEL=liquid/lfm-2.5-1.2b-thinking:free
 # 获取 API Key: https://platform.deepseek.com/api_keys
 # 当 OpenRouter 所有模型都失败时，使用 DeepSeek 作为最后兜底
 DEEPSEEK_API_KEY=
+
+# ========== Rate Limit Adaptive Penalty (可选) ==========
+# 仅在需要调参时设置，不设置则使用系统默认:
+# BURST_WINDOW=120s, BURST_THRESHOLD=3, MAX_LEVEL=3, TTL(1/2/3)=300/900/1800s
+# RATE_LIMIT_BURST_WINDOW_SECONDS=120
+# RATE_LIMIT_BURST_THRESHOLD=3
+# RATE_LIMIT_MAX_PENALTY_LEVEL=3
+# RATE_LIMIT_PENALTY_TTL_LEVEL_1_SECONDS=300
+# RATE_LIMIT_PENALTY_TTL_LEVEL_2_SECONDS=900
+# RATE_LIMIT_PENALTY_TTL_LEVEL_3_SECONDS=1800

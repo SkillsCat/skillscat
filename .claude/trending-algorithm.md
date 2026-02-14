@@ -23,13 +23,16 @@ Measures short-term star growth momentum.
 - Formula: `1.0 + log2(dailyGrowth7d + 1) × min(acceleration, 3) × 0.4`
 
 ### 3. Recency Boost (1.0x – 1.5x)
-Favors newly indexed skills, decays linearly over 14 days.
+Uses repository activity (`last_commit_at`) as the time anchor with watershed bands.
 ```
-recencyBoost = max(1.0, 1.5 - daysSinceIndexed / 14)
+if daysSinceActivity <= 7   => 1.5
+if daysSinceActivity <= 30  => 1.25
+if daysSinceActivity <= 90  => 1.1
+else                        => 1.0
 ```
 
 ### 4. Activity Penalty (0.3x – 1.0x)
-Penalizes stale repos based on days since last commit:
+Penalizes stale repos based on days since activity anchor (`last_commit_at`, fallback `indexed_at`):
 | Days since commit | Penalty |
 |---|---|
 | ≤ 30 | 1.0 |

@@ -110,7 +110,7 @@ export const GET: RequestHandler = async ({ url, platform }) => {
         const total = skills.length + matchedCategories.length;
         return { skills, categories: matchedCategories, total };
       },
-      60
+      30
     );
 
     return json({
@@ -124,7 +124,7 @@ export const GET: RequestHandler = async ({ url, platform }) => {
       }
     } satisfies ApiResponse<{ skills: SkillCardData[]; categories: typeof data.categories }>, {
       headers: {
-        'Cache-Control': 'public, max-age=60, stale-while-revalidate=120',
+        'Cache-Control': 'public, max-age=30, stale-while-revalidate=90',
         'X-Cache': hit ? 'HIT' : 'MISS'
       }
     });

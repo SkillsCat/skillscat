@@ -236,6 +236,7 @@
     data.skill.repoOwner &&
     data.skill.repoName
   ));
+  const encodedApiSkillSlug = $derived(data.skill ? encodeURIComponent(data.skill.slug) : '');
 
   // Installation commands
   const installCommands = $derived(data.skill ? [
@@ -288,7 +289,7 @@
           });
 
           // Fetch all files
-          const response = await fetch(`/api/skills/${data.skill.slug}/files`);
+          const response = await fetch(`/api/skills/${encodedApiSkillSlug}/files`);
           if (!response.ok) {
             if (response.status === 429) {
               toast('Too many requests. Please wait a moment.', 'warning');
@@ -346,7 +347,7 @@
   // Fallback to zip download
   function fallbackDownload() {
     if (!data.skill) return;
-    window.location.href = `/api/skills/${data.skill.slug}/download`;
+    window.location.href = `/api/skills/${encodedApiSkillSlug}/download`;
   }
 
   // Use delayed-highlighted version if available, otherwise server-rendered HTML.
@@ -377,6 +378,12 @@
     fileError = null;
     highlightedFileContent = '';
 
+    // SKILL.md is already rendered below in the dedicated readme panel.
+    if (isSkillReadmeFile(path)) {
+      fileLoading = false;
+      return;
+    }
+
     // Check if it's a binary file
     if (isBinaryFile(path)) {
       fileLoading = false;
@@ -384,10 +391,16 @@
       return;
     }
 
+    if (!encodedApiSkillSlug) {
+      fileLoading = false;
+      fileError = 'Failed to load file';
+      return;
+    }
+
     fileLoading = true;
 
     try {
-      const res = await fetch(`/api/skills/${data.skill?.slug}/file?path=${encodeURIComponent(path)}`);
+      const res = await fetch(`/api/skills/${encodedApiSkillSlug}/file?path=${encodeURIComponent(path)}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ message: 'Failed to load file' })) as { message?: string };
         throw new Error(err.message || 'Failed to load file');
@@ -482,6 +495,10 @@
   function isBinaryFile(path: string): boolean {
     const ext = path.split('.').pop()?.toLowerCase() || '';
     return BINARY_EXTENSIONS.has(ext);
+  }
+
+  function isSkillReadmeFile(path: string): boolean {
+    return path.replace(/^\.\//, '').toLowerCase() === 'skill.md';
   }
 
   // SVG icons for different file types (VS Code style)
@@ -895,7 +912,7 @@
             </div>
 
             <!-- File Content Viewer -->
-            {#if selectedFile}
+            {#if selectedFile && !isSkillReadmeFile(selectedFile)}
               <div class="file-content-viewer">
                 <div class="file-content-header">
                   <span class="file-content-path">{selectedFile}</span>

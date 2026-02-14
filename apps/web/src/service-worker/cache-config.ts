@@ -44,8 +44,8 @@ export const API_CACHE_CONFIGS = [
   createConfig(/^\/api\/skills\/[^/]+$/, 5 * 60 * 1000, 10 * 60 * 1000),
   createConfig(/^\/api\/skills\/[^/]+\/files$/, 5 * 60 * 1000, 10 * 60 * 1000),
   createConfig(/^\/api\/skills\/[^/]+\/download$/, 60 * 60 * 1000, 2 * 60 * 60 * 1000),
-  createConfig(/^\/api\/search/, 1 * 60 * 1000, 2 * 60 * 1000),
-  createConfig(/^\/api\/registry\/search/, 1 * 60 * 1000, 2 * 60 * 1000),
+  createConfig(/^\/api\/search/, 30 * 1000, 90 * 1000),
+  createConfig(/^\/api\/registry\/search/, 30 * 1000, 90 * 1000),
   createConfig(/^\/api\/registry\/skill\//, 5 * 60 * 1000, 10 * 60 * 1000),
 ];
 
