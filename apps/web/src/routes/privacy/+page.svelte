@@ -27,7 +27,7 @@
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
   <article class="prose prose-lg max-w-none">
     <h1>Privacy Policy</h1>
-    <p class="lead">Last updated: January 2025</p>
+    <p class="lead">Last updated: February 14, 2026</p>
 
     <p>
       SkillsCat ("we", "our", or "us") is an open platform for discovering, sharing, and installing AI agent skills. We are committed to protecting your privacy. This Privacy Policy explains how we collect, use, and safeguard your information when you use our website and services.
@@ -38,17 +38,18 @@
     <h3>1.1 Information You Provide</h3>
     <p>When you use SkillsCat, we may collect:</p>
     <ul>
-      <li><strong>Account Information:</strong> When you sign in using GitHub or Google OAuth, we receive your public profile information including your username, email address, and profile picture.</li>
-      <li><strong>Submitted Content:</strong> Skills you submit to our platform, including GitHub repository URLs.</li>
-      <li><strong>User Preferences:</strong> Your favorites and other preferences.</li>
+      <li><strong>Account Information:</strong> When you sign in using GitHub OAuth, we receive account data such as your username, email address, profile image, and GitHub account identifier.</li>
+      <li><strong>Submitted Content:</strong> Skills you submit, including repository URLs, uploaded SKILL.md content, and related metadata.</li>
+      <li><strong>Sharing and Collaboration Data:</strong> If you share private skills or manage organizations, we store the user IDs or email addresses needed to enforce those permissions.</li>
+      <li><strong>User Preferences and Credentials:</strong> Your favorites, API token metadata, and account/session records.</li>
     </ul>
 
     <h3>1.2 Information Collected Automatically</h3>
     <p>We automatically collect certain information when you visit our website:</p>
     <ul>
-      <li><strong>Usage Data:</strong> Pages visited, features used, and actions taken.</li>
-      <li><strong>Device Information:</strong> Browser type, operating system, and device type.</li>
-      <li><strong>Log Data:</strong> IP address, access times, and referring URLs.</li>
+      <li><strong>Security and Session Data:</strong> Request metadata such as IP address and user-agent may be processed for authentication security, abuse prevention, and rate limiting.</li>
+      <li><strong>Usage Events:</strong> We record product events such as submissions, installs, downloads, favorites, and unfavorites with timestamps.</li>
+      <li><strong>Infrastructure Logs:</strong> Cloudflare infrastructure may generate operational logs for reliability and security.</li>
     </ul>
 
     <h2>2. How We Use Your Information</h2>
@@ -56,46 +57,49 @@
     <ul>
       <li>Provide and maintain our services</li>
       <li>Authenticate your identity and manage your account</li>
-      <li>Process skill submissions and maintain our catalog</li>
-      <li>Improve our website and user experience</li>
-      <li>Communicate with you about updates and changes</li>
+      <li>Process skill submissions/uploads and maintain our catalog</li>
+      <li>Enforce access controls for private, unlisted, and shared skills</li>
+      <li>Generate aggregate usage statistics (for example trending and download metrics)</li>
+      <li>Provide account features such as API tokens, notifications, and organization permissions</li>
       <li>Detect and prevent fraud or abuse</li>
     </ul>
 
     <h2>3. Information Sharing</h2>
     <p>We do not sell, trade, or rent your personal information to third parties. We may share information in the following circumstances:</p>
     <ul>
-      <li><strong>Service Providers:</strong> We use Cloudflare for hosting and infrastructure services.</li>
+      <li><strong>Public Content:</strong> Public skills and related public profile metadata are visible to other users.</li>
+      <li><strong>Service Providers:</strong> We use providers such as Cloudflare (hosting/infrastructure), GitHub (OAuth and repository APIs), optional OpenRouter/DeepSeek model APIs (for automated skill classification when enabled), and Google Fonts (font delivery).</li>
+      <li><strong>Collaboration Features:</strong> If you share a private skill with another user or email address, that permission data is stored and used to grant access.</li>
       <li><strong>Legal Requirements:</strong> When required by law or to protect our rights.</li>
-      <li><strong>With Your Consent:</strong> When you explicitly authorize us to share information.</li>
     </ul>
 
     <h2>4. Data Storage and Security</h2>
     <p>
-      Your data is stored on Cloudflare's infrastructure, which provides enterprise-grade security. We implement appropriate technical and organizational measures to protect your personal information against unauthorized access, alteration, disclosure, or destruction.
+      Your data is stored primarily on Cloudflare infrastructure (including D1, KV, and R2). We implement reasonable technical and organizational measures to protect personal information against unauthorized access, alteration, disclosure, or destruction.
     </p>
 
     <h2>5. Third-Party Services</h2>
     <p>Our service integrates with:</p>
     <ul>
-      <li><strong>GitHub:</strong> For OAuth authentication and fetching repository information. GitHub's privacy policy applies to data collected by GitHub.</li>
-      <li><strong>Google:</strong> For OAuth authentication. Google's privacy policy applies to data collected by Google.</li>
-      <li><strong>Cloudflare:</strong> For hosting, CDN, and security services.</li>
+      <li><strong>GitHub:</strong> For OAuth authentication and repository metadata/content access.</li>
+      <li><strong>Cloudflare:</strong> For hosting, CDN, D1, KV, R2, and security services.</li>
+      <li><strong>OpenRouter / DeepSeek (optional):</strong> For automated skill classification if these providers are configured.</li>
+      <li><strong>Google Fonts:</strong> For web font delivery.</li>
     </ul>
 
     <h2>6. Your Rights</h2>
-    <p>You have the right to:</p>
+    <p>You can:</p>
     <ul>
-      <li>Access your personal information</li>
-      <li>Correct inaccurate data</li>
-      <li>Delete your account and associated data</li>
-      <li>Export your data</li>
-      <li>Opt out of non-essential data collection</li>
+      <li>Delete your account from account settings. This removes sessions, tokens, favorites, private skills, and related account data.</li>
+      <li>Understand that public skills are preserved as public records and detached from your account after deletion; signing in again with the same GitHub account can relink them.</li>
+      <li>Manage favorites, API tokens, and shared-skill permissions through product settings.</li>
+      <li>Update core profile information through your GitHub account.</li>
+      <li>Contact us through the repository for additional privacy requests.</li>
     </ul>
 
     <h2>7. Cookies</h2>
     <p>
-      We use essential cookies for authentication and session management. We do not use tracking cookies or third-party advertising cookies.
+      We use essential cookies for authentication and session management. We do not use advertising cookies or third-party tracking cookies.
     </p>
 
     <h2>8. Children's Privacy</h2>
@@ -110,7 +114,7 @@
 
     <h2>10. Contact Us</h2>
     <p>
-      If you have any questions about this Privacy Policy, please contact us through our GitHub repository.
+      If you have any questions about this Privacy Policy, please contact us through our <a href="https://github.com/backrunner/skillscat" target="_blank" rel="noopener noreferrer">GitHub repository</a>.
     </p>
 
     <h2>11. Open Source</h2>

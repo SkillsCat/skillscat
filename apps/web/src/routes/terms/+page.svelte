@@ -27,7 +27,7 @@
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
   <article class="prose prose-lg max-w-none">
     <h1>Terms of Service</h1>
-    <p class="lead">Last updated: January 2025</p>
+    <p class="lead">Last updated: February 14, 2026</p>
 
     <p>
       Welcome to SkillsCat. By accessing or using our website and services, you agree to be bound by these Terms of Service ("Terms"). Please read them carefully.
@@ -51,7 +51,7 @@
     <h2>3. User Accounts</h2>
     <h3>3.1 Account Creation</h3>
     <p>
-      To access certain features, you must sign in using GitHub or Google OAuth. You are responsible for maintaining the security of your account.
+      To access certain features, you must sign in using GitHub OAuth. Some API and CLI features also require API tokens generated from your account. You are responsible for maintaining the security of your account and tokens.
     </p>
 
     <h3>3.2 Account Responsibilities</h3>
@@ -109,7 +109,7 @@
 
     <h2>7. Third-Party Services</h2>
     <p>
-      Our service integrates with third-party services including GitHub and Google. Your use of these services is subject to their respective terms and policies.
+      Our service integrates with third-party services including GitHub (authentication and repository data), Cloudflare (hosting and infrastructure), and optional model providers used for automated classification. Your use of these services is subject to their respective terms and policies.
     </p>
 
     <h2>8. Disclaimer of Warranties</h2>
