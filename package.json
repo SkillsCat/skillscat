@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "author": "BackRunner",
-  "repository": "https://github.com/BackRunner/skillscat",
+  "repository": "https://github.com/backrunner/skillscat",
   "license": "AGPL-3.0",
   "type": "module",
   "packageManager": "pnpm@10.29.3",

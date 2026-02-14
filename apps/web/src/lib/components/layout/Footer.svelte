@@ -97,7 +97,7 @@
       </div>
       <div class="flex items-center gap-4">
         <a
-          href="https://github.com/skillscat/skillscat"
+          href="https://github.com/backrunner/skillscat"
           target="_blank"
           rel="noopener noreferrer"
           class="text-fg-subtle hover:text-fg transition-colors"

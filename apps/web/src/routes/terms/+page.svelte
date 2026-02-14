@@ -147,7 +147,7 @@
 
     <h2>14. Contact</h2>
     <p>
-      For questions about these Terms, please contact us through our <a href="https://github.com/skillscat/skillscat" target="_blank" rel="noopener noreferrer">GitHub repository</a>.
+      For questions about these Terms, please contact us through our <a href="https://github.com/backrunner/skillscat" target="_blank" rel="noopener noreferrer">GitHub repository</a>.
     </p>
 
     <h2>15. Open Source</h2>

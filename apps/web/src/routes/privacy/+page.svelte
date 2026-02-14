@@ -115,7 +115,7 @@
 
     <h2>11. Open Source</h2>
     <p>
-      SkillsCat is open source software licensed under AGPL-3.0. You can review our source code and data handling practices on our <a href="https://github.com/skillscat/skillscat" target="_blank" rel="noopener noreferrer">GitHub repository</a>.
+      SkillsCat is open source software licensed under AGPL-3.0. You can review our source code and data handling practices on our <a href="https://github.com/backrunner/skillscat" target="_blank" rel="noopener noreferrer">GitHub repository</a>.
     </p>
   </article>
 </div>
