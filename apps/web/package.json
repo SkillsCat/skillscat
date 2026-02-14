@@ -1,15 +1,16 @@
 {
   "name": "@skillscat/web",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "type": "module",
   "scripts": {
     "build:sw": "node scripts/build-sw.mjs",
     "dev": "pnpm build:sw && vite dev",
     "build": "pnpm build:sw && vite build",
+    "prepare:assetsignore": "node scripts/prepare-assetsignore.mjs",
     "preview": "node scripts/preview.mjs",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint .",
-    "deploy": "wrangler deploy -c wrangler.preview.toml --env production",
+    "deploy": "pnpm build && pnpm prepare:assetsignore && wrangler deploy -c wrangler.preview.toml --env production",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply skillscat-db --local -c wrangler.preview.toml",
     "db:migrate:prod": "wrangler d1 migrations apply skillscat-db --remote -c wrangler.preview.toml --env production",
