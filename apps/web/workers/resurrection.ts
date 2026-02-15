@@ -10,6 +10,7 @@
  */
 
 import type { BaseEnv, GitHubGraphQLRepoData, SkillTier, ExecutionContext, ScheduledController } from './shared/types';
+import { githubFetch } from './shared/utils';
 
 interface ResurrectionEnv extends BaseEnv {}
 
@@ -97,25 +98,23 @@ async function batchFetchGitHubRepos(
   const query = `query { ${repoQueries} }`;
 
   try {
-    const response = await fetch(GITHUB_GRAPHQL_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-        'User-Agent': 'SkillsCat-Resurrection-Worker/1.0',
-      },
-      body: JSON.stringify({ query }),
-    });
-
-    if (!response.ok) {
-      console.error(`GitHub GraphQL error: ${response.status}`);
-      return results;
-    }
-
-    const data = await response.json() as { data: Record<string, GitHubGraphQLRepoData | null> };
+    const data = await githubFetch<{ data: Record<string, GitHubGraphQLRepoData | null> }>(
+      GITHUB_GRAPHQL_URL,
+      {
+        token: env.GITHUB_TOKEN,
+        userAgent: 'SkillsCat-Resurrection-Worker/1.0',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query }),
+        notFoundAsNull: false,
+      }
+    );
+    if (!data?.data) return results;
 
     repos.forEach((repo, idx) => {
-      const repoData = data.data?.[`repo${idx}`];
+      const repoData = data.data[`repo${idx}`];
       if (repoData) {
         results.set(repo.id, repoData);
       }

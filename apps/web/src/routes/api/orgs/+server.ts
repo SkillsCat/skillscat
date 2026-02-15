@@ -1,5 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { githubRequest } from '$lib/server/github-request';
 
 /**
  * Check if a name exists on GitHub (as user or organization)
@@ -7,12 +8,9 @@ import type { RequestHandler } from './$types';
 async function checkGitHubNameExists(name: string, githubToken: string): Promise<boolean> {
   try {
     // Check if it's a user or org on GitHub
-    const response = await fetch(`https://api.github.com/users/${name}`, {
-      headers: {
-        'Authorization': `Bearer ${githubToken}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'SkillsCat',
-      },
+    const response = await githubRequest(`https://api.github.com/users/${name}`, {
+      token: githubToken,
+      userAgent: 'SkillsCat/1.0',
     });
     // 200 means the name exists, 404 means it doesn't
     return response.status === 200;

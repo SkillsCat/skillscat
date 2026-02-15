@@ -2,6 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { createLogger } from '$lib';
 import type { SkillMdLocation, ScanResult } from '$lib/types';
+import { githubRequest } from '$lib/server/github-request';
 
 const log = createLogger('Submit');
 
@@ -152,21 +153,14 @@ async function scanRepoForSkillMd(
   maxDepth: number = MAX_DEPTH,
   allowDotFolders: boolean = false
 ): Promise<ScanResult> {
-  const headers: HeadersInit = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'SkillsCat/1.0',
-  };
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
   try {
     // Use Git Trees API with recursive flag
-    const response = await fetch(
+    const response = await githubRequest(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`,
-      { headers }
+      {
+        token,
+        userAgent: 'SkillsCat/1.0',
+      }
     );
 
     if (!response.ok) {
@@ -256,21 +250,14 @@ async function searchRepoForSkillMd(
   maxDepth: number = MAX_DEPTH,
   allowDotFolders: boolean = false
 ): Promise<ScanResult> {
-  const headers: HeadersInit = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'SkillsCat/1.0',
-  };
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
   try {
     const query = encodeURIComponent(`filename:SKILL.md repo:${owner}/${repo}`);
-    const response = await fetch(
+    const response = await githubRequest(
       `${GITHUB_API_BASE}/search/code?q=${query}&per_page=100`,
-      { headers }
+      {
+        token,
+        userAgent: 'SkillsCat/1.0',
+      }
     );
 
     if (!response.ok) {
@@ -332,10 +319,20 @@ interface GitHubContent {
   size?: number;
 }
 
-interface RepoInfo {
+type GitHubRefType = 'tree' | 'blob' | 'commit';
+
+interface ParsedRepoUrl {
   owner: string;
   repo: string;
   path: string;
+  refType?: GitHubRefType;
+  refPath?: string;
+}
+
+interface RepoInfo {
+  owner: string;
+  repo: string;
+  defaultBranch: string;
   name?: string;
   description?: string;
   stars?: number;
@@ -343,37 +340,112 @@ interface RepoInfo {
 }
 
 /**
- * Parse repository URL to extract owner, repo, and path (GitHub only)
+ * Parse repository URL to extract owner/repo and optional ref data (GitHub only)
  */
-function parseRepoUrl(url: string): RepoInfo | null {
-  // GitHub: https://github.com/owner/repo or https://github.com/owner/repo/tree/branch/path
-  const githubMatch = url.match(/github\.com\/([^\/]+)\/([^\/]+)(?:\/tree\/[^\/]+)?(\/.+)?$/);
-  if (githubMatch) {
+function parseRepoUrl(url: string): ParsedRepoUrl | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+
+  if (!['github.com', 'www.github.com'].includes(parsed.hostname.toLowerCase())) {
+    return null;
+  }
+
+  const segments = parsed.pathname
+    .split('/')
+    .filter(Boolean)
+    .map(segment => decodeURIComponent(segment));
+
+  if (segments.length < 2) {
+    return null;
+  }
+
+  const owner = segments[0];
+  const repo = segments[1].replace(/\.git$/, '');
+
+  if (!owner || !repo) {
+    return null;
+  }
+
+  if (segments.length === 2) {
+    return { owner, repo, path: '' };
+  }
+
+  const route = segments[2];
+  if (route === 'tree' || route === 'blob' || route === 'commit') {
     return {
-      owner: githubMatch[1],
-      repo: githubMatch[2].replace(/\.git$/, ''),
-      path: githubMatch[3]?.slice(1) || ''
+      owner,
+      repo,
+      path: '',
+      refType: route,
+      refPath: segments.slice(3).join('/'),
     };
   }
 
-  return null;
+  return {
+    owner,
+    repo,
+    path: segments.slice(2).join('/'),
+  };
+}
+
+/**
+ * Resolve submitted path from parsed URL and enforce default-branch-only policy.
+ */
+function resolveSubmittedPath(parsedUrl: ParsedRepoUrl, defaultBranch: string): { path: string } | { error: string } {
+  if (!parsedUrl.refType) {
+    return { path: parsedUrl.path };
+  }
+
+  if (!parsedUrl.refPath) {
+    return {
+      error: `Invalid GitHub URL format. Please use the repository root or the default branch (${defaultBranch}).`,
+    };
+  }
+
+  if (parsedUrl.refType === 'commit') {
+    return {
+      error: `Commit-specific URLs are not supported. Please submit using the repository root or the default branch (${defaultBranch}).`,
+    };
+  }
+
+  const defaultBranchPrefix = `${defaultBranch}/`;
+  const matchesDefaultBranch =
+    parsedUrl.refPath === defaultBranch || parsedUrl.refPath.startsWith(defaultBranchPrefix);
+
+  if (!matchesDefaultBranch) {
+    return {
+      error: `Only the default branch (${defaultBranch}) is supported for submission.`,
+    };
+  }
+
+  const relativePath = parsedUrl.refPath === defaultBranch
+    ? ''
+    : parsedUrl.refPath.slice(defaultBranch.length + 1);
+
+  if (parsedUrl.refType === 'blob') {
+    const parts = relativePath.split('/').filter(Boolean);
+    if (parts.length === 0) {
+      return { path: '' };
+    }
+    parts.pop();
+    return { path: parts.join('/') };
+  }
+
+  return { path: relativePath };
 }
 
 /**
  * Fetch repository info from GitHub
  */
 async function fetchGitHubRepo(owner: string, repo: string, token?: string): Promise<RepoInfo | null> {
-  const headers: HeadersInit = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'SkillsCat/1.0',
-  };
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}`, { headers });
+  const response = await githubRequest(`${GITHUB_API_BASE}/repos/${owner}/${repo}`, {
+    token,
+    userAgent: 'SkillsCat/1.0',
+  });
   if (!response.ok) return null;
 
   const data = await response.json() as {
@@ -381,12 +453,13 @@ async function fetchGitHubRepo(owner: string, repo: string, token?: string): Pro
     description?: string;
     stargazers_count?: number;
     fork?: boolean;
+    default_branch?: string;
   };
 
   return {
     owner,
     repo,
-    path: '',
+    defaultBranch: data.default_branch || 'main',
     name: data.name,
     description: data.description || undefined,
     stars: data.stargazers_count,
@@ -398,25 +471,18 @@ async function fetchGitHubRepo(owner: string, repo: string, token?: string): Pro
  * Check if SKILL.md exists in GitHub repo (only in root, not in dot folders)
  */
 async function checkGitHubSkillMd(owner: string, repo: string, path: string, token?: string, allowDotFolders: boolean = false): Promise<boolean> {
-  const headers: HeadersInit = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'SkillsCat/1.0',
-  };
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
   // Only check root SKILL.md (skip dot folders unless allowed for high-star repos)
   const skillPaths = [
     path ? `${path}/SKILL.md` : 'SKILL.md',
   ].filter(p => allowDotFolders || !isInDotFolder(p));
 
   for (const checkPath of skillPaths) {
-    const response = await fetch(
+    const response = await githubRequest(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${checkPath}`,
-      { headers }
+      {
+        token,
+        userAgent: 'SkillsCat/1.0',
+      }
     );
     if (response.ok) return true;
   }
@@ -448,10 +514,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       throw error(400, 'Invalid repository URL. Only GitHub repositories are supported.');
     }
 
-    const { owner, repo, path: urlPath } = repoInfo;
-
-    // Use explicit skillPath if provided, otherwise use path from URL
-    const path = explicitSkillPath !== undefined ? explicitSkillPath : urlPath;
+    const { owner, repo } = repoInfo;
 
     const db = platform?.env?.DB;
     const queue = platform?.env?.INDEXING_QUEUE;
@@ -466,6 +529,14 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     if (repoData.fork) {
       throw error(400, 'Forked repositories are not accepted. Please submit the original repository.');
     }
+
+    const resolvedPath = resolveSubmittedPath(repoInfo, repoData.defaultBranch);
+    if ('error' in resolvedPath) {
+      throw error(400, resolvedPath.error);
+    }
+
+    // Use explicit skillPath if provided, otherwise use path from URL
+    const path = explicitSkillPath !== undefined ? explicitSkillPath : resolvedPath.path;
 
     // Reject dot-folder submissions from repos with insufficient stars
     const allowDotFolders = (repoData.stars ?? 0) >= DOT_FOLDER_MIN_STARS;
@@ -728,7 +799,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
       return json({ valid: false, error: 'Invalid repository URL. Only GitHub repositories are supported.' });
     }
 
-    const { owner, repo, path } = repoInfo;
+    const { owner, repo } = repoInfo;
 
     const db = platform?.env?.DB;
     const githubToken = platform?.env?.GITHUB_TOKEN;
@@ -742,6 +813,13 @@ export const GET: RequestHandler = async ({ platform, url }) => {
     if (repoData.fork) {
       return json({ valid: false, error: 'Forked repositories are not accepted' });
     }
+
+    const resolvedPath = resolveSubmittedPath(repoInfo, repoData.defaultBranch);
+    if ('error' in resolvedPath) {
+      return json({ valid: false, error: resolvedPath.error });
+    }
+
+    const path = resolvedPath.path;
 
     // Determine if dot-folder skills are allowed based on star count
     const allowDotFolders = (repoData.stars ?? 0) >= DOT_FOLDER_MIN_STARS;

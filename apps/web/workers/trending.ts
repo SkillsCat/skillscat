@@ -21,6 +21,7 @@ import type {
   ClassificationMessage,
 } from './shared/types';
 import { TIER_CONFIG } from './shared/types';
+import { githubFetch } from './shared/utils';
 
 const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql';
 const BATCH_SIZE = 50; // GitHub GraphQL limit
@@ -175,25 +176,23 @@ async function batchFetchGitHubRepos(
   const query = `query { ${repoQueries} }`;
 
   try {
-    const response = await fetch(GITHUB_GRAPHQL_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-        'User-Agent': 'SkillsCat-Trending-Worker/2.0',
-      },
-      body: JSON.stringify({ query }),
-    });
-
-    if (!response.ok) {
-      console.error(`GitHub GraphQL error: ${response.status}`);
-      return results;
-    }
-
-    const data = await response.json() as { data: Record<string, GitHubGraphQLRepoData | null> };
+    const data = await githubFetch<{ data: Record<string, GitHubGraphQLRepoData | null> }>(
+      GITHUB_GRAPHQL_URL,
+      {
+        token: env.GITHUB_TOKEN,
+        userAgent: 'SkillsCat-Trending-Worker/2.0',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query }),
+        notFoundAsNull: false,
+      }
+    );
+    if (!data?.data) return results;
 
     repos.forEach((repo, idx) => {
-      const repoData = data.data?.[`repo${idx}`];
+      const repoData = data.data[`repo${idx}`];
       if (repoData) {
         results.set(repo.id, repoData);
       }

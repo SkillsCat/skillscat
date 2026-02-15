@@ -36,6 +36,7 @@ import {
   decodeBase64ToUtf8,
   buildFileTree,
 } from './shared/utils';
+import { githubRequest } from '../src/lib/server/github-request';
 
 const log = createLogger('Indexing');
 
@@ -1023,7 +1024,11 @@ async function processMessage(
     if (skillMd.content) {
       skillMdContent = decodeBase64(skillMd.content);
     } else if (skillMd.download_url) {
-      const response = await fetch(skillMd.download_url);
+      const response = await githubRequest(skillMd.download_url, {
+        token: env.GITHUB_TOKEN,
+        apiVersion: env.GITHUB_API_VERSION,
+        userAgent: 'SkillsCat-Worker/1.0',
+      });
       skillMdContent = await response.text();
     }
     textContents.set('SKILL.md', skillMdContent);

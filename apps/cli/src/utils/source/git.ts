@@ -1,6 +1,7 @@
 import type { RepoSource, SkillInfo } from './source';
 import { SKILL_DISCOVERY_PATHS, parseSkillFrontmatter } from './source';
 import { calculateContentHash } from '../storage/cache';
+import { githubRequest } from '../core/github-request';
 
 const GITHUB_API = 'https://api.github.com';
 const GITLAB_API = 'https://gitlab.com/api/v4';
@@ -32,11 +33,8 @@ interface GitLabFile {
  * Get default branch for a GitHub repo
  */
 async function getGitHubDefaultBranch(owner: string, repo: string): Promise<string> {
-  const response = await fetch(`${GITHUB_API}/repos/${owner}/${repo}`, {
-    headers: {
-      'Accept': 'application/vnd.github+json',
-      'User-Agent': 'skillscat-cli/1.0'
-    }
+  const response = await githubRequest(`${GITHUB_API}/repos/${owner}/${repo}`, {
+    userAgent: 'skillscat-cli/1.0',
   });
 
   if (!response.ok) {
@@ -68,13 +66,10 @@ async function getGitLabDefaultBranch(owner: string, repo: string): Promise<stri
  * Fetch repository tree from GitHub
  */
 async function fetchGitHubTree(owner: string, repo: string, branch: string): Promise<GitHubTreeItem[]> {
-  const response = await fetch(
+  const response = await githubRequest(
     `${GITHUB_API}/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
     {
-      headers: {
-        'Accept': 'application/vnd.github+json',
-        'User-Agent': 'skillscat-cli/1.0'
-      }
+      userAgent: 'skillscat-cli/1.0',
     }
   );
 
@@ -94,11 +89,8 @@ async function fetchGitHubFile(owner: string, repo: string, path: string, ref?: 
     ? `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}?ref=${ref}`
     : `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}`;
 
-  const response = await fetch(url, {
-    headers: {
-      'Accept': 'application/vnd.github+json',
-      'User-Agent': 'skillscat-cli/1.0'
-    }
+  const response = await githubRequest(url, {
+    userAgent: 'skillscat-cli/1.0',
   });
 
   if (!response.ok) {
@@ -122,11 +114,8 @@ async function getGitHubFileSha(owner: string, repo: string, path: string, ref?:
     ? `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}?ref=${ref}`
     : `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}`;
 
-  const response = await fetch(url, {
-    headers: {
-      'Accept': 'application/vnd.github+json',
-      'User-Agent': 'skillscat-cli/1.0'
-    }
+  const response = await githubRequest(url, {
+    userAgent: 'skillscat-cli/1.0',
   });
 
   if (!response.ok) return null;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import CopyButton from '$lib/components/ui/CopyButton.svelte';
+  import { DropdownMenu } from 'bits-ui';
   import SkillCardCompact from '$lib/components/skill/SkillCardCompact.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
   import { toast } from '$lib/components/ui/Toast.svelte';
@@ -32,6 +33,9 @@
   let isBookmarking = $state(false);
   const isAuthenticated = $derived(data.isAuthenticated ?? false);
   const isBookmarked = $derived(bookmarkOverride ?? data.isBookmarked ?? false);
+  const canUseNativeShare = $derived(
+    typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+  );
 
   async function handleBookmark() {
     if (!data.skill || isBookmarking) return;
@@ -60,6 +64,53 @@
       toast('Failed to update bookmark', 'error');
     } finally {
       isBookmarking = false;
+    }
+  }
+
+  async function handleNativeShare() {
+    if (!data.skill || !canUseNativeShare) return;
+
+    try {
+      await navigator.share({
+        title: `${data.skill.name} - SkillsCat`,
+        text: `Check out ${data.skill.name} on SkillsCat`,
+        url: canonicalSkillUrl
+      });
+    } catch (err) {
+      if (
+        err &&
+        typeof err === 'object' &&
+        'name' in err &&
+        (err as { name?: string }).name === 'AbortError'
+      ) {
+        return;
+      }
+      console.error('Native share failed:', err);
+      toast('Failed to share skill', 'error');
+    }
+  }
+
+  function handleShareToX() {
+    if (!data.skill || typeof window === 'undefined') return;
+
+    const shareUrl = new URL('https://x.com/intent/tweet');
+    shareUrl.searchParams.set('text', `Check out ${data.skill.name} on SkillsCat`);
+    shareUrl.searchParams.set('url', canonicalSkillUrl);
+    window.open(shareUrl.toString(), '_blank', 'noopener,noreferrer');
+  }
+
+  async function handleCopyUrl() {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      toast('Clipboard not available', 'error');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(canonicalSkillUrl);
+      toast('URL copied to clipboard', 'success');
+    } catch (err) {
+      console.error('Copy URL failed:', err);
+      toast('Failed to copy URL', 'error');
     }
   }
 
@@ -755,22 +806,72 @@
               />
             </a>
 
-            <!-- Title + Bookmark -->
+            <!-- Title + Actions -->
             <div class="flex-1 min-w-0 flex items-center gap-3">
               <h1 class="skill-title-inline flex-1">{data.skill.name}</h1>
-              {#if isAuthenticated}
-                <button
-                  class="bookmark-btn"
-                  class:bookmarked={isBookmarked}
-                  onclick={handleBookmark}
-                  disabled={isBookmarking}
-                  aria-label={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
-                >
-                  <svg class="w-6 h-6" fill={isBookmarked ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                  </svg>
-                </button>
-              {/if}
+              <div class="skill-header-actions">
+                <DropdownMenu.Root>
+                  <DropdownMenu.Trigger class="share-btn" aria-label="Share skill">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                    </svg>
+                  </DropdownMenu.Trigger>
+
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content
+                      forceMount
+                      side="bottom"
+                      align="end"
+                      sideOffset={8}
+                    >
+                      {#snippet child({ wrapperProps, props, open })}
+                        {#if open}
+                          <div {...wrapperProps}>
+                            <div {...props} class="share-dropdown-content">
+                              {#if canUseNativeShare}
+                                <DropdownMenu.Item class="share-dropdown-item" onSelect={handleNativeShare}>
+                                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                                  </svg>
+                                  Share Skills
+                                </DropdownMenu.Item>
+                              {/if}
+
+                              <DropdownMenu.Item class="share-dropdown-item" onSelect={handleShareToX}>
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                  <path d="M18.901 1.154h3.681l-8.04 9.19 9.459 12.502h-7.406l-5.8-7.584-6.633 7.584H.48l8.6-9.826L0 1.154h7.594l5.243 6.932 6.064-6.932zm-1.291 19.49h2.04L6.486 3.24H4.297z" />
+                                </svg>
+                                Share to X
+                              </DropdownMenu.Item>
+
+                              <DropdownMenu.Item class="share-dropdown-item" onSelect={handleCopyUrl}>
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-4 12h6a2 2 0 002-2v-8a2 2 0 00-2-2h-6a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                                Copy URL
+                              </DropdownMenu.Item>
+                            </div>
+                          </div>
+                        {/if}
+                      {/snippet}
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Root>
+
+                {#if isAuthenticated}
+                  <button
+                    class="bookmark-btn"
+                    class:bookmarked={isBookmarked}
+                    onclick={handleBookmark}
+                    disabled={isBookmarking}
+                    aria-label={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
+                  >
+                    <svg class="w-6 h-6" fill={isBookmarked ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                    </svg>
+                  </button>
+                {/if}
+              </div>
             </div>
           </div>
 
@@ -1220,7 +1321,15 @@
     letter-spacing: -0.02em;
   }
 
-  /* Bookmark Button */
+  .skill-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  /* Header Action Buttons */
+  .share-btn,
   .bookmark-btn {
     display: flex;
     align-items: center;
@@ -1237,6 +1346,11 @@
     flex-shrink: 0;
   }
 
+  .share-btn {
+    color: var(--fg-muted);
+  }
+
+  .share-btn:hover,
   .bookmark-btn:hover {
     color: var(--primary);
     border-color: var(--primary);
@@ -1249,9 +1363,49 @@
     border-color: var(--primary);
   }
 
+  .share-btn:focus-visible,
+  .bookmark-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+
+  .share-btn:disabled,
   .bookmark-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .share-dropdown-content {
+    min-width: 11.5rem;
+    background-color: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow:
+      0 10px 25px -5px rgb(0 0 0 / 0.1),
+      0 10px 10px -5px rgb(0 0 0 / 0.04);
+    padding: 0.375rem;
+    z-index: 60;
+  }
+
+  :global(.share-dropdown-item) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.5rem 0.625rem;
+    border-radius: var(--radius-md);
+    color: var(--fg);
+    font-size: 0.875rem;
+    line-height: 1.35;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+
+  :global(.share-dropdown-item:hover),
+  :global(.share-dropdown-item[data-highlighted]) {
+    background: var(--bg-muted);
+    color: var(--primary);
   }
 
   .skill-description-full {

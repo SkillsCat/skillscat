@@ -2,8 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { isSkillOwner } from '$lib/server/permissions';
-
-const GITHUB_API_BASE = 'https://api.github.com';
+import { githubRequest } from '$lib/server/github-request';
 
 /**
  * Verify that a GitHub repo exists and belongs to the user
@@ -21,17 +20,10 @@ async function verifyGitHubRepo(
 
   const [, owner, repo] = match;
 
-  const headers: HeadersInit = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'SkillsCat/1.0',
-  };
-
-  if (githubToken) {
-    headers.Authorization = `Bearer ${githubToken}`;
-  }
-
-  const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo.replace(/\.git$/, '')}`, { headers });
+  const response = await githubRequest(`https://api.github.com/repos/${owner}/${repo.replace(/\.git$/, '')}`, {
+    token: githubToken,
+    userAgent: 'SkillsCat/1.0',
+  });
 
   if (!response.ok) {
     return { valid: false, error: 'Repository not found or not accessible' };

@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
 import { getCached } from '$lib/server/cache';
+import { githubRequest } from '$lib/server/github-request';
 
 interface SkillFile {
   path: string;
@@ -77,16 +78,11 @@ async function getLatestCommitSha(
   const { data } = await getCached(
     `commit:${owner}/${repo}`,
     async () => {
-      const headers: Record<string, string> = {
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'SkillsCat'
-      };
-      if (githubToken) {
-        headers['Authorization'] = `Bearer ${githubToken}`;
-      }
-
       // Get repository info (includes default branch)
-      const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
+      const repoRes = await githubRequest(`https://api.github.com/repos/${owner}/${repo}`, {
+        token: githubToken,
+        userAgent: 'SkillsCat/1.0',
+      });
       if (!repoRes.ok) {
         if (repoRes.status === 404) return null;
         throw new Error(`Failed to fetch repo: ${repoRes.status}`);
@@ -95,9 +91,12 @@ async function getLatestCommitSha(
       const branch = repoInfo.default_branch;
 
       // Get latest commit
-      const commitRes = await fetch(
+      const commitRes = await githubRequest(
         `https://api.github.com/repos/${owner}/${repo}/commits/${branch}`,
-        { headers }
+        {
+          token: githubToken,
+          userAgent: 'SkillsCat/1.0',
+        }
       );
       if (!commitRes.ok) return null;
       const commitInfo = await commitRes.json() as { sha: string };
@@ -120,16 +119,11 @@ async function fetchGitHubFiles(
   skillPath: string | null,
   githubToken?: string
 ): Promise<SkillFile[]> {
-  const headers: Record<string, string> = {
-    'Accept': 'application/vnd.github.v3+json',
-    'User-Agent': 'SkillsCat'
-  };
-  if (githubToken) {
-    headers['Authorization'] = `Bearer ${githubToken}`;
-  }
-
   const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
-  const treeRes = await fetch(treeUrl, { headers });
+  const treeRes = await githubRequest(treeUrl, {
+    token: githubToken,
+    userAgent: 'SkillsCat/1.0',
+  });
   if (!treeRes.ok) throw new Error(`Failed to fetch tree: ${treeRes.status}`);
   const treeData = await treeRes.json() as { tree: GitHubTreeItem[] };
 
@@ -158,9 +152,12 @@ async function fetchGitHubFiles(
 
     if (!isTextFile(relativePath)) continue;
 
-    const blobRes = await fetch(
+    const blobRes = await githubRequest(
       `https://api.github.com/repos/${owner}/${repo}/git/blobs/${item.sha}`,
-      { headers }
+      {
+        token: githubToken,
+        userAgent: 'SkillsCat/1.0',
+      }
     );
     if (!blobRes.ok) continue;
     const blobData = await blobRes.json() as { content: string };

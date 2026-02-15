@@ -6,8 +6,7 @@
  */
 
 import type { GithubEventsEnv, GitHubEvent, IndexingMessage } from './shared/types';
-
-const GITHUB_API_BASE = 'https://api.github.com';
+import { githubFetch } from './shared/utils';
 const EVENTS_PER_PAGE = 100;
 
 /**
@@ -17,25 +16,13 @@ async function fetchGitHubEvents(
   env: GithubEventsEnv,
   page: number = 1
 ): Promise<GitHubEvent[]> {
-  const url = `${GITHUB_API_BASE}/events?per_page=${EVENTS_PER_PAGE}&page=${page}`;
-
-  const headers: HeadersInit = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'SkillsCat-Worker/1.0',
-  };
-
-  if (env.GITHUB_TOKEN) {
-    headers.Authorization = `Bearer ${env.GITHUB_TOKEN}`;
-  }
-
-  const response = await fetch(url, { headers });
-
-  if (!response.ok) {
-    throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
-  }
-
-  return response.json();
+  const url = `https://api.github.com/events?per_page=${EVENTS_PER_PAGE}&page=${page}`;
+  const events = await githubFetch<GitHubEvent[]>(url, {
+    token: env.GITHUB_TOKEN,
+    userAgent: 'SkillsCat-Worker/1.0',
+    notFoundAsNull: false,
+  });
+  return events ?? [];
 }
 
 /**

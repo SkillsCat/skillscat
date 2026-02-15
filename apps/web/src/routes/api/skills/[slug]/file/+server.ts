@@ -2,6 +2,7 @@ import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
+import { githubRequest } from '$lib/server/github-request';
 
 interface SkillInfo {
   id: string;
@@ -120,18 +121,13 @@ export const GET: RequestHandler = async ({ params, platform, request, url, loca
   // For GitHub skills, try fetching from GitHub directly
   if (skill.source_type === 'github' && skill.visibility === 'public' && skill.repo_owner && skill.repo_name) {
     try {
-      const headers: Record<string, string> = {
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'SkillsCat'
-      };
-      if (githubToken) {
-        headers['Authorization'] = `Bearer ${githubToken}`;
-      }
-
       const fullPath = skill.skill_path ? `${skill.skill_path}/${filePath}` : filePath;
       const contentUrl = `https://api.github.com/repos/${skill.repo_owner}/${skill.repo_name}/contents/${fullPath}`;
 
-      const res = await fetch(contentUrl, { headers });
+      const res = await githubRequest(contentUrl, {
+        token: githubToken,
+        userAgent: 'SkillsCat/1.0',
+      });
       if (res.ok) {
         const data = await res.json() as { content: string; size: number };
 

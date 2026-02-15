@@ -10,6 +10,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { env } from '$env/dynamic/private';
+import { githubRequest } from '$lib/server/github-request';
 
 // Threshold for user-triggered resurrection (lower than quarterly batch)
 const USER_ACCESS_STAR_THRESHOLD = 20;
@@ -47,12 +48,13 @@ async function fetchGitHubRepoData(
   `;
 
   try {
-    const response = await fetch('https://api.github.com/graphql', {
+    const response = await githubRequest('https://api.github.com/graphql', {
       method: 'POST',
+      token,
       headers: {
-        'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
+      userAgent: 'SkillsCat/1.0',
       body: JSON.stringify({
         query,
         variables: { owner, name },

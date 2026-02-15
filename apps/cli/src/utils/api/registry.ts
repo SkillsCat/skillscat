@@ -4,6 +4,7 @@ import { verboseRequest, verboseResponse, verboseLog } from '../core/verbose';
 import { parseNetworkError, parseHttpError } from '../core/errors';
 import { getCachedSkill, cacheSkill, calculateContentHash } from '../storage/cache';
 import { parseSlug } from '../core/slug';
+import { githubRequest } from '../core/github-request';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -64,11 +65,8 @@ async function fetchFromGitHub(owner: string, repo: string, skillPath?: string):
   verboseLog(`Fetching from GitHub: ${url}`);
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        'Accept': 'application/vnd.github+json',
-        'User-Agent': 'skillscat-cli/0.1.0'
-      }
+    const response = await githubRequest(url, {
+      userAgent: 'skillscat-cli/0.1.0',
     });
 
     if (!response.ok) {

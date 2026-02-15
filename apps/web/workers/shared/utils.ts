@@ -1,6 +1,7 @@
 /**
  * Shared Utilities for Workers
  */
+import { githubRequest } from '../../src/lib/server/github-request';
 
 // ============================================
 // Text File Detection
@@ -78,10 +79,15 @@ export interface GitHubFetchOptions {
   token?: string;
   apiVersion?: string;
   userAgent?: string;
+  method?: string;
+  headers?: HeadersInit;
+  body?: BodyInit | null;
+  maxRetries?: number;
+  notFoundAsNull?: boolean;
 }
 
 /**
- * Generic GitHub API fetch with error handling
+ * Generic GitHub API fetch with retry handling
  */
 export async function githubFetch<T>(
   url: string,
@@ -90,22 +96,25 @@ export async function githubFetch<T>(
   const {
     token,
     apiVersion = '2022-11-28',
-    userAgent = 'SkillsCat-Worker/1.0'
+    userAgent = 'SkillsCat-Worker/1.0',
+    method,
+    headers,
+    body,
+    maxRetries,
+    notFoundAsNull = true,
   } = options;
 
-  const headers: HeadersInit = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': apiVersion,
-    'User-Agent': userAgent,
-  };
+  const response = await githubRequest(url, {
+    token,
+    apiVersion,
+    userAgent,
+    method,
+    headers,
+    body,
+    maxRetries,
+  });
 
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  const response = await fetch(url, { headers });
-
-  if (response.status === 404) {
+  if (response.status === 404 && notFoundAsNull) {
     return null;
   }
 

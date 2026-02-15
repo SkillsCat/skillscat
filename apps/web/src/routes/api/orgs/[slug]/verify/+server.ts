@@ -1,7 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-
-const GITHUB_API_BASE = 'https://api.github.com';
+import { githubRequest } from '$lib/server/github-request';
 
 /**
  * POST /api/orgs/[slug]/verify - Verify organization with GitHub
@@ -51,14 +50,10 @@ export const POST: RequestHandler = async ({ locals, platform, params }) => {
   }
 
   // Check if GitHub org exists with same name
-  const headers: HeadersInit = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'SkillsCat/1.0',
-    Authorization: `Bearer ${account.access_token}`,
-  };
-
-  const orgResponse = await fetch(`${GITHUB_API_BASE}/orgs/${org.name}`, { headers });
+  const orgResponse = await githubRequest(`https://api.github.com/orgs/${org.name}`, {
+    token: account.access_token,
+    userAgent: 'SkillsCat/1.0',
+  });
 
   if (!orgResponse.ok) {
     throw error(400, `GitHub organization '${org.name}' not found`);
@@ -72,9 +67,12 @@ export const POST: RequestHandler = async ({ locals, platform, params }) => {
 
   // Check if authenticated user is an admin of the GitHub org.
   // Use /user/memberships/orgs/:org to avoid relying on local display names.
-  const membershipResponse = await fetch(
-    `${GITHUB_API_BASE}/user/memberships/orgs/${org.name}`,
-    { headers }
+  const membershipResponse = await githubRequest(
+    `https://api.github.com/user/memberships/orgs/${org.name}`,
+    {
+      token: account.access_token,
+      userAgent: 'SkillsCat/1.0',
+    }
   );
 
   if (!membershipResponse.ok) {
