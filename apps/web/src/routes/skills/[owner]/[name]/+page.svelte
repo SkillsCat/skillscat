@@ -811,7 +811,7 @@
               <h1 class="skill-title-inline flex-1">{data.skill.name}</h1>
               <div class="skill-header-actions">
                 <DropdownMenu.Root>
-                  <DropdownMenu.Trigger class="share-btn" aria-label="Share skill">
+                  <DropdownMenu.Trigger class="skill-action-btn share-btn" aria-label="Share skill">
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
                     </svg>
@@ -860,13 +860,13 @@
 
                 {#if isAuthenticated}
                   <button
-                    class="bookmark-btn"
+                    class="skill-action-btn bookmark-btn"
                     class:bookmarked={isBookmarked}
                     onclick={handleBookmark}
                     disabled={isBookmarking}
                     aria-label={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
                   >
-                    <svg class="w-6 h-6" fill={isBookmarked ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <svg class="w-5 h-5" fill={isBookmarked ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
                     </svg>
                   </button>
@@ -1329,8 +1329,7 @@
   }
 
   /* Header Action Buttons */
-  .share-btn,
-  .bookmark-btn {
+  :global(.skill-action-btn) {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1346,12 +1345,17 @@
     flex-shrink: 0;
   }
 
-  .share-btn {
-    color: var(--fg-muted);
+  :global(.skill-action-btn:hover) {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: var(--primary-subtle);
   }
 
-  .share-btn:hover,
-  .bookmark-btn:hover {
+  :global(.skill-action-btn:active) {
+    transform: translateY(1px) scale(0.97);
+  }
+
+  :global(.skill-action-btn[data-state='open']) {
     color: var(--primary);
     border-color: var(--primary);
     background: var(--primary-subtle);
@@ -1363,14 +1367,12 @@
     border-color: var(--primary);
   }
 
-  .share-btn:focus-visible,
-  .bookmark-btn:focus-visible {
+  :global(.skill-action-btn:focus-visible) {
     outline: 2px solid var(--primary);
     outline-offset: 2px;
   }
 
-  .share-btn:disabled,
-  .bookmark-btn:disabled {
+  :global(.skill-action-btn:disabled) {
     opacity: 0.5;
     cursor: not-allowed;
   }
