@@ -377,7 +377,7 @@
 
           // Show success - both button state and toast
           downloadSuccess = true;
-          toast(`${data.skill.name} installed successfully!`, 'success');
+          toast(`${data.skill.name} installed successfully!`, 'success', { celebrate: true });
           setTimeout(() => downloadSuccess = false, 3000);
         } catch (err: unknown) {
           // User cancelled the directory picker - not an error
