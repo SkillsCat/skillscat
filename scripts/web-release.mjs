@@ -221,22 +221,23 @@ function maybeBumpWebVersion(options) {
   const pkg = readJson(webPackagePath);
   const currentVersion = pkg.version ?? INITIAL_VERSION;
   const nextVersion = options.bump ? bumpVersion(currentVersion, options.bump) : currentVersion;
+  const changed = currentVersion !== nextVersion;
 
   console.log(`Web version: ${currentVersion}${nextVersion !== currentVersion ? ` -> ${nextVersion}` : ''}`);
 
   if (!options.bump) {
-    return { currentVersion, nextVersion };
+    return { currentVersion, nextVersion, changed };
   }
 
   if (options.dryRun) {
     console.log('[version] Dry-run enabled, apps/web/package.json will not be changed.');
-    return { currentVersion, nextVersion };
+    return { currentVersion, nextVersion, changed };
   }
 
   pkg.version = nextVersion;
   writeJson(webPackagePath, pkg);
   console.log(`[version] Updated apps/web/package.json -> ${nextVersion}`);
-  return { currentVersion, nextVersion };
+  return { currentVersion, nextVersion, changed };
 }
 
 function buildDeployAllBumpChoices(currentVersion) {
@@ -389,8 +390,12 @@ function printPlan(mode, versionInfo, tag, options) {
   console.log('- Deploy web: run');
   if (mode === 'deploy-all') {
     console.log(`- Deploy workers: run (env: ${options.workersEnv})`);
+    console.log(`- Commit version bump: ${versionInfo.changed ? 'run' : 'skip (no version change)'}`);
+    console.log(`- Push branch: ${versionInfo.changed ? 'run' : 'skip (no version change)'}`);
   }
-  console.log(`- Tag: ${tag ? `create ${tag} (after successful deploy)` : 'skip'}`);
+  console.log(
+    `- Tag: ${tag ? `create ${tag} (after successful deploy${mode === 'deploy-all' ? ' + git push' : ''})` : 'skip'}`
+  );
   console.log(`- Push tag: ${tag ? (options.pushTag ? 'yes' : 'no') : 'n/a (no tag)'}`);
   if (options.dryRun) {
     console.log('- Mode: dry-run');
@@ -424,6 +429,31 @@ function runWorkersDeploy(options) {
   runStep('deploy:workers', 'node', args, {
     cwd: projectRoot,
     dryRun: false
+  });
+}
+
+function runDeployAllGitFlow(versionInfo, options) {
+  if (!versionInfo.changed) {
+    console.log('[git] Version unchanged, skipping commit/push.');
+    return;
+  }
+
+  runStep('git:add-version', 'git', ['add', 'apps/web/package.json'], {
+    cwd: projectRoot,
+    dryRun: options.dryRun
+  });
+  runStep(
+    'git:commit-version',
+    'git',
+    ['commit', '-m', `chore(release): web v${versionInfo.nextVersion}`, '--', 'apps/web/package.json'],
+    {
+      cwd: projectRoot,
+      dryRun: options.dryRun
+    }
+  );
+  runStep('git:push-branch', 'git', ['push'], {
+    cwd: projectRoot,
+    dryRun: options.dryRun
   });
 }
 
@@ -468,6 +498,7 @@ async function runDeploy(command, options) {
 
   if (command === 'deploy-all') {
     runWorkersDeploy(options);
+    runDeployAllGitFlow(versionInfo, options);
   }
 
   runTagFlow(tag, versionInfo.nextVersion, options);
