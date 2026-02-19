@@ -55,3 +55,6 @@ tmp/
 
 # ========== Generated assets ==========
 apps/web/static/sw.js
+
+# ========== Private seeders (not open source) ==========
+scripts/private/

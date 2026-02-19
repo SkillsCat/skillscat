@@ -1,16 +1,18 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 
-export const GET: RequestHandler = async ({ locals, platform, url }) => {
-  const session = await locals.auth?.();
-  if (!session?.user) {
-    throw error(401, 'Authentication required');
-  }
-
+export const GET: RequestHandler = async ({ locals, platform, request, url }) => {
   const db = platform?.env?.DB;
   if (!db) {
     throw error(500, 'Database not available');
   }
+
+  const auth = await getAuthContext(request, locals, db);
+  if (!auth.userId || !auth.user) {
+    throw error(401, 'Authentication required');
+  }
+  requireScope(auth, 'read');
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '20', 10)));
@@ -24,7 +26,7 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
       ORDER BY created_at DESC
       LIMIT ? OFFSET ?
     `)
-      .bind(session.user.id, limit, offset)
+      .bind(auth.userId, limit, offset)
       .all<{
         id: string;
         name: string;
@@ -35,7 +37,7 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
         updated_at: number;
       }>(),
     db.prepare(`SELECT COUNT(*) as count FROM skills WHERE owner_id = ?`)
-      .bind(session.user.id)
+      .bind(auth.userId)
       .first<{ count: number }>(),
   ]);
 

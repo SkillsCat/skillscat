@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middleware/auth';
 
 /**
  * Compute SHA-256 hash of content
@@ -150,7 +150,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
   if (!auth.userId || !auth.user) {
     throw error(401, 'Authentication required');
   }
-  requireScope(auth, 'publish');
+  requireSubmitPublishScope(auth);
 
   // Get content from query params (base64 encoded)
   const contentBase64 = url.searchParams.get('content');
@@ -278,7 +278,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   if (!auth.userId || !auth.user) {
     throw error(401, 'Authentication required');
   }
-  requireScope(auth, 'publish');
+  requireSubmitPublishScope(auth);
 
   // Parse multipart form data
   const formData = await request.formData();

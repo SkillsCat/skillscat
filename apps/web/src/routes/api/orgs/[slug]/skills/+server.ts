@@ -1,10 +1,11 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getAuthContext, hasScope } from '$lib/server/middleware/auth';
 
 /**
  * GET /api/orgs/[slug]/skills - List organization skills
  */
-export const GET: RequestHandler = async ({ locals, platform, params, url }) => {
+export const GET: RequestHandler = async ({ locals, platform, request, params, url }) => {
   const db = platform?.env?.DB;
   if (!db) {
     throw error(500, 'Database not available');
@@ -30,13 +31,14 @@ export const GET: RequestHandler = async ({ locals, platform, params, url }) => 
     throw error(404, 'Organization not found');
   }
 
-  // Get current user for permission check
-  const session = await locals.auth?.();
-  const userId = session?.user?.id;
+  // Get current user/token for permission check
+  const auth = await getAuthContext(request, locals, db);
+  const userId = auth.userId;
+  const canUseReadScope = hasScope(auth, 'read');
 
   // Check if user is a member of the org
   let isMember = false;
-  if (userId) {
+  if (userId && canUseReadScope) {
     const membership = await db.prepare(`
       SELECT 1 FROM org_members WHERE org_id = ? AND user_id = ?
     `)

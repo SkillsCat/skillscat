@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middleware/auth';
 
 const MAX_PREVIEW_BODY_BYTES = 180000;
 
@@ -200,7 +200,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   if (!auth.userId || !auth.user) {
     throw error(401, 'Authentication required');
   }
-  requireScope(auth, 'publish');
+  requireSubmitPublishScope(auth);
 
   const payload = await readLimitedJsonBody(request, MAX_PREVIEW_BODY_BYTES) as {
     content?: string;

@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { createLogger } from '$lib';
 import type { SkillMdLocation, ScanResult } from '$lib/types';
 import { githubRequest } from '$lib/server/github-request';
+import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middleware/auth';
 
 const log = createLogger('Submit');
 
@@ -15,6 +16,8 @@ const QUEUE_DELAY_MS = 1000; // 1 second delay between queue messages
 
 /** Minimum stars required for a repo to allow dot-folder skills */
 const DOT_FOLDER_MIN_STARS = 500;
+/** Maximum size for submit request JSON body */
+const MAX_SUBMIT_BODY_BYTES = 16 * 1024;
 
 interface ArchiveData {
   id: string;
@@ -22,6 +25,55 @@ interface ArchiveData {
   skillMdContent: string | null;
   repo_owner: string;
   repo_name: string;
+}
+
+/**
+ * Read request body with a hard size limit and parse JSON.
+ */
+async function readLimitedJsonBody(request: Request, maxBytes: number): Promise<unknown> {
+  const contentLength = request.headers.get('content-length');
+  if (contentLength) {
+    const parsed = Number(contentLength);
+    if (Number.isFinite(parsed) && parsed > maxBytes) {
+      throw error(413, 'Request body too large');
+    }
+  }
+
+  const body = request.body;
+  if (!body) {
+    throw error(400, 'Request body is required');
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+
+    totalBytes += value.byteLength;
+    if (totalBytes > maxBytes) {
+      reader.cancel().catch(() => {});
+      throw error(413, 'Request body too large');
+    }
+
+    chunks.push(value);
+  }
+
+  const merged = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  try {
+    return JSON.parse(new TextDecoder().decode(merged)) as unknown;
+  } catch {
+    throw error(400, 'Invalid JSON body');
+  }
 }
 
 /**
@@ -495,13 +547,22 @@ async function checkGitHubSkillMd(owner: string, repo: string, path: string, tok
  */
 export const POST: RequestHandler = async ({ locals, platform, request }) => {
   try {
-    // Check if user is logged in
-    const session = await locals.auth?.();
-    if (!session?.user) {
-      throw error(401, 'Please sign in to submit a skill');
+    const db = platform?.env?.DB;
+    const queue = platform?.env?.INDEXING_QUEUE;
+    const githubToken = platform?.env?.GITHUB_TOKEN;
+
+    if (!db) {
+      throw error(500, 'Database not available');
     }
 
-    const body = await request.json() as { url?: string; skillPath?: string };
+    // Support both session auth and API token auth
+    const auth = await getAuthContext(request, locals, db);
+    if (!auth.userId || !auth.user) {
+      throw error(401, 'Please sign in to submit a skill');
+    }
+    requireSubmitPublishScope(auth);
+
+    const body = await readLimitedJsonBody(request, MAX_SUBMIT_BODY_BYTES) as { url?: string; skillPath?: string };
     const { url, skillPath: explicitSkillPath } = body;
 
     if (!url) {
@@ -515,10 +576,6 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     }
 
     const { owner, repo } = repoInfo;
-
-    const db = platform?.env?.DB;
-    const queue = platform?.env?.INDEXING_QUEUE;
-    const githubToken = platform?.env?.GITHUB_TOKEN;
 
     // Fetch repository info first
     const repoData = await fetchGitHubRepo(owner, repo, githubToken);
@@ -553,7 +610,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
         owner,
         repo,
         path,
-        userId: session.user.id,
+        userId: auth.userId,
         db,
         queue,
         platform,
@@ -573,7 +630,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       repo,
       skills: scanResult.found,
       truncated: scanResult.truncated,
-      userId: session.user.id,
+      userId: auth.userId,
       db,
       queue,
       platform,

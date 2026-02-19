@@ -6,6 +6,7 @@
  */
 
 import type { D1Database } from '@cloudflare/workers-types';
+import { error as httpError } from '@sveltejs/kit';
 import { validateApiToken, type TokenInfo } from '../api-auth';
 
 export interface AuthContext {
@@ -20,6 +21,11 @@ export interface AuthContext {
   tokenInfo: TokenInfo | null;
   scopes: string[];
 }
+
+/**
+ * Shared scope for skill submission/publishing actions.
+ */
+export const SKILL_SUBMIT_PUBLISH_SCOPE = 'publish' as const;
 
 interface SessionAuth {
   user: {
@@ -101,6 +107,13 @@ export function requireAuth(auth: AuthContext): asserts auth is AuthContext & { 
  */
 export function requireScope(auth: AuthContext, scope: string): void {
   if (!hasScope(auth, scope)) {
-    throw new Error(`Scope '${scope}' required`);
+    throw httpError(403, `Scope '${scope}' required`);
   }
+}
+
+/**
+ * Require publish scope for skill submit/publish APIs.
+ */
+export function requireSubmitPublishScope(auth: AuthContext): void {
+  requireScope(auth, SKILL_SUBMIT_PUBLISH_SCOPE);
 }
