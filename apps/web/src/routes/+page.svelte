@@ -3,6 +3,7 @@
   import Grid from '$lib/components/layout/Grid.svelte';
   import SkillCard from '$lib/components/skill/SkillCard.svelte';
   import EmptyState from '$lib/components/feedback/EmptyState.svelte';
+  import SEO from '$lib/components/common/SEO.svelte';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     Fire03Icon,
@@ -13,8 +14,8 @@
     HeartbreakIcon
   } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
-  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
-  import { SITE_DESCRIPTION, SITE_TITLE } from '$lib/seo/constants';
+  import { buildOgImageUrl } from '$lib/seo/og';
+  import { SITE_TITLE, SITE_URL } from '$lib/seo/constants';
 
   interface Props {
     data: {
@@ -37,26 +38,39 @@
 
   let displayCount = $derived(roundDownSkillCount(data.stats.totalSkills));
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'home' });
+  const homeDescription = 'Discover, share, and install open-source AI agent skills. Explore trending, recent, and top-rated skills on SkillsCat.';
+  const homeStructuredData = {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: 'SkillsCat',
+    url: SITE_URL,
+    description: homeDescription,
+    publisher: {
+      '@type': 'Organization',
+      name: 'SkillsCat',
+      url: SITE_URL,
+      sameAs: ['https://github.com/backrunner/skillscat'],
+    },
+    potentialAction: {
+      '@type': 'SearchAction',
+      target: {
+        '@type': 'EntryPoint',
+        urlTemplate: `${SITE_URL}/search?q={search_term_string}`,
+      },
+      'query-input': 'required name=search_term_string',
+    },
+  };
 </script>
 
-<svelte:head>
-  <title>{SITE_TITLE}</title>
-  <meta name="description" content={SITE_DESCRIPTION} />
-  <link rel="canonical" href="https://skills.cat/" />
-  <meta property="og:title" content={SITE_TITLE} />
-  <meta property="og:description" content={SITE_DESCRIPTION} />
-  <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://skills.cat/" />
-  <meta property="og:image" content={ogImageUrl} />
-  <meta property="og:image:secure_url" content={ogImageUrl} />
-  <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
-  <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
-  <meta property="og:image:alt" content="SkillsCat home page social preview image" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content={SITE_TITLE} />
-  <meta name="twitter:description" content={SITE_DESCRIPTION} />
-  <meta name="twitter:image" content={ogImageUrl} />
-</svelte:head>
+<SEO
+  title={SITE_TITLE}
+  description={homeDescription}
+  url="/"
+  image={ogImageUrl}
+  imageAlt="SkillsCat home page social preview image"
+  keywords={['ai agent skills', 'skillscat', 'open source skills', 'ai automation']}
+  structuredData={homeStructuredData}
+/>
 
 <div class="home-page">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">

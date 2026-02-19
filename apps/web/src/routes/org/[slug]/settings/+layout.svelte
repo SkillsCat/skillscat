@@ -104,6 +104,7 @@
 
 <svelte:head>
   <title>{org?.displayName || slug} Settings - SkillsCat</title>
+  <meta name="robots" content="noindex, nofollow, noarchive" />
 </svelte:head>
 
 {#if $session.isPending || loading}

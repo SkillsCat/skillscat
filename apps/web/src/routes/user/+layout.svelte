@@ -58,6 +58,7 @@
 
 <svelte:head>
   <title>Settings - SkillsCat</title>
+  <meta name="robots" content="noindex, nofollow, noarchive" />
 </svelte:head>
 
 {#if $session.isPending}

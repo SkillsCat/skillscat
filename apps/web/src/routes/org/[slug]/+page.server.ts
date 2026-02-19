@@ -57,6 +57,9 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
     ]);
 
     if (!orgRes.ok) {
+      if (orgRes.status === 404) {
+        setHeaders({ 'X-Skillscat-Status-Override': '404' });
+      }
       return {
         ...fallback,
         error: orgRes.status === 404 ? 'Organization not found' : 'Failed to load organization',
@@ -65,6 +68,7 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
 
     const orgData = await orgRes.json() as { organization?: Org };
     if (!orgData.organization) {
+      setHeaders({ 'X-Skillscat-Status-Override': '404' });
       return {
         ...fallback,
         error: 'Organization not found',

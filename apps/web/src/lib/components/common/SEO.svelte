@@ -1,6 +1,6 @@
 <script lang="ts">
   import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
-  import { SITE_DESCRIPTION } from '$lib/seo/constants';
+  import { SITE_DESCRIPTION, SITE_LOCALE, SITE_NAME, SITE_URL } from '$lib/seo/constants';
 
   /**
    * SEO Component - 结构化数据和 Meta 标签
@@ -12,13 +12,13 @@
     url?: string;
     image?: string;
     imageAlt?: string;
-    type?: 'website' | 'article' | 'product';
+    type?: 'website' | 'article' | 'product' | 'profile';
     publishedTime?: string;
     modifiedTime?: string;
     author?: string;
     keywords?: string[];
     noindex?: boolean;
-    structuredData?: Record<string, any>;
+    structuredData?: Record<string, unknown> | Array<Record<string, unknown>> | null;
   }
 
   let {
@@ -36,12 +36,24 @@
     structuredData,
   }: Props = $props();
 
-  const siteName = 'SkillsCat';
-  const siteUrl = 'https://skills.cat';
+  const siteName = SITE_NAME;
+  const siteUrl = SITE_URL;
+  const locale = SITE_LOCALE;
 
-  // Use $derived for computed values that depend on props
-  const fullUrl = $derived(url ? `${siteUrl}${url}` : siteUrl);
-  const fullImage = $derived(image.startsWith('http') ? image : `${siteUrl}${image}`);
+  const fullUrl = $derived(
+    url
+      ? (url.startsWith('http://') || url.startsWith('https://') ? url : `${siteUrl}${url}`)
+      : siteUrl
+  );
+  const fullImage = $derived(
+    image.startsWith('http://') || image.startsWith('https://') ? image : `${siteUrl}${image}`
+  );
+  const hasCanonical = $derived(Boolean(url) || !noindex);
+  const robotsContent = $derived(
+    noindex
+      ? 'noindex, nofollow, noarchive'
+      : 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'
+  );
 
   // Default structured data for the website
   const defaultStructuredData = {
@@ -60,9 +72,11 @@
     },
   };
 
-  const jsonLd = $derived(structuredData || defaultStructuredData);
+  const jsonLd = $derived(
+    structuredData === undefined ? (noindex ? null : defaultStructuredData) : structuredData
+  );
   const safeJsonLd = $derived(
-    JSON.stringify(jsonLd).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')
+    jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') : ''
   );
 </script>
 
@@ -71,26 +85,26 @@
   <title>{title}</title>
   <meta name="title" content={title} />
   <meta name="description" content={description} />
+  {#if author}
+    <meta name="author" content={author} />
+  {/if}
   {#if keywords.length > 0}
     <meta name="keywords" content={keywords.join(', ')} />
   {/if}
-  {#if noindex}
-    <meta name="robots" content="noindex, nofollow" />
-  {:else}
-    <meta name="robots" content="index, follow" />
-  {/if}
+  <meta name="robots" content={robotsContent} />
 
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content={type} />
   <meta property="og:url" content={fullUrl} />
   <meta property="og:title" content={title} />
   <meta property="og:description" content={description} />
+  <meta property="og:site_name" content={siteName} />
+  <meta property="og:locale" content={locale} />
   <meta property="og:image" content={fullImage} />
   <meta property="og:image:secure_url" content={fullImage} />
   <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
   <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
   <meta property="og:image:alt" content={imageAlt} />
-  <meta property="og:site_name" content={siteName} />
   {#if publishedTime}
     <meta property="article:published_time" content={publishedTime} />
   {/if}
@@ -110,8 +124,14 @@
   <meta name="twitter:image:alt" content={imageAlt} />
 
   <!-- Canonical URL -->
-  <link rel="canonical" href={fullUrl} />
+  {#if hasCanonical}
+    <link rel="canonical" href={fullUrl} />
+    <link rel="alternate" hreflang="en" href={fullUrl} />
+    <link rel="alternate" hreflang="x-default" href={fullUrl} />
+  {/if}
 
   <!-- Structured Data -->
-  {@html `<script type="application/ld+json">${safeJsonLd}</script>`}
+  {#if safeJsonLd}
+    {@html `<script type="application/ld+json">${safeJsonLd}</script>`}
+  {/if}
 </svelte:head>

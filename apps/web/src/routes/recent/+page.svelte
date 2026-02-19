@@ -1,10 +1,11 @@
 <script lang="ts">
   import ListPage from '$lib/components/layout/ListPage.svelte';
+  import SEO from '$lib/components/common/SEO.svelte';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Notification01Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
-  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
-  import { SITE_DESCRIPTION } from '$lib/seo/constants';
+  import { buildOgImageUrl } from '$lib/seo/og';
+  import { SITE_URL } from '$lib/seo/constants';
 
   interface PaginationData {
     currentPage: number;
@@ -23,32 +24,36 @@
 
   let { data }: Props = $props();
   const canonicalUrl = $derived(
-    `https://skills.cat/recent${data.pagination.currentPage > 1 ? `?page=${data.pagination.currentPage}` : ''}`
+    `${SITE_URL}/recent${data.pagination.currentPage > 1 ? `?page=${data.pagination.currentPage}` : ''}`
   );
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'recent' });
+  const pageTitle = $derived(
+    `Recently Added Skills${data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat`
+  );
+  const pageDescription = 'Browse newly added AI agent skills and try the latest community contributions first.';
+  const structuredData = $derived({
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: pageTitle,
+    description: pageDescription,
+    url: canonicalUrl,
+    mainEntity: {
+      '@type': 'ItemList',
+      itemListOrder: 'https://schema.org/ItemListOrderDescending',
+      numberOfItems: data.pagination.totalItems,
+    },
+  });
 </script>
 
-<svelte:head>
-  <title>Recently Added Skills{data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat</title>
-  <meta name="description" content={SITE_DESCRIPTION} />
-  <link
-    rel="canonical"
-    href={canonicalUrl}
-  />
-  <meta property="og:title" content="Recently Added Skills - SkillsCat" />
-  <meta property="og:description" content={SITE_DESCRIPTION} />
-  <meta property="og:type" content="website" />
-  <meta property="og:url" content={canonicalUrl} />
-  <meta property="og:image" content={ogImageUrl} />
-  <meta property="og:image:secure_url" content={ogImageUrl} />
-  <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
-  <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
-  <meta property="og:image:alt" content="Recently added skills social preview image" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Recently Added Skills - SkillsCat" />
-  <meta name="twitter:description" content={SITE_DESCRIPTION} />
-  <meta name="twitter:image" content={ogImageUrl} />
-</svelte:head>
+<SEO
+  title={pageTitle}
+  description={pageDescription}
+  url={canonicalUrl}
+  image={ogImageUrl}
+  imageAlt="Recently added skills social preview image"
+  keywords={['new ai skills', 'recent ai agent skills', 'skillscat recent']}
+  structuredData={structuredData}
+/>
 
 <ListPage
   title="Recently Added"

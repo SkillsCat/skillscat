@@ -3,7 +3,7 @@ import type { PageServerLoad } from './$types';
 const CACHE_TTL = 300; // 5 minutes
 const CACHE_TTL_NOT_FOUND = 60; // 1 minute for 404s
 
-export const load: PageServerLoad = async ({ params, platform }) => {
+export const load: PageServerLoad = async ({ params, platform, setHeaders }) => {
   const db = platform?.env?.DB;
   const cache = platform?.caches?.default;
   const { username } = params;
@@ -23,6 +23,9 @@ export const load: PageServerLoad = async ({ params, platform }) => {
       const cached = await cache.match(new Request(`https://cache/${cacheKey}`));
       if (cached) {
         const data = await cached.json();
+        if (!data?.profile && data?.error === 'User not found') {
+          setHeaders({ 'X-Skillscat-Status-Override': '404' });
+        }
         return data as {
           profile: UserProfile | null;
           skills: Skill[];
@@ -147,6 +150,7 @@ export const load: PageServerLoad = async ({ params, platform }) => {
     }>();
 
   if (!author) {
+    setHeaders({ 'X-Skillscat-Status-Override': '404' });
     // Cache 404 with shorter TTL
     const notFoundResult = {
       profile: null,

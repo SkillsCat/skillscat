@@ -70,6 +70,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
 
   const normalizedOwner = normalizeSkillOwner(params.owner);
   if (!normalizedOwner) {
+    setHeaders({ 'X-Skillscat-Status-Override': '404' });
     return {
       skill: null,
       relatedSkills: [],
@@ -87,6 +88,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     const skill = await getSkillBySlug(env, slug, userId);
 
     if (!skill) {
+      setHeaders({ 'X-Skillscat-Status-Override': '404' });
       return {
         skill: null,
         relatedSkills: [],

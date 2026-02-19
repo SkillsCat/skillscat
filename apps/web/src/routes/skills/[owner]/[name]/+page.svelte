@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SEO from '$lib/components/common/SEO.svelte';
   import CopyButton from '$lib/components/ui/CopyButton.svelte';
   import { DropdownMenu } from 'bits-ui';
   import SkillCardCompact from '$lib/components/skill/SkillCardCompact.svelte';
@@ -10,8 +11,8 @@
   import { encodeSkillSlugForPath } from '$lib/skill-path';
   import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
   import type { Highlighter } from 'shiki';
-  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
-  import { SITE_DESCRIPTION } from '$lib/seo/constants';
+  import { buildOgImageUrl } from '$lib/seo/og';
+  import { SITE_URL } from '$lib/seo/constants';
 
   interface Props {
     data: {
@@ -692,6 +693,11 @@
     return !data.skill.orgSlug && !data.skill.ownerName && !data.skill.authorUsername;
   }
 
+  function toIsoTimestamp(timestamp: number | null | undefined): string | undefined {
+    if (!timestamp || timestamp <= 0) return undefined;
+    return new Date(timestamp).toISOString();
+  }
+
   // Highlight command syntax
   function highlightCommand(command: string): string {
     // Parse: $ npx skillscat add owner/repo
@@ -720,45 +726,72 @@
 
   const highlightedCommand = $derived(highlightCommand(currentCommand));
   const canonicalSkillUrl = $derived(
-    data.skill ? `https://skills.cat/skills/${encodeSkillSlugForPath(data.skill.slug)}` : 'https://skills.cat'
+    data.skill ? `${SITE_URL}/skills/${encodeSkillSlugForPath(data.skill.slug)}` : SITE_URL
   );
   const skillDescription = $derived(
-    data.skill?.description || (data.skill ? `AI agent skill: ${data.skill.name}` : '')
+    data.skill?.description || (data.skill ? `AI agent skill: ${data.skill.name}` : 'Skill not found on SkillsCat.')
   );
   const ogImageUrl = $derived(
     data.skill
       ? buildOgImageUrl({ type: 'skill', slug: data.skill.slug })
       : buildOgImageUrl({ type: 'page', slug: '404' })
   );
+  const publishedTime = $derived(
+    toIsoTimestamp(data.skill?.createdAt)
+  );
+  const modifiedTime = $derived(
+    toIsoTimestamp(data.skill?.lastCommitAt ?? data.skill?.updatedAt)
+  );
+  const skillStructuredData = $derived(
+    data.skill && data.skill.visibility === 'public'
+      ? {
+          '@context': 'https://schema.org',
+          '@type': 'SoftwareSourceCode',
+          name: data.skill.name,
+          description: skillDescription,
+          url: canonicalSkillUrl,
+          codeRepository: data.skill.githubUrl || undefined,
+          datePublished: publishedTime || undefined,
+          dateModified: modifiedTime || undefined,
+          author: {
+            '@type': data.skill.orgName ? 'Organization' : 'Person',
+            name: getAuthorDisplayName(),
+          },
+          publisher: {
+            '@type': 'Organization',
+            name: 'SkillsCat',
+            url: SITE_URL,
+          },
+        }
+      : null
+  );
 </script>
 
-<svelte:head>
-  {#if data.skill}
-    <title>{data.skill.name} - SkillsCat</title>
-    <meta name="description" content={SITE_DESCRIPTION} />
-    {#if data.skill.visibility !== 'public'}
-      <meta name="robots" content="noindex, nofollow" />
-    {/if}
-    <link rel="canonical" href={canonicalSkillUrl} />
-    <meta property="og:title" content={`${data.skill.name} - SkillsCat`} />
-    <meta property="og:description" content={SITE_DESCRIPTION} />
-    <meta property="og:type" content="article" />
-    <meta property="og:url" content={canonicalSkillUrl} />
-    <meta property="og:image" content={ogImageUrl} />
-    <meta property="og:image:secure_url" content={ogImageUrl} />
-    <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
-    <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
-    <meta property="og:image:alt" content={`${data.skill.name} skill social preview image`} />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content={`${data.skill.name} - SkillsCat`} />
-    <meta name="twitter:description" content={SITE_DESCRIPTION} />
-    <meta name="twitter:image" content={ogImageUrl} />
-  {:else}
-    <title>Skill Not Found - SkillsCat</title>
-    <meta name="description" content={SITE_DESCRIPTION} />
-    <meta name="robots" content="noindex, nofollow" />
-  {/if}
-</svelte:head>
+{#if data.skill}
+  <SEO
+    title={`${data.skill.name} - SkillsCat`}
+    description={skillDescription}
+    url={canonicalSkillUrl}
+    image={ogImageUrl}
+    imageAlt={`${data.skill.name} skill social preview image`}
+    type="article"
+    author={getAuthorDisplayName()}
+    publishedTime={publishedTime}
+    modifiedTime={modifiedTime}
+    noindex={data.skill.visibility !== 'public'}
+    keywords={['ai agent skill', data.skill.name, data.skill.repoOwner, 'skillscat']}
+    structuredData={skillStructuredData}
+  />
+{:else}
+  <SEO
+    title="Skill Not Found - SkillsCat"
+    description={skillDescription}
+    image={ogImageUrl}
+    imageAlt="Skill not found social preview image"
+    noindex
+    structuredData={null}
+  />
+{/if}
 
 {#if data.skill}
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">

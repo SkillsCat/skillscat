@@ -1,5 +1,6 @@
 <script lang="ts">
   import SearchBox from '$lib/components/common/SearchBox.svelte';
+  import SEO from '$lib/components/common/SEO.svelte';
   import Grid from '$lib/components/layout/Grid.svelte';
   import SkillCard from '$lib/components/skill/SkillCard.svelte';
   import EmptyState from '$lib/components/feedback/EmptyState.svelte';
@@ -7,8 +8,8 @@
   import type { Category } from '$lib/constants/categories';
   import type { SkillCardData } from '$lib/types';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
-  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
-  import { SITE_DESCRIPTION } from '$lib/seo/constants';
+  import { buildOgImageUrl } from '$lib/seo/og';
+  import { SITE_URL } from '$lib/seo/constants';
   import {
     GitBranchIcon,
     CodeIcon,
@@ -156,10 +157,10 @@
   const endItem = $derived(data.pagination ? Math.min(data.pagination.currentPage * data.pagination.itemsPerPage, data.pagination.totalItems) : data.skills.length);
   const canonicalUrl = $derived(
     data.category
-      ? `https://skills.cat/category/${data.category.slug}${
+      ? `${SITE_URL}/category/${data.category.slug}${
           data.pagination && data.pagination.currentPage > 1 ? `?page=${data.pagination.currentPage}` : ''
         }`
-      : 'https://skills.cat/categories'
+      : `${SITE_URL}/categories`
   );
   const categoryDescription = $derived(
     data.category
@@ -171,32 +172,50 @@
       ? buildOgImageUrl({ type: 'category', slug: data.category.slug })
       : buildOgImageUrl({ type: 'page', slug: '404' })
   );
+  const pageTitle = $derived(
+    data.category
+      ? `${data.category.name} Skills${
+          data.pagination && data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''
+        } - SkillsCat`
+      : 'Category Not Found - SkillsCat'
+  );
+  const categoryStructuredData = $derived(
+    data.category
+      ? {
+          '@context': 'https://schema.org',
+          '@type': 'CollectionPage',
+          name: pageTitle,
+          description: categoryDescription,
+          url: canonicalUrl,
+          mainEntity: {
+            '@type': 'ItemList',
+            numberOfItems: data.pagination?.totalItems ?? data.skills.length,
+          },
+        }
+      : null
+  );
 </script>
 
-<svelte:head>
-  {#if data.category}
-    <title>{data.category.name} Skills{data.pagination && data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat</title>
-    <meta name="description" content={SITE_DESCRIPTION} />
-    <link rel="canonical" href={canonicalUrl} />
-    <meta property="og:title" content={`${data.category.name} Skills - SkillsCat`} />
-    <meta property="og:description" content={SITE_DESCRIPTION} />
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content={canonicalUrl} />
-    <meta property="og:image" content={ogImageUrl} />
-    <meta property="og:image:secure_url" content={ogImageUrl} />
-    <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
-    <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
-    <meta property="og:image:alt" content={`${data.category.name} category social preview image`} />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content={`${data.category.name} Skills - SkillsCat`} />
-    <meta name="twitter:description" content={SITE_DESCRIPTION} />
-    <meta name="twitter:image" content={ogImageUrl} />
-  {:else}
-    <title>Category Not Found - SkillsCat</title>
-    <meta name="description" content={SITE_DESCRIPTION} />
-    <meta name="robots" content="noindex, nofollow" />
-  {/if}
-</svelte:head>
+{#if data.category}
+  <SEO
+    title={pageTitle}
+    description={categoryDescription}
+    url={canonicalUrl}
+    image={ogImageUrl}
+    imageAlt={`${data.category.name} category social preview image`}
+    keywords={[`${data.category.name} skills`, 'ai agent skills', 'skillscat category']}
+    structuredData={categoryStructuredData}
+  />
+{:else}
+  <SEO
+    title={pageTitle}
+    description={categoryDescription}
+    image={ogImageUrl}
+    imageAlt="Category not found social preview image"
+    noindex
+    structuredData={null}
+  />
+{/if}
 
 {#if data.category}
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">

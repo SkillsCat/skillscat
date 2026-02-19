@@ -1,10 +1,11 @@
 <script lang="ts">
+  import SEO from '$lib/components/common/SEO.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
   import { buildSkillPath } from '$lib/skill-path';
-  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
-  import { SITE_DESCRIPTION } from '$lib/seo/constants';
+  import { buildOgImageUrl } from '$lib/seo/og';
+  import { SITE_URL } from '$lib/seo/constants';
 
   interface Org {
     id: string;
@@ -66,9 +67,31 @@
     org?.userRole && ["owner", "admin"].includes(org.userRole),
   );
   const orgName = $derived(org?.displayName || slug);
-  const canonicalUrl = $derived(`https://skills.cat/org/${slug}`);
+  const canonicalUrl = $derived(`${SITE_URL}/org/${slug}`);
   const ogImageUrl = $derived(
     buildOgImageUrl({ type: 'org', slug })
+  );
+  const pageTitle = $derived(org ? `${orgName} - SkillsCat` : 'Organization Not Found - SkillsCat');
+  const orgDescription = $derived(
+    org?.description?.trim() || `Explore ${orgName}'s public AI agent skills on SkillsCat.`
+  );
+  const orgStructuredData = $derived(
+    org
+      ? {
+          '@context': 'https://schema.org',
+          '@type': 'ProfilePage',
+          name: pageTitle,
+          description: orgDescription,
+          url: canonicalUrl,
+          mainEntity: {
+            '@type': 'Organization',
+            name: orgName,
+            url: canonicalUrl,
+            logo: org.avatarUrl || undefined,
+            description: org.description || undefined,
+          },
+        }
+      : null
   );
 
   $effect(() => {
@@ -118,29 +141,27 @@
   }
 </script>
 
-<svelte:head>
-  <title>{orgName} - SkillsCat</title>
-  {#if org}
-    <meta name="description" content={SITE_DESCRIPTION} />
-    <link rel="canonical" href={canonicalUrl} />
-    <meta property="og:title" content={`${orgName} - SkillsCat`} />
-    <meta property="og:description" content={SITE_DESCRIPTION} />
-    <meta property="og:type" content="profile" />
-    <meta property="og:url" content={canonicalUrl} />
-    <meta property="og:image" content={ogImageUrl} />
-    <meta property="og:image:secure_url" content={ogImageUrl} />
-    <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
-    <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
-    <meta property="og:image:alt" content={`${orgName} organization social preview image`} />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content={`${orgName} - SkillsCat`} />
-    <meta name="twitter:description" content={SITE_DESCRIPTION} />
-    <meta name="twitter:image" content={ogImageUrl} />
-  {:else}
-    <meta name="description" content={SITE_DESCRIPTION} />
-    <meta name="robots" content="noindex, nofollow" />
-  {/if}
-</svelte:head>
+{#if org}
+  <SEO
+    title={pageTitle}
+    description={orgDescription}
+    url={canonicalUrl}
+    image={ogImageUrl}
+    imageAlt={`${orgName} organization social preview image`}
+    type="profile"
+    keywords={['organization skills', 'team ai agent skills', 'skillscat org']}
+    structuredData={orgStructuredData}
+  />
+{:else}
+  <SEO
+    title={pageTitle}
+    description="The requested organization could not be found on SkillsCat."
+    image={ogImageUrl}
+    imageAlt="Organization not found social preview image"
+    noindex
+    structuredData={null}
+  />
+{/if}
 
 <div class="org-page">
   {#if loading}

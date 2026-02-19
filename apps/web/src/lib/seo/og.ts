@@ -1,4 +1,4 @@
-const SITE_URL = 'https://skills.cat';
+import { SITE_URL } from './constants';
 
 export const OG_IMAGE_WIDTH = 1200;
 export const OG_IMAGE_HEIGHT = 630;

@@ -11,8 +11,8 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
     request,
     isAuthenticated: Boolean(locals.user),
     hasCookies: cookies.getAll().length > 0,
-    sMaxAge: 120,
-    staleWhileRevalidate: 600,
+    sMaxAge: 60,
+    staleWhileRevalidate: 180,
   });
 
   const env = {
@@ -24,7 +24,7 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
   const { data } = await getCached(
     `page:recent:v1:${page}`,
     () => getRecentSkillsPaginated(env, page, ITEMS_PER_PAGE),
-    120
+    60
   );
   const { skills, total } = data;
   const totalPages = Math.ceil(total / ITEMS_PER_PAGE);

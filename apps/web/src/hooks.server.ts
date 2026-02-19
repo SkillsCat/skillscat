@@ -6,6 +6,7 @@ import { runRequestSecurity, shouldNoIndexPath } from '$lib/server/request-secur
 import { setCacheVersion } from '$lib/server/cache';
 
 const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
+const STATUS_OVERRIDE_HEADER = 'X-Skillscat-Status-Override';
 const AUTHOR_LINK_COOKIE = 'sc-author-linked';
 const AUTHOR_LINK_COOKIE_TTL_SECONDS = 24 * 60 * 60;
 
@@ -19,8 +20,39 @@ function cloneResponseWithHeader(response: Response, key: string, value: string)
   });
 }
 
+function cloneResponseWithoutHeader(response: Response, key: string): Response {
+  const headers = new Headers(response.headers);
+  headers.delete(key);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function cloneResponseWithStatus(response: Response, status: number): Response {
+  return new Response(response.body, {
+    status,
+    headers: new Headers(response.headers),
+  });
+}
+
 function applyResponseSecurityHeaders(pathname: string, response: Response): Response {
   let secured = response;
+
+  const statusOverride = secured.headers.get(STATUS_OVERRIDE_HEADER);
+  if (statusOverride) {
+    secured = cloneResponseWithoutHeader(secured, STATUS_OVERRIDE_HEADER);
+    const parsedStatus = Number.parseInt(statusOverride, 10);
+    if (
+      Number.isInteger(parsedStatus) &&
+      parsedStatus >= 400 &&
+      parsedStatus <= 599 &&
+      parsedStatus !== secured.status
+    ) {
+      secured = cloneResponseWithStatus(secured, parsedStatus);
+    }
+  }
 
   if (pathname.startsWith('/api/') && !secured.headers.has('Cache-Control')) {
     secured = cloneResponseWithHeader(secured, 'Cache-Control', 'no-store');

@@ -14,6 +14,7 @@ export interface DbEnv {
 }
 
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
+const LIST_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 
 interface CachedSkillCardRaw {
   id: string;
@@ -129,7 +130,10 @@ function buildListCacheKeys(key: string, cacheVersion?: string): string[] {
 export async function getCachedList(
   r2: R2Bucket | undefined,
   key: string,
-  cacheVersion?: string
+  cacheVersion?: string,
+  options?: {
+    maxAgeMs?: number;
+  }
 ): Promise<{ data: SkillCardData[]; generatedAt: number } | null> {
   if (!r2) return null;
 
@@ -151,6 +155,21 @@ export async function getCachedList(
         continue;
       }
 
+      const generatedAt = Number(parsed.generatedAt);
+      if (!Number.isFinite(generatedAt) || generatedAt <= 0) {
+        continue;
+      }
+
+      const maxAgeMs = options?.maxAgeMs;
+      if (typeof maxAgeMs === 'number' && maxAgeMs > 0) {
+        const ageMs = Date.now() - generatedAt;
+        if (ageMs > maxAgeMs) {
+          // Remove stale list cache so future requests don't keep probing old payloads.
+          void r2.delete(cacheKey);
+          continue;
+        }
+      }
+
       // If we read from legacy key, promote to versioned key asynchronously.
       if (cacheKey !== primaryKey) {
         void r2.put(primaryKey, text, {
@@ -160,7 +179,7 @@ export async function getCachedList(
 
       return {
         data: parsed.data.map(normalizeCachedSkill),
-        generatedAt: Number(parsed.generatedAt ?? Date.now()),
+        generatedAt,
       };
     }
     return null;
@@ -178,7 +197,9 @@ export async function getTrendingSkills(
   limit: number = 12
 ): Promise<SkillCardData[]> {
   // 先尝试从 R2 缓存读取
-  const cached = await getCachedList(env.R2, 'trending', env.CACHE_VERSION);
+  const cached = await getCachedList(env.R2, 'trending', env.CACHE_VERSION, {
+    maxAgeMs: LIST_CACHE_MAX_AGE_MS,
+  });
   if (cached?.data) {
     const top = cached.data.slice(0, limit);
     if (!env.DB) return top;
@@ -266,7 +287,9 @@ export async function getRecentSkills(
   limit: number = 12
 ): Promise<SkillCardData[]> {
   // 先尝试从 R2 缓存读取
-  const cached = await getCachedList(env.R2, 'recent', env.CACHE_VERSION);
+  const cached = await getCachedList(env.R2, 'recent', env.CACHE_VERSION, {
+    maxAgeMs: LIST_CACHE_MAX_AGE_MS,
+  });
   if (cached?.data) {
     const top = cached.data.slice(0, limit);
     if (!env.DB) return top;
@@ -360,7 +383,9 @@ export async function getTopSkills(
   limit: number = 12
 ): Promise<SkillCardData[]> {
   // 先尝试从 R2 缓存读取
-  const cached = await getCachedList(env.R2, 'top', env.CACHE_VERSION);
+  const cached = await getCachedList(env.R2, 'top', env.CACHE_VERSION, {
+    maxAgeMs: LIST_CACHE_MAX_AGE_MS,
+  });
   if (cached?.data) {
     const top = cached.data.slice(0, limit);
     if (!env.DB) return top;
@@ -386,6 +411,7 @@ export async function getTopSkills(
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.visibility = 'public'
+      AND (s.skill_path IS NULL OR s.skill_path = '' OR s.skill_path NOT LIKE '.%')
     ORDER BY s.stars DESC
     LIMIT ?
   `)

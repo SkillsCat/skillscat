@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import SEO from '$lib/components/common/SEO.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
   import EmptyState from '$lib/components/feedback/EmptyState.svelte';
   import SkillCard from '$lib/components/skill/SkillCard.svelte';
@@ -7,8 +8,8 @@
   import Section from '$lib/components/layout/Section.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
-  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
-  import { SITE_DESCRIPTION } from '$lib/seo/constants';
+  import { buildOgImageUrl } from '$lib/seo/og';
+  import { SITE_URL } from '$lib/seo/constants';
 
   interface UserProfile {
     id: string;
@@ -48,10 +49,30 @@
   const skills = $derived(data.skills);
   const error = $derived(data.error);
   const profileDisplayName = $derived(profile?.name || username);
-  const profileCanonicalUrl = $derived(`https://skills.cat/u/${username}`);
+  const profileCanonicalUrl = $derived(`${SITE_URL}/u/${username}`);
   const profileDescription = $derived(`View ${profileDisplayName}'s public AI agent skills on SkillsCat.`);
   const ogImageUrl = $derived(
     buildOgImageUrl({ type: 'user', slug: username ?? '' })
+  );
+  const pageTitle = $derived(profile && !error ? `${profileDisplayName} - SkillsCat` : 'User Not Found - SkillsCat');
+  const profileStructuredData = $derived(
+    profile && !error
+      ? {
+          '@context': 'https://schema.org',
+          '@type': 'ProfilePage',
+          name: pageTitle,
+          description: profileDescription,
+          url: profileCanonicalUrl,
+          mainEntity: {
+            '@type': profile.type === 'Organization' ? 'Organization' : 'Person',
+            name: profileDisplayName,
+            url: profileCanonicalUrl,
+            image: profile.image || undefined,
+            description: profile.bio || undefined,
+            sameAs: profile.githubUsername ? [`https://github.com/${profile.githubUsername}`] : undefined,
+          },
+        }
+      : null
   );
 
   function formatDate(timestamp: number): string {
@@ -76,32 +97,27 @@
   }
 </script>
 
-<svelte:head>
-  <title>{profileDisplayName} - SkillsCat</title>
-  {#if profile && !error}
-    <meta
-      name="description"
-      content={SITE_DESCRIPTION}
-    />
-    <link rel="canonical" href={profileCanonicalUrl} />
-    <meta property="og:title" content={`${profileDisplayName} - SkillsCat`} />
-    <meta property="og:description" content={SITE_DESCRIPTION} />
-    <meta property="og:type" content="profile" />
-    <meta property="og:url" content={profileCanonicalUrl} />
-    <meta property="og:image" content={ogImageUrl} />
-    <meta property="og:image:secure_url" content={ogImageUrl} />
-    <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
-    <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
-    <meta property="og:image:alt" content={`${profileDisplayName} profile social preview image`} />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content={`${profileDisplayName} - SkillsCat`} />
-    <meta name="twitter:description" content={SITE_DESCRIPTION} />
-    <meta name="twitter:image" content={ogImageUrl} />
-  {:else}
-    <meta name="description" content={SITE_DESCRIPTION} />
-    <meta name="robots" content="noindex, nofollow" />
-  {/if}
-</svelte:head>
+{#if profile && !error}
+  <SEO
+    title={pageTitle}
+    description={profileDescription}
+    url={profileCanonicalUrl}
+    image={ogImageUrl}
+    imageAlt={`${profileDisplayName} profile social preview image`}
+    type="profile"
+    keywords={['developer profile', 'ai agent skills author', 'skillscat user']}
+    structuredData={profileStructuredData}
+  />
+{:else}
+  <SEO
+    title={pageTitle}
+    description="The requested user profile could not be found on SkillsCat."
+    image={ogImageUrl}
+    imageAlt="User profile not found social preview image"
+    noindex
+    structuredData={null}
+  />
+{/if}
 
 <div class="profile-page">
   {#if error}
