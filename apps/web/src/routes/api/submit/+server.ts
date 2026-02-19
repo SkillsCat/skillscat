@@ -18,6 +18,141 @@ const QUEUE_DELAY_MS = 1000; // 1 second delay between queue messages
 const DOT_FOLDER_MIN_STARS = 500;
 /** Maximum size for submit request JSON body */
 const MAX_SUBMIT_BODY_BYTES = 16 * 1024;
+/** Fast-fail policy for token-based submit calls */
+const GITHUB_TOKEN_SUBMIT_MAX_RETRIES = 0;
+const GITHUB_TOKEN_SUBMIT_MAX_DELAY_MS = 2_000;
+
+type GitHubUpstreamErrorCode = 'github_rate_limited' | 'github_upstream_failure';
+type GitHubRequestMode = 'default' | 'token_fast_fail';
+
+class GitHubUpstreamError extends Error {
+  readonly code: GitHubUpstreamErrorCode;
+  readonly status: number;
+  readonly retryAfterSeconds: number | null;
+
+  constructor({
+    code,
+    status,
+    message,
+    retryAfterSeconds = null,
+  }: {
+    code: GitHubUpstreamErrorCode;
+    status: number;
+    message: string;
+    retryAfterSeconds?: number | null;
+  }) {
+    super(message);
+    this.name = 'GitHubUpstreamError';
+    this.code = code;
+    this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+function parseRetryAfterSeconds(headers: Headers): number | null {
+  const retryAfter = headers.get('retry-after');
+  if (retryAfter) {
+    const asSeconds = Number.parseInt(retryAfter, 10);
+    if (Number.isFinite(asSeconds) && asSeconds >= 0) {
+      return asSeconds;
+    }
+
+    const asDate = Date.parse(retryAfter);
+    if (Number.isFinite(asDate)) {
+      return Math.max(0, Math.ceil((asDate - Date.now()) / 1000));
+    }
+  }
+
+  const reset = headers.get('x-ratelimit-reset');
+  if (reset) {
+    const epochSeconds = Number.parseInt(reset, 10);
+    if (Number.isFinite(epochSeconds) && epochSeconds > 0) {
+      return Math.max(0, epochSeconds - Math.floor(Date.now() / 1000));
+    }
+  }
+
+  return null;
+}
+
+function isGitHubRateLimited(response: Response): boolean {
+  if (response.status === 429) return true;
+  if (response.status !== 403) return false;
+
+  const remaining = response.headers.get('x-ratelimit-remaining');
+  return remaining === '0' || response.headers.has('retry-after');
+}
+
+function ensureGitHubNotRateLimited(response: Response): void {
+  if (!isGitHubRateLimited(response)) return;
+
+  const retryAfterSeconds = parseRetryAfterSeconds(response.headers);
+  const retryHint = retryAfterSeconds !== null ? ` Retry after ${retryAfterSeconds} seconds.` : '';
+
+  throw new GitHubUpstreamError({
+    code: 'github_rate_limited',
+    status: 429,
+    message: `GitHub API rate limit reached.${retryHint}`,
+    retryAfterSeconds,
+  });
+}
+
+function buildGitHubUpstreamResponse(err: GitHubUpstreamError, forValidation: boolean): Response {
+  const headers = new Headers({
+    'Cache-Control': 'no-store',
+  });
+
+  if (err.retryAfterSeconds !== null) {
+    headers.set('Retry-After', String(err.retryAfterSeconds));
+  }
+
+  if (forValidation) {
+    const body: Record<string, string | number | boolean> = {
+      valid: false,
+      error: err.message,
+      code: err.code,
+    };
+    if (err.retryAfterSeconds !== null) {
+      body.retryAfterSeconds = err.retryAfterSeconds;
+    }
+    return json(body, { status: err.status, headers });
+  }
+
+  const body: Record<string, string | number> = {
+    message: err.message,
+    code: err.code,
+  };
+  if (err.retryAfterSeconds !== null) {
+    body.retryAfterSeconds = err.retryAfterSeconds;
+  }
+  return json(body, { status: err.status, headers });
+}
+
+async function githubRequestForSubmit(
+  url: string,
+  token?: string,
+  mode: GitHubRequestMode = 'default'
+): Promise<Response> {
+  try {
+    const requestOptions: Parameters<typeof githubRequest>[1] = {
+      token,
+      userAgent: 'SkillsCat/1.0',
+    };
+
+    if (mode === 'token_fast_fail') {
+      requestOptions.maxRetries = GITHUB_TOKEN_SUBMIT_MAX_RETRIES;
+      requestOptions.maxDelayMs = GITHUB_TOKEN_SUBMIT_MAX_DELAY_MS;
+    }
+
+    return await githubRequest(url, requestOptions);
+  } catch (cause) {
+    log.error('GitHub request failed:', { url, cause });
+    throw new GitHubUpstreamError({
+      code: 'github_upstream_failure',
+      status: 503,
+      message: 'GitHub API request failed due to an upstream network issue. Please retry later.',
+    });
+  }
+}
 
 interface ArchiveData {
   id: string;
@@ -203,21 +338,22 @@ async function scanRepoForSkillMd(
   token?: string,
   basePath: string = '',
   maxDepth: number = MAX_DEPTH,
-  allowDotFolders: boolean = false
+  allowDotFolders: boolean = false,
+  mode: GitHubRequestMode = 'default'
 ): Promise<ScanResult> {
   try {
     // Use Git Trees API with recursive flag
-    const response = await githubRequest(
+    const response = await githubRequestForSubmit(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`,
-      {
-        token,
-        userAgent: 'SkillsCat/1.0',
-      }
+      token,
+      mode
     );
+
+    ensureGitHubNotRateLimited(response);
 
     if (!response.ok) {
       // Fallback to search API if trees API fails
-      return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, allowDotFolders);
+      return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, allowDotFolders, mode);
     }
 
     const data = await response.json() as GitHubTreeResponse;
@@ -270,9 +406,13 @@ async function scanRepoForSkillMd(
 
     return { found: limited, truncated };
   } catch (err) {
+    if (err instanceof GitHubUpstreamError) {
+      throw err;
+    }
+
     log.error('Error scanning repo with Trees API:', err);
     // Fallback to search API
-    return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, allowDotFolders);
+    return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, allowDotFolders, mode);
   }
 }
 
@@ -300,20 +440,25 @@ async function searchRepoForSkillMd(
   token?: string,
   basePath: string = '',
   maxDepth: number = MAX_DEPTH,
-  allowDotFolders: boolean = false
+  allowDotFolders: boolean = false,
+  mode: GitHubRequestMode = 'default'
 ): Promise<ScanResult> {
   try {
     const query = encodeURIComponent(`filename:SKILL.md repo:${owner}/${repo}`);
-    const response = await githubRequest(
+    const response = await githubRequestForSubmit(
       `${GITHUB_API_BASE}/search/code?q=${query}&per_page=100`,
-      {
-        token,
-        userAgent: 'SkillsCat/1.0',
-      }
+      token,
+      mode
     );
 
+    ensureGitHubNotRateLimited(response);
+
     if (!response.ok) {
-      return { found: [], truncated: false };
+      throw new GitHubUpstreamError({
+        code: 'github_upstream_failure',
+        status: 502,
+        message: `GitHub code search failed (${response.status}). Please retry later.`,
+      });
     }
 
     const data = await response.json() as GitHubSearchResponse;
@@ -359,8 +504,16 @@ async function searchRepoForSkillMd(
 
     return { found: limited, truncated };
   } catch (err) {
+    if (err instanceof GitHubUpstreamError) {
+      throw err;
+    }
+
     log.error('Error searching repo with Search API:', err);
-    return { found: [], truncated: false };
+    throw new GitHubUpstreamError({
+      code: 'github_upstream_failure',
+      status: 503,
+      message: 'GitHub code search failed due to an upstream network issue. Please retry later.',
+    });
   }
 }
 
@@ -493,12 +646,22 @@ function resolveSubmittedPath(parsedUrl: ParsedRepoUrl, defaultBranch: string): 
 /**
  * Fetch repository info from GitHub
  */
-async function fetchGitHubRepo(owner: string, repo: string, token?: string): Promise<RepoInfo | null> {
-  const response = await githubRequest(`${GITHUB_API_BASE}/repos/${owner}/${repo}`, {
-    token,
-    userAgent: 'SkillsCat/1.0',
-  });
-  if (!response.ok) return null;
+async function fetchGitHubRepo(
+  owner: string,
+  repo: string,
+  token?: string,
+  mode: GitHubRequestMode = 'default'
+): Promise<RepoInfo | null> {
+  const response = await githubRequestForSubmit(`${GITHUB_API_BASE}/repos/${owner}/${repo}`, token, mode);
+  ensureGitHubNotRateLimited(response);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new GitHubUpstreamError({
+      code: 'github_upstream_failure',
+      status: 502,
+      message: `GitHub repository lookup failed (${response.status}). Please retry later.`,
+    });
+  }
 
   const data = await response.json() as {
     name?: string;
@@ -522,21 +685,35 @@ async function fetchGitHubRepo(owner: string, repo: string, token?: string): Pro
 /**
  * Check if SKILL.md exists in GitHub repo (only in root, not in dot folders)
  */
-async function checkGitHubSkillMd(owner: string, repo: string, path: string, token?: string, allowDotFolders: boolean = false): Promise<boolean> {
+async function checkGitHubSkillMd(
+  owner: string,
+  repo: string,
+  path: string,
+  token?: string,
+  allowDotFolders: boolean = false,
+  mode: GitHubRequestMode = 'default'
+): Promise<boolean> {
   // Only check root SKILL.md (skip dot folders unless allowed for high-star repos)
   const skillPaths = [
     path ? `${path}/SKILL.md` : 'SKILL.md',
   ].filter(p => allowDotFolders || !isInDotFolder(p));
 
   for (const checkPath of skillPaths) {
-    const response = await githubRequest(
+    const response = await githubRequestForSubmit(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${checkPath}`,
-      {
-        token,
-        userAgent: 'SkillsCat/1.0',
-      }
+      token,
+      mode
     );
+    ensureGitHubNotRateLimited(response);
+
     if (response.ok) return true;
+    if (response.status !== 404) {
+      throw new GitHubUpstreamError({
+        code: 'github_upstream_failure',
+        status: 502,
+        message: `GitHub file lookup failed (${response.status}). Please retry later.`,
+      });
+    }
   }
 
   return false;
@@ -561,6 +738,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       throw error(401, 'Please sign in to submit a skill');
     }
     requireSubmitPublishScope(auth);
+    const githubRequestMode: GitHubRequestMode = auth.authMethod === 'token' ? 'token_fast_fail' : 'default';
 
     const body = await readLimitedJsonBody(request, MAX_SUBMIT_BODY_BYTES) as { url?: string; skillPath?: string };
     const { url, skillPath: explicitSkillPath } = body;
@@ -578,7 +756,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     const { owner, repo } = repoInfo;
 
     // Fetch repository info first
-    const repoData = await fetchGitHubRepo(owner, repo, githubToken);
+    const repoData = await fetchGitHubRepo(owner, repo, githubToken, githubRequestMode);
     if (!repoData) {
       throw error(404, 'Repository not found');
     }
@@ -602,7 +780,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     }
 
     // First, check if SKILL.md exists at the submitted path (or root if no path)
-    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, allowDotFolders);
+    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, allowDotFolders, githubRequestMode);
 
     if (hasSkillMd) {
       // SKILL.md found at the submitted path - submit directly
@@ -618,7 +796,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     }
 
     // No SKILL.md at submitted path - scan for SKILL.md files as fallback
-    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders);
+    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders, githubRequestMode);
 
     if (scanResult.found.length === 0) {
       throw error(400, 'No SKILL.md file found in the repository');
@@ -636,6 +814,11 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       platform,
     });
   } catch (err: any) {
+    if (err instanceof GitHubUpstreamError) {
+      log.error('GitHub upstream error while submitting skill:', err);
+      return buildGitHubUpstreamResponse(err, false);
+    }
+
     log.error('Error submitting skill:', err);
     if (err.status) throw err;
     throw error(500, 'Failed to submit skill');
@@ -862,7 +1045,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
     const githubToken = platform?.env?.GITHUB_TOKEN;
 
     // Fetch repository info first
-    const repoData = await fetchGitHubRepo(owner, repo, githubToken);
+    const repoData = await fetchGitHubRepo(owner, repo, githubToken, 'default');
     if (!repoData) {
       return json({ valid: false, error: 'Repository not found' });
     }
@@ -882,7 +1065,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
     const allowDotFolders = (repoData.stars ?? 0) >= DOT_FOLDER_MIN_STARS;
 
     // First, check if SKILL.md exists at the submitted path (or root if no path)
-    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, allowDotFolders);
+    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, allowDotFolders, 'default');
 
     if (hasSkillMd) {
       // SKILL.md found at the submitted path - check if already exists in DB
@@ -931,7 +1114,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
     }
 
     // No SKILL.md at submitted path - scan for SKILL.md files as fallback
-    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders);
+    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders, 'default');
 
     if (scanResult.found.length === 0) {
       return json({ valid: false, error: 'No SKILL.md file found in the repository' });
@@ -997,6 +1180,11 @@ export const GET: RequestHandler = async ({ platform, url }) => {
       stars: repoData.stars,
     });
   } catch (err: any) {
+    if (err instanceof GitHubUpstreamError) {
+      log.error('GitHub upstream error while checking URL:', err);
+      return buildGitHubUpstreamResponse(err, true);
+    }
+
     log.error('Error checking URL:', err);
     return json({ valid: false, error: 'Failed to validate URL' });
   }
