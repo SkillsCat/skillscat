@@ -170,9 +170,16 @@ function isBlockedAutomation(ua: string): boolean {
   return BLOCKED_AUTOMATION_UA.some((pattern) => pattern.test(ua));
 }
 
-function hasTokenAuthHeader(request: Request): boolean {
+function getBearerToken(request: Request): string | null {
   const authorization = request.headers.get('authorization') || '';
-  return /^bearer\s+/i.test(authorization);
+  const match = authorization.match(/^bearer\s+(.+)$/i);
+  if (!match) return null;
+  const token = match[1].trim();
+  return token ? token : null;
+}
+
+function hasTokenAuthHeader(request: Request): boolean {
+  return getBearerToken(request) !== null;
 }
 
 function isMutationMethod(method: string): boolean {
@@ -228,9 +235,27 @@ function getAdaptiveRateLimitOptions(env: App.Platform['env'] | undefined): Adap
   };
 }
 
-function pickRateLimitConfig(routeId: string | null, pathname: string, method: string): RateLimitConfig {
-  if (routeId === '/api/submit' || pathname === '/api/submit') {
-    return RATE_LIMITS.submit;
+function isSubmitRoute(routeId: string | null, pathname: string): boolean {
+  return routeId === '/api/submit' || pathname === '/api/submit';
+}
+
+async function getSubmitTokenRateLimitKey(request: Request): Promise<string | null> {
+  const token = getBearerToken(request);
+  if (!token) return null;
+
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+    const bytes = Array.from(new Uint8Array(digest).slice(0, 12));
+    const fingerprint = bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+    return `tk:${fingerprint}`;
+  } catch {
+    return null;
+  }
+}
+
+function pickRateLimitConfig(routeId: string | null, pathname: string, method: string, tokenAuth: boolean): RateLimitConfig {
+  if (isSubmitRoute(routeId, pathname)) {
+    return tokenAuth ? RATE_LIMITS.submitToken : RATE_LIMITS.submit;
   }
 
   if (routeId === '/api/skills/upload' || pathname === '/api/skills/upload') {
@@ -340,8 +365,14 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
     return null;
   }
 
-  const config = pickRateLimitConfig(routeId, pathname, method);
-  const clientKey = getRateLimitKey(request);
+  const config = pickRateLimitConfig(routeId, pathname, method, tokenAuth);
+  let clientKey = getRateLimitKey(request);
+  if (tokenAuth && isSubmitRoute(routeId, pathname)) {
+    const tokenKey = await getSubmitTokenRateLimitKey(request);
+    if (tokenKey) {
+      clientKey = tokenKey;
+    }
+  }
   const adaptiveOptions = getAdaptiveRateLimitOptions(platform?.env);
   const key = `${routeId ?? pathname}:${clientKey}`;
   const result = await checkRateLimit(kv, key, config, adaptiveOptions);

@@ -221,5 +221,11 @@ export const RATE_LIMITS = {
     limit: 20,
     windowSeconds: 60,
     prefix: 'rl:submit'
+  },
+  // Submit via API token: higher throughput with isolated token-level buckets
+  submitToken: {
+    limit: 120,
+    windowSeconds: 60,
+    prefix: 'rl:submit:token'
   }
 } as const;
