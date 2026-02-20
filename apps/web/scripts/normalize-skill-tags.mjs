@@ -14,6 +14,7 @@ const DEFAULTS = {
   envName: null,
   local: true,
   dryRun: false,
+  touchSkills: true,
   scanBatchSize: 500,
   applyBatchSize: 200,
   verbose: false,
@@ -33,6 +34,7 @@ Options:
   --local                 Run against local D1 (default)
   --remote                Run against remote D1
   --dry-run               Show summary without writing changes
+  --no-touch-skills       Do not update skills.updated_at for affected skills
   --scan-batch <n>        Rows fetched per scan query (default: 500)
   --apply-batch <n>       Changed rows per write transaction (default: 200)
   --verbose               Print per-batch details
@@ -90,6 +92,9 @@ function parseArgs(argv) {
         break;
       case '--dry-run':
         options.dryRun = true;
+        break;
+      case '--no-touch-skills':
+        options.touchSkills = false;
         break;
       case '--scan-batch':
         options.scanBatchSize = parsePositiveInt(takeArgValue(argv, i, arg), arg);
@@ -216,24 +221,38 @@ function normalizeTag(rawTag) {
 }
 
 function buildSqlForBatch(batch) {
-  const lines = ['BEGIN;'];
+  const insertLines = [];
+  const deleteLines = [];
+  const insertMap = new Map();
 
   for (const row of batch) {
     const skillId = escSql(row.skill_id);
     const oldTag = escSql(row.tag);
 
-    lines.push(`DELETE FROM skill_tags WHERE skill_id = ${skillId} AND tag = ${oldTag};`);
+    // Delete after insert to keep operation idempotent/safe without explicit SQL transactions.
+    deleteLines.push(`DELETE FROM skill_tags WHERE skill_id = ${skillId} AND tag = ${oldTag};`);
 
     if (row.nextTag) {
       const createdAt = Number.isFinite(Number(row.created_at)) ? Number(row.created_at) : Date.now();
-      lines.push(
-        `INSERT INTO skill_tags (skill_id, tag, created_at) VALUES (${skillId}, ${escSql(row.nextTag)}, ${createdAt}) ON CONFLICT(skill_id, tag) DO NOTHING;`
-      );
+      const key = `${row.skill_id}::${row.nextTag}`;
+      const prev = insertMap.get(key);
+      if (!prev || createdAt < prev.createdAt) {
+        insertMap.set(key, {
+          skillId,
+          tag: escSql(row.nextTag),
+          createdAt,
+        });
+      }
     }
   }
 
-  lines.push('COMMIT;');
-  return lines.join('\n');
+  for (const entry of insertMap.values()) {
+    insertLines.push(
+      `INSERT INTO skill_tags (skill_id, tag, created_at) VALUES (${entry.skillId}, ${entry.tag}, ${entry.createdAt}) ON CONFLICT(skill_id, tag) DO NOTHING;`
+    );
+  }
+
+  return [...insertLines, ...deleteLines].join('\n');
 }
 
 function flushChanges(changes, options) {
@@ -241,7 +260,28 @@ function flushChanges(changes, options) {
   if (options.dryRun) return;
 
   const sql = buildSqlForBatch(changes);
+  if (!sql.trim()) return;
   runD1(sql, options, false);
+}
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function touchSkillsUpdatedAt(skillIds, options) {
+  if (options.dryRun || !options.touchSkills) return;
+  if (!skillIds || skillIds.length === 0) return;
+
+  const now = Date.now();
+  for (const chunk of chunkArray(skillIds, 400)) {
+    const idsSql = chunk.map((id) => escSql(id)).join(', ');
+    const sql = `UPDATE skills SET updated_at = ${now} WHERE id IN (${idsSql});`;
+    runD1(sql, options, false);
+  }
 }
 
 async function main() {
@@ -263,6 +303,7 @@ async function main() {
   let untouched = 0;
   const samples = [];
   const pending = [];
+  const changedSkillIds = new Set();
 
   while (true) {
     const rows = runD1(
@@ -286,6 +327,7 @@ async function main() {
       }
 
       changed++;
+      changedSkillIds.add(String(row.skill_id));
       if (!nextTag) {
         deleted++;
       } else {
@@ -322,9 +364,13 @@ async function main() {
   }
 
   flushChanges(pending, options);
+  touchSkillsUpdatedAt(Array.from(changedSkillIds), options);
 
   console.log(
     `[normalize-tags] done scanned=${scanned} changed=${changed} rewritten=${rewritten} deleted=${deleted} untouched=${untouched}`
+  );
+  console.log(
+    `[normalize-tags] affectedSkills=${changedSkillIds.size} touchSkills=${options.dryRun ? false : options.touchSkills}`
   );
 
   if (samples.length > 0) {
