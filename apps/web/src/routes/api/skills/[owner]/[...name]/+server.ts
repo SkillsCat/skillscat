@@ -13,10 +13,7 @@ import {
 } from '$lib/skill-path';
 
 /**
- * GET /api/skills/[owner]/[name] - Get skill by owner and name
- *
- * This is the two-segment path version that produces clean URLs like:
- * /api/skills/testuser/my-skill instead of /api/skills/%40testuser%2Fmy-skill
+ * GET /api/skills/[owner]/[...name] - Get skill by owner and name
  */
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const owner = normalizeSkillOwner(params.owner);
@@ -294,7 +291,7 @@ function buildR2Paths(skill: SkillInfo): string[] {
 }
 
 /**
- * DELETE /api/skills/[owner]/[name] - Delete a private skill
+ * DELETE /api/skills/[owner]/[...name] - Delete a private skill
  *
  * Only the owner can delete a skill, and only uploaded (private) skills can be deleted.
  * GitHub-sourced skills cannot be deleted through this endpoint.

@@ -64,8 +64,13 @@ export function encodeSkillSlugForPath(slug: string): string {
   const parts = parseSkillSlug(slug);
   if (!parts) return '';
 
-  // URL shape is always /skills/[owner]/[name], where name may include "/" in slug.
-  return `${encodeURIComponent(parts.owner)}/${encodeURIComponent(parts.name)}`;
+  const encodedName = parts.name
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+
+  // URL shape is /skills/[owner]/[name...], with each segment encoded independently.
+  return `${encodeURIComponent(parts.owner)}/${encodedName}`;
 }
 
 export function buildSkillPath(slug: string): string {
@@ -95,7 +100,7 @@ export function buildUploadSkillR2Key(slug: string, filePath: string): string {
 export function getCanonicalSkillPathFromPathname(pathname: string): string | null {
   const pathOnly = pathname.replace(/\/+$/, '') || '/';
   const segments = pathOnly.split('/').filter(Boolean);
-  if (segments[0] !== 'skills' || segments.length < 4) {
+  if (segments[0] !== 'skills' || segments.length < 3) {
     return null;
   }
 

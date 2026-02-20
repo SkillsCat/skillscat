@@ -45,10 +45,13 @@ function getAccessClientKey(request: Request, userId: string | null): string | u
 }
 
 /**
- * Two-segment skill detail page: /skills/[owner]/[name]
+ * Multi-segment skill detail page: /skills/[owner]/[...name]
  *
- * This route handles clean URLs like /skills/testowner/testrepo
- * using unified slug format: owner/name
+ * This route handles URLs like:
+ * - /skills/testowner/testrepo
+ * - /skills/testowner/testrepo/sub-skill
+ *
+ * with unified slug format: owner/name...
  */
 export const load: PageServerLoad = async ({ params, platform, locals, request, setHeaders, cookies }) => {
   setPublicPageCache({

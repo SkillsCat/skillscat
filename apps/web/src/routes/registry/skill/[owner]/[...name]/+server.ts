@@ -24,10 +24,7 @@ export interface RegistrySkillItem {
 }
 
 /**
- * GET /registry/skill/[owner]/[name] - Get skill by owner and name
- *
- * This is the two-segment path version that produces clean URLs like:
- * /registry/skill/testuser/my-skill instead of /registry/skill/%40testuser%2Fmy-skill
+ * GET /registry/skill/[owner]/[...name] - Get skill by owner and name
  */
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const owner = normalizeSkillOwner(params.owner);

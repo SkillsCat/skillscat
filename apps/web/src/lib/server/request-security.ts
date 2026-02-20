@@ -73,7 +73,7 @@ const UA_PROTECTED_ROUTE_IDS = new Set([
   '/api/skills/[slug]/files',
   '/api/skills/[slug]/file',
   '/api/skills/[slug]/track-install',
-  '/registry/skill/[owner]/[name]',
+  '/registry/skill/[owner]/[...name]',
 ]);
 
 const BLOCKED_AUTOMATION_UA = [
@@ -269,7 +269,7 @@ function pickRateLimitConfig(routeId: string | null, pathname: string, method: s
   if (
     routeId === '/api/skills/[slug]/files' ||
     routeId === '/api/skills/[slug]/download' ||
-    routeId === '/registry/skill/[owner]/[name]'
+    routeId === '/registry/skill/[owner]/[...name]'
   ) {
     return HEAVY_TRANSFER_LIMIT;
   }
