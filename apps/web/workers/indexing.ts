@@ -351,18 +351,10 @@ async function checkAndConvertPrivateSkill(
 async function getLatestCommitSha(
   owner: string,
   name: string,
-  env: IndexingEnv
+  env: IndexingEnv,
+  defaultBranch?: string
 ): Promise<{ sha: string; branch: string } | null> {
-  // Get repository info (includes default branch)
-  const repo = await githubFetch<GitHubRepo>(getRepoApiUrl(owner, name), {
-    token: env.GITHUB_TOKEN,
-    apiVersion: env.GITHUB_API_VERSION,
-    userAgent: 'SkillsCat-Indexing-Worker/1.0',
-  });
-
-  if (!repo) return null;
-
-  const branch = repo.default_branch;
+  const branch = defaultBranch || 'main';
 
   // Get latest commit
   const commitUrl = `https://api.github.com/repos/${owner}/${name}/commits/${branch}`;
@@ -436,6 +428,44 @@ async function getStoredCommitSha(
 }
 
 /**
+ * Get stored blob SHAs from previous indexed file structure.
+ */
+async function getStoredFileShas(
+  owner: string,
+  name: string,
+  skillPath: string | null,
+  env: IndexingEnv
+): Promise<Map<string, string>> {
+  const normalizedPath = skillPath || '';
+  const shas = new Map<string, string>();
+
+  const result = await env.DB.prepare(`
+    SELECT file_structure FROM skills
+    WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, '') = ?
+    LIMIT 1
+  `)
+    .bind(owner, name, normalizedPath)
+    .first<{ file_structure: string | null }>();
+
+  if (!result?.file_structure) {
+    return shas;
+  }
+
+  try {
+    const parsed = JSON.parse(result.file_structure) as { files?: Array<{ path?: string; sha?: string }> };
+    for (const file of parsed.files || []) {
+      if (file.path && file.sha) {
+        shas.set(file.path, file.sha);
+      }
+    }
+  } catch (err) {
+    log.warn(`Failed to parse stored file_structure for ${owner}/${name}:`, err);
+  }
+
+  return shas;
+}
+
+/**
  * Check if skill needs update based on commit SHA
  */
 async function needsUpdate(
@@ -476,7 +506,8 @@ async function fetchDirectoryFiles(
   branch: string,
   skillPath: string | null,
   env: IndexingEnv,
-  allowDotFolders: boolean = false
+  allowDotFolders: boolean = false,
+  previousFileShas?: Map<string, string>
 ): Promise<{ files: DirectoryFile[]; textContents: Map<string, string> }> {
   const treeUrl = `https://api.github.com/repos/${owner}/${name}/git/trees/${branch}?recursive=1`;
   const treeData = await githubFetch<GitHubTreeResponse>(treeUrl, {
@@ -490,11 +521,14 @@ async function fetchDirectoryFiles(
   }
 
   const prefix = skillPath ? `${skillPath}/` : '';
+  const r2PathPart = skillPath ? `/${skillPath}` : '';
+  const r2Prefix = `skills/${owner}/${name}${r2PathPart}/`;
   const files: DirectoryFile[] = [];
   const textContents = new Map<string, string>();
 
   let fileCount = 0;
   let totalSize = 0;
+  let reusedFromR2 = 0;
 
   for (const item of treeData.tree) {
     if (fileCount >= MAX_FILES) {
@@ -547,6 +581,16 @@ async function fetchDirectoryFiles(
 
     // Fetch content for text files only
     if (isText) {
+      const previousSha = previousFileShas?.get(relativePath);
+      if (previousSha && previousSha === item.sha) {
+        const cachedObject = await env.R2.get(`${r2Prefix}${relativePath}`);
+        if (cachedObject) {
+          textContents.set(relativePath, await cachedObject.text());
+          reusedFromR2++;
+          continue;
+        }
+      }
+
       const blobUrl = `https://api.github.com/repos/${owner}/${name}/git/blobs/${item.sha}`;
       const blobData = await githubFetch<{ content: string; encoding: string }>(blobUrl, {
         token: env.GITHUB_TOKEN,
@@ -565,6 +609,9 @@ async function fetchDirectoryFiles(
     }
   }
 
+  if (reusedFromR2 > 0) {
+    log.log(`Reused ${reusedFromR2} text files from R2 cache by blob SHA`);
+  }
   log.log(`Fetched ${files.length} files (${textContents.size} text, ${files.length - textContents.size} binary), total size: ${totalSize} bytes`);
 
   return { files, textContents };
@@ -580,13 +627,16 @@ async function cacheDirectoryFiles(
   skillPath: string | null,
   textContents: Map<string, string>,
   commitSha: string,
+  directoryFiles: DirectoryFile[],
   env: IndexingEnv
 ): Promise<void> {
   const pathPart = skillPath ? `/${skillPath}` : '';
   const r2Prefix = `skills/${owner}/${name}${pathPart}/`;
+  const fileByPath = new Map(directoryFiles.map((file) => [file.path, file]));
 
   for (const [relativePath, content] of textContents) {
     const r2Path = `${r2Prefix}${relativePath}`;
+    const fileMeta = fileByPath.get(relativePath);
 
     await env.R2.put(r2Path, content, {
       httpMetadata: {
@@ -595,6 +645,7 @@ async function cacheDirectoryFiles(
       customMetadata: {
         skillId,
         commitSha,
+        blobSha: fileMeta?.sha || '',
         indexedAt: new Date().toISOString(),
       },
     });
@@ -965,7 +1016,12 @@ async function processMessage(
   const allowDotFolders = repo.stargazers_count >= DOT_FOLDER_MIN_STARS;
 
   // Step 2: Get latest commit SHA
-  const latestCommit = await getLatestCommitSha(repoOwner, repoName, env);
+  const latestCommit = await getLatestCommitSha(
+    repoOwner,
+    repoName,
+    env,
+    repo.default_branch
+  );
   if (!latestCommit) {
     log.log(`Failed to get latest commit SHA: ${repoOwner}/${repoName}`);
     return;
@@ -1005,6 +1061,9 @@ async function processMessage(
   // Step 5: Fetch all files from directory using Tree API
   let directoryFiles: DirectoryFile[] = [];
   let textContents = new Map<string, string>();
+  const previousFileShas = exists
+    ? await getStoredFileShas(repoOwner, repoName, skillPath || null, env)
+    : undefined;
 
   try {
     const result = await fetchDirectoryFiles(
@@ -1013,7 +1072,8 @@ async function processMessage(
       latestCommit.branch,
       skillPath || null,
       env,
-      allowDotFolders
+      allowDotFolders,
+      previousFileShas
     );
     directoryFiles = result.files;
     textContents = result.textContents;
@@ -1145,6 +1205,7 @@ async function processMessage(
       skillPath || null,
       textContents,
       latestCommit.sha,
+      directoryFiles,
       env
     );
     log.log(`Cached ${textContents.size} files to R2`);

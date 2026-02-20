@@ -289,6 +289,180 @@
     data.skill.repoName
   ));
   const encodedApiSkillSlug = $derived(data.skill ? encodeURIComponent(data.skill.slug) : '');
+  const canUseDirectGitHubRead = $derived(Boolean(
+    data.skill &&
+    data.skill.visibility === 'public' &&
+    data.skill.sourceType === 'github' &&
+    data.skill.repoOwner &&
+    data.skill.repoName
+  ));
+
+  const MAX_DIRECT_DOWNLOAD_FILES = 12;
+  const MAX_DIRECT_FILE_SIZE = 512 * 1024;
+  const MIN_DIRECT_RATE_LIMIT_REMAINING = 15;
+  let allowDirectGitHubRead = $state(true);
+
+  interface GitHubContentResponse {
+    content?: string;
+    encoding?: string;
+    size?: number;
+    type?: string;
+  }
+
+  interface DirectSkillFilesPayload {
+    folderName: string;
+    files: Array<{ path: string; content: string }>;
+  }
+
+  interface DirectGitHubFileResult {
+    content: string | null;
+    remaining: number | null;
+  }
+
+  function decodeGitHubBase64ToUtf8(base64: string): string {
+    const cleanBase64 = base64.replace(/\n/g, '');
+    const binaryString = atob(cleanBase64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+
+  function buildGitHubContentApiUrl(relativePath: string): string | null {
+    if (!data.skill || !canUseDirectGitHubRead || !allowDirectGitHubRead) return null;
+
+    const normalizedRelativePath = relativePath.replace(/^\/+/, '').replace(/^\.\//, '');
+    if (!normalizedRelativePath || normalizedRelativePath.includes('..')) return null;
+
+    const fullPath = data.skill.skillPath
+      ? `${data.skill.skillPath}/${normalizedRelativePath}`.replace(/^\/+/, '')
+      : normalizedRelativePath;
+
+    const encodedPath = fullPath
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+
+    if (!encodedPath) return null;
+
+    return `https://api.github.com/repos/${encodeURIComponent(data.skill.repoOwner)}/${encodeURIComponent(data.skill.repoName)}/contents/${encodedPath}`;
+  }
+
+  function parseRateLimitRemaining(headers: Headers): number | null {
+    const value = headers.get('x-ratelimit-remaining');
+    if (!value) return null;
+
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  async function fetchGitHubFileDirect(relativePath: string): Promise<DirectGitHubFileResult> {
+    const contentUrl = buildGitHubContentApiUrl(relativePath);
+    if (!contentUrl) return { content: null, remaining: null };
+
+    const response = await fetch(contentUrl, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+      },
+    });
+
+    const remaining = parseRateLimitRemaining(response.headers);
+    if (remaining !== null && remaining <= MIN_DIRECT_RATE_LIMIT_REMAINING) {
+      allowDirectGitHubRead = false;
+    }
+
+    if (response.status === 404) return { content: null, remaining };
+    if (
+      response.status === 429 ||
+      (response.status === 403 && remaining === 0)
+    ) {
+      allowDirectGitHubRead = false;
+    }
+    if (!response.ok) throw new Error(`GitHub fetch failed (${response.status})`);
+
+    const payload = await response.json() as GitHubContentResponse;
+    if (payload.type !== 'file' || payload.encoding !== 'base64' || !payload.content) {
+      throw new Error('Unexpected GitHub content response');
+    }
+
+    if (payload.size && payload.size > MAX_DIRECT_FILE_SIZE) {
+      throw new Error('File too large');
+    }
+
+    return {
+      content: decodeGitHubBase64ToUtf8(payload.content),
+      remaining,
+    };
+  }
+
+  function collectDownloadableFilePaths(nodes: FileNode[], paths: string[]): boolean {
+    for (const node of nodes) {
+      if (paths.length >= MAX_DIRECT_DOWNLOAD_FILES) return true;
+
+      if (node.type === 'directory') {
+        if (node.children && node.children.length > 0) {
+          const exceeded = collectDownloadableFilePaths(node.children, paths);
+          if (exceeded) return true;
+        }
+        continue;
+      }
+
+      if (isBinaryFile(node.path)) continue;
+      if (node.size && node.size > MAX_DIRECT_FILE_SIZE) continue;
+      paths.push(node.path);
+    }
+
+    return false;
+  }
+
+  async function fetchSkillFilesDirectFromGitHub(): Promise<DirectSkillFilesPayload | null> {
+    if (!data.skill || !canUseDirectGitHubRead) return null;
+
+    try {
+      const folderName = data.skill.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
+      const filePaths: string[] = [];
+      let exceededDirectLimit = false;
+
+      if (data.skill.fileStructure && data.skill.fileStructure.length > 0) {
+        exceededDirectLimit = collectDownloadableFilePaths(data.skill.fileStructure, filePaths);
+      }
+
+      if (filePaths.length === 0) {
+        filePaths.push('SKILL.md');
+      }
+
+      if (exceededDirectLimit) {
+        return null;
+      }
+
+      const files: Array<{ path: string; content: string }> = [];
+      const uniqueFilePaths = [...new Set(filePaths)];
+      let remainingBudget: number | null = null;
+
+      for (const filePath of uniqueFilePaths) {
+        if (remainingBudget !== null && remainingBudget <= MIN_DIRECT_RATE_LIMIT_REMAINING) {
+          return null;
+        }
+
+        const result = await fetchGitHubFileDirect(filePath);
+        remainingBudget = result.remaining;
+
+        if (result.content === null) {
+          return null;
+        }
+        files.push({ path: filePath, content: result.content });
+      }
+
+      if (files.length === 0) return null;
+
+      return { folderName, files };
+    } catch (error) {
+      console.warn('Direct GitHub fetch failed, fallback to SkillsCat API:', error);
+      return null;
+    }
+  }
 
   // Installation commands
   const installCommands = $derived(data.skill ? [
@@ -340,16 +514,20 @@
             startIn: 'documents'
           });
 
-          // Fetch all files
-          const response = await fetch(`/api/skills/${encodedApiSkillSlug}/files`);
-          if (!response.ok) {
-            if (response.status === 429) {
-              toast('Too many requests. Please wait a moment.', 'warning');
-              return;
+          // Public GitHub skills: optimistic direct fetch (unauthorized), fallback to platform API.
+          let payload = await fetchSkillFilesDirectFromGitHub();
+          if (!payload) {
+            const response = await fetch(`/api/skills/${encodedApiSkillSlug}/files`);
+            if (!response.ok) {
+              if (response.status === 429) {
+                toast('Too many requests. Please wait a moment.', 'warning');
+                return;
+              }
+              throw new Error('Failed to fetch files');
             }
-            throw new Error('Failed to fetch files');
+            payload = await response.json() as { folderName: string; files: Array<{ path: string; content: string }> };
           }
-          const { folderName, files } = await response.json() as { folderName: string; files: Array<{ path: string; content: string }> };
+          const { folderName, files } = payload;
 
           // Create skill folder
           const skillDir = await dirHandle.getDirectoryHandle(folderName, { create: true });
@@ -452,13 +630,25 @@
     fileLoading = true;
 
     try {
-      const res = await fetch(`/api/skills/${encodedApiSkillSlug}/file?path=${encodeURIComponent(path)}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: 'Failed to load file' })) as { message?: string };
-        throw new Error(err.message || 'Failed to load file');
+      // Public GitHub skills: optimistic direct fetch (unauthorized), fallback to platform API.
+      let directContent: string | null = null;
+      try {
+        const directResult = await fetchGitHubFileDirect(path);
+        directContent = directResult.content;
+      } catch (directError) {
+        console.warn('Direct GitHub file fetch failed, fallback to SkillsCat API:', directError);
       }
-      const result = await res.json() as { path: string; content: string };
-      fileContent = result.content;
+      if (directContent !== null) {
+        fileContent = directContent;
+      } else {
+        const res = await fetch(`/api/skills/${encodedApiSkillSlug}/file?path=${encodeURIComponent(path)}`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ message: 'Failed to load file' })) as { message?: string };
+          throw new Error(err.message || 'Failed to load file');
+        }
+        const result = await res.json() as { path: string; content: string };
+        fileContent = result.content;
+      }
 
       // Highlight the content if shiki is loaded
       if (highlighter && fileContent) {

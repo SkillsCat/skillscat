@@ -8,6 +8,7 @@
 import type { GithubEventsEnv, GitHubEvent, IndexingMessage } from './shared/types';
 import { githubFetch } from './shared/utils';
 const EVENTS_PER_PAGE = 100;
+const REPO_QUEUE_DEDUP_TTL_SECONDS = 5 * 60;
 
 /**
  * 获取 GitHub Events
@@ -80,6 +81,33 @@ async function markEventProcessed(env: GithubEventsEnv, eventId: string): Promis
 }
 
 /**
+ * Check if a repository has been queued recently.
+ * This suppresses bursts of duplicate queue messages for hot repos.
+ */
+async function wasRepoQueuedRecently(
+  env: GithubEventsEnv,
+  owner: string,
+  name: string
+): Promise<boolean> {
+  const key = `github-events:repo-queued:${owner.toLowerCase()}/${name.toLowerCase()}`;
+  return (await env.KV.get(key)) !== null;
+}
+
+/**
+ * Mark a repository as recently queued.
+ */
+async function markRepoQueued(
+  env: GithubEventsEnv,
+  owner: string,
+  name: string
+): Promise<void> {
+  const key = `github-events:repo-queued:${owner.toLowerCase()}/${name.toLowerCase()}`;
+  await env.KV.put(key, '1', {
+    expirationTtl: REPO_QUEUE_DEDUP_TTL_SECONDS,
+  });
+}
+
+/**
  * 处理 GitHub Events
  */
 async function processEvents(env: GithubEventsEnv): Promise<{ processed: number; queued: number }> {
@@ -116,7 +144,13 @@ async function processEvents(env: GithubEventsEnv): Promise<{ processed: number;
 
       const message = extractRepoInfo(event);
       if (message) {
+        if (await wasRepoQueuedRecently(env, message.repoOwner, message.repoName)) {
+          await markEventProcessed(env, event.id);
+          continue;
+        }
+
         await env.INDEXING_QUEUE.send(message);
+        await markRepoQueued(env, message.repoOwner, message.repoName);
         queued++;
         console.log(`Queued repo for indexing: ${message.repoOwner}/${message.repoName}`);
       }
