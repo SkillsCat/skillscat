@@ -90,8 +90,10 @@
 
       success = true;
       githubUrl = '';
-    } catch (err: any) {
-      error = err.message || 'An error occurred';
+    } catch (err: unknown) {
+      error = err instanceof Error && err.message
+        ? err.message
+        : 'An error occurred';
     } finally {
       isSubmitting = false;
     }

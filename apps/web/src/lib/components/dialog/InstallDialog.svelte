@@ -30,6 +30,15 @@
   type InstallTarget = 'claude' | 'cursor' | 'codex' | 'custom';
   type Platform = 'mac' | 'linux' | 'windows' | 'unknown';
 
+  interface DirectoryPickerOptions {
+    mode?: 'read' | 'readwrite';
+    startIn?: 'documents' | string;
+  }
+
+  interface WindowWithDirectoryPicker extends Window {
+    showDirectoryPicker?: (options?: DirectoryPickerOptions) => Promise<FileSystemDirectoryHandle>;
+  }
+
   let selectedTarget = $state<InstallTarget>('claude');
   let isInstalling = $state(false);
   let installError = $state<string | null>(null);
@@ -94,8 +103,14 @@
     installError = null;
 
     try {
+      const pickerWindow = window as WindowWithDirectoryPicker;
+      if (typeof pickerWindow.showDirectoryPicker !== 'function') {
+        installError = 'File System API is not supported in this browser';
+        return;
+      }
+
       // Request directory access
-      const dirHandle = await (window as any).showDirectoryPicker({
+      const dirHandle = await pickerWindow.showDirectoryPicker({
         mode: 'readwrite',
         startIn: 'documents',
       });
@@ -119,12 +134,17 @@
       }
 
       onClose?.();
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
+    } catch (errorValue: unknown) {
+      const errorName = typeof errorValue === 'object' && errorValue !== null && 'name' in errorValue
+        ? String((errorValue as { name: unknown }).name)
+        : '';
+      if (errorName === 'AbortError') {
         // User cancelled
         return;
       }
-      installError = error.message || 'Installation failed';
+      installError = errorValue instanceof Error && errorValue.message
+        ? errorValue.message
+        : 'Installation failed';
     } finally {
       isInstalling = false;
     }

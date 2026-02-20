@@ -83,7 +83,7 @@
   let searchQuery = $state('');
 
   // Icon mapping for categories (same as Navbar and categories page)
-  const categoryIcons: Record<string, any> = {
+  const categoryIcons: Record<string, typeof GitBranchIcon> = {
     'git': GitBranchIcon,
     'code-generation': CodeIcon,
     'refactoring': RefreshIcon,

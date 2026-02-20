@@ -17,7 +17,10 @@ const DEFAULT_REGISTRY_URL = 'http://localhost:3000/registry';
 async function waitForServer(url: string, timeoutMs = 90000): Promise<void> {
   const start = Date.now();
   let lastError: unknown;
-  const fetchFn = (globalThis as any).fetch as (input: string) => Promise<{ ok: boolean }>;
+  const fetchFn = globalThis.fetch;
+  if (typeof fetchFn !== 'function') {
+    throw new Error('Global fetch is not available in this runtime');
+  }
 
   while (Date.now() - start < timeoutMs) {
     try {

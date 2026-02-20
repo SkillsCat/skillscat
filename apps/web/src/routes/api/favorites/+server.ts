@@ -2,6 +2,32 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { checkSkillAccess } from '$lib/server/permissions';
 
+interface FavoriteSkillRow {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  repoOwner: string;
+  repoName: string;
+  stars: number;
+  forks: number;
+  trendingScore: number;
+  updatedAt: number;
+  authorAvatar: string | null;
+  favoritedAt: number;
+}
+
+interface SkillCategoryRow {
+  skill_id: string;
+  category_slug: string;
+}
+
+function hasStatus(errorValue: unknown): errorValue is { status: number } {
+  if (typeof errorValue !== 'object' || errorValue === null) return false;
+  if (!('status' in errorValue)) return false;
+  return typeof (errorValue as { status: unknown }).status === 'number';
+}
+
 /**
  * GET /api/favorites - 获取用户收藏列表
  */
@@ -69,7 +95,7 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
       LIMIT ? OFFSET ?
     `)
       .bind(userId, userId, userId, userId, now, limit, offset)
-      .all();
+      .all<FavoriteSkillRow>();
 
     // 获取总数
     const countResult = await db.prepare(`
@@ -98,7 +124,7 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
       .first<{ total: number }>();
 
     // 获取每个 skill 的分类
-    const skillIds = favorites.results.map((f: any) => f.id);
+    const skillIds = favorites.results.map((favorite) => favorite.id);
     let categoriesMap: Record<string, string[]> = {};
 
     if (skillIds.length > 0) {
@@ -108,9 +134,9 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
         WHERE skill_id IN (${placeholders})
       `)
         .bind(...skillIds)
-        .all();
+        .all<SkillCategoryRow>();
 
-      for (const cat of categories.results as any[]) {
+      for (const cat of categories.results) {
         if (!categoriesMap[cat.skill_id]) {
           categoriesMap[cat.skill_id] = [];
         }
@@ -119,9 +145,9 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
     }
 
     // 组装结果
-    const results = favorites.results.map((f: any) => ({
-      ...f,
-      categories: categoriesMap[f.id] || [],
+    const results = favorites.results.map((favorite) => ({
+      ...favorite,
+      categories: categoriesMap[favorite.id] || [],
     }));
 
     return json({
@@ -130,9 +156,9 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
       limit,
       offset,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Error fetching favorites:', err);
-    if (err.status) throw err;
+    if (hasStatus(err)) throw err;
     throw error(500, 'Failed to fetch favorites');
   }
 };
@@ -204,9 +230,9 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       .run();
 
     return json({ success: true, message: 'Favorite added' });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Error adding favorite:', err);
-    if (err.status) throw err;
+    if (hasStatus(err)) throw err;
     throw error(500, 'Failed to add favorite');
   }
 };
@@ -252,9 +278,9 @@ export const DELETE: RequestHandler = async ({ locals, platform, request }) => {
       .run();
 
     return json({ success: true, message: 'Favorite removed' });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Error removing favorite:', err);
-    if (err.status) throw err;
+    if (hasStatus(err)) throw err;
     throw error(500, 'Failed to remove favorite');
   }
 };

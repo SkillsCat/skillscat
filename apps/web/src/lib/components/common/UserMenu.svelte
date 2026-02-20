@@ -22,12 +22,14 @@
     unreadCount?: number;
   }
 
+  type LoginDialogComponentType = typeof import('$lib/components/dialog/LoginDialog.svelte').default;
+
   let { unreadCount = 0 }: Props = $props();
 
   const session = useSession();
 
   let showLoginDialog = $state(false);
-  let LoginDialogComponent = $state<any>(null);
+  let LoginDialogComponent = $state<LoginDialogComponentType | null>(null);
   let isLoadingLoginDialog = $state(false);
 
   function handleSignOut() {

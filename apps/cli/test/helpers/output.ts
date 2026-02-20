@@ -31,8 +31,10 @@ export async function runCommand(fn: () => Promise<void> | void): Promise<{
   const warnSpy = vi.spyOn(console, 'warn').mockImplementation((...args) => {
     warns.push(args.join(' '));
   });
-  const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true as any);
-  const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true as any);
+  const stdoutWriteMock = ((..._args: Parameters<typeof process.stdout.write>) => true) as typeof process.stdout.write;
+  const stderrWriteMock = ((..._args: Parameters<typeof process.stderr.write>) => true) as typeof process.stderr.write;
+  const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(stdoutWriteMock);
+  const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(stderrWriteMock);
 
   const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: number) => {
     throw new ExitError(code ?? 0);

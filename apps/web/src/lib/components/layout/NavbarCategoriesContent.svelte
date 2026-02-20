@@ -50,7 +50,7 @@
     Calculator01Icon
   } from '@hugeicons/core-free-icons';
 
-  const categoryIcons: Record<string, any> = {
+  const categoryIcons: Record<string, typeof GitBranchIcon> = {
     'code-generation': CodeIcon,
     'refactoring': RefreshIcon,
     'debugging': Bug01Icon,

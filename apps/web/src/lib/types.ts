@@ -24,7 +24,7 @@ export interface SkillCardData {
   forks: number;
   trendingScore: number;
   updatedAt: number;
-  authorAvatar?: string;
+  authorAvatar?: string | null;
   categories: string[]; // category slugs
 }
 
@@ -38,21 +38,21 @@ export interface SkillDetail extends SkillCardData {
   indexedAt: number;
   license?: string | null;
   // Author info
-  authorUsername?: string;
-  authorDisplayName?: string;
-  authorBio?: string;
-  authorSkillsCount?: number;
-  authorTotalStars?: number;
+  authorUsername?: string | null;
+  authorDisplayName?: string | null;
+  authorBio?: string | null;
+  authorSkillsCount?: number | null;
+  authorTotalStars?: number | null;
   // Private skill fields
   visibility: 'public' | 'private' | 'unlisted';
   sourceType: 'github' | 'upload';
-  ownerId?: string;
-  ownerName?: string;
-  ownerAvatar?: string;
-  orgId?: string;
-  orgName?: string;
-  orgSlug?: string;
-  orgAvatar?: string;
+  ownerId?: string | null;
+  ownerName?: string | null;
+  ownerAvatar?: string | null;
+  orgId?: string | null;
+  orgName?: string | null;
+  orgSlug?: string | null;
+  orgAvatar?: string | null;
 }
 
 // ========== File Node ==========

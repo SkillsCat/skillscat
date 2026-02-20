@@ -47,7 +47,7 @@
     repoName: string;
     description: string | null;
     stars: number;
-    authorAvatar?: string;
+    authorAvatar?: string | null;
   }
 
   interface SearchApiSkill {
@@ -109,7 +109,7 @@
   });
 
   // Icon mapping for categories
-  const categoryIcons: Record<string, any> = {
+  const categoryIcons: Record<string, typeof GitBranchIcon> = {
     'git': GitBranchIcon,
     'code-generation': CodeIcon,
     'refactoring': RefreshIcon,

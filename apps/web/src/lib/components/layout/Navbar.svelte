@@ -31,15 +31,19 @@
     unreadCount?: number;
   }
 
+  type CategoriesMenuContentComponentType = typeof import('$lib/components/layout/NavbarCategoriesContent.svelte').default;
+  type SubmitDialogComponentType = typeof import('$lib/components/dialog/SubmitDialog.svelte').default;
+  type LoginDialogComponentType = typeof import('$lib/components/dialog/LoginDialog.svelte').default;
+
   let { unreadCount = 0 }: Props = $props();
 
   let mobileMenuOpen = $state(false);
   let searchQuery = $state('');
   let showSubmitDialog = $state(false);
   let showLoginDialog = $state(false);
-  let CategoriesMenuContentComponent = $state<any>(null);
-  let SubmitDialogComponent = $state<any>(null);
-  let LoginDialogComponent = $state<any>(null);
+  let CategoriesMenuContentComponent = $state<CategoriesMenuContentComponentType | null>(null);
+  let SubmitDialogComponent = $state<SubmitDialogComponentType | null>(null);
+  let LoginDialogComponent = $state<LoginDialogComponentType | null>(null);
   let isLoadingCategoriesMenu = $state(false);
   let isLoadingSubmitDialog = $state(false);
   let isLoadingLoginDialog = $state(false);

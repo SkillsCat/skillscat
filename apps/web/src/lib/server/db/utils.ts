@@ -2,7 +2,7 @@
  * Database utility functions for D1 and R2
  */
 
-import type { SkillCardData, SkillDetail } from '$lib/types';
+import type { FileNode, SkillCardData, SkillDetail } from '$lib/types';
 
 export interface DbEnv {
   DB?: D1Database;
@@ -34,6 +34,92 @@ interface CachedSkillCardRaw {
   authorAvatar?: string | null;
   author_avatar?: string | null;
   categories?: string[];
+}
+
+interface SkillListRow {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  repoOwner: string;
+  repoName: string;
+  stars: number;
+  forks: number;
+  trendingScore: number;
+  updatedAt: number;
+  authorAvatar: string | null;
+}
+
+interface SkillDetailRow {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  repo_owner: string;
+  repo_name: string;
+  github_url: string | null;
+  skill_path: string | null;
+  stars: number | null;
+  forks: number | null;
+  trending_score: number | null;
+  last_commit_at: number | null;
+  updated_at: number;
+  created_at: number | null;
+  indexed_at: number;
+  readme: string | null;
+  file_structure: string | null;
+  visibility: SkillDetail['visibility'] | null;
+  source_type: SkillDetail['sourceType'] | null;
+  owner_id: string | null;
+  org_id: string | null;
+  authorAvatar: string | null;
+  authorUsername: string | null;
+  authorDisplayName: string | null;
+  authorBio: string | null;
+  authorSkillsCount: number | null;
+  authorTotalStars: number | null;
+  ownerName: string | null;
+  ownerAvatar: string | null;
+  orgName: string | null;
+  orgSlug: string | null;
+  orgAvatar: string | null;
+}
+
+interface CategoryRow {
+  skill_id: string;
+  category_slug: string;
+}
+
+interface CategoryCountRow {
+  category_slug: string;
+  count: number;
+}
+
+interface TagRow {
+  tag: string;
+}
+
+interface OverlapCountRow {
+  skill_id: string;
+  cnt: number;
+}
+
+interface RelatedSkillCandidateRow extends SkillListRow {
+  lastCommitAt: number | null;
+  sharedCategoryCount?: number;
+  sharedTagCount?: number;
+}
+
+function parseFileTree(fileStructureRaw: string | null): FileNode[] {
+  if (!fileStructureRaw) return [];
+
+  try {
+    const parsed = JSON.parse(fileStructureRaw) as { fileTree?: unknown };
+    if (!Array.isArray(parsed.fileTree)) return [];
+    return parsed.fileTree as FileNode[];
+  } catch {
+    return [];
+  }
 }
 
 function normalizeCachedSkill(item: CachedSkillCardRaw): SkillCardData {
@@ -229,9 +315,9 @@ export async function getTrendingSkills(
     LIMIT ?
   `)
     .bind(limit)
-    .all();
+    .all<SkillListRow>();
 
-  return addCategoriesToSkills(env.DB, result.results as any[]);
+  return addCategoriesToSkills(env.DB, result.results);
 }
 
 /**
@@ -266,12 +352,12 @@ export async function getTrendingSkillsPaginated(
     LIMIT ? OFFSET ?
   `)
     .bind(limit, offset)
-    .all();
+    .all<SkillListRow>();
 
   const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
     .first<{ total: number }>();
 
-  const skills = await addCategoriesToSkills(env.DB, result.results as any[]);
+  const skills = await addCategoriesToSkills(env.DB, result.results);
 
   return {
     skills,
@@ -322,9 +408,9 @@ export async function getRecentSkills(
     LIMIT ?
   `)
     .bind(limit)
-    .all();
+    .all<SkillListRow>();
 
-  return addCategoriesToSkills(env.DB, result.results as any[]);
+  return addCategoriesToSkills(env.DB, result.results);
 }
 
 /**
@@ -362,12 +448,12 @@ export async function getRecentSkillsPaginated(
     LIMIT ? OFFSET ?
   `)
     .bind(limit, offset)
-    .all();
+    .all<SkillListRow>();
 
   const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
     .first<{ total: number }>();
 
-  const skills = await addCategoriesToSkills(env.DB, result.results as any[]);
+  const skills = await addCategoriesToSkills(env.DB, result.results);
 
   return {
     skills,
@@ -416,9 +502,9 @@ export async function getTopSkills(
     LIMIT ?
   `)
     .bind(limit)
-    .all();
+    .all<SkillListRow>();
 
-  return addCategoriesToSkills(env.DB, result.results as any[]);
+  return addCategoriesToSkills(env.DB, result.results);
 }
 
 /**
@@ -454,12 +540,12 @@ export async function getTopSkillsPaginated(
     LIMIT ? OFFSET ?
   `)
     .bind(limit, offset)
-    .all();
+    .all<SkillListRow>();
 
   const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public' AND (skill_path IS NULL OR skill_path = '' OR skill_path NOT LIKE '.%')")
     .first<{ total: number }>();
 
-  const skills = await addCategoriesToSkills(env.DB, result.results as any[]);
+  const skills = await addCategoriesToSkills(env.DB, result.results);
 
   return {
     skills,
@@ -499,7 +585,7 @@ export async function getSkillsByCategory(
     LIMIT ? OFFSET ?
   `)
     .bind(categorySlug, limit, offset)
-    .all();
+    .all<SkillListRow>();
 
   const countResult = await env.DB.prepare(`
     SELECT COUNT(*) as total FROM skill_categories sc
@@ -509,7 +595,7 @@ export async function getSkillsByCategory(
     .bind(categorySlug)
     .first<{ total: number }>();
 
-  const skills = await addCategoriesToSkills(env.DB, result.results as any[]);
+  const skills = await addCategoriesToSkills(env.DB, result.results);
 
   return {
     skills,
@@ -562,9 +648,9 @@ export async function searchSkills(
     LIMIT ?
   `)
     .bind(searchTerm, searchTerm, searchTerm, limit)
-    .all();
+    .all<SkillListRow>();
 
-  return addCategoriesToSkills(env.DB, result.results as any[]);
+  return addCategoriesToSkills(env.DB, result.results);
 }
 
 /**
@@ -598,11 +684,11 @@ export async function getSkillBySlug(
     WHERE s.slug = ?
   `)
     .bind(slug)
-    .first();
+    .first<SkillDetailRow>();
 
   if (!result) return null;
 
-  const skillData = result as any;
+  const skillData = result;
 
   // 权限检查
   if (skillData.visibility === 'private') {
@@ -647,7 +733,7 @@ export async function getSkillBySlug(
     SELECT category_slug FROM skill_categories WHERE skill_id = ?
   `)
     .bind(skillData.id)
-    .all();
+    .all<CategoryRow>();
 
   // 从 R2 读取 SKILL.md 内容
   let readme = skillData.readme;
@@ -681,21 +767,7 @@ export async function getSkillBySlug(
   }
 
   // 解析文件结构 (直接使用预构建的 fileTree)
-  let fileStructure: Array<{
-    name: string;
-    path: string;
-    type: 'file' | 'directory';
-    size?: number;
-    children?: any[];
-  }> = [];
-  try {
-    if (skillData.file_structure) {
-      const parsed = JSON.parse(skillData.file_structure);
-      if (parsed.fileTree && Array.isArray(parsed.fileTree)) {
-        fileStructure = parsed.fileTree;
-      }
-    }
-  } catch {}
+  const fileStructure = parseFileTree(skillData.file_structure);
 
   return {
     id: skillData.id,
@@ -715,7 +787,7 @@ export async function getSkillBySlug(
     indexedAt: skillData.indexed_at,
     readme,
     fileStructure,
-    categories: categories.results.map((c: any) => c.category_slug),
+    categories: categories.results.map((c) => c.category_slug),
     authorAvatar: skillData.authorAvatar,
     authorUsername: skillData.authorUsername,
     authorDisplayName: skillData.authorDisplayName,
@@ -758,13 +830,13 @@ export async function getRelatedSkills(
   // Step 1: Get current skill's tags
   const tagsResult = await env.DB.prepare(
     'SELECT tag FROM skill_tags WHERE skill_id = ?'
-  ).bind(skillId).all();
-  const skillTags: string[] = (tagsResult.results as any[]).map((r) => r.tag);
+  ).bind(skillId).all<TagRow>();
+  const skillTags = tagsResult.results.map((row) => row.tag);
   const hasTags = skillTags.length > 0;
 
   // Step 2: Tiered candidate discovery
   // Each candidate tracks which tier discovered it
-  const candidateMap = new Map<string, { data: any; tier: number }>();
+  const candidateMap = new Map<string, { data: RelatedSkillCandidateRow; tier: number }>();
   const excludeIds: string[] = [skillId];
 
   const SKILL_COLUMNS = `
@@ -774,7 +846,7 @@ export async function getRelatedSkills(
     COALESCE(s.last_commit_at, s.updated_at) as updatedAt, s.last_commit_at as lastCommitAt,
     a.avatar_url as authorAvatar`;
 
-  const addCandidates = (rows: any[], tier: number) => {
+  const addCandidates = (rows: RelatedSkillCandidateRow[], tier: number) => {
     for (const row of rows) {
       if (!candidateMap.has(row.id)) {
         candidateMap.set(row.id, { data: row, tier });
@@ -801,8 +873,8 @@ export async function getRelatedSkills(
       GROUP BY s.id
       ORDER BY sharedCategoryCount DESC, s.trending_score DESC
       LIMIT 30
-    `).bind(...categories, ...excludeIds).all();
-    addCandidates(result.results as any[], 1);
+    `).bind(...categories, ...excludeIds).all<RelatedSkillCandidateRow>();
+    addCandidates(result.results, 1);
   }
 
   // Tier 2: Tag overlap
@@ -821,8 +893,8 @@ export async function getRelatedSkills(
       GROUP BY s.id
       ORDER BY sharedTagCount DESC, s.trending_score DESC
       LIMIT 20
-    `).bind(...skillTags, ...excludeIds).all();
-    addCandidates(result.results as any[], 2);
+    `).bind(...skillTags, ...excludeIds).all<RelatedSkillCandidateRow>();
+    addCandidates(result.results, 2);
   }
 
   // Tier 3: Same author
@@ -837,8 +909,8 @@ export async function getRelatedSkills(
         AND s.visibility = 'public'
       ORDER BY s.trending_score DESC
       LIMIT 10
-    `).bind(repoOwner, ...excludeIds).all();
-    addCandidates(result.results as any[], 3);
+    `).bind(repoOwner, ...excludeIds).all<RelatedSkillCandidateRow>();
+    addCandidates(result.results, 3);
   }
 
   // Tier 4: Trending fallback
@@ -852,8 +924,8 @@ export async function getRelatedSkills(
         AND s.visibility = 'public'
       ORDER BY s.trending_score DESC
       LIMIT 15
-    `).bind(...excludeIds).all();
-    addCandidates(result.results as any[], 4);
+    `).bind(...excludeIds).all<RelatedSkillCandidateRow>();
+    addCandidates(result.results, 4);
   }
 
   if (candidateMap.size === 0) return [];
@@ -873,8 +945,8 @@ export async function getRelatedSkills(
       FROM skill_tags
       WHERE skill_id IN (${idPh}) AND tag IN (${tagPh})
       GROUP BY skill_id
-    `).bind(...allIds, ...skillTags).all();
-    for (const row of tagResult.results as any[]) {
+    `).bind(...allIds, ...skillTags).all<OverlapCountRow>();
+    for (const row of tagResult.results) {
       tagOverlapMap[row.skill_id] = row.cnt;
     }
   }
@@ -891,8 +963,8 @@ export async function getRelatedSkills(
       FROM skill_categories
       WHERE skill_id IN (${idPh}) AND category_slug IN (${catPh})
       GROUP BY skill_id
-    `).bind(...nonTier1Ids, ...categories).all();
-    for (const row of catResult.results as any[]) {
+    `).bind(...nonTier1Ids, ...categories).all<OverlapCountRow>();
+    for (const row of catResult.results) {
       catOverlapMap[row.skill_id] = row.cnt;
     }
   }
@@ -985,10 +1057,10 @@ export async function getCategoryStats(
     JOIN skills s ON sc.skill_id = s.id
     WHERE s.visibility = 'public'
     GROUP BY sc.category_slug
-  `).all();
+  `).all<CategoryCountRow>();
 
   const stats: Record<string, number> = {};
-  for (const row of result.results as any[]) {
+  for (const row of result.results) {
     stats[row.category_slug] = row.count;
   }
 
@@ -1000,7 +1072,7 @@ export async function getCategoryStats(
  */
 async function addCategoriesToSkills(
   db: D1Database,
-  skills: any[]
+  skills: SkillListRow[]
 ): Promise<SkillCardData[]> {
   if (skills.length === 0) return [];
 
@@ -1012,10 +1084,10 @@ async function addCategoriesToSkills(
     WHERE skill_id IN (${placeholders})
   `)
     .bind(...skillIds)
-    .all();
+    .all<CategoryRow>();
 
   const categoriesMap: Record<string, string[]> = {};
-  for (const cat of categories.results as any[]) {
+  for (const cat of categories.results) {
     if (!categoriesMap[cat.skill_id]) {
       categoriesMap[cat.skill_id] = [];
     }

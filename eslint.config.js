@@ -19,6 +19,7 @@ export default [
   {
     files: ['**/*.ts', '**/*.js', '**/*.mjs'],
     plugins: {
+      '@typescript-eslint': tseslint.plugin,
       'unused-imports': unusedImports,
     },
     languageOptions: {
@@ -30,6 +31,7 @@ export default [
     },
     rules: {
       'no-unused-vars': 'off',
+      '@typescript-eslint/no-explicit-any': ['error', { fixToUnknown: true }],
       'unused-imports/no-unused-imports': 'error',
     },
   },
@@ -37,6 +39,7 @@ export default [
   {
     files: ['**/*.svelte'],
     plugins: {
+      '@typescript-eslint': tseslint.plugin,
       'unused-imports': unusedImports,
       svelte,
     },
@@ -50,6 +53,7 @@ export default [
     },
     rules: {
       'no-unused-vars': 'off',
+      '@typescript-eslint/no-explicit-any': ['error', { fixToUnknown: true }],
       'unused-imports/no-unused-imports': 'error',
     },
   },

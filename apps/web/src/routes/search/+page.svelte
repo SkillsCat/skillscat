@@ -63,7 +63,7 @@
   let searchValue = $state('');
 
   // Icon mapping for categories
-  const categoryIcons: Record<string, any> = {
+  const categoryIcons: Record<string, typeof GitBranchIcon> = {
     // Development
     'code-generation': CodeIcon,
     'refactoring': RefreshIcon,

@@ -23,20 +23,35 @@ description: Example skill updated
 Hello from v2.
 `;
 
-function mockResponse(data: unknown, status = 200) {
+interface MockFetchResponse {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  json: () => Promise<unknown>;
+}
+
+function toUrlString(input: unknown): string {
+  if (typeof input === 'string') return input;
+  if (typeof input === 'object' && input !== null && 'toString' in input && typeof input.toString === 'function') {
+    return input.toString();
+  }
+  return String(input);
+}
+
+function mockResponse(data: unknown, status = 200): MockFetchResponse {
   return {
     ok: status >= 200 && status < 300,
     status,
     statusText: status === 200 ? 'OK' : 'Error',
     json: async () => data,
-  } as any;
+  };
 }
 
 function mockGitHubFetch(content: string, sha = 'sha1') {
   const encoded = Buffer.from(content).toString('base64');
 
-  const fetchMock = vi.fn(async (input: any) => {
-    const url = typeof input === 'string' ? input : input.toString();
+  const fetchMock = vi.fn(async (input: unknown) => {
+    const url = toUrlString(input);
 
     if (url.includes('https://api.github.com/repos/testowner/testrepo')) {
       if (url.includes('/git/trees/')) {
@@ -95,8 +110,8 @@ describe('CLI commands with mocked network', () => {
   });
 
   it('login/logout/whoami with token', async () => {
-    const fetchMock = vi.fn(async (input: any) => {
-      const url = typeof input === 'string' ? input : input.toString();
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
       if (url.endsWith('/api/tokens/validate')) {
         return mockResponse({
           success: true,
@@ -171,8 +186,8 @@ describe('CLI commands with mocked network', () => {
   });
 
   it('submit handles success response', async () => {
-    const fetchMock = vi.fn(async (input: any) => {
-      const url = typeof input === 'string' ? input : input.toString();
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
       if (url.endsWith('/api/submit')) {
         return mockResponse({ success: true, message: 'Queued' }, 200);
       }
@@ -189,8 +204,8 @@ describe('CLI commands with mocked network', () => {
 
   it('updates registry-fallback installs via registry strategy', async () => {
     let registryFetchCount = 0;
-    const fetchMock = vi.fn(async (input: any) => {
-      const url = typeof input === 'string' ? input : input.toString();
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
 
       // Force git discovery failure so add() falls back to registry.
       if (url.includes('https://api.github.com/repos/testowner/testrepo')) {

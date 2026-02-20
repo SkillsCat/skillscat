@@ -12,7 +12,7 @@
       repoOwner: string;
       stars: number;
       updatedAt: number;
-      authorAvatar?: string;
+      authorAvatar?: string | null;
     };
   }
 
