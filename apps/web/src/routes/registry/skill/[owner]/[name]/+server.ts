@@ -2,7 +2,13 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
-import { normalizeSkillOwner } from '$lib/skill-path';
+import {
+  buildSkillSlug,
+  buildUploadSkillR2Key,
+  normalizeSkillName,
+  normalizeSkillOwner,
+  parseSkillSlug,
+} from '$lib/skill-path';
 
 export interface RegistrySkillItem {
   name: string;
@@ -25,14 +31,14 @@ export interface RegistrySkillItem {
  */
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const owner = normalizeSkillOwner(params.owner);
-  const { name } = params;
+  const name = normalizeSkillName(params.name);
   if (!owner || !name) {
     return json(
       { error: 'Invalid skill identifier' },
       { status: 400, headers: { 'Access-Control-Allow-Origin': '*' } }
     );
   }
-  const slug = `${owner}/${name}`;
+  const slug = buildSkillSlug(owner, name);
 
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
@@ -115,12 +121,23 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     if (r2) {
       try {
         if (row.sourceType === 'upload') {
-          const slugParts = row.slug.split('/');
-          if (slugParts.length >= 2) {
-            const key = `skills/${slugParts[0]}/${slugParts[1]}/SKILL.md`;
+          const canonicalPath = buildUploadSkillR2Key(row.slug, 'SKILL.md');
+          const parsedSlug = parseSkillSlug(row.slug);
+          const candidatePaths = new Set<string>();
+
+          if (canonicalPath) {
+            candidatePaths.add(canonicalPath);
+          }
+          if (parsedSlug) {
+            // Legacy fallback for previously stored upload paths.
+            candidatePaths.add(`skills/${parsedSlug.owner}/${parsedSlug.name.split('/')[0]}/SKILL.md`);
+          }
+
+          for (const key of candidatePaths) {
             const object = await r2.get(key);
             if (object) {
               content = await object.text();
+              break;
             }
           }
         } else if (row.owner && row.repo) {
@@ -139,13 +156,13 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
       content = row.readme;
     }
 
-    const slugParts = row.slug.split('/');
+    const parsedSlug = parseSkillSlug(row.slug);
 
     const skill: RegistrySkillItem = {
       name: row.name,
       description: row.description || '',
-      owner: row.owner || slugParts[0] || '',
-      repo: row.repo || slugParts[1] || '',
+      owner: row.owner || parsedSlug?.owner || '',
+      repo: row.repo || parsedSlug?.name.split('/')[0] || '',
       stars: row.stars || 0,
       updatedAt: row.updatedAt,
       categories: row.categories ? row.categories.split(',') : [],

@@ -3,6 +3,7 @@
  */
 
 import type { FileNode, SkillCardData, SkillDetail } from '$lib/types';
+import { buildUploadSkillR2Key, parseSkillSlug } from '$lib/skill-path';
 
 export interface DbEnv {
   DB?: D1Database;
@@ -740,11 +741,18 @@ export async function getSkillBySlug(
   if (env.R2 && !readme) {
     try {
       if (skillData.source_type === 'upload') {
-        const slugParts = skillData.slug.split('/');
-        const candidatePaths = [
-          `skills/${slugParts[0]}/${slugParts[1] || skillData.name}/SKILL.md`,
-          `skills/${slugParts[0]}/${skillData.name}/SKILL.md`,
-        ];
+        const slugParts = parseSkillSlug(skillData.slug);
+        const candidatePaths = new Set<string>();
+        const canonicalPath = buildUploadSkillR2Key(skillData.slug, 'SKILL.md');
+        if (canonicalPath) {
+          candidatePaths.add(canonicalPath);
+        }
+        // Backward compatibility for older upload paths.
+        if (slugParts) {
+          candidatePaths.add(`skills/${slugParts.owner}/${slugParts.name.split('/')[0] || skillData.name}/SKILL.md`);
+          candidatePaths.add(`skills/${slugParts.owner}/${skillData.name}/SKILL.md`);
+        }
+
         for (const path of candidatePaths) {
           const object = await env.R2.get(path);
           if (object) {

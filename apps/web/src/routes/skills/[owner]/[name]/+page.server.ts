@@ -4,7 +4,7 @@ import { getSkillBySlug, getRelatedSkills, recordSkillAccess } from '$lib/server
 import { getCached } from '$lib/server/cache';
 import { renderReadmeMarkdown } from '$lib/server/markdown';
 import { setPublicPageCache } from '$lib/server/page-cache';
-import { normalizeSkillOwner } from '$lib/skill-path';
+import { buildSkillPathFromOwnerAndName, buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
 
 const BOT_UA_PATTERN = /\b(bot|crawler|spider|slurp|preview|headless|lighthouse)\b/i;
 
@@ -69,6 +69,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
   const userId = locals.user?.id || null;
 
   const normalizedOwner = normalizeSkillOwner(params.owner);
+  const normalizedName = normalizeSkillName(params.name);
   if (!normalizedOwner) {
     setHeaders({ 'X-Skillscat-Status-Override': '404' });
     return {
@@ -78,11 +79,20 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     };
   }
 
-  if (normalizedOwner !== params.owner) {
-    throw redirect(308, `/skills/${encodeURIComponent(normalizedOwner)}/${encodeURIComponent(params.name)}`);
+  if (!normalizedName) {
+    setHeaders({ 'X-Skillscat-Status-Override': '404' });
+    return {
+      skill: null,
+      relatedSkills: [],
+      error: 'Skill not found or you do not have permission to view it.',
+    };
   }
 
-  const slug = `${normalizedOwner}/${params.name}`;
+  if (normalizedOwner !== params.owner || normalizedName !== params.name) {
+    throw redirect(308, buildSkillPathFromOwnerAndName(normalizedOwner, normalizedName));
+  }
+
+  const slug = buildSkillSlug(normalizedOwner, normalizedName);
 
   try {
     const skill = await getSkillBySlug(env, slug, userId);

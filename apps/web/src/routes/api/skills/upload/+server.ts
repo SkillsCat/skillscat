@@ -1,6 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middleware/auth';
+import { buildUploadSkillR2Key } from '$lib/skill-path';
 
 /**
  * Compute SHA-256 hash of content
@@ -407,10 +408,10 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 
   // Store SKILL.md in R2 after DB insert succeeds to avoid accidental overwrite
   // during concurrent uploads that race on slug uniqueness.
-  const slugParts = slug.split('/');
-  const r2Path = slugParts.length >= 2
-    ? `skills/${slugParts[0]}/${slugParts[1]}/SKILL.md`
-    : `skills/${slug}/SKILL.md`;
+  const r2Path = buildUploadSkillR2Key(slug, 'SKILL.md');
+  if (!r2Path) {
+    throw error(400, 'Invalid skill slug');
+  }
 
   try {
     await r2.put(r2Path, skillMdContent, {

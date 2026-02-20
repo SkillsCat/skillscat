@@ -4,7 +4,13 @@ import type { SkillDetail, SkillCardData, ApiResponse, FileNode } from '$lib/typ
 import { getCached, invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { isSkillOwner, checkSkillAccess } from '$lib/server/permissions';
-import { normalizeSkillOwner } from '$lib/skill-path';
+import {
+  buildSkillSlug,
+  buildUploadSkillR2Key,
+  normalizeSkillName,
+  normalizeSkillOwner,
+  parseSkillSlug,
+} from '$lib/skill-path';
 
 /**
  * GET /api/skills/[owner]/[name] - Get skill by owner and name
@@ -14,11 +20,11 @@ import { normalizeSkillOwner } from '$lib/skill-path';
  */
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const owner = normalizeSkillOwner(params.owner);
-  const { name } = params;
+  const name = normalizeSkillName(params.name);
   if (!owner || !name) {
     throw error(400, 'Invalid skill identifier');
   }
-  const slug = `${owner}/${name}`;
+  const slug = buildSkillSlug(owner, name);
 
   try {
     const db = platform?.env?.DB;
@@ -266,11 +272,20 @@ interface SkillInfo {
  */
 function buildR2Paths(skill: SkillInfo): string[] {
   if (skill.source_type === 'upload') {
-    const parts = skill.slug.split('/');
-    if (parts.length >= 2) {
-      return [`skills/${parts[0]}/${parts[1]}/SKILL.md`];
+    const canonical = buildUploadSkillR2Key(skill.slug, 'SKILL.md');
+    const parts = parseSkillSlug(skill.slug);
+    const paths = new Set<string>();
+
+    if (canonical) {
+      paths.add(canonical);
     }
-    return [`skills/${skill.slug}/SKILL.md`];
+
+    if (parts) {
+      // Legacy fallback for previously stored upload paths.
+      paths.add(`skills/${parts.owner}/${parts.name.split('/')[0]}/SKILL.md`);
+    }
+
+    return [...paths];
   }
 
   // For GitHub-sourced skills
@@ -299,11 +314,11 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
   requireScope(auth, 'write');
 
   const owner = normalizeSkillOwner(params.owner);
-  const { name } = params;
+  const name = normalizeSkillName(params.name);
   if (!owner || !name) {
     throw error(400, 'Invalid skill identifier');
   }
-  const slug = `${owner}/${name}`;
+  const slug = buildSkillSlug(owner, name);
 
   // Fetch skill by slug and verify ownership
   const skill = await db.prepare(`

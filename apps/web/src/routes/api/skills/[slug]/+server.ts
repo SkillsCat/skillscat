@@ -4,8 +4,14 @@ import type { SkillDetail, SkillCardData, ApiResponse, FileNode } from '$lib/typ
 import { getCached, invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { isSkillOwner, checkSkillAccess } from '$lib/server/permissions';
+import { buildUploadSkillR2Key, normalizeSkillSlug, parseSkillSlug } from '$lib/skill-path';
 
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
+  const slug = normalizeSkillSlug(params.slug || '');
+  if (!slug) {
+    throw error(400, 'Invalid skill slug');
+  }
+
   try {
     const db = platform?.env?.DB;
 
@@ -17,7 +23,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     }
 
     const { data, hit } = await getCached(
-      `api:skill:${params.slug}`,
+      `api:skill:${slug}`,
       async () => {
         // Get skill by slug
         const row = await db.prepare(`
@@ -53,7 +59,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
           LEFT JOIN authors a ON s.repo_owner = a.username
           WHERE s.slug = ?
           GROUP BY s.id
-        `).bind(params.slug).first<{
+        `).bind(slug).first<{
           id: string;
           name: string;
           slug: string;
@@ -252,11 +258,20 @@ interface SkillInfo {
  */
 function buildR2Paths(skill: SkillInfo): string[] {
   if (skill.source_type === 'upload') {
-    const parts = skill.slug.split('/');
-    if (parts.length >= 2) {
-      return [`skills/${parts[0]}/${parts[1]}/SKILL.md`];
+    const canonical = buildUploadSkillR2Key(skill.slug, 'SKILL.md');
+    const parts = parseSkillSlug(skill.slug);
+    const paths = new Set<string>();
+
+    if (canonical) {
+      paths.add(canonical);
     }
-    return [`skills/${skill.slug}/SKILL.md`];
+
+    if (parts) {
+      // Legacy fallback for previously stored upload paths.
+      paths.add(`skills/${parts.owner}/${parts.name.split('/')[0]}/SKILL.md`);
+    }
+
+    return [...paths];
   }
 
   const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
@@ -283,9 +298,9 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
   }
   requireScope(auth, 'write');
 
-  const { slug } = params;
+  const slug = normalizeSkillSlug(params.slug || '');
   if (!slug) {
-    throw error(400, 'Skill slug is required');
+    throw error(400, 'Invalid skill slug');
   }
 
   // Fetch skill by slug and verify ownership

@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
+import { buildUploadSkillR2Key, normalizeSkillSlug, parseSkillSlug } from '$lib/skill-path';
 
 interface SkillInfo {
   id: string;
@@ -20,11 +21,20 @@ interface SkillInfo {
  */
 function buildR2Paths(skill: SkillInfo): string[] {
   if (skill.source_type === 'upload') {
-    const parts = skill.slug.split('/');
-    if (parts.length >= 2) {
-      return [`skills/${parts[0]}/${parts[1]}/SKILL.md`];
+    const canonical = buildUploadSkillR2Key(skill.slug, 'SKILL.md');
+    const parts = parseSkillSlug(skill.slug);
+    const paths = new Set<string>();
+
+    if (canonical) {
+      paths.add(canonical);
     }
-    return [`skills/${skill.slug}/SKILL.md`];
+
+    if (parts) {
+      // Legacy fallback for previously stored upload paths.
+      paths.add(`skills/${parts.owner}/${parts.name.split('/')[0]}/SKILL.md`);
+    }
+
+    return [...paths];
   }
   const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
   return [`skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/SKILL.md`];
@@ -41,9 +51,9 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     throw error(503, 'Storage not available');
   }
 
-  const { slug } = params;
+  const slug = normalizeSkillSlug(params.slug || '');
   if (!slug) {
-    throw error(400, 'Skill slug is required');
+    throw error(400, 'Invalid skill slug');
   }
 
   // Fetch skill info

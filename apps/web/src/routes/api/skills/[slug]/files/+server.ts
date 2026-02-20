@@ -4,6 +4,7 @@ import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
 import { getCached } from '$lib/server/cache';
 import { githubRequest } from '$lib/server/github-request';
+import { buildUploadSkillR2Prefix, normalizeSkillSlug } from '$lib/skill-path';
 
 interface SkillFile {
   path: string;
@@ -235,8 +236,8 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
 
   if (!db || !r2) throw error(503, 'Storage not available');
 
-  const { slug } = params;
-  if (!slug) throw error(400, 'Skill slug is required');
+  const slug = normalizeSkillSlug(params.slug || '');
+  if (!slug) throw error(400, 'Invalid skill slug');
 
   // Validate slug format to prevent injection
   if (!/^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/.test(slug)) {
@@ -268,10 +269,11 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
   // Build R2 prefix path
   let r2Prefix: string;
   if (skill.source_type === 'upload') {
-    const parts = slug.split('/');
-    r2Prefix = parts.length >= 2
-      ? `skills/${parts[0]}/${parts[1]}/`
-      : `skills/${slug}/`;
+    const uploadPrefix = buildUploadSkillR2Prefix(skill.slug);
+    if (!uploadPrefix) {
+      throw error(500, 'Invalid upload skill path');
+    }
+    r2Prefix = uploadPrefix;
   } else {
     const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
     r2Prefix = `skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/`;

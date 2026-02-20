@@ -70,6 +70,156 @@ interface ParsedSkillMd {
   body: string;
 }
 
+function getLineIndent(line: string): number {
+  return line.match(/^(\s*)/)?.[1].length ?? 0;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractYamlFieldFromLines(
+  lines: string[],
+  key: string,
+  startIndex: number,
+  endIndex: number,
+  minIndent: number,
+  maxIndent: number | null
+): string | null {
+  const keyPattern = new RegExp(`^(\\s*)${escapeRegExp(key)}:\\s*(.*)$`);
+
+  for (let i = startIndex; i < endIndex; i++) {
+    const match = lines[i].match(keyPattern);
+    if (!match) continue;
+
+    const indent = match[1].length;
+    if (indent < minIndent) continue;
+    if (maxIndent !== null && indent > maxIndent) continue;
+
+    const inlineValue = match[2].trim();
+    if (inlineValue.length > 0) {
+      return inlineValue;
+    }
+
+    const values: string[] = [];
+    for (let j = i + 1; j < endIndex; j++) {
+      const nextLine = lines[j];
+      if (nextLine.trim() === '') continue;
+
+      const nextIndent = getLineIndent(nextLine);
+      if (nextIndent <= indent) break;
+
+      const trimmed = nextLine.trim();
+      const listMatch = trimmed.match(/^[-*]\s+(.+)$/);
+      values.push((listMatch ? listMatch[1] : trimmed).trim());
+    }
+
+    return values.length > 0 ? values.join(',') : null;
+  }
+
+  return null;
+}
+
+function extractYamlRootField(yamlContent: string, key: string): string | null {
+  const lines = yamlContent.split('\n');
+  return extractYamlFieldFromLines(lines, key, 0, lines.length, 0, 0);
+}
+
+function extractYamlNestedField(yamlContent: string, parentKey: string, key: string): string | null {
+  const lines = yamlContent.split('\n');
+  const parentPattern = new RegExp(`^(\\s*)${escapeRegExp(parentKey)}:\\s*(.*)$`);
+
+  for (let i = 0; i < lines.length; i++) {
+    const parentMatch = lines[i].match(parentPattern);
+    if (!parentMatch) continue;
+
+    const parentIndent = parentMatch[1].length;
+    let endIndex = lines.length;
+
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].trim() === '') continue;
+      if (getLineIndent(lines[j]) <= parentIndent) {
+        endIndex = j;
+        break;
+      }
+    }
+
+    const value = extractYamlFieldFromLines(
+      lines,
+      key,
+      i + 1,
+      endIndex,
+      parentIndent + 1,
+      null
+    );
+    if (value) return value;
+  }
+
+  return null;
+}
+
+function trimWrappingPairs(value: string): string {
+  let output = value.trim();
+  let changed = true;
+
+  while (changed && output.length > 1) {
+    changed = false;
+
+    if (
+      (output.startsWith('"') && output.endsWith('"'))
+      || (output.startsWith("'") && output.endsWith("'"))
+      || (output.startsWith('`') && output.endsWith('`'))
+    ) {
+      output = output.slice(1, -1).trim();
+      changed = true;
+      continue;
+    }
+
+    const first = output[0];
+    const last = output[output.length - 1];
+    if (
+      (first === '[' && last === ']')
+      || (first === '(' && last === ')')
+      || (first === '{' && last === '}')
+    ) {
+      output = output.slice(1, -1).trim();
+      changed = true;
+    }
+  }
+
+  return output;
+}
+
+function normalizeTag(rawTag: string): string {
+  let tag = trimWrappingPairs(rawTag);
+  if (!tag) return '';
+
+  // Support YAML list style tokens that leak into inline parsing (e.g. "- persona")
+  tag = tag.replace(/^[-*]\s+/, '');
+  tag = tag
+    .replace(/^[\[\(\{]+/, '')
+    .replace(/[\]\)\}]+$/, '')
+    .replace(/^['"`]+/, '')
+    .replace(/['"`]+$/, '');
+  tag = trimWrappingPairs(tag);
+
+  tag = tag
+    .replace(/^[,;:]+/, '')
+    .replace(/[,;:]+$/, '')
+    .trim();
+
+  return tag ? tag.toLowerCase() : '';
+}
+
+function normalizeTags(tagsString: string): string[] {
+  const tags = trimWrappingPairs(tagsString.replace(/\r\n/g, '\n').trim())
+    .split(/[,\n;，]/)
+    .map((tag) => normalizeTag(tag))
+    .filter(Boolean);
+
+  return [...new Set(tags)];
+}
+
 /**
  * Parse YAML multi-line block scalar (| or >) and format for display
  * Joins all lines with spaces and removes extra whitespace
@@ -172,15 +322,17 @@ function parseSkillFrontmatter(content: string): ParsedSkillMd {
   const categoriesMatch = yamlContent.match(/^categories:\s*(.+)$/m);
   if (categoriesMatch) frontmatter.categories = categoriesMatch[1].trim();
 
-  // Parse keywords (alias for tags, root level)
-  const keywordsMatch = yamlContent.match(/^keywords:\s*(.+)$/m);
-  if (keywordsMatch) frontmatter.keywords = keywordsMatch[1].trim();
+  // Parse keywords (alias for tags, root level; supports inline and list formats)
+  const keywordsValue = extractYamlRootField(yamlContent, 'keywords');
+  if (keywordsValue) frontmatter.keywords = keywordsValue.trim();
 
-  // Parse metadata.tags
-  const tagsMatch = yamlContent.match(/tags:\s*(.+)$/m);
-  if (tagsMatch) {
+  // Parse tags (prefer metadata.tags, fallback to root tags)
+  const metadataTags = extractYamlNestedField(yamlContent, 'metadata', 'tags');
+  const rootTags = extractYamlRootField(yamlContent, 'tags');
+  const tagsValue = metadataTags || rootTags;
+  if (tagsValue) {
     frontmatter.metadata = frontmatter.metadata || {};
-    frontmatter.metadata.tags = tagsMatch[1].trim();
+    frontmatter.metadata.tags = tagsValue.trim();
   }
 
   // Parse metadata.category (nested)
@@ -933,10 +1085,7 @@ async function saveSkillTags(
   tagsString: string,
   env: IndexingEnv
 ): Promise<string[]> {
-  const tags = tagsString
-    .split(',')
-    .map((t) => t.trim().toLowerCase())
-    .filter(Boolean);
+  const tags = normalizeTags(tagsString);
 
   if (tags.length === 0) return [];
 

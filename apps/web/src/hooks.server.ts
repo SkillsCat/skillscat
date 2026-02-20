@@ -4,6 +4,7 @@ import { building } from '$app/environment';
 import type { Handle } from '@sveltejs/kit';
 import { runRequestSecurity, shouldNoIndexPath } from '$lib/server/request-security';
 import { setCacheVersion } from '$lib/server/cache';
+import { getCanonicalSkillPathFromPathname, normalizeSkillOwner } from '$lib/skill-path';
 
 const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
 const STATUS_OVERRIDE_HEADER = 'X-Skillscat-Status-Override';
@@ -65,7 +66,80 @@ function applyResponseSecurityHeaders(pathname: string, response: Response): Res
   return secured;
 }
 
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function getSkillOwnerFromPathname(pathname: string): string | null {
+  const pathOnly = pathname.replace(/\/+$/, '') || '/';
+  const segments = pathOnly.split('/').filter(Boolean);
+  if (segments[0] !== 'skills' || segments.length !== 2) {
+    return null;
+  }
+  return safeDecodeURIComponent(segments[1] || '');
+}
+
+async function resolveProfilePathForSkillOwner(db: D1Database, ownerSegment: string): Promise<string | null> {
+  const owner = normalizeSkillOwner(ownerSegment);
+  if (!owner) return null;
+
+  // Organization takes precedence for /org routing.
+  const org = await db.prepare(`
+    SELECT slug
+    FROM organizations
+    WHERE slug = ? COLLATE NOCASE
+    LIMIT 1
+  `)
+    .bind(owner)
+    .first<{ slug: string }>();
+
+  if (org?.slug) {
+    return `/org/${encodeURIComponent(org.slug)}`;
+  }
+
+  const user = await db.prepare(`
+    SELECT name
+    FROM user
+    WHERE name = ? COLLATE NOCASE
+    LIMIT 1
+  `)
+    .bind(owner)
+    .first<{ name: string }>();
+
+  if (user?.name) {
+    return `/u/${encodeURIComponent(user.name)}`;
+  }
+
+  const author = await db.prepare(`
+    SELECT username
+    FROM authors
+    WHERE username = ? COLLATE NOCASE
+    LIMIT 1
+  `)
+    .bind(owner)
+    .first<{ username: string }>();
+
+  if (author?.username) {
+    return `/u/${encodeURIComponent(author.username)}`;
+  }
+
+  return null;
+}
+
 export const handle: Handle = async ({ event, resolve }) => {
+  const canonicalSkillPath = getCanonicalSkillPathFromPathname(event.url.pathname);
+  if (canonicalSkillPath && canonicalSkillPath !== event.url.pathname) {
+    const location = `${canonicalSkillPath}${event.url.search}`;
+    return new Response(null, {
+      status: 308,
+      headers: { Location: location },
+    });
+  }
+
   setCacheVersion((event.platform?.env as { CACHE_VERSION?: string } | undefined)?.CACHE_VERSION);
 
   const blocked = await runRequestSecurity(event);
@@ -74,6 +148,20 @@ export const handle: Handle = async ({ event, resolve }) => {
   }
 
   const env = event.platform?.env as AuthEnv | undefined;
+
+  if (env?.DB) {
+    const skillOwner = getSkillOwnerFromPathname(event.url.pathname);
+    if (skillOwner) {
+      const profilePath = await resolveProfilePathForSkillOwner(env.DB, skillOwner);
+      if (profilePath) {
+        const location = `${profilePath}${event.url.search}`;
+        return new Response(null, {
+          status: 308,
+          headers: { Location: location },
+        });
+      }
+    }
+  }
 
   // During build or if env is not available, skip auth
   if (building || !env?.DB) {

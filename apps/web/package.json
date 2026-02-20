@@ -14,7 +14,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply skillscat-db --local -c wrangler.preview.toml",
     "db:migrate:prod": "wrangler d1 migrations apply skillscat-db --remote -c wrangler.preview.toml --env production",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "tags:normalize": "node scripts/normalize-skill-tags.mjs"
   },
   "dependencies": {
     "@cf-wasm/resvg": "^0.3.3",
