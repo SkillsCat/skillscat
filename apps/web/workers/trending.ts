@@ -657,7 +657,14 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.visibility = 'public'
-      AND (s.skill_path IS NULL OR s.skill_path = '' OR s.skill_path NOT LIKE '.%')
+      AND (
+        s.skill_path IS NULL
+        OR s.skill_path = ''
+        OR (
+          s.skill_path NOT LIKE '.%'
+          AND s.skill_path NOT LIKE '%/.%'
+        )
+      )
     ORDER BY s.stars DESC
     LIMIT 100
   `).all<SkillListItem>();
