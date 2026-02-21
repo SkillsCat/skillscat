@@ -789,10 +789,17 @@ export async function getSkillBySlug(
       } else {
         // Include skill_path in R2 path for multi-skill repos
         const skillPathPart = skillData.skill_path ? `/${skillData.skill_path}` : '';
-        const r2Path = `skills/${skillData.repo_owner}/${skillData.repo_name}${skillPathPart}/SKILL.md`;
-        const object = await env.R2.get(r2Path);
-        if (object) {
-          readme = await object.text();
+        const candidatePaths = new Set<string>([
+          `skills/${skillData.repo_owner}/${skillData.repo_name}${skillPathPart}/SKILL.md`,
+          `skills/${skillData.repo_owner.toLowerCase()}/${skillData.repo_name.toLowerCase()}${skillPathPart}/SKILL.md`,
+        ]);
+
+        for (const path of candidatePaths) {
+          const object = await env.R2.get(path);
+          if (object) {
+            readme = await object.text();
+            break;
+          }
         }
       }
     } catch (error) {

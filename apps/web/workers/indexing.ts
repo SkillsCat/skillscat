@@ -1159,30 +1159,37 @@ async function processMessage(
     return;
   }
 
-  log.log(`Repo info fetched: ${repoOwner}/${repoName}, stars: ${repo.stargazers_count}, fork: ${repo.fork}`);
+  const canonicalRepoOwner = repo.owner?.login || repoOwner;
+  const canonicalRepoName = repo.name || repoName;
+
+  if (canonicalRepoOwner !== repoOwner || canonicalRepoName !== repoName) {
+    log.log(`Canonicalized repository identity: ${repoOwner}/${repoName} -> ${canonicalRepoOwner}/${canonicalRepoName}`);
+  }
+
+  log.log(`Repo info fetched: ${canonicalRepoOwner}/${canonicalRepoName}, stars: ${repo.stargazers_count}, fork: ${repo.fork}`);
 
   // Determine if dot-folder skills are allowed based on star count
   const allowDotFolders = repo.stargazers_count >= DOT_FOLDER_MIN_STARS;
 
   // Step 2: Get latest commit SHA
   const latestCommit = await getLatestCommitSha(
-    repoOwner,
-    repoName,
+    canonicalRepoOwner,
+    canonicalRepoName,
     env,
     repo.default_branch
   );
   if (!latestCommit) {
-    log.log(`Failed to get latest commit SHA: ${repoOwner}/${repoName}`);
+    log.log(`Failed to get latest commit SHA: ${canonicalRepoOwner}/${canonicalRepoName}`);
     return;
   }
 
   log.log(`Latest commit: ${latestCommit.sha} (branch: ${latestCommit.branch})`);
 
   // Step 3: Check if update is needed
-  const exists = await skillExists(repoOwner, repoName, skillPath || null, env);
+  const exists = await skillExists(canonicalRepoOwner, canonicalRepoName, skillPath || null, env);
   const shouldFetchContent = await needsUpdate(
-    repoOwner,
-    repoName,
+    canonicalRepoOwner,
+    canonicalRepoName,
     skillPath || null,
     latestCommit.sha,
     forceReindex || false,
@@ -1191,7 +1198,7 @@ async function processMessage(
 
   // If skill exists and no content update needed, just update stars/forks
   if (exists && !shouldFetchContent) {
-    const updatedId = await updateSkill(repoOwner, repoName, skillPath || null, repo, env);
+    const updatedId = await updateSkill(canonicalRepoOwner, canonicalRepoName, skillPath || null, repo, env);
     if (updatedId) {
       log.log(`Updated stars/forks only for skill: ${updatedId}`);
     }
@@ -1199,25 +1206,25 @@ async function processMessage(
   }
 
   // Step 4: Verify SKILL.md exists
-  const skillMd = await getSkillMd(repoOwner, repoName, env, skillPath, allowDotFolders);
+  const skillMd = await getSkillMd(canonicalRepoOwner, canonicalRepoName, env, skillPath, allowDotFolders);
   if (!skillMd) {
-    log.log(`No SKILL.md found: ${repoOwner}/${repoName}${skillPath ? `/${skillPath}` : ''}`);
+    log.log(`No SKILL.md found: ${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`);
     return;
   }
 
-  log.log(`SKILL.md found: ${repoOwner}/${repoName}, path: ${skillMd.path}`);
+  log.log(`SKILL.md found: ${canonicalRepoOwner}/${canonicalRepoName}, path: ${skillMd.path}`);
 
   // Step 5: Fetch all files from directory using Tree API
   let directoryFiles: DirectoryFile[] = [];
   let textContents = new Map<string, string>();
   const previousFileShas = exists
-    ? await getStoredFileShas(repoOwner, repoName, skillPath || null, env)
+    ? await getStoredFileShas(canonicalRepoOwner, canonicalRepoName, skillPath || null, env)
     : undefined;
 
   try {
     const result = await fetchDirectoryFiles(
-      repoOwner,
-      repoName,
+      canonicalRepoOwner,
+      canonicalRepoName,
       latestCommit.branch,
       skillPath || null,
       env,
@@ -1227,7 +1234,7 @@ async function processMessage(
     directoryFiles = result.files;
     textContents = result.textContents;
   } catch (err) {
-    log.error(`Failed to fetch directory files: ${repoOwner}/${repoName}`, err);
+    log.error(`Failed to fetch directory files: ${canonicalRepoOwner}/${canonicalRepoName}`, err);
     // Fallback: just use SKILL.md content
     let skillMdContent = '';
     if (skillMd.content) {
@@ -1271,7 +1278,7 @@ async function processMessage(
   if (!exists && repo.stargazers_count < 100) {
     const duplicate = await checkForDuplicate(normalizedHash, env, 1000);
     if (duplicate.isDuplicate) {
-      log.log(`Rejecting duplicate of ${duplicate.originalSlug}: ${repoOwner}/${repoName}`);
+      log.log(`Rejecting duplicate of ${duplicate.originalSlug}: ${canonicalRepoOwner}/${canonicalRepoName}`);
       return;
     }
   }
@@ -1280,9 +1287,9 @@ async function processMessage(
   let skillId: string;
 
   if (exists) {
-    const updatedId = await updateSkill(repoOwner, repoName, skillPath || null, repo, env);
+    const updatedId = await updateSkill(canonicalRepoOwner, canonicalRepoName, skillPath || null, repo, env);
     if (!updatedId) {
-      log.error(`Failed to update skill: ${repoOwner}/${repoName}`);
+      log.error(`Failed to update skill: ${canonicalRepoOwner}/${canonicalRepoName}`);
       return;
     }
     skillId = updatedId;
@@ -1344,13 +1351,13 @@ async function processMessage(
 
   // Step 9: Cache all text files to R2
   const pathPart = skillPath ? `/${skillPath}` : '';
-  const r2Path = `skills/${repoOwner}/${repoName}${pathPart}/SKILL.md`;
+  const r2Path = `skills/${canonicalRepoOwner}/${canonicalRepoName}${pathPart}/SKILL.md`;
 
   try {
     await cacheDirectoryFiles(
       skillId,
-      repoOwner,
-      repoName,
+      canonicalRepoOwner,
+      canonicalRepoName,
       skillPath || null,
       textContents,
       latestCommit.sha,
@@ -1359,12 +1366,12 @@ async function processMessage(
     );
     log.log(`Cached ${textContents.size} files to R2`);
   } catch (r2Error) {
-    log.error(`Failed to cache files to R2: ${repoOwner}/${repoName}`, r2Error);
+    log.error(`Failed to cache files to R2: ${canonicalRepoOwner}/${canonicalRepoName}`, r2Error);
     throw r2Error;
   }
 
   // Step 10: Get last commit date for SKILL.md
-  const lastCommitAt = await getLastCommitDate(repoOwner, repoName, skillMd.path, env);
+  const lastCommitAt = await getLastCommitDate(canonicalRepoOwner, canonicalRepoName, skillMd.path, env);
 
   // Step 11: Update commit_sha, file_structure, and last_commit_at
   const fileStructure: FileStructure = {
@@ -1380,8 +1387,8 @@ async function processMessage(
   const classificationMessage: ClassificationMessage & { tags?: string[] } = {
     type: 'classify',
     skillId,
-    repoOwner,
-    repoName,
+    repoOwner: canonicalRepoOwner,
+    repoName: canonicalRepoName,
     skillMdPath: r2Path,
   };
 
