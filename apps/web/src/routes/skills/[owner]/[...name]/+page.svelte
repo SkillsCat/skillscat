@@ -743,6 +743,18 @@
     return path.replace(/^\.\//, '').toLowerCase() === 'skill.md';
   }
 
+  function hasNonReadmeFiles(nodes: FileNode[]): boolean {
+    for (const node of nodes) {
+      if (node.type === 'file' && !isSkillReadmeFile(node.path)) {
+        return true;
+      }
+      if (node.children && hasNonReadmeFiles(node.children)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // SVG icons for different file types (VS Code style)
   function getFileIconSvg(node: FileNode): string {
     if (node.type === 'directory') {
@@ -1186,7 +1198,7 @@
         </div>
 
         <!-- File Browser (show above SKILL.md when files exist) -->
-        {#if data.skill.fileStructure && data.skill.fileStructure.length > 0}
+        {#if data.skill.fileStructure && data.skill.fileStructure.length > 0 && hasNonReadmeFiles(data.skill.fileStructure)}
           <div class="card">
             <h2 class="text-lg font-semibold text-fg mb-4">Files</h2>
             <div class="file-browser">
