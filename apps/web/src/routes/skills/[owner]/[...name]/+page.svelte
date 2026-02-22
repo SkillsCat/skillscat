@@ -900,6 +900,78 @@
     return new Date(timestamp).toISOString();
   }
 
+  const SEO_DESCRIPTION_STOP_WORDS = new Set([
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'how',
+    'in', 'is', 'it', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'with',
+    'you', 'your', 'ai', 'agent', 'skill', 'skills'
+  ]);
+
+  function normalizeKeywordValue(keyword: string): string {
+    return keyword.trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  function appendKeyword(target: string[], keyword: string): void {
+    const value = keyword.trim();
+    const normalized = normalizeKeywordValue(value);
+    if (!normalized || normalized.length < 2) return;
+    if (target.some((item) => normalizeKeywordValue(item) === normalized)) return;
+    target.push(value);
+  }
+
+  function extractDescriptionKeywords(description: string | null | undefined): string[] {
+    if (!description) return [];
+
+    const tokens = description.toLowerCase().match(/[a-z0-9][a-z0-9+#.-]*/g) || [];
+    const frequency = new Map<string, number>();
+
+    for (const token of tokens) {
+      if (token.length < 3) continue;
+      if (/^\d+$/.test(token)) continue;
+      if (SEO_DESCRIPTION_STOP_WORDS.has(token)) continue;
+      frequency.set(token, (frequency.get(token) ?? 0) + 1);
+    }
+
+    return [...frequency.entries()]
+      .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+      .slice(0, 4)
+      .map(([token]) => token);
+  }
+
+  function buildSkillSeoKeywords(skill: SkillDetail): string[] {
+    const keywords: string[] = [];
+
+    appendKeyword(keywords, skill.name);
+    appendKeyword(keywords, `${skill.name} skill`);
+    appendKeyword(keywords, skill.slug);
+
+    if (skill.repoOwner && skill.repoName) {
+      appendKeyword(keywords, `${skill.repoOwner}/${skill.repoName}`);
+      appendKeyword(keywords, `${skill.repoOwner} ${skill.repoName}`);
+    } else if (skill.repoOwner) {
+      appendKeyword(keywords, skill.repoOwner);
+    }
+
+    for (const categorySlug of skill.categories ?? []) {
+      const category = getCategoryBySlug(categorySlug);
+      if (!category) continue;
+      appendKeyword(keywords, category.name);
+      appendKeyword(keywords, `${category.name} skill`);
+      for (const keyword of category.keywords.slice(0, 3)) {
+        appendKeyword(keywords, keyword);
+      }
+    }
+
+    for (const keyword of extractDescriptionKeywords(skill.description)) {
+      appendKeyword(keywords, keyword);
+    }
+
+    appendKeyword(keywords, skill.sourceType === 'upload' ? 'uploaded ai skill' : 'github ai skill');
+    appendKeyword(keywords, 'ai agent skill');
+    appendKeyword(keywords, 'skillscat');
+
+    return keywords.slice(0, 18);
+  }
+
   // Highlight command syntax
   function highlightCommand(command: string): string {
     // Parse: $ npx skillscat add owner/repo
@@ -944,6 +1016,9 @@
   const modifiedTime = $derived(
     toIsoTimestamp(data.skill?.lastCommitAt ?? data.skill?.updatedAt)
   );
+  const skillSeoKeywords = $derived(
+    data.skill ? buildSkillSeoKeywords(data.skill) : ['ai agent skill', 'skillscat']
+  );
   const skillStructuredData = $derived(
     data.skill && data.skill.visibility === 'public'
       ? {
@@ -981,7 +1056,7 @@
     publishedTime={publishedTime}
     modifiedTime={modifiedTime}
     noindex={data.skill.visibility !== 'public'}
-    keywords={['ai agent skill', data.skill.name, data.skill.repoOwner, 'skillscat']}
+    keywords={skillSeoKeywords}
     structuredData={skillStructuredData}
   />
 {:else}
