@@ -48,11 +48,11 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-kv-namespace-id>"
 
-# 必需 (如果使用 OpenRouter): 指定使用的模型
+# 可选: 覆盖主模型（默认 openrouter/free，会自动路由到可用免费模型）
 # 查看可用免费模型: https://openrouter.ai/models?q=:free
 # [vars]
-# AI_MODEL = "liquid/lfm-2.5-1.2b-thinking:free"
-# FREE_MODELS = "liquid/lfm-2.5-1.2b-thinking:free,google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free"
+# AI_MODEL = "openrouter/free"
+# FREE_MODELS = "google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free"
 
 [env.production]
 name = "skillscat-classification-production"

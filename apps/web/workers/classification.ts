@@ -23,6 +23,8 @@ import { createLogger } from './shared/utils';
 const log = createLogger('Classification');
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+// OpenRouter free router auto-selects a currently available free model.
+const DEFAULT_OPENROUTER_MODEL = 'openrouter/free';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_MODEL = 'deepseek-chat';
 
@@ -353,7 +355,7 @@ function classifyByKeywords(content: string, tags?: string[]): ClassificationRes
 
 /**
  * Classify skill using AI with multi-model fallback strategy:
- * 1. Try primary model on OpenRouter (AI_MODEL env var)
+ * 1. Try primary model on OpenRouter (AI_MODEL env var, defaults to openrouter/free)
  * 2. Retry primary model once
  * 3. Try random fallback model from FREE_MODELS pool
  * 4. Try DeepSeek as final AI fallback
@@ -366,10 +368,10 @@ async function classifyWithAI(
 ): Promise<ExtendedClassificationResult> {
   const prompt = buildClassificationPrompt(skillMdContent, tags);
   const freeModels = getFreeModels(env);
-  const primaryModel = env.AI_MODEL || freeModels[0];
+  const primaryModel = env.AI_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
 
-  // 1. Try OpenRouter (if API key and model are available)
-  if (env.OPENROUTER_API_KEY && primaryModel) {
+  // 1. Try OpenRouter (if API key is available)
+  if (env.OPENROUTER_API_KEY) {
     // 1a. Primary model - first attempt
     try {
       console.log(`[OpenRouter] Trying primary model: ${primaryModel}`);
@@ -398,8 +400,6 @@ async function classifyWithAI(
     }
   } else if (!env.OPENROUTER_API_KEY) {
     console.log('[OpenRouter] No API key configured');
-  } else if (!primaryModel) {
-    console.log('[OpenRouter] No model configured (set AI_MODEL or FREE_MODELS)');
   }
 
   // 2. DeepSeek fallback
