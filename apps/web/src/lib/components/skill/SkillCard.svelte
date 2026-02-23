@@ -398,7 +398,6 @@
 
   .meta-badge-time {
     flex-shrink: 0;
-    margin-left: auto;
     white-space: nowrap;
   }
 
