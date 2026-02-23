@@ -19,7 +19,6 @@ const SEO_DESCRIPTION_STOP_WORDS = new Set([
 const MAX_SEO_DESCRIPTION_SCAN_CHARS = 500;
 const MAX_SEO_TITLE_LENGTH = 68;
 const MAX_SEO_DESCRIPTION_LENGTH = 160;
-const README_SEO_MIN_DESC_LENGTH = 32;
 
 interface SkillSeoPayload {
   title: string;
@@ -85,80 +84,8 @@ function cleanDescriptionText(description: string | null | undefined): string | 
   return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
-function stripMarkdownFrontmatter(markdown: string): string {
-  if (!markdown.startsWith('---')) return markdown;
-  const match = markdown.match(/^---\s*\n[\s\S]*?\n---\s*(?:\n|$)/);
-  return match ? markdown.slice(match[0].length) : markdown;
-}
-
-function markdownToPlainText(markdown: string): string {
-  return markdown
-    .replace(/\r/g, '')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/~~~[\s\S]*?~~~/g, ' ')
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/<\/?[^>]+>/g, ' ')
-    .replace(/[*_~]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function isLikelyBadReadmeBlock(block: string): boolean {
-  const normalized = block.trim().toLowerCase();
-  if (!normalized) return true;
-
-  if (/^(installation|install|usage|examples?|quick start|getting started|requirements?|license|contributing|author)\b/.test(normalized)) {
-    return true;
-  }
-
-  if (/^(npx|npm|pnpm|yarn|uv|pip|python|node|go|cargo|docker)\b/.test(normalized)) {
-    return true;
-  }
-
-  if (/^(#|>|- |\* |\d+\. )/.test(normalized) && normalized.length < README_SEO_MIN_DESC_LENGTH) {
-    return true;
-  }
-
-  return false;
-}
-
-function extractReadmeSeoDescription(readme: string | null | undefined): string | null {
-  if (!readme) return null;
-
-  const withoutFrontmatter = stripMarkdownFrontmatter(readme).replace(/\r/g, '');
-  const blocks = withoutFrontmatter
-    .split(/\n\s*\n+/)
-    .map((block) => block.trim())
-    .filter(Boolean);
-
-  for (const rawBlock of blocks) {
-    if (!rawBlock) continue;
-    if (/^\s*#{1,6}\s+/.test(rawBlock)) continue; // headings only
-    if (/shields\.io|img\.shields\.io/i.test(rawBlock)) continue; // badge rows
-
-    const plain = markdownToPlainText(rawBlock)
-      .replace(/^#{1,6}\s+/, '')
-      .replace(/^>\s*/, '')
-      .trim();
-
-    if (plain.length < README_SEO_MIN_DESC_LENGTH) continue;
-    if (!/[a-zA-Z]/.test(plain)) continue;
-    if (isLikelyBadReadmeBlock(plain)) continue;
-
-    return cleanDescriptionText(plain);
-  }
-
-  return null;
-}
-
 function buildGroundedSeoDescription(skill: SkillDetail): string {
-  const fromReadme = extractReadmeSeoDescription(skill.readme);
-  if (fromReadme) {
-    return trimToLength(fromReadme, MAX_SEO_DESCRIPTION_LENGTH);
-  }
-
+  // `skill.description` is the canonical summary extracted from SKILL.md during indexing.
   const fromSkillDescription = cleanDescriptionText(skill.description);
   if (fromSkillDescription) {
     return trimToLength(fromSkillDescription, MAX_SEO_DESCRIPTION_LENGTH);
