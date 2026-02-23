@@ -17,6 +17,8 @@
     modifiedTime?: string;
     author?: string;
     keywords?: string[];
+    tags?: string[];
+    section?: string;
     noindex?: boolean;
     structuredData?: Record<string, unknown> | Array<Record<string, unknown>> | null;
   }
@@ -32,6 +34,8 @@
     modifiedTime,
     author,
     keywords = [],
+    tags = [],
+    section,
     noindex = false,
     structuredData,
   }: Props = $props();
@@ -113,6 +117,14 @@
   {/if}
   {#if author}
     <meta property="article:author" content={author} />
+  {/if}
+  {#if section}
+    <meta property="article:section" content={section} />
+  {/if}
+  {#if tags.length > 0}
+    {#each tags as tag}
+      <meta property="article:tag" content={tag} />
+    {/each}
   {/if}
 
   <!-- Twitter -->

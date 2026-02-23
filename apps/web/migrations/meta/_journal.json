@@ -15,6 +15,13 @@
       "when": 1770911649207,
       "tag": "0001_pre_release_db_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1771870860993,
+      "tag": "0002_lush_gamora",
+      "breakpoints": true
     }
   ]
 }

@@ -24,6 +24,13 @@
       isAuthenticated?: boolean;
       isDotFolderSkill?: boolean;
       renderedReadme?: string;
+      seo?: {
+        title: string;
+        description: string;
+        keywords: string[];
+        articleTags?: string[];
+        section?: string;
+      };
     };
   }
 
@@ -900,78 +907,6 @@
     return new Date(timestamp).toISOString();
   }
 
-  const SEO_DESCRIPTION_STOP_WORDS = new Set([
-    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'how',
-    'in', 'is', 'it', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'with',
-    'you', 'your', 'ai', 'agent', 'skill', 'skills'
-  ]);
-
-  function normalizeKeywordValue(keyword: string): string {
-    return keyword.trim().toLowerCase().replace(/\s+/g, ' ');
-  }
-
-  function appendKeyword(target: string[], keyword: string): void {
-    const value = keyword.trim();
-    const normalized = normalizeKeywordValue(value);
-    if (!normalized || normalized.length < 2) return;
-    if (target.some((item) => normalizeKeywordValue(item) === normalized)) return;
-    target.push(value);
-  }
-
-  function extractDescriptionKeywords(description: string | null | undefined): string[] {
-    if (!description) return [];
-
-    const tokens = description.toLowerCase().match(/[a-z0-9][a-z0-9+#.-]*/g) || [];
-    const frequency = new Map<string, number>();
-
-    for (const token of tokens) {
-      if (token.length < 3) continue;
-      if (/^\d+$/.test(token)) continue;
-      if (SEO_DESCRIPTION_STOP_WORDS.has(token)) continue;
-      frequency.set(token, (frequency.get(token) ?? 0) + 1);
-    }
-
-    return [...frequency.entries()]
-      .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
-      .slice(0, 4)
-      .map(([token]) => token);
-  }
-
-  function buildSkillSeoKeywords(skill: SkillDetail): string[] {
-    const keywords: string[] = [];
-
-    appendKeyword(keywords, skill.name);
-    appendKeyword(keywords, `${skill.name} skill`);
-    appendKeyword(keywords, skill.slug);
-
-    if (skill.repoOwner && skill.repoName) {
-      appendKeyword(keywords, `${skill.repoOwner}/${skill.repoName}`);
-      appendKeyword(keywords, `${skill.repoOwner} ${skill.repoName}`);
-    } else if (skill.repoOwner) {
-      appendKeyword(keywords, skill.repoOwner);
-    }
-
-    for (const categorySlug of skill.categories ?? []) {
-      const category = getCategoryBySlug(categorySlug);
-      if (!category) continue;
-      appendKeyword(keywords, category.name);
-      appendKeyword(keywords, `${category.name} skill`);
-      for (const keyword of category.keywords.slice(0, 3)) {
-        appendKeyword(keywords, keyword);
-      }
-    }
-
-    for (const keyword of extractDescriptionKeywords(skill.description)) {
-      appendKeyword(keywords, keyword);
-    }
-
-    appendKeyword(keywords, skill.sourceType === 'upload' ? 'uploaded ai skill' : 'github ai skill');
-    appendKeyword(keywords, 'ai agent skill');
-    appendKeyword(keywords, 'skillscat');
-
-    return keywords.slice(0, 18);
-  }
-
   // Highlight command syntax
   function highlightCommand(command: string): string {
     // Parse: $ npx skillscat add owner/repo
@@ -1003,11 +938,20 @@
     data.skill ? `${SITE_URL}/skills/${encodeSkillSlugForPath(data.skill.slug)}` : SITE_URL
   );
   const skillDescription = $derived(
-    data.skill?.description || (data.skill ? `AI agent skill: ${data.skill.name}` : 'Skill not found on SkillsCat.')
+    data.seo?.description
+      || data.skill?.description
+      || (data.skill ? `AI agent skill: ${data.skill.name}` : 'Skill not found on SkillsCat.')
+  );
+  const skillSeoTitle = $derived(
+    data.seo?.title || (data.skill ? `${data.skill.name} - SkillsCat` : 'Skill Not Found - SkillsCat')
   );
   const ogImageUrl = $derived(
     data.skill
-      ? buildOgImageUrl({ type: 'skill', slug: data.skill.slug })
+      ? buildOgImageUrl({
+          type: 'skill',
+          slug: data.skill.slug,
+          version: data.skill.lastCommitAt ?? data.skill.updatedAt ?? data.skill.indexedAt,
+        })
       : buildOgImageUrl({ type: 'page', slug: '404' })
   );
   const publishedTime = $derived(
@@ -1016,37 +960,65 @@
   const modifiedTime = $derived(
     toIsoTimestamp(data.skill?.lastCommitAt ?? data.skill?.updatedAt)
   );
-  const skillSeoKeywords = $derived(
-    data.skill ? buildSkillSeoKeywords(data.skill) : ['ai agent skill', 'skillscat']
-  );
+  const skillSeoKeywords = $derived(data.seo?.keywords ?? ['ai agent skill', 'skillscat']);
   const skillStructuredData = $derived(
     data.skill && data.skill.visibility === 'public'
-      ? {
-          '@context': 'https://schema.org',
-          '@type': 'SoftwareSourceCode',
-          name: data.skill.name,
-          description: skillDescription,
-          url: canonicalSkillUrl,
-          codeRepository: data.skill.githubUrl || undefined,
-          datePublished: publishedTime || undefined,
-          dateModified: modifiedTime || undefined,
-          author: {
-            '@type': data.skill.orgName ? 'Organization' : 'Person',
-            name: getAuthorDisplayName(),
+      ? [
+          {
+            '@context': 'https://schema.org',
+            '@type': 'SoftwareSourceCode',
+            name: data.skill.name,
+            description: skillDescription,
+            url: canonicalSkillUrl,
+            codeRepository: data.skill.githubUrl || undefined,
+            datePublished: publishedTime || undefined,
+            dateModified: modifiedTime || undefined,
+            keywords: skillSeoKeywords.join(', '),
+            about: (data.skill.categories || [])
+              .map((slug) => getCategoryBySlug(slug)?.name)
+              .filter(Boolean),
+            author: {
+              '@type': data.skill.orgName ? 'Organization' : 'Person',
+              name: getAuthorDisplayName(),
+            },
+            publisher: {
+              '@type': 'Organization',
+              name: 'SkillsCat',
+              url: SITE_URL,
+            },
           },
-          publisher: {
-            '@type': 'Organization',
-            name: 'SkillsCat',
-            url: SITE_URL,
-          },
-        }
+          {
+            '@context': 'https://schema.org',
+            '@type': 'BreadcrumbList',
+            itemListElement: [
+              {
+                '@type': 'ListItem',
+                position: 1,
+                name: 'Home',
+                item: SITE_URL,
+              },
+              {
+                '@type': 'ListItem',
+                position: 2,
+                name: 'Skills',
+                item: `${SITE_URL}/trending`,
+              },
+              {
+                '@type': 'ListItem',
+                position: 3,
+                name: data.skill.name,
+                item: canonicalSkillUrl,
+              }
+            ],
+          }
+        ]
       : null
   );
 </script>
 
 {#if data.skill}
   <SEO
-    title={`${data.skill.name} - SkillsCat`}
+    title={skillSeoTitle}
     description={skillDescription}
     url={canonicalSkillUrl}
     image={ogImageUrl}
@@ -1057,6 +1029,8 @@
     modifiedTime={modifiedTime}
     noindex={data.skill.visibility !== 'public'}
     keywords={skillSeoKeywords}
+    tags={data.seo?.articleTags}
+    section={data.seo?.section}
     structuredData={skillStructuredData}
   />
 {:else}

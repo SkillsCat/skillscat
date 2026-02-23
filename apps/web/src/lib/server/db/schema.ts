@@ -67,7 +67,8 @@ export const organizations = sqliteTable('organizations', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
   index('organizations_slug_idx').on(table.slug),
-  index('organizations_owner_idx').on(table.ownerId)
+  index('organizations_owner_idx').on(table.ownerId),
+  index('organizations_updated_idx').on(table.updatedAt)
 ]);
 
 // ========== Organization Members ==========
@@ -125,6 +126,7 @@ export const skills = sqliteTable('skills', {
   index('skills_stars_idx').on(table.stars),
   index('skills_indexed_idx').on(table.indexedAt),
   index('skills_visibility_idx').on(table.visibility),
+  index('skills_visibility_org_idx').on(table.visibility, table.orgId),
   index('skills_visibility_trending_desc_idx').on(table.visibility, table.trendingScore),
   index('skills_visibility_stars_desc_idx').on(table.visibility, table.stars),
   index('skills_visibility_recent_expr_idx').on(
@@ -161,7 +163,10 @@ export const authors = sqliteTable('authors', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
   index('authors_username_idx').on(table.username),
-  index('authors_user_id_idx').on(table.userId)
+  index('authors_user_id_idx').on(table.userId),
+  index('authors_sitemap_updated_partial_idx')
+    .on(table.updatedAt)
+    .where(sql`${table.username} IS NOT NULL AND ${table.skillsCount} > 0`)
 ]);
 
 // ========== Skill Permissions ==========
