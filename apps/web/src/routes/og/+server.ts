@@ -57,7 +57,7 @@ const DEFAULT_OG: OgData = {
 async function resolveSkill(slug: string, env: DbEnv): Promise<OgData | null> {
   if (!env.DB) return null;
   const skill = await getSkillBySlug(env, slug, null);
-  if (!skill || skill.visibility !== 'public') return null;
+  if (!skill || skill.visibility === 'private') return null;
   const author = skill.authorDisplayName || skill.repoOwner || '';
   const categories = skill.categories || [];
   const firstCat = categories.length > 0 ? getCategoryBySlug(categories[0]) : null;
