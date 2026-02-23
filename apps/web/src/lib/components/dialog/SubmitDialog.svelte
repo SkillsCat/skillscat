@@ -321,6 +321,7 @@
     margin-bottom: 1.5rem;
     color: var(--muted-foreground);
     line-height: 1.6;
+    text-align: left;
   }
 
   .form-group {

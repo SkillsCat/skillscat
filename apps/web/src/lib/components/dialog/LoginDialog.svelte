@@ -46,14 +46,14 @@
         {#if open}
           <div {...props} class="dialog" transition:fly={{ y: 10, duration: 200 }}>
             <div class="dialog-header">
-              <Dialog.Title class="dialog-title">Sign In</Dialog.Title>
-              <Dialog.Close class="dialog-close" aria-label="Close">
+              <Dialog.Title class="login-dialog-title">Sign In</Dialog.Title>
+              <Dialog.Close class="login-dialog-close" aria-label="Close">
                 <HugeiconsIcon icon={Cancel01Icon} size={20} strokeWidth={2} />
               </Dialog.Close>
             </div>
 
             <div class="dialog-content">
-              <Dialog.Description class="dialog-description">
+              <Dialog.Description class="login-dialog-description">
                 Sign in to save your favorite skills and submit new ones to the community.
               </Dialog.Description>
 
@@ -112,14 +112,14 @@
     border-bottom: 2px solid var(--border);
   }
 
-  :global(.dialog-title) {
+  :global(.login-dialog-title) {
     font-size: 1.375rem;
     font-weight: 700;
     color: var(--foreground);
     margin: 0;
   }
 
-  :global(.dialog-close) {
+  :global(.login-dialog-close) {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -133,7 +133,7 @@
     transition: all 0.15s ease;
   }
 
-  :global(.dialog-close:hover) {
+  :global(.login-dialog-close:hover) {
     border-color: var(--primary);
     background-color: var(--primary-subtle);
     color: var(--primary);
@@ -144,7 +144,7 @@
     padding: 1.5rem;
   }
 
-  :global(.dialog-description) {
+  :global(.login-dialog-description) {
     margin: 0 0 1.5rem 0;
     color: var(--muted-foreground);
     font-size: 0.9375rem;
