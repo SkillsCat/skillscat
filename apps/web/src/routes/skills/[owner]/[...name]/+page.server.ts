@@ -4,9 +4,227 @@ import { getSkillBySlug, getRelatedSkills, recordSkillAccess } from '$lib/server
 import { getCached } from '$lib/server/cache';
 import { renderReadmeMarkdown } from '$lib/server/markdown';
 import { setPublicPageCache } from '$lib/server/page-cache';
+import { CATEGORIES } from '$lib/constants/categories';
+import type { Category } from '$lib/constants/categories';
 import { buildSkillPathFromOwnerAndName, buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
+import type { SkillDetail } from '$lib/types';
 
 const BOT_UA_PATTERN = /\b(bot|crawler|spider|slurp|preview|headless|lighthouse)\b/i;
+const CATEGORY_BY_SLUG = new Map(CATEGORIES.map((category) => [category.slug, category] as const));
+const SEO_DESCRIPTION_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'how',
+  'in', 'is', 'it', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'with',
+  'you', 'your', 'ai', 'agent', 'skill', 'skills'
+]);
+const MAX_SEO_DESCRIPTION_SCAN_CHARS = 500;
+const MAX_SEO_TITLE_LENGTH = 68;
+const MAX_SEO_DESCRIPTION_LENGTH = 160;
+
+interface SkillSeoPayload {
+  title: string;
+  description: string;
+  keywords: string[];
+  articleTags: string[];
+  section?: string;
+}
+
+function normalizeKeywordValue(keyword: string): string {
+  return keyword.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function appendKeyword(target: string[], seen: Set<string>, keyword: string): void {
+  const value = keyword.trim();
+  const normalized = normalizeKeywordValue(value);
+  if (!normalized || normalized.length < 2 || seen.has(normalized)) {
+    return;
+  }
+  seen.add(normalized);
+  target.push(value);
+}
+
+function isCategory(value: Category | undefined): value is Category {
+  return Boolean(value);
+}
+
+function extractDescriptionKeywords(description: string | null | undefined): string[] {
+  if (!description) return [];
+
+  const scanText = description.slice(0, MAX_SEO_DESCRIPTION_SCAN_CHARS).toLowerCase();
+  const tokens = scanText.match(/[a-z0-9][a-z0-9+#.-]*/g) || [];
+  const frequency = new Map<string, number>();
+
+  for (const token of tokens) {
+    if (token.length < 3) continue;
+    if (/^\d+$/.test(token)) continue;
+    if (SEO_DESCRIPTION_STOP_WORDS.has(token)) continue;
+    frequency.set(token, (frequency.get(token) ?? 0) + 1);
+  }
+
+  return [...frequency.entries()]
+    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+    .slice(0, 4)
+    .map(([token]) => token);
+}
+
+function trimToLength(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+  const sliced = normalized.slice(0, maxLength - 1);
+  const cut = sliced.lastIndexOf(' ');
+  return `${(cut > Math.floor(maxLength * 0.6) ? sliced.slice(0, cut) : sliced).trim()}…`;
+}
+
+function cleanDescriptionText(description: string | null | undefined): string | null {
+  if (!description) return null;
+  const text = description
+    .replace(/\s+/g, ' ')
+    .replace(/[`*_#]/g, '')
+    .trim();
+  if (!text) return null;
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
+function buildSkillSeoKeywords(skill: SkillDetail): string[] {
+  const keywords: string[] = [];
+  const seen = new Set<string>();
+  const categories = (skill.categories ?? [])
+    .map((slug) => CATEGORY_BY_SLUG.get(slug))
+    .filter(isCategory);
+  const descriptionKeywords = extractDescriptionKeywords(skill.description);
+  const primaryCategory = categories[0];
+  const primaryCategoryName = primaryCategory?.name?.toLowerCase();
+
+  appendKeyword(keywords, seen, skill.name);
+  appendKeyword(keywords, seen, `${skill.name} skill`);
+  appendKeyword(keywords, seen, `${skill.name} ai agent skill`);
+  appendKeyword(keywords, seen, skill.slug);
+
+  if (skill.repoOwner && skill.repoName) {
+    appendKeyword(keywords, seen, `${skill.repoOwner}/${skill.repoName}`);
+    appendKeyword(keywords, seen, `${skill.repoOwner} ${skill.repoName}`);
+    appendKeyword(keywords, seen, `${skill.repoOwner}/${skill.repoName} skill`);
+  } else if (skill.repoOwner) {
+    appendKeyword(keywords, seen, skill.repoOwner);
+  }
+
+  for (const category of categories) {
+    appendKeyword(keywords, seen, category.name);
+    appendKeyword(keywords, seen, `${category.name} skill`);
+    appendKeyword(keywords, seen, `${category.name} automation skill`);
+    appendKeyword(keywords, seen, `${category.name} ai agent skill`);
+    for (const keyword of category.keywords.slice(0, 3)) {
+      appendKeyword(keywords, seen, keyword);
+      appendKeyword(keywords, seen, `${keyword} automation skill`);
+      if (primaryCategoryName) {
+        appendKeyword(keywords, seen, `${keyword} ${primaryCategoryName} workflow`);
+      }
+    }
+  }
+
+  for (const keyword of descriptionKeywords) {
+    appendKeyword(keywords, seen, keyword);
+    appendKeyword(keywords, seen, `${keyword} skill`);
+    appendKeyword(keywords, seen, `${keyword} automation`);
+  }
+
+  if (descriptionKeywords.length >= 2) {
+    appendKeyword(keywords, seen, `${descriptionKeywords[0]} ${descriptionKeywords[1]} skill`);
+    appendKeyword(keywords, seen, `${descriptionKeywords[0]} ${descriptionKeywords[1]} workflow`);
+  }
+
+  if (primaryCategoryName && descriptionKeywords[0]) {
+    appendKeyword(keywords, seen, `${descriptionKeywords[0]} ${primaryCategoryName} skill`);
+  }
+
+  appendKeyword(keywords, seen, skill.sourceType === 'upload' ? 'uploaded ai skill' : 'github ai skill');
+  appendKeyword(keywords, seen, 'ai agent skill');
+  appendKeyword(keywords, seen, 'skillscat');
+
+  return keywords.slice(0, 24);
+}
+
+function buildSkillSeoPayload(skill: SkillDetail): SkillSeoPayload {
+  const categories = (skill.categories ?? [])
+    .map((slug) => CATEGORY_BY_SLUG.get(slug))
+    .filter(isCategory);
+  const primaryCategory = categories[0];
+  const primaryCategoryName = primaryCategory?.name;
+  const primaryCategoryLower = primaryCategoryName?.toLowerCase();
+  const descriptionKeywords = extractDescriptionKeywords(skill.description);
+  const keywords = buildSkillSeoKeywords(skill);
+
+  const titleParts = [skill.name];
+  if (primaryCategoryName) {
+    titleParts.push(`${primaryCategoryName} AI Agent Skill`);
+  } else {
+    titleParts.push('AI Agent Skill');
+  }
+  titleParts.push('SkillsCat');
+  const rawTitle = titleParts.join(' | ');
+  const title = trimToLength(rawTitle, MAX_SEO_TITLE_LENGTH);
+
+  const cleanDescription = cleanDescriptionText(skill.description);
+  const phraseBits: string[] = [];
+
+  if (primaryCategoryLower) {
+    phraseBits.push(`${primaryCategoryLower} automation`);
+  }
+  if (descriptionKeywords.length >= 2) {
+    phraseBits.push(`${descriptionKeywords[0]} ${descriptionKeywords[1]} workflow`);
+  } else if (descriptionKeywords[0]) {
+    phraseBits.push(`${descriptionKeywords[0]} workflow`);
+  }
+  if (skill.repoOwner && skill.repoName) {
+    phraseBits.push(`${skill.repoOwner}/${skill.repoName} skill`);
+  }
+
+  let description = cleanDescription
+    ?? `Discover ${skill.name} on SkillsCat, an AI agent skill for ${primaryCategoryLower || 'automation'} workflows.`;
+
+  const uniquePhraseBits: string[] = [];
+  for (const phrase of phraseBits) {
+    if (!phrase) continue;
+    const normalized = normalizeKeywordValue(phrase);
+    if (uniquePhraseBits.some((item) => normalizeKeywordValue(item) === normalized)) continue;
+    uniquePhraseBits.push(phrase);
+  }
+
+  if (uniquePhraseBits.length > 0) {
+    const tail = `Ideal for ${uniquePhraseBits.slice(0, 2).join(' and ')} on SkillsCat.`;
+    const combined = `${description} ${tail}`.replace(/\s+/g, ' ').trim();
+    description = trimToLength(combined, MAX_SEO_DESCRIPTION_LENGTH);
+  } else {
+    description = trimToLength(description, MAX_SEO_DESCRIPTION_LENGTH);
+  }
+
+  const articleTags: string[] = [];
+  const articleTagSeen = new Set<string>();
+  const pushArticleTag = (value: string) => {
+    const normalized = normalizeKeywordValue(value);
+    if (!normalized || articleTagSeen.has(normalized)) return;
+    articleTagSeen.add(normalized);
+    articleTags.push(value);
+  };
+
+  if (primaryCategoryName) pushArticleTag(primaryCategoryName);
+  for (const category of categories.slice(0, 3)) {
+    pushArticleTag(category.name);
+    for (const keyword of category.keywords.slice(0, 2)) {
+      pushArticleTag(keyword);
+    }
+  }
+  for (const keyword of descriptionKeywords.slice(0, 3)) {
+    pushArticleTag(keyword);
+  }
+
+  return {
+    title,
+    description,
+    keywords,
+    articleTags: articleTags.slice(0, 10),
+    section: primaryCategoryName,
+  };
+}
 
 function shouldTrackAccess(request: Request): boolean {
   const purpose = `${request.headers.get('purpose') || ''} ${request.headers.get('sec-purpose') || ''}`.toLowerCase();
@@ -149,6 +367,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
 
     // Determine if this is a dot-folder skill (e.g., .claude/SKILL.md)
     const isDotFolderSkill = skill.skillPath ? /^\.[\w-]+/.test(skill.skillPath) : false;
+    const seo = buildSkillSeoPayload(skill);
 
     return {
       skill,
@@ -158,6 +377,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       isBookmarked,
       isAuthenticated: !!userId,
       isDotFolderSkill,
+      seo,
     };
   } catch (error) {
     console.error('Error loading skill:', error);
