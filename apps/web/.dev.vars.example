@@ -24,11 +24,11 @@ GITHUB_TOKEN=your-github-token
 # 查看可用免费模型: https://openrouter.ai/models?q=:free
 OPENROUTER_API_KEY=
 
-# 必需 (如果使用 OpenRouter): 指定使用的模型
-AI_MODEL=liquid/lfm-2.5-1.2b-thinking:free
+# 可选: 主模型（默认 openrouter/free，会自动路由到可用免费模型）
+AI_MODEL=openrouter/free
 
 # 可选: 免费模型池，逗号分隔 (用于 fallback)
-# FREE_MODELS=liquid/lfm-2.5-1.2b-thinking:free,google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free
+# FREE_MODELS=google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free
 
 # ========== DeepSeek API (兜底策略，可选) ==========
 # 获取 API Key: https://platform.deepseek.com/api_keys
