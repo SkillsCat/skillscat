@@ -96,6 +96,7 @@
     color: var(--muted-foreground);
     margin-bottom: 1.5rem;
     line-height: 1.5;
+    text-align: left;
   }
 
   .dialog-actions {
