@@ -1,15 +1,18 @@
-// Service Worker 缓存配置
+// Service Worker cache configuration
 
-// 版本号 - 构建时会被替换
-export const SW_VERSION = '__SW_VERSION__';
+// Version placeholder replaced during the SW build step
+declare const __SW_VERSION__: string;
+export const SW_VERSION = __SW_VERSION__;
 
-// 缓存名称
+// Cache names
 export const CACHE_NAMES = {
   static: `skillscat-static-v${SW_VERSION}`,
   api: `skillscat-api-v${SW_VERSION}`,
+  pages: `skillscat-pages-v${SW_VERSION}`,
+  pageData: `skillscat-page-data-v${SW_VERSION}`,
 } as const;
 
-// 静态资源匹配模式 (Cache First)
+// Static asset match patterns (Cache First)
 export const STATIC_PATTERNS: RegExp[] = [
   /^\/_app\/immutable\//,
   /\.(?:js|css|woff2?|ttf|otf)$/,
@@ -17,14 +20,14 @@ export const STATIC_PATTERNS: RegExp[] = [
   /^https:\/\/avatars\.githubusercontent\.com\//,
 ];
 
-// API 缓存配置 (Stale While Revalidate)
+// API cache configuration (Stale While Revalidate)
 export interface ApiCacheConfig {
   pattern: RegExp;
-  maxAge: number; // 缓存时间 (ms)
-  staleWhileRevalidate: number; // 过期验证时间 (ms)
+  maxAge: number; // Cache freshness window (ms)
+  staleWhileRevalidate: number; // Stale serving window after maxAge (ms)
 }
 
-// 创建带 test 方法的配置
+// Helper to attach a typed test function to each config entry
 function createConfig(
   pattern: RegExp,
   maxAge: number,
@@ -49,7 +52,7 @@ export const API_CACHE_CONFIGS = [
   createConfig(/^\/api\/registry\/skill\//, 5 * 60 * 1000, 10 * 60 * 1000),
 ];
 
-// 不缓存的路由模式
+// Route patterns that must never be cached by the SW
 export const NO_CACHE_PATTERNS: RegExp[] = [
   /^\/api\/auth\//,
   /^\/api\/favorites/,

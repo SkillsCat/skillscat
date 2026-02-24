@@ -1,23 +1,27 @@
-// Service Worker 主入口
+// Service Worker entry point
 
-import { SW_VERSION } from './cache-config';
+import { SW_VERSION, CACHE_NAMES } from './cache-config';
 import {
   cacheFirst,
+  networkFirst,
   staleWhileRevalidate,
   isStaticAsset,
+  isNavigationRequest,
+  isSvelteKitDataRequest,
+  isExplicitlyPublicResponse,
   getApiCacheConfig,
   cleanupOldCaches,
 } from './cache-strategies';
 
 declare const self: ServiceWorkerGlobalScope;
 
-// Install 事件 - 跳过等待，立即激活
+// Install event: skip waiting and activate as soon as possible
 self.addEventListener('install', (event) => {
   console.log(`[SW] Installing version ${SW_VERSION}`);
   event.waitUntil(self.skipWaiting());
 });
 
-// Activate 事件 - 清理旧缓存，接管所有客户端
+// Activate event: clean old caches and take control of existing clients
 self.addEventListener('activate', (event) => {
   console.log(`[SW] Activating version ${SW_VERSION}`);
   event.waitUntil(
@@ -25,29 +29,47 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch 事件 - 拦截请求并应用缓存策略
+// Fetch event: intercept requests and apply cache strategies
 self.addEventListener('fetch', (event) => {
   const request = event.request;
 
-  // 只处理 GET 请求
+  // Only handle GET requests
   if (request.method !== 'GET') {
     return;
   }
 
   const url = new URL(request.url);
 
-  // 跳过非 HTTP(S) 请求
+  // Ignore non-HTTP(S) requests
   if (!url.protocol.startsWith('http')) {
     return;
   }
 
-  // 静态资源 - Cache First
+  const isSameOrigin = url.origin === self.location.origin;
+
+  // Page navigations: Network First (cache only explicitly public responses)
+  if (isSameOrigin && isNavigationRequest(request)) {
+    event.respondWith(
+      networkFirst(request, CACHE_NAMES.pages, isExplicitlyPublicResponse)
+    );
+    return;
+  }
+
+  // SvelteKit page data (__data.json): Network First with offline fallback
+  if (isSameOrigin && isSvelteKitDataRequest(url)) {
+    event.respondWith(
+      networkFirst(request, CACHE_NAMES.pageData, isExplicitlyPublicResponse)
+    );
+    return;
+  }
+
+  // Static assets: Cache First
   if (isStaticAsset(url)) {
     event.respondWith(cacheFirst(request));
     return;
   }
 
-  // API 请求 - Stale While Revalidate
+  // API requests: Stale While Revalidate
   if (url.pathname.startsWith('/api/')) {
     const config = getApiCacheConfig(url.pathname);
 
@@ -57,10 +79,10 @@ self.addEventListener('fetch', (event) => {
     }
   }
 
-  // 其他请求 - 直接网络请求
+  // All other requests fall through to the network
 });
 
-// Message 事件 - 支持手动清除缓存
+// Message event: support manual cache management
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'CLEAR_CACHE') {
     event.waitUntil(

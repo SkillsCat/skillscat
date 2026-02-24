@@ -1,4 +1,4 @@
-// Service Worker 缓存策略实现
+// Service Worker caching strategy implementations
 
 import {
   CACHE_NAMES,
@@ -8,12 +8,12 @@ import {
   type ApiCacheConfig,
 } from './cache-config';
 
-// 缓存元数据 key
+// Cache metadata header key
 const CACHE_TIME_HEADER = 'sw-cache-time';
 
 /**
- * Cache First 策略 - 用于静态资源
- * 优先从缓存读取，缓存未命中时从网络获取并缓存
+ * Cache First for static assets.
+ * Serve from cache when available, otherwise fetch and cache the response.
  */
 export async function cacheFirst(request: Request): Promise<Response> {
   const cache = await caches.open(CACHE_NAMES.static);
@@ -33,8 +33,41 @@ export async function cacheFirst(request: Request): Promise<Response> {
 }
 
 /**
- * Stale While Revalidate 策略 - 用于 API 响应
- * 立即返回缓存（如果有），同时在后台更新缓存
+ * Network First for HTML documents and SvelteKit data requests.
+ * Prefer fresh network responses and fall back to cache when offline.
+ */
+export async function networkFirst(
+  request: Request,
+  cacheName: string,
+  shouldCacheResponse: (response: Response) => boolean = (response) => response.ok
+): Promise<Response> {
+  const cache = await caches.open(cacheName);
+
+  try {
+    const response = await fetch(request);
+
+    // Only update or clear cache on successful responses to avoid caching error pages.
+    if (response.ok) {
+      if (shouldCacheResponse(response)) {
+        await cache.put(request, response.clone());
+      } else {
+        await cache.delete(request);
+      }
+    }
+
+    return response;
+  } catch (error) {
+    const cached = await cache.match(request);
+    if (cached) {
+      return cached;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Stale While Revalidate for cacheable API responses.
+ * Return cached data immediately when possible and refresh in the background.
  */
 export async function staleWhileRevalidate(
   request: Request,
@@ -45,12 +78,12 @@ export async function staleWhileRevalidate(
 
   const now = Date.now();
 
-  // 后台更新函数
+  // Background refresh function
   const updateCache = async () => {
     try {
       const response = await fetch(request);
       if (response.ok) {
-        // 添加缓存时间戳
+        // Persist the cache timestamp on the stored response
         const headers = new Headers(response.headers);
         headers.set(CACHE_TIME_HEADER, now.toString());
 
@@ -63,7 +96,7 @@ export async function staleWhileRevalidate(
         await cache.put(request, cachedResponse);
       }
     } catch {
-      // 网络错误时静默失败
+      // Silently ignore refresh failures
     }
   };
 
@@ -71,19 +104,19 @@ export async function staleWhileRevalidate(
     const cacheTime = parseInt(cached.headers.get(CACHE_TIME_HEADER) || '0', 10);
     const age = now - cacheTime;
 
-    // 缓存仍然新鲜
+    // Cache entry is still fresh
     if (age < config.maxAge) {
       return cached;
     }
 
-    // 缓存过期但在 stale 窗口内，返回缓存并后台更新
+    // Cache entry is stale but still within the stale-while-revalidate window
     if (age < config.maxAge + config.staleWhileRevalidate) {
       updateCache();
       return cached;
     }
   }
 
-  // 无缓存或缓存完全过期，等待网络响应
+  // No cache or fully expired cache: wait for the network response
   const response = await fetch(request);
 
   if (response.ok) {
@@ -103,7 +136,7 @@ export async function staleWhileRevalidate(
 }
 
 /**
- * 判断请求是否为静态资源
+ * Check whether a request targets a static asset.
  */
 export function isStaticAsset(url: URL): boolean {
   const fullUrl = url.href;
@@ -118,28 +151,73 @@ export function isStaticAsset(url: URL): boolean {
 }
 
 /**
- * 获取 API 缓存配置
+ * Check whether a request is a top-level navigation.
+ */
+export function isNavigationRequest(request: Request): boolean {
+  return request.mode === 'navigate';
+}
+
+/**
+ * Check whether a request is a SvelteKit page data request.
+ * Examples: /foo/__data.json or /__data.json
+ */
+export function isSvelteKitDataRequest(url: URL): boolean {
+  return url.pathname === '/__data.json' || url.pathname.endsWith('/__data.json');
+}
+
+/**
+ * Cache only page responses explicitly marked as public.
+ * This avoids storing personalized or private responses.
+ */
+export function isExplicitlyPublicResponse(response: Response): boolean {
+  if (!response.ok) {
+    return false;
+  }
+
+  const cacheControl = response.headers.get('cache-control')?.toLowerCase() ?? '';
+  if (!cacheControl) {
+    return false;
+  }
+
+  if (
+    cacheControl.includes('no-store')
+    || cacheControl.includes('private')
+    || cacheControl.includes('no-cache')
+  ) {
+    return false;
+  }
+
+  const vary = response.headers.get('vary')?.toLowerCase() ?? '';
+  if (vary.includes('*') || vary.includes('cookie')) {
+    return false;
+  }
+
+  return cacheControl.includes('public');
+}
+
+/**
+ * Resolve API cache configuration for a pathname.
  */
 export function getApiCacheConfig(pathname: string): ApiCacheConfig | null {
-  // 检查是否在不缓存列表中
+  // Exclude routes that must never be cached
   if (NO_CACHE_PATTERNS.some((pattern) => pattern.test(pathname))) {
     return null;
   }
 
-  // 查找匹配的缓存配置
+  // Find the first matching cache config
   return API_CACHE_CONFIGS.find((config) => config.test(pathname)) || null;
 }
 
 /**
- * 清理旧版本缓存
+ * Remove caches from older SW versions.
  */
 export async function cleanupOldCaches(): Promise<void> {
   const cacheNames = await caches.keys();
-  const currentCaches = Object.values(CACHE_NAMES);
+  const currentCaches = new Set<string>(Object.values(CACHE_NAMES));
 
   await Promise.all(
     cacheNames
-      .filter((name) => !currentCaches.includes(name))
+      .filter((name) => !currentCaches.has(name))
       .map((name) => caches.delete(name))
   );
 }
