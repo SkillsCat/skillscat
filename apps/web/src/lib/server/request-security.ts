@@ -131,6 +131,10 @@ function isApiOrRegistryPath(pathname: string): boolean {
     return true;
   }
 
+  if (pathname.startsWith('/registry/repo/')) {
+    return true;
+  }
+
   if (pathname.startsWith('/registry/search')) {
     return true;
   }
@@ -154,7 +158,8 @@ function routeNeedsUaProtection(routeId: string | null, pathname: string): boole
   return (
     /^\/api\/skills\/.+\/(download|files|file|track-install)$/.test(pathname) ||
     pathname === '/api/skills/upload' ||
-    /^\/registry\/skill\//.test(pathname)
+    /^\/registry\/skill\//.test(pathname) ||
+    /^\/registry\/repo\//.test(pathname)
   );
 }
 
@@ -180,6 +185,21 @@ function getBearerToken(request: Request): string | null {
 
 function hasTokenAuthHeader(request: Request): boolean {
   return getBearerToken(request) !== null;
+}
+
+function isSkillscatCliUserAgent(ua: string): boolean {
+  return /\bskillscat-cli\/\d/i.test(ua);
+}
+
+function hasAnonymousBackgroundSubmitMarker(request: Request): boolean {
+  return request.headers.get('x-skillscat-background-submit') === '1';
+}
+
+function isAnonymousCliBackgroundSubmitRequest(request: Request): boolean {
+  if (hasTokenAuthHeader(request)) return false;
+  if (!hasAnonymousBackgroundSubmitMarker(request)) return false;
+  const ua = normalizeUserAgent(request.headers.get('user-agent'));
+  return isSkillscatCliUserAgent(ua);
 }
 
 function isMutationMethod(method: string): boolean {
@@ -253,8 +273,17 @@ async function getSubmitTokenRateLimitKey(request: Request): Promise<string | nu
   }
 }
 
-function pickRateLimitConfig(routeId: string | null, pathname: string, method: string, tokenAuth: boolean): RateLimitConfig {
+function pickRateLimitConfig(
+  routeId: string | null,
+  pathname: string,
+  method: string,
+  tokenAuth: boolean,
+  anonymousCliBackgroundSubmit: boolean
+): RateLimitConfig {
   if (isSubmitRoute(routeId, pathname)) {
+    if (anonymousCliBackgroundSubmit) {
+      return RATE_LIMITS.submitAnonymousCli;
+    }
     return tokenAuth ? RATE_LIMITS.submitToken : RATE_LIMITS.submit;
   }
 
@@ -317,6 +346,7 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
   const routeId = route.id ?? null;
   const cors = pathname.startsWith('/registry/');
   const tokenAuth = hasTokenAuthHeader(request);
+  const anonymousCliBackgroundSubmit = isAnonymousCliBackgroundSubmitRequest(request);
 
   if (
     isMutationMethod(method) &&
@@ -365,7 +395,7 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
     return null;
   }
 
-  const config = pickRateLimitConfig(routeId, pathname, method, tokenAuth);
+  const config = pickRateLimitConfig(routeId, pathname, method, tokenAuth, anonymousCliBackgroundSubmit);
   let clientKey = getRateLimitKey(request);
   if (tokenAuth && isSubmitRoute(routeId, pathname)) {
     const tokenKey = await getSubmitTokenRateLimitKey(request);

@@ -222,6 +222,12 @@ export const RATE_LIMITS = {
     windowSeconds: 60,
     prefix: 'rl:submit'
   },
+  // Anonymous background submit from CLI: stricter throughput
+  submitAnonymousCli: {
+    limit: 6,
+    windowSeconds: 60,
+    prefix: 'rl:submit:anon-cli'
+  },
   // Submit via API token: higher throughput with isolated token-level buckets
   submitToken: {
     limit: 120,

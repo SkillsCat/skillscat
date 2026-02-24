@@ -53,6 +53,10 @@ function mockGitHubFetch(content: string, sha = 'sha1') {
   const fetchMock = vi.fn(async (input: unknown) => {
     const url = toUrlString(input);
 
+    if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
+      return mockResponse({ skills: [], total: 0 }, 200);
+    }
+
     if (url.includes('https://api.github.com/repos/testowner/testrepo')) {
       if (url.includes('/git/trees/')) {
         return mockResponse({
@@ -69,6 +73,56 @@ function mockGitHubFetch(content: string, sha = 'sha1') {
       }
 
       return mockResponse({ default_branch: 'main' }, 200);
+    }
+
+    if (url.endsWith('/api/submit')) {
+      return mockResponse({ success: true, message: 'queued' }, 200);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+  return fetchMock;
+}
+
+function mockGitHubCompanionSkillFetch() {
+  const encodedSkill = Buffer.from(SKILL_MD_V1).toString('base64');
+
+  const fetchMock = vi.fn(async (input: unknown) => {
+    const url = toUrlString(input);
+
+    if (url.includes('https://api.github.com/repos/testowner/testrepo/contents/skills/demo/SKILL.md?ref=feature-x')) {
+      return mockResponse({ content: encodedSkill, encoding: 'base64', sha: 'sha-skill' }, 200);
+    }
+
+    if (url.includes('https://api.github.com/repos/testowner/testrepo/git/trees/feature-x?recursive=1')) {
+      return mockResponse({
+        tree: [
+          { path: 'skills/demo/SKILL.md', type: 'blob', sha: 'sha-skill', mode: '100644' },
+          { path: 'skills/demo/notes.txt', type: 'blob', sha: 'sha-notes', mode: '100644' },
+          { path: 'skills/demo/templates/prompt.txt', type: 'blob', sha: 'sha-link', mode: '120000' },
+          { path: 'shared/prompts/base.txt', type: 'blob', sha: 'sha-target', mode: '100644' },
+          { path: 'skills/demo/subskill/SKILL.md', type: 'blob', sha: 'sha-other', mode: '100644' },
+          { path: 'skills/demo/subskill/extra.txt', type: 'blob', sha: 'sha-other-extra', mode: '100644' },
+        ],
+      }, 200);
+    }
+
+    if (url.endsWith('/git/blobs/sha-skill')) {
+      return mockResponse({ content: encodedSkill, encoding: 'base64' }, 200);
+    }
+
+    if (url.endsWith('/git/blobs/sha-notes')) {
+      return mockResponse({ content: Buffer.from('local notes').toString('base64'), encoding: 'base64' }, 200);
+    }
+
+    if (url.endsWith('/git/blobs/sha-link')) {
+      return mockResponse({ content: Buffer.from('../../../shared/prompts/base.txt').toString('base64'), encoding: 'base64' }, 200);
+    }
+
+    if (url.endsWith('/git/blobs/sha-target')) {
+      return mockResponse({ content: Buffer.from('shared prompt content').toString('base64'), encoding: 'base64' }, 200);
     }
 
     throw new Error(`Unexpected fetch: ${url}`);
@@ -176,6 +230,663 @@ describe('CLI commands with mocked network', () => {
     expect(removeResult.stdout).toContain('Removed Test Skill');
   });
 
+  it('parses explicit GitHub tree/blob refs and marks them as explicit', async () => {
+    const { parseSource } = await import('../src/utils/source/source');
+
+    const tree = parseSource('https://github.com/testowner/testrepo/tree/feature-x/skills/demo');
+    expect(tree).toMatchObject({
+      platform: 'github',
+      owner: 'testowner',
+      repo: 'testrepo',
+      branch: 'feature-x',
+      path: 'skills/demo',
+      refKind: 'tree',
+      hasExplicitRef: true,
+    });
+
+    const blob = parseSource('https://github.com/testowner/testrepo/blob/feature-x/skills/demo/SKILL.md');
+    expect(blob).toMatchObject({
+      platform: 'github',
+      owner: 'testowner',
+      repo: 'testrepo',
+      branch: 'feature-x',
+      path: 'skills/demo/SKILL.md',
+      refKind: 'blob',
+      hasExplicitRef: true,
+    });
+
+    const shorthand = parseSource('testowner/testrepo');
+    expect(shorthand?.hasExplicitRef).toBeUndefined();
+    expect(shorthand?.refKind).toBeUndefined();
+  });
+
+  it('installs skill from explicit GitHub blob URL (non-default branch style URL)', async () => {
+    const fetchMock = mockGitHubFetch(SKILL_MD_V1, 'sha-blob');
+
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() =>
+      add('https://github.com/testowner/testrepo/blob/feature-x/skills/demo/SKILL.md', { yes: true })
+    );
+
+    expect(result.exitCode).toBeNull();
+
+    const skillFile = join(process.cwd(), '.claude/skills', 'Test Skill', 'SKILL.md');
+    expect(existsSync(skillFile)).toBe(true);
+    expect(readFileSync(skillFile, 'utf-8')).toContain('Hello from v1');
+    expect(fetchMock.mock.calls.map((call) => toUrlString(call[0]))).not.toContain('http://localhost:3000/api/submit');
+  });
+
+  it('installs companion files and resolves GitHub symlinked files inside the skill directory', async () => {
+    const fetchMock = mockGitHubCompanionSkillFetch();
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() =>
+      add('https://github.com/testowner/testrepo/tree/feature-x/skills/demo', { yes: true })
+    );
+
+    expect(result.exitCode).toBeNull();
+
+    const skillRoot = join(process.cwd(), '.claude/skills', 'Test Skill');
+    expect(readFileSync(join(skillRoot, 'SKILL.md'), 'utf-8')).toContain('Hello from v1');
+    expect(readFileSync(join(skillRoot, 'notes.txt'), 'utf-8')).toBe('local notes');
+    expect(readFileSync(join(skillRoot, 'templates', 'prompt.txt'), 'utf-8')).toBe('shared prompt content');
+    expect(existsSync(join(skillRoot, 'subskill', 'extra.txt'))).toBe(false);
+    const treeRequests = fetchMock.mock.calls.filter((call) =>
+      toUrlString(call[0]).includes('/git/trees/feature-x?recursive=1')
+    );
+    expect(treeRequests).toHaveLength(1);
+  });
+
+  it('fails with a clear error when GitHub tree API returns a truncated response', async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      if (url.includes('https://api.github.com/repos/testowner/testrepo/git/trees/feature-x?recursive=1')) {
+        return mockResponse({ truncated: true, tree: [] }, 200);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+    const result = await runCommand(() =>
+      add('https://github.com/testowner/testrepo/tree/feature-x/skills/demo', { yes: true })
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('truncated response');
+  });
+
+  it('preserves binary companion files when falling back from blob API to contents API', async () => {
+    const encodedSkill = Buffer.from(SKILL_MD_V1).toString('base64');
+    const binaryBytes = Buffer.from([0x00, 0xff, 0x10, 0x80, 0x42]);
+
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+
+      if (url.includes('/git/trees/feature-bin?recursive=1')) {
+        return mockResponse({
+          tree: [
+            { path: 'skills/demo/SKILL.md', type: 'blob', sha: 'sha-skill-bin', mode: '100644' },
+            { path: 'skills/demo/asset.bin', type: 'blob', sha: 'sha-asset-bin', mode: '100644' },
+          ],
+        }, 200);
+      }
+
+      if (url.endsWith('/git/blobs/sha-skill-bin')) {
+        return mockResponse({ content: encodedSkill, encoding: 'base64' }, 200);
+      }
+
+      if (url.endsWith('/git/blobs/sha-asset-bin')) {
+        return mockResponse({ message: 'blob unavailable' }, 500);
+      }
+
+      if (url.includes('/contents/skills/demo/asset.bin?ref=feature-bin')) {
+        return mockResponse({
+          type: 'file',
+          content: binaryBytes.toString('base64'),
+          encoding: 'base64',
+          sha: 'sha-asset-bin',
+        }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() =>
+      add('https://github.com/testowner/testrepo/tree/feature-bin/skills/demo', { yes: true })
+    );
+
+    expect(result.exitCode).toBeNull();
+    const installedBytes = readFileSync(join(process.cwd(), '.claude/skills', 'Test Skill', 'asset.bin'));
+    expect(installedBytes.equals(binaryBytes)).toBe(true);
+  });
+
+  it('does not let raw downloads override tree/blob-snapshot content for companion files', async () => {
+    const encodedSkill = Buffer.from(SKILL_MD_V1).toString('base64');
+
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+
+      if (url.includes('/git/trees/feature-raw?recursive=1')) {
+        return mockResponse({
+          tree: [
+            { path: 'skills/demo/SKILL.md', type: 'blob', sha: 'sha-skill-raw', mode: '100644' },
+            { path: 'skills/demo/notes.txt', type: 'blob', sha: 'sha-notes-raw', mode: '100644' },
+          ],
+        }, 200);
+      }
+
+      if (url.endsWith('/git/blobs/sha-skill-raw')) {
+        return mockResponse({ content: encodedSkill, encoding: 'base64' }, 200);
+      }
+
+      if (url.endsWith('/git/blobs/sha-notes-raw')) {
+        return mockResponse({ content: Buffer.from('blob-correct').toString('base64'), encoding: 'base64' }, 200);
+      }
+
+      if (url === 'https://raw.githubusercontent.com/testowner/testrepo/feature-raw/skills/demo/notes.txt') {
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          text: async () => 'raw-wrong',
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() =>
+      add('https://github.com/testowner/testrepo/tree/feature-raw/skills/demo', { yes: true })
+    );
+
+    expect(result.exitCode).toBeNull();
+    const notes = readFileSync(join(process.cwd(), '.claude/skills', 'Test Skill', 'notes.txt'), 'utf-8');
+    expect(notes).toBe('blob-correct');
+  });
+
+  it('removes stale managed companion files when upstream companion files change', async () => {
+    const encodedSkill = Buffer.from(SKILL_MD_V1).toString('base64');
+
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+
+      if (url.includes('/git/trees/feature-a?recursive=1')) {
+        return mockResponse({
+          tree: [
+            { path: 'skills/demo/SKILL.md', type: 'blob', sha: 'sha-skill-a', mode: '100644' },
+            { path: 'skills/demo/old.txt', type: 'blob', sha: 'sha-old-a', mode: '100644' },
+          ],
+        }, 200);
+      }
+
+      if (url.includes('/git/trees/feature-b?recursive=1')) {
+        return mockResponse({
+          tree: [
+            { path: 'skills/demo/SKILL.md', type: 'blob', sha: 'sha-skill-b', mode: '100644' },
+            { path: 'skills/demo/new.txt', type: 'blob', sha: 'sha-new-b', mode: '100644' },
+          ],
+        }, 200);
+      }
+
+      if (url.endsWith('/git/blobs/sha-skill-a') || url.endsWith('/git/blobs/sha-skill-b')) {
+        return mockResponse({ content: encodedSkill, encoding: 'base64' }, 200);
+      }
+
+      if (url.endsWith('/git/blobs/sha-old-a')) {
+        return mockResponse({ content: Buffer.from('old companion').toString('base64'), encoding: 'base64' }, 200);
+      }
+
+      if (url.endsWith('/git/blobs/sha-new-b')) {
+        return mockResponse({ content: Buffer.from('new companion').toString('base64'), encoding: 'base64' }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const first = await runCommand(() =>
+      add('https://github.com/testowner/testrepo/tree/feature-a/skills/demo', { yes: true })
+    );
+    expect(first.exitCode).toBeNull();
+
+    const skillRoot = join(process.cwd(), '.claude/skills', 'Test Skill');
+    expect(existsSync(join(skillRoot, 'old.txt'))).toBe(true);
+
+    const second = await runCommand(() =>
+      add('https://github.com/testowner/testrepo/tree/feature-b/skills/demo', { yes: true })
+    );
+    expect(second.exitCode).toBeNull();
+
+    expect(existsSync(join(skillRoot, 'old.txt'))).toBe(false);
+    expect(readFileSync(join(skillRoot, 'new.txt'), 'utf-8')).toBe('new companion');
+  });
+
+  it('does not delete existing companion files when companion hydration fails during reinstall', async () => {
+    const { add } = await import('../src/commands/add');
+
+    vi.stubGlobal('fetch', mockGitHubCompanionSkillFetch() as unknown as typeof fetch);
+    const first = await runCommand(() =>
+      add('https://github.com/testowner/testrepo/tree/feature-x/skills/demo', { yes: true })
+    );
+    expect(first.exitCode).toBeNull();
+
+    const skillRoot = join(process.cwd(), '.claude/skills', 'Test Skill');
+    const notesPath = join(skillRoot, 'notes.txt');
+    expect(readFileSync(notesPath, 'utf-8')).toBe('local notes');
+
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    resetTestCacheDir();
+
+    const encodedSkill = Buffer.from(SKILL_MD_V1).toString('base64');
+    const failingFetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+
+      if (url.includes('/git/trees/feature-x?recursive=1')) {
+        return mockResponse({
+          tree: [
+            { path: 'skills/demo/SKILL.md', type: 'blob', sha: 'sha-skill', mode: '100644' },
+            { path: 'skills/demo/notes.txt', type: 'blob', sha: 'sha-notes', mode: '100644' },
+          ],
+        }, 200);
+      }
+
+      if (url.endsWith('/git/blobs/sha-skill')) {
+        return mockResponse({ content: encodedSkill, encoding: 'base64' }, 200);
+      }
+
+      if (url.endsWith('/git/blobs/sha-notes')) {
+        return mockResponse({ message: 'temporary failure' }, 503);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', failingFetchMock as unknown as typeof fetch);
+    const second = await runCommand(() =>
+      add('https://github.com/testowner/testrepo/tree/feature-x/skills/demo', { yes: true, force: true })
+    );
+
+    expect(second.exitCode).toBeNull();
+    expect(readFileSync(notesPath, 'utf-8')).toBe('local notes');
+  });
+
+  it('reuses persistent GitHub tree/blob cache across repeated installs of the same explicit-ref skill', async () => {
+    const fetchMock = mockGitHubCompanionSkillFetch();
+    const { add } = await import('../src/commands/add');
+
+    const source = 'https://github.com/testowner/testrepo/tree/feature-x/skills/demo';
+
+    const first = await runCommand(() => add(source, { yes: true }));
+    expect(first.exitCode).toBeNull();
+
+    const second = await runCommand(() => add(source, { yes: true }));
+    expect(second.exitCode).toBeNull();
+
+    const urls = fetchMock.mock.calls.map((call) => toUrlString(call[0]));
+    const count = (needle: string) => urls.filter((url) => url.includes(needle)).length;
+
+    expect(count('/git/trees/feature-x?recursive=1')).toBe(1);
+    expect(count('/git/blobs/sha-skill')).toBe(1);
+    expect(count('/git/blobs/sha-notes')).toBe(1);
+    expect(count('/git/blobs/sha-link')).toBe(1);
+    expect(count('/git/blobs/sha-target')).toBe(1);
+  });
+
+  it('does not fall back to registry for explicit GitHub ref sources', async () => {
+    const seenUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      seenUrls.push(url);
+
+      if (url.includes('https://api.github.com/repos/testowner/testrepo')) {
+        return mockResponse({ message: 'Not Found' }, 404);
+      }
+
+      if (url === `${REGISTRY_URL}/skill/testowner/testrepo`) {
+        return mockResponse({
+          name: 'Registry Fallback Skill',
+          description: 'Should not be used for explicit refs',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1,
+          githubUrl: '',
+          visibility: 'public',
+          slug: 'testowner/testrepo',
+        }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { add } = await import('../src/commands/add');
+    const result = await runCommand(() =>
+      add('https://github.com/testowner/testrepo/tree/feature-x/skills/demo', { yes: true })
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Failed to fetch repository tree');
+    expect(seenUrls).not.toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
+    expect(seenUrls).not.toContain(`${REGISTRY_URL}/skill/testowner/testrepo`);
+  });
+
+  it('surfaces GitHub contents API errors for explicit path installs instead of treating them as path misses', async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+
+      if (url.includes('/git/trees/feature-x?recursive=1')) {
+        return mockResponse({ tree: [] }, 200);
+      }
+
+      if (url.includes('/contents/skills/demo/SKILL.md?ref=feature-x')) {
+        return mockResponse({ message: 'rate limited' }, 429);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() =>
+      add('https://github.com/testowner/testrepo/blob/feature-x/skills/demo/SKILL.md', { yes: true })
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Failed to fetch file from GitHub (429)');
+    expect(result.stderr).not.toContain('No skills found in this repository');
+  });
+
+  it('triggers anonymous background submit after successful default-branch style GitHub install', async () => {
+    await configureRegistry('https://skills.cat/registry');
+
+    const encoded = Buffer.from(SKILL_MD_V1).toString('base64');
+    const seenSubmits: Array<{ url: string; headers: Record<string, string>; body: string | undefined }> = [];
+
+    const fetchMock = vi.fn(async (input: unknown, init?: unknown) => {
+      const url = toUrlString(input);
+
+      if (url === 'https://skills.cat/registry/repo/testowner/testrepo' || url.startsWith('https://skills.cat/registry/repo/testowner/testrepo?')) {
+        return mockResponse({ skills: [], total: 0 }, 200);
+      }
+
+      if (url.includes('https://api.github.com/repos/testowner/testrepo')) {
+        if (url.includes('/git/trees/')) {
+          return mockResponse({ tree: [{ path: 'SKILL.md', type: 'blob', sha: 'sha-submit' }] }, 200);
+        }
+        if (url.includes('/contents/')) {
+          return mockResponse({ content: encoded, encoding: 'base64', sha: 'sha-submit' }, 200);
+        }
+        return mockResponse({ default_branch: 'main' }, 200);
+      }
+
+      if (url === 'https://skills.cat/api/submit') {
+        const requestInit = (init ?? {}) as { headers?: Record<string, string>; body?: string };
+        seenSubmits.push({
+          url,
+          headers: requestInit.headers || {},
+          body: requestInit.body,
+        });
+        return mockResponse({ success: true }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    await runCommand(() => add('testowner/testrepo', { yes: true }));
+
+    expect(seenSubmits.length).toBe(1);
+    expect(seenSubmits[0].headers['X-Skillscat-Background-Submit']).toBe('1');
+    expect(seenSubmits[0].headers['User-Agent']).toContain('skillscat-cli/');
+    expect(seenSubmits[0].body || '').toContain('"url":"https://github.com/testowner/testrepo"');
+  });
+
+  it('can disable anonymous background submit via environment variable', async () => {
+    await configureRegistry('https://skills.cat/registry');
+    process.env.SKILLSCAT_BACKGROUND_SUBMIT = '0';
+
+    try {
+      const encoded = Buffer.from(SKILL_MD_V1).toString('base64');
+      let submitCount = 0;
+
+      const fetchMock = vi.fn(async (input: unknown) => {
+        const url = toUrlString(input);
+
+        if (url === 'https://skills.cat/registry/repo/testowner/testrepo' || url.startsWith('https://skills.cat/registry/repo/testowner/testrepo?')) {
+          return mockResponse({ skills: [], total: 0 }, 200);
+        }
+
+        if (url.includes('https://api.github.com/repos/testowner/testrepo')) {
+          if (url.includes('/git/trees/')) {
+            return mockResponse({ tree: [{ path: 'SKILL.md', type: 'blob', sha: 'sha-nosubmit' }] }, 200);
+          }
+          if (url.includes('/contents/')) {
+            return mockResponse({ content: encoded, encoding: 'base64', sha: 'sha-nosubmit' }, 200);
+          }
+          return mockResponse({ default_branch: 'main' }, 200);
+        }
+
+        if (url === 'https://skills.cat/api/submit') {
+          submitCount += 1;
+          return mockResponse({ success: true }, 200);
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
+
+      vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+      const { add } = await import('../src/commands/add');
+      await runCommand(() => add('testowner/testrepo', { yes: true }));
+
+      expect(submitCount).toBe(0);
+    } finally {
+      delete process.env.SKILLSCAT_BACKGROUND_SUBMIT;
+    }
+  });
+
+  it('prefers registry repo results over GitHub for direct GitHub repo installs', async () => {
+    const seenUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      seenUrls.push(url);
+
+      if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
+        return mockResponse({
+          skills: [{
+            slug: 'testowner/test-skill',
+            name: 'Registry First Skill',
+            description: 'From repo lookup',
+            owner: 'testowner',
+            repo: 'testrepo',
+            skillPath: '',
+            githubUrl: 'https://github.com/testowner/testrepo',
+            visibility: 'private',
+            updatedAt: Date.now(),
+            stars: 0,
+          }],
+          total: 1,
+        }, 200);
+      }
+
+      if (url === `${REGISTRY_URL}/skill/testowner/test-skill`) {
+        return mockResponse({
+          name: 'Registry First Skill',
+          description: 'From registry content',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replace('Test Skill', 'Registry First Skill').replace('# Test Skill', '# Registry First Skill'),
+          githubUrl: 'https://github.com/testowner/testrepo',
+          visibility: 'private',
+          slug: 'testowner/test-skill',
+          skillPath: '',
+        }, 200);
+      }
+
+      if (url.endsWith('/api/submit')) {
+        return mockResponse({ success: true }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() => add('testowner/testrepo', { yes: true }));
+    expect(result.exitCode).toBeNull();
+
+    const skillFile = join(process.cwd(), '.claude/skills', 'Registry First Skill', 'SKILL.md');
+    expect(existsSync(skillFile)).toBe(true);
+    expect(readFileSync(skillFile, 'utf-8')).toContain('Registry First Skill');
+
+    expect(seenUrls).toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
+    expect(seenUrls).toContain(`${REGISTRY_URL}/skill/testowner/test-skill`);
+    expect(seenUrls).not.toContain('http://localhost:3000/api/submit');
+  });
+
+  it('fails when -s requests are only partially resolved', async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+
+      if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
+        return mockResponse({
+          skills: [{
+            slug: 'testowner/registry-first-skill',
+            name: 'Registry First Skill',
+            description: 'From repo lookup',
+            owner: 'testowner',
+            repo: 'testrepo',
+            skillPath: '',
+            githubUrl: 'https://github.com/testowner/testrepo',
+            visibility: 'public',
+            updatedAt: Date.now(),
+            stars: 0,
+          }],
+          total: 1,
+        }, 200);
+      }
+
+      if (url === `${REGISTRY_URL}/skill/testowner/registry-first-skill`) {
+        return mockResponse({
+          name: 'Registry First Skill',
+          description: 'From registry content',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Registry First Skill'),
+          githubUrl: 'https://github.com/testowner/testrepo',
+          visibility: 'public',
+          slug: 'testowner/registry-first-skill',
+          skillPath: '',
+        }, 200);
+      }
+
+      if (url.includes('https://api.github.com/repos/testowner/testrepo')) {
+        return mockResponse({ message: 'GitHub unavailable' }, 503);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() =>
+      add('testowner/testrepo', { yes: true, skill: ['Registry First Skill', 'Missing Skill'] })
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).not.toContain('Installed');
+
+    const installedSkillFile = join(process.cwd(), '.claude/skills', 'Registry First Skill', 'SKILL.md');
+    expect(existsSync(installedSkillFile)).toBe(false);
+  });
+
+  it('falls back to GitHub when registry repo summary exists but skill detail fetch fails', async () => {
+    const seenUrls: string[] = [];
+    const encoded = Buffer.from(SKILL_MD_V1).toString('base64');
+
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      seenUrls.push(url);
+
+      if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
+        return mockResponse({
+          skills: [{
+            slug: 'testowner/test-skill',
+            name: 'Test Skill',
+            description: 'From repo lookup',
+            owner: 'testowner',
+            repo: 'testrepo',
+            skillPath: '',
+            githubUrl: 'https://github.com/testowner/testrepo',
+            visibility: 'public',
+            updatedAt: Date.now(),
+            stars: 0,
+          }],
+          total: 1,
+        }, 200);
+      }
+
+      if (url === `${REGISTRY_URL}/skill/testowner/test-skill`) {
+        return mockResponse({ error: 'temporarily unavailable' }, 500);
+      }
+
+      if (url.includes('https://api.github.com/repos/testowner/testrepo')) {
+        if (url.includes('/git/trees/')) {
+          return mockResponse({ tree: [{ path: 'SKILL.md', type: 'blob', sha: 'sha-backfill' }] }, 200);
+        }
+        if (url.includes('/contents/')) {
+          return mockResponse({ content: encoded, encoding: 'base64', sha: 'sha-backfill' }, 200);
+        }
+        return mockResponse({ default_branch: 'main' }, 200);
+      }
+
+      if (url.endsWith('/api/submit')) {
+        return mockResponse({ success: true }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() => add('testowner/testrepo', { yes: true }));
+    if (result.exitCode !== null) {
+      throw new Error(`Unexpected add() failure: ${result.stderr || result.stdout}`);
+    }
+    expect(result.exitCode).toBeNull();
+
+    const skillFile = join(process.cwd(), '.claude/skills', 'Test Skill', 'SKILL.md');
+    expect(existsSync(skillFile)).toBe(true);
+    expect(readFileSync(skillFile, 'utf-8')).toContain('Hello from v1');
+    expect(seenUrls.some((url) => url.includes('https://api.github.com/repos/testowner/testrepo'))).toBe(true);
+  });
+
   it('info outputs skill details', async () => {
     mockGitHubFetch(SKILL_MD_V1, 'sha-info');
     const { info } = await import('../src/commands/info');
@@ -206,6 +917,10 @@ describe('CLI commands with mocked network', () => {
     let registryFetchCount = 0;
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = toUrlString(input);
+
+      if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
+        return mockResponse({ skills: [], total: 0 }, 200);
+      }
 
       // Force git discovery failure so add() falls back to registry.
       if (url.includes('https://api.github.com/repos/testowner/testrepo')) {

@@ -9,7 +9,7 @@ export default {
     format: 'esm',
     sourcemap: false
   },
-  external: ['commander', 'picocolors', /^node:/],
+  external: ['commander', 'picocolors', 'inquirer', /^node:/],
   plugins: [
     preserveShebang(),
     resolve(),

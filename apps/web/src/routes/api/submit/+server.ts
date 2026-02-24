@@ -24,6 +24,8 @@ const GITHUB_TOKEN_SUBMIT_MAX_DELAY_MS = 2_000;
 
 type GitHubUpstreamErrorCode = 'github_rate_limited' | 'github_upstream_failure';
 type GitHubRequestMode = 'default' | 'token_fast_fail';
+const ANON_CLI_SUBMIT_HEADER = 'x-skillscat-background-submit';
+const ANON_CLI_SUBMIT_SENTINEL = 'anonymous_cli';
 
 class GitHubUpstreamError extends Error {
   readonly code: GitHubUpstreamErrorCode;
@@ -53,6 +55,16 @@ function hasStatus(errorValue: unknown): errorValue is { status: number } {
   if (typeof errorValue !== 'object' || errorValue === null) return false;
   if (!('status' in errorValue)) return false;
   return typeof (errorValue as { status: unknown }).status === 'number';
+}
+
+function isSkillscatCliUserAgent(ua: string | null): boolean {
+  return /\bskillscat-cli\/\d/i.test((ua || '').trim());
+}
+
+function isAnonymousCliBackgroundSubmit(request: Request): boolean {
+  return request.headers.get(ANON_CLI_SUBMIT_HEADER) === '1'
+    && isSkillscatCliUserAgent(request.headers.get('user-agent'))
+    && !request.headers.get('authorization');
 }
 
 function parseRetryAfterSeconds(headers: Headers): number | null {
@@ -736,12 +748,18 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       throw error(500, 'Database not available');
     }
 
-    // Support both session auth and API token auth
+    // Support authenticated submissions and anonymous CLI background submissions.
     const auth = await getAuthContext(request, locals, db);
-    if (!auth.userId || !auth.user) {
+    const anonymousCliBackgroundSubmit = isAnonymousCliBackgroundSubmit(request);
+    let submitterUserId: string | null = null;
+
+    if (auth.userId && auth.user) {
+      requireSubmitPublishScope(auth);
+      submitterUserId = auth.userId;
+    } else if (!anonymousCliBackgroundSubmit) {
       throw error(401, 'Please sign in to submit a skill');
     }
-    requireSubmitPublishScope(auth);
+
     const githubRequestMode: GitHubRequestMode = auth.authMethod === 'token' ? 'token_fast_fail' : 'default';
 
     const body = await readLimitedJsonBody(request, MAX_SUBMIT_BODY_BYTES) as { url?: string; skillPath?: string };
@@ -792,7 +810,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
         owner,
         repo,
         path,
-        userId: auth.userId,
+        userId: submitterUserId,
         db,
         queue,
         platform,
@@ -812,7 +830,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       repo,
       skills: scanResult.found,
       truncated: scanResult.truncated,
-      userId: auth.userId,
+      userId: submitterUserId,
       db,
       queue,
       platform,
@@ -846,7 +864,7 @@ async function submitMultipleSkills({
   repo: string;
   skills: SkillMdLocation[];
   truncated: boolean;
-  userId: string;
+  userId: string | null;
   db: D1Database | undefined;
   queue: Queue | undefined;
   platform: App.Platform | undefined;
@@ -887,7 +905,7 @@ async function submitMultipleSkills({
         repoOwner: owner,
         repoName: repo,
         skillPath: skillPath,
-        submittedBy: userId,
+        submittedBy: userId ?? ANON_CLI_SUBMIT_SENTINEL,
         submittedAt: new Date().toISOString(),
       };
 
@@ -943,7 +961,7 @@ async function submitSingleSkill({
   owner: string;
   repo: string;
   path: string;
-  userId: string;
+  userId: string | null;
   db: D1Database | undefined;
   queue: Queue | undefined;
   platform: App.Platform | undefined;
@@ -995,13 +1013,13 @@ async function submitSingleSkill({
       repoOwner: owner,
       repoName: repo,
       skillPath: path,
-      submittedBy: userId,
+      submittedBy: userId ?? ANON_CLI_SUBMIT_SENTINEL,
       submittedAt: new Date().toISOString(),
     };
     log.log(`Sending to indexing queue: ${owner}/${repo}`, queueMessage);
     try {
       await queue.send(queueMessage);
-      log.log(`Successfully queued for indexing: ${owner}/${repo}, user: ${userId}`);
+      log.log(`Successfully queued for indexing: ${owner}/${repo}, user: ${userId ?? ANON_CLI_SUBMIT_SENTINEL}`);
     } catch (queueError) {
       log.error(`Failed to send to indexing queue: ${owner}/${repo}`, queueError);
       throw error(500, 'Failed to queue skill for processing');

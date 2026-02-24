@@ -6,6 +6,9 @@ export interface RepoSource {
   repo: string;
   branch?: string;
   path?: string;
+  refKind?: 'tree' | 'blob';
+  hasExplicitRef?: boolean;
+  originalInput?: string;
 }
 
 export interface SkillInfo {
@@ -13,8 +16,14 @@ export interface SkillInfo {
   description: string;
   path: string;
   content: string;
+  companionFiles?: SkillCompanionFile[];
   sha?: string;
   contentHash?: string;
+}
+
+export interface SkillCompanionFile {
+  path: string; // relative to the skill directory
+  content: Uint8Array;
 }
 
 export interface SkillMetadata {
@@ -42,18 +51,43 @@ export function parseSource(source: string): RepoSource | null {
     };
   }
 
-  // GitHub URL: https://github.com/owner/repo or with tree/branch/path
-  const githubMatch = source.match(
-    /github\.com\/([^\/]+)\/([^\/]+)(?:\/tree\/([^\/]+))?(?:\/(.+))?$/
-  );
-  if (githubMatch) {
-    return {
-      platform: 'github',
-      owner: githubMatch[1],
-      repo: githubMatch[2].replace(/\.git$/, ''),
-      branch: githubMatch[3],
-      path: githubMatch[4]
-    };
+  // GitHub URL: https://github.com/owner/repo or with tree/blob refs
+  try {
+    const url = new URL(source);
+    const host = url.hostname.toLowerCase();
+    if (host === 'github.com' || host === 'www.github.com') {
+      const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+      if (parts.length >= 2) {
+        const owner = parts[0];
+        const repo = parts[1].replace(/\.git$/, '');
+        const route = parts[2];
+
+        if (route === 'tree' || route === 'blob') {
+          const branch = parts[3];
+          const path = parts.slice(4).join('/');
+          return {
+            platform: 'github',
+            owner,
+            repo,
+            branch,
+            path: path || undefined,
+            refKind: route,
+            hasExplicitRef: true,
+            originalInput: source
+          };
+        }
+
+        return {
+          platform: 'github',
+          owner,
+          repo,
+          path: parts.slice(2).join('/') || undefined,
+          originalInput: source
+        };
+      }
+    }
+  } catch {
+    // Not a valid URL, continue to other formats.
   }
 
   // GitLab URL: https://gitlab.com/owner/repo or with -/tree/branch/path

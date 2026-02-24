@@ -29,6 +29,24 @@ export interface RegistrySearchResult {
   total: number;
 }
 
+export interface RegistryRepoSkillSummary {
+  slug: string;
+  name: string;
+  description: string;
+  owner: string;
+  repo: string;
+  skillPath?: string;
+  githubUrl?: string;
+  visibility?: 'public' | 'private' | 'unlisted';
+  updatedAt?: number;
+  stars?: number;
+}
+
+export interface RegistryRepoResult {
+  skills: RegistryRepoSkillSummary[];
+  total: number;
+}
+
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const token = await getValidToken();
   const headers: Record<string, string> = {
@@ -197,6 +215,44 @@ export async function searchSkills(
     }
 
     return await response.json() as RegistrySearchResult;
+  } catch (error) {
+    if (error instanceof Error && !error.message.includes('Rate limit')) {
+      const networkError = parseNetworkError(error);
+      throw new Error(networkError.message);
+    }
+    throw error;
+  }
+}
+
+export async function fetchSkillsByRepo(
+  owner: string,
+  repo: string,
+  options?: { path?: string }
+): Promise<RegistryRepoResult> {
+  const registryUrl = getRegistryUrl();
+  const path = options?.path?.replace(/^\/+|\/+$/g, '');
+  const params = new URLSearchParams();
+  if (path) params.set('path', path);
+  const query = params.toString();
+  const url = `${registryUrl}/repo/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${query ? `?${query}` : ''}`;
+
+  const headers = await getAuthHeaders();
+  const startTime = Date.now();
+  verboseRequest('GET', url, headers);
+
+  try {
+    const response = await fetch(url, { headers });
+    verboseResponse(response.status, response.statusText, Date.now() - startTime);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return { skills: [], total: 0 };
+      }
+      const parsed = parseHttpError(response.status, response.statusText);
+      throw new Error(parsed.message);
+    }
+
+    return await response.json() as RegistryRepoResult;
   } catch (error) {
     if (error instanceof Error && !error.message.includes('Rate limit')) {
       const networkError = parseNetworkError(error);

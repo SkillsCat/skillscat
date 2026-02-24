@@ -2,7 +2,7 @@ import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
-const DEFAULT_REGISTRY_URL = 'https://skills.cat/registry';
+export const DEFAULT_REGISTRY_URL = 'https://skills.cat/registry';
 
 export interface Settings {
   registry?: string;
@@ -129,4 +129,20 @@ export function deleteSetting<K extends keyof Settings>(key: K): void {
  */
 export function getRegistryUrl(): string {
   return getSetting('registry') || DEFAULT_REGISTRY_URL;
+}
+
+function normalizeRegistryUrlForCompare(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = '';
+    parsed.search = '';
+    parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+    return parsed.toString();
+  } catch {
+    return url.replace(/\/+$/, '');
+  }
+}
+
+export function isDefaultRegistry(): boolean {
+  return normalizeRegistryUrlForCompare(getRegistryUrl()) === normalizeRegistryUrlForCompare(DEFAULT_REGISTRY_URL);
 }
