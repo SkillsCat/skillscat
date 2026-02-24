@@ -16,7 +16,7 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
   }
 
   const org = await db.prepare(`
-    SELECT id, name, slug, display_name, description, avatar_url, github_org_id, verified_at, owner_id, created_at
+    SELECT id, name, slug, display_name, description, avatar_url, github_org_id, verified_at, owner_id, created_at, updated_at
     FROM organizations
     WHERE slug = ?
   `)
@@ -32,6 +32,7 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
       verified_at: number | null;
       owner_id: string;
       created_at: number;
+      updated_at: number;
     }>();
 
   if (!org) {
@@ -79,6 +80,7 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
       githubConnected: org.github_org_id !== null,
       verified: org.verified_at !== null,
       createdAt: org.created_at,
+      updatedAt: org.updated_at,
       memberCount: memberCount?.count || 0,
       skillCount: skillCount?.count || 0,
       userRole,

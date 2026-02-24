@@ -9,6 +9,8 @@ interface Org {
   description: string;
   avatarUrl: string;
   verified: boolean;
+  createdAt?: number;
+  updatedAt?: number;
   memberCount: number;
   skillCount: number;
   userRole: string | null;
@@ -28,6 +30,7 @@ interface Skill {
   description: string;
   visibility: 'public' | 'private' | 'unlisted';
   stars: number;
+  updatedAt?: number;
 }
 
 export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, request, cookies }) => {
