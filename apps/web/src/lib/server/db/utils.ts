@@ -755,16 +755,16 @@ export async function getSkillBySlug(
     }
   }
 
-  // 获取分类
-  const categories = await env.DB.prepare(`
+  const categoriesPromise = env.DB.prepare(`
     SELECT category_slug FROM skill_categories WHERE skill_id = ?
   `)
     .bind(skillData.id)
     .all<CategoryRow>();
 
-  // 从 R2 读取 SKILL.md 内容
-  let readme = skillData.readme;
-  if (env.R2 && !readme) {
+  const readmePromise = (async (): Promise<string | null> => {
+    let readme = skillData.readme;
+    if (!env.R2 || readme) return readme;
+
     try {
       if (skillData.source_type === 'upload') {
         const slugParts = parseSkillSlug(skillData.slug);
@@ -805,7 +805,11 @@ export async function getSkillBySlug(
     } catch (error) {
       console.error('Error reading SKILL.md from R2:', error);
     }
-  }
+
+    return readme;
+  })();
+
+  const [categories, readme] = await Promise.all([categoriesPromise, readmePromise]);
 
   // 解析文件结构 (直接使用预构建的 fileTree)
   const fileStructure = parseFileTree(skillData.file_structure);

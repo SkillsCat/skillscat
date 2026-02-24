@@ -23,6 +23,7 @@
       isBookmarked?: boolean;
       isAuthenticated?: boolean;
       isDotFolderSkill?: boolean;
+      hasReadme?: boolean;
       renderedReadme?: string;
       seo?: {
         title: string;
@@ -1346,7 +1347,7 @@
         {/if}
 
         <!-- SKILL.md Content -->
-        {#if data.skill.readme}
+        {#if data.hasReadme ?? Boolean(data.skill.readme)}
           <div class="card skill-content-card">
             <div class="skill-content-header">
               <svg class="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">

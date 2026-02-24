@@ -19,6 +19,9 @@ const SEO_DESCRIPTION_STOP_WORDS = new Set([
 const MAX_SEO_DESCRIPTION_SCAN_CHARS = 500;
 const MAX_SEO_TITLE_LENGTH = 68;
 const MAX_SEO_DESCRIPTION_LENGTH = 160;
+const RELATED_SKILLS_CACHE_TTL = 3600;
+// Keyed by skill ID + readme version, so entries are immutable after a skill update.
+const README_HTML_CACHE_TTL = 60 * 60 * 24 * 30;
 
 interface SkillSeoPayload {
   title: string;
@@ -248,7 +251,52 @@ function getAccessClientKey(request: Request, userId: string | null): string | u
  *
  * with unified slug format: owner/name...
  */
-export const load: PageServerLoad = async ({ params, platform, locals, request, setHeaders, cookies }) => {
+export const load: PageServerLoad = async ({ params, platform, locals, request, setHeaders, cookies, isDataRequest }) => {
+  const perfStart = performance.now();
+  const serverTimings: Array<{ name: string; dur: number; desc?: string }> = [];
+  let serverTimingFlushed = false;
+
+  const pushTiming = (name: string, start: number, desc?: string) => {
+    serverTimings.push({
+      name,
+      dur: Math.max(0, performance.now() - start),
+      desc,
+    });
+  };
+
+  const timed = async <T>(name: string, fn: () => Promise<T>, desc?: string): Promise<T> => {
+    const start = performance.now();
+    try {
+      return await fn();
+    } finally {
+      pushTiming(name, start, desc);
+    }
+  };
+
+  const flushServerTiming = () => {
+    if (serverTimingFlushed) return;
+    serverTimingFlushed = true;
+    serverTimings.push({
+      name: 'total',
+      dur: Math.max(0, performance.now() - perfStart),
+      desc: isDataRequest ? 'data' : 'html',
+    });
+    setHeaders({
+      'Server-Timing': serverTimings
+        .map((entry) => {
+          const dur = Number(entry.dur.toFixed(1));
+          const descPart = entry.desc ? `;desc="${entry.desc.replace(/"/g, '')}"` : '';
+          return `${entry.name};dur=${dur}${descPart}`;
+        })
+        .join(', '),
+    });
+  };
+
+  const finish = <T>(value: T): T => {
+    flushServerTiming();
+    return value;
+  };
+
   setPublicPageCache({
     setHeaders,
     request,
@@ -270,20 +318,20 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
   const normalizedName = normalizeSkillName(params.name);
   if (!normalizedOwner) {
     setHeaders({ 'X-Skillscat-Status-Override': '404' });
-    return {
+    return finish({
       skill: null,
       relatedSkills: [],
       error: 'Skill not found or you do not have permission to view it.',
-    };
+    });
   }
 
   if (!normalizedName) {
     setHeaders({ 'X-Skillscat-Status-Override': '404' });
-    return {
+    return finish({
       skill: null,
       relatedSkills: [],
       error: 'Skill not found or you do not have permission to view it.',
-    };
+    });
   }
 
   if (normalizedOwner !== params.owner || normalizedName !== params.name) {
@@ -293,15 +341,15 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
   const slug = buildSkillSlug(normalizedOwner, normalizedName);
 
   try {
-    const skill = await getSkillBySlug(env, slug, userId);
+    const skill = await timed('skill_detail', () => getSkillBySlug(env, slug, userId), 'db+r2');
 
     if (!skill) {
       setHeaders({ 'X-Skillscat-Status-Override': '404' });
-      return {
+      return finish({
         skill: null,
         relatedSkills: [],
         error: 'Skill not found or you do not have permission to view it.',
-      };
+      });
     }
 
     // Record access asynchronously (don't block response)
@@ -311,57 +359,91 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       });
     }
 
-    // Get related skills based on categories (multi-signal scoring, cached 1h)
-    const { data: relatedSkills } = await getCached(
-      `related:${skill.id}`,
-      () => getRelatedSkills(env, skill.id, skill.categories || [], skill.repoOwner || '', 10),
-      3600
+    const relatedSkillsPromise = timed(
+      'related',
+      async () => {
+        const { data } = await getCached(
+          `related:${skill.id}`,
+          () => getRelatedSkills(env, skill.id, skill.categories || [], skill.repoOwner || '', 10),
+          RELATED_SKILLS_CACHE_TTL
+        );
+        return data;
+      },
+      'secondary'
     );
 
-    let renderedReadme = '';
-    if (skill.readme) {
-      if (skill.visibility === 'public') {
+    const renderedReadmePromise = timed(
+      'readme_html',
+      async (): Promise<string> => {
+        if (!skill.readme) return '';
+        if (skill.visibility !== 'public') {
+          return renderReadmeMarkdown(skill.readme);
+        }
+
         const readmeVersion = skill.updatedAt ?? skill.indexedAt ?? 0;
         const { data } = await getCached(
           `readme:html:${skill.id}:${readmeVersion}`,
           () => Promise.resolve(renderReadmeMarkdown(skill.readme)),
-          3600
+          README_HTML_CACHE_TTL
         );
-        renderedReadme = data;
-      } else {
-        renderedReadme = renderReadmeMarkdown(skill.readme);
-      }
-    }
+        return data;
+      },
+      'secondary'
+    );
 
-    // Check if user has bookmarked this skill
-    let isBookmarked = false;
-    if (userId && env.DB) {
-      const bookmark = await env.DB.prepare(
-        'SELECT 1 FROM favorites WHERE user_id = ? AND skill_id = ?'
-      ).bind(userId, skill.id).first();
-      isBookmarked = !!bookmark;
-    }
+    const isBookmarkedPromise = timed(
+      'bookmark',
+      async () => {
+        if (!userId || !env.DB) return false;
+        const bookmark = await env.DB.prepare(
+          'SELECT 1 FROM favorites WHERE user_id = ? AND skill_id = ?'
+        ).bind(userId, skill.id).first();
+        return !!bookmark;
+      },
+      'secondary'
+    );
+
+    const [relatedSkillsResult, renderedReadmeResult, isBookmarkedResult] = await Promise.allSettled([
+      relatedSkillsPromise,
+      renderedReadmePromise,
+      isBookmarkedPromise,
+    ]);
+
+    const relatedSkills = relatedSkillsResult.status === 'fulfilled'
+      ? relatedSkillsResult.value
+      : (console.error('Failed to load related skills:', relatedSkillsResult.reason), []);
+
+    const renderedReadme = renderedReadmeResult.status === 'fulfilled'
+      ? renderedReadmeResult.value
+      : (console.error('Failed to render/read cached SKILL.md HTML:', renderedReadmeResult.reason), '');
+
+    const isBookmarked = isBookmarkedResult.status === 'fulfilled'
+      ? isBookmarkedResult.value
+      : (console.error('Failed to load bookmark state:', isBookmarkedResult.reason), false);
 
     // Determine if this is a dot-folder skill (e.g., .claude/SKILL.md)
     const isDotFolderSkill = skill.skillPath ? /^\.[\w-]+/.test(skill.skillPath) : false;
+    const hasReadme = Boolean(skill.readme);
+    // Avoid sending both raw markdown and rendered HTML in the same data payload.
+    const skillForClient: SkillDetail = hasReadme ? { ...skill, readme: null } : skill;
     const seo = buildSkillSeoPayload(skill);
 
-    return {
-      skill,
+    return finish({
+      skill: skillForClient,
       renderedReadme,
       relatedSkills,
-      isOwner: skill.ownerId === userId,
       isBookmarked,
       isAuthenticated: !!userId,
       isDotFolderSkill,
+      hasReadme,
       seo,
-    };
+    });
   } catch (error) {
     console.error('Error loading skill:', error);
-    return {
+    return finish({
       skill: null,
       relatedSkills: [],
       error: 'Failed to load skill',
-    };
+    });
   }
 };

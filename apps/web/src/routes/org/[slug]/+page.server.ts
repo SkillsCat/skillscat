@@ -1,6 +1,9 @@
 import type { PageServerLoad } from './$types';
 import { setPublicPageCache } from '$lib/server/page-cache';
 
+const CACHE_TTL = 300;
+const CACHE_TTL_NOT_FOUND = 60;
+
 interface Org {
   id: string;
   name: string;
@@ -33,7 +36,7 @@ interface Skill {
   updatedAt?: number;
 }
 
-export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, request, cookies }) => {
+export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, request, cookies, platform }) => {
   setPublicPageCache({
     setHeaders,
     request,
@@ -44,6 +47,9 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
   });
 
   const slug = params.slug;
+  const cache = platform?.caches?.default;
+  const useAnonDataCache = !locals.user;
+  const cacheKey = `org-page:${slug}`;
   const fallback = {
     slug,
     org: null as Org | null,
@@ -51,6 +57,21 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
     skills: [] as Skill[],
     error: 'Failed to load organization',
   };
+
+  if (useAnonDataCache && cache) {
+    try {
+      const cached = await cache.match(new Request(`https://cache/${cacheKey}`));
+      if (cached) {
+        const data = await cached.json() as typeof fallback;
+        if (data?.error === 'Organization not found') {
+          setHeaders({ 'X-Skillscat-Status-Override': '404' });
+        }
+        return data;
+      }
+    } catch {
+      // Cache miss or unavailable cache API
+    }
+  }
 
   try {
     const [orgRes, membersRes, skillsRes] = await Promise.all([
@@ -63,10 +84,18 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
       if (orgRes.status === 404) {
         setHeaders({ 'X-Skillscat-Status-Override': '404' });
       }
-      return {
+      const result = {
         ...fallback,
         error: orgRes.status === 404 ? 'Organization not found' : 'Failed to load organization',
       };
+      if (useAnonDataCache && cache) {
+        const ttl = orgRes.status === 404 ? CACHE_TTL_NOT_FOUND : CACHE_TTL;
+        const response = new Response(JSON.stringify(result), {
+          headers: { 'Cache-Control': `public, max-age=${ttl}` },
+        });
+        platform?.context?.waitUntil(cache.put(new Request(`https://cache/${cacheKey}`), response));
+      }
+      return result;
     }
 
     const orgData = await orgRes.json() as { organization?: Org };
@@ -90,13 +119,20 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
       skills = skillsData.skills || [];
     }
 
-    return {
+    const result = {
       slug,
       org: orgData.organization,
       members,
       skills,
       error: null,
     };
+    if (useAnonDataCache && cache) {
+      const response = new Response(JSON.stringify(result), {
+        headers: { 'Cache-Control': `public, max-age=${CACHE_TTL}` },
+      });
+      platform?.context?.waitUntil(cache.put(new Request(`https://cache/${cacheKey}`), response));
+    }
+    return result;
   } catch {
     return fallback;
   }

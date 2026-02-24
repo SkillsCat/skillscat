@@ -9,8 +9,8 @@ interface PageCacheOptions {
 
 /**
  * Apply conservative HTML caching for public pages:
- * - Anonymous + no cookies: edge-cacheable
- * - Logged-in or cookie-bearing requests: no-store (avoid personalized HTML caching)
+ * - Anonymous requests: edge-cacheable (cookies alone don't imply personalization)
+ * - Logged-in requests: private browser-cacheable (never shared-cache)
  */
 export function setPublicPageCache({
   setHeaders,
@@ -20,9 +20,11 @@ export function setPublicPageCache({
   sMaxAge,
   staleWhileRevalidate,
 }: PageCacheOptions): void {
-  if (isAuthenticated || hasCookies || Boolean(request.headers.get('cookie'))) {
+  if (isAuthenticated) {
     setHeaders({
-      'Cache-Control': 'private, no-store',
+      // Allow short-lived browser caching for logged-in navigation while preventing shared edge caching.
+      'Cache-Control': 'private, max-age=30, stale-while-revalidate=60',
+      Vary: 'Cookie',
     });
     return;
   }

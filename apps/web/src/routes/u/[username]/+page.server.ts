@@ -1,4 +1,5 @@
 import type { PageServerLoad } from './$types';
+import { setPublicPageCache } from '$lib/server/page-cache';
 
 const CACHE_TTL = 300; // 5 minutes
 const CACHE_TTL_NOT_FOUND = 60; // 1 minute for 404s
@@ -9,7 +10,16 @@ interface UserProfileLoadResult {
   error?: string;
 }
 
-export const load: PageServerLoad = async ({ params, platform, setHeaders }) => {
+export const load: PageServerLoad = async ({ params, platform, setHeaders, locals, request, cookies }) => {
+  setPublicPageCache({
+    setHeaders,
+    request,
+    isAuthenticated: Boolean(locals.user),
+    hasCookies: cookies.getAll().length > 0,
+    sMaxAge: 120,
+    staleWhileRevalidate: 600,
+  });
+
   const db = platform?.env?.DB;
   const cache = platform?.caches?.default;
   const { username } = params;
