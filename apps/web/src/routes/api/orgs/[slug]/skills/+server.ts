@@ -56,7 +56,8 @@ export const GET: RequestHandler = async ({ locals, platform, request, params, u
 
   if (isMember) {
     query = `
-      SELECT id, name, slug, description, visibility, stars
+      SELECT id, name, slug, description, visibility, stars,
+             COALESCE(last_commit_at, updated_at, indexed_at) AS updatedAt
       FROM skills
       WHERE org_id = ?
       ORDER BY stars DESC, created_at DESC
@@ -67,7 +68,8 @@ export const GET: RequestHandler = async ({ locals, platform, request, params, u
     countBindings = [org.id];
   } else {
     query = `
-      SELECT id, name, slug, description, visibility, stars
+      SELECT id, name, slug, description, visibility, stars,
+             COALESCE(last_commit_at, updated_at, indexed_at) AS updatedAt
       FROM skills
       WHERE org_id = ? AND visibility = 'public'
       ORDER BY stars DESC, created_at DESC
@@ -88,6 +90,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, params, u
         description: string | null;
         visibility: string;
         stars: number;
+        updatedAt: number | null;
       }>(),
     db.prepare(countQuery)
       .bind(...countBindings)
@@ -106,6 +109,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, params, u
       description: s.description,
       visibility: s.visibility,
       stars: s.stars,
+      updatedAt: s.updatedAt ?? undefined,
     })),
     total,
     page,

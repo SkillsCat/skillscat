@@ -8,6 +8,8 @@
   import Section from '$lib/components/layout/Section.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
+  import { getCategoryBySlug } from '$lib/constants/categories';
+  import { buildSkillPath } from '$lib/skill-path';
   import { buildOgImageUrl } from '$lib/seo/og';
   import { SITE_URL } from '$lib/seo/constants';
 
@@ -44,36 +46,184 @@
 
   let { data }: Props = $props();
 
+  const MAX_SEO_TITLE_LENGTH = 68;
+  const MAX_SEO_DESCRIPTION_LENGTH = 160;
+  const PROFILE_ITEMLIST_LIMIT = 12;
+
+  function normalizeSeoKeyword(value: string): string {
+    return value.trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  function trimSeoText(value: string, maxLength: number): string {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxLength) return normalized;
+    const sliced = normalized.slice(0, maxLength - 1);
+    const cut = sliced.lastIndexOf(' ');
+    return `${(cut > Math.floor(maxLength * 0.6) ? sliced.slice(0, cut) : sliced).trim()}…`;
+  }
+
+  function cleanSeoText(value: string | null | undefined): string | null {
+    if (!value) return null;
+    const text = value.replace(/\s+/g, ' ').replace(/[`*_#]/g, '').trim();
+    if (!text) return null;
+    return /[.!?]$/.test(text) ? text : `${text}.`;
+  }
+
+  function extractSeoTokens(value: string | null | undefined): string[] {
+    if (!value) return [];
+    const tokens = value.toLowerCase().match(/[a-z0-9][a-z0-9+#.-]*/g) || [];
+    const stopWords = new Set([
+      'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'is', 'it',
+      'of', 'on', 'or', 'that', 'the', 'this', 'to', 'with', 'we', 'our', 'you', 'your'
+    ]);
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const token of tokens) {
+      if (token.length < 3) continue;
+      if (/^\d+$/.test(token)) continue;
+      if (stopWords.has(token)) continue;
+      if (seen.has(token)) continue;
+      seen.add(token);
+      result.push(token);
+      if (result.length >= 4) break;
+    }
+    return result;
+  }
+
   const username = $derived($page.params.username);
   const profile = $derived(data.profile);
   const skills = $derived(data.skills);
   const error = $derived(data.error);
   const profileDisplayName = $derived(profile?.name || username);
-  const profileCanonicalUrl = $derived(`${SITE_URL}/u/${username}`);
-  const profileDescription = $derived(`View ${profileDisplayName}'s public AI agent skills on SkillsCat.`);
-  const ogImageUrl = $derived(
-    buildOgImageUrl({ type: 'user', slug: username ?? '' })
+  const profileCanonicalUrl = $derived(`${SITE_URL}/u/${encodeURIComponent(username || '')}`);
+  const topCategoryNames = $derived((() => {
+    const counts = new Map<string, number>();
+    for (const skill of skills) {
+      for (const categorySlug of skill.categories || []) {
+        counts.set(categorySlug, (counts.get(categorySlug) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([slug]) => getCategoryBySlug(slug)?.name)
+      .filter((value): value is string => Boolean(value));
+  })());
+  const profileUpdatedAt = $derived(
+    skills.reduce((max, skill) => Math.max(max, skill.updatedAt || 0), 0)
   );
-  const pageTitle = $derived(profile && !error ? `${profileDisplayName} - SkillsCat` : 'User Not Found - SkillsCat');
+  const profileDescription = $derived((() => {
+    const bio = cleanSeoText(profile?.bio);
+    const prefix = bio
+      ? bio
+      : `Browse ${skills.length} public AI agent skill${skills.length === 1 ? '' : 's'} by ${profileDisplayName} on SkillsCat.`;
+    const categoryPart = topCategoryNames.length > 0
+      ? `Top categories: ${topCategoryNames.slice(0, 2).join(', ')}.`
+      : '';
+    return trimSeoText(`${prefix} ${categoryPart}`.trim(), MAX_SEO_DESCRIPTION_LENGTH);
+  })());
+  const ogImageUrl = $derived(
+    buildOgImageUrl({
+      type: 'user',
+      slug: username ?? '',
+      version: profileUpdatedAt || profile?.joinedAt || skills.length || 0,
+    })
+  );
+  const pageTitle = $derived(
+    profile && !error
+      ? trimSeoText(
+          `${profileDisplayName} AI Agent Skills${skills.length ? ` (${skills.length})` : ''} | SkillsCat`,
+          MAX_SEO_TITLE_LENGTH
+        )
+      : 'User Not Found - SkillsCat'
+  );
+  const profileSeoKeywords = $derived((() => {
+    const keywords: string[] = [];
+    const seen = new Set<string>();
+    const push = (value: string | null | undefined) => {
+      if (!value) return;
+      const normalized = normalizeSeoKeyword(value);
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+      keywords.push(value.trim());
+    };
+
+    push(profileDisplayName);
+    push(`@${username}`);
+    push(`${profileDisplayName} ai agent skills`);
+    push(`${profileDisplayName} skillscat profile`);
+    push(`skills by ${profileDisplayName}`);
+    push('ai agent skills author');
+    push('developer skills profile');
+    if (profile?.githubUsername) {
+      push(profile.githubUsername);
+      push(`${profile.githubUsername} skills`);
+    }
+    for (const categoryName of topCategoryNames) {
+      push(categoryName);
+      push(`${categoryName} skills`);
+      push(`${categoryName} ai skills`);
+    }
+    for (const token of extractSeoTokens(profile?.bio)) {
+      push(token);
+      push(`${token} skills`);
+    }
+    push('skillscat');
+
+    return keywords.slice(0, 20);
+  })());
+  const profileSkillItemList = $derived(
+    skills
+      .slice(0, PROFILE_ITEMLIST_LIMIT)
+      .map((skill, index) => ({
+        '@type': 'ListItem',
+        position: index + 1,
+        url: `${SITE_URL}${buildSkillPath(skill.slug)}`,
+        name: skill.name,
+      }))
+  );
   const profileStructuredData = $derived(
     profile && !error
-      ? {
-          '@context': 'https://schema.org',
-          '@type': 'ProfilePage',
-          name: pageTitle,
-          description: profileDescription,
-          url: profileCanonicalUrl,
-          mainEntity: {
-            '@type': profile.type === 'Organization' ? 'Organization' : 'Person',
-            name: profileDisplayName,
+      ? [
+          {
+            '@context': 'https://schema.org',
+            '@type': 'ProfilePage',
+            name: pageTitle,
+            description: profileDescription,
             url: profileCanonicalUrl,
-            image: profile.image || undefined,
-            description: profile.bio || undefined,
-            sameAs: profile.githubUsername ? [`https://github.com/${profile.githubUsername}`] : undefined,
+            keywords: profileSeoKeywords.join(', '),
+            mainEntity: {
+              '@type': profile.type === 'Organization' ? 'Organization' : 'Person',
+              name: profileDisplayName,
+              url: profileCanonicalUrl,
+              image: profile.image || undefined,
+              description: profile.bio || undefined,
+              sameAs: profile.githubUsername ? [`https://github.com/${profile.githubUsername}`] : undefined,
+            },
           },
-        }
+          {
+            '@context': 'https://schema.org',
+            '@type': 'BreadcrumbList',
+            itemListElement: [
+              { '@type': 'ListItem', position: 1, name: 'Home', item: SITE_URL },
+              { '@type': 'ListItem', position: 2, name: 'Skills', item: `${SITE_URL}/trending` },
+              { '@type': 'ListItem', position: 3, name: profileDisplayName, item: profileCanonicalUrl },
+            ],
+          },
+          ...(profileSkillItemList.length > 0
+            ? [{
+                '@context': 'https://schema.org',
+                '@type': 'ItemList',
+                name: `${profileDisplayName} public skills`,
+                url: profileCanonicalUrl,
+                numberOfItems: skills.length,
+                itemListElement: profileSkillItemList,
+              }]
+            : [])
+        ]
       : null
   );
+  const profileShouldNoindex = $derived(skills.length === 0);
 
   function formatDate(timestamp: number): string {
     return new Date(timestamp).toLocaleDateString('en-US', {
@@ -105,8 +255,9 @@
     image={ogImageUrl}
     imageAlt={`${profileDisplayName} profile social preview image`}
     type="profile"
-    keywords={['developer profile', 'ai agent skills author', 'skillscat user']}
-    structuredData={profileStructuredData}
+    keywords={profileSeoKeywords}
+    noindex={profileShouldNoindex}
+    structuredData={profileShouldNoindex ? null : profileStructuredData}
   />
 {:else}
   <SEO

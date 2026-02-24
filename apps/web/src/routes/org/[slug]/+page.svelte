@@ -15,6 +15,8 @@
     description: string;
     avatarUrl: string;
     verified: boolean;
+    createdAt?: number;
+    updatedAt?: number;
     memberCount: number;
     skillCount: number;
     userRole: string | null;
@@ -34,6 +36,7 @@
     description: string;
     visibility: "public" | "private" | "unlisted";
     stars: number;
+    updatedAt?: number;
   }
 
   type Tab = "skills" | "members";
@@ -58,6 +61,50 @@
   let activeSlug = $state('');
   let activeTab = $state<Tab>("skills");
 
+  const MAX_SEO_TITLE_LENGTH = 68;
+  const MAX_SEO_DESCRIPTION_LENGTH = 160;
+  const ORG_ITEMLIST_LIMIT = 12;
+
+  function normalizeSeoKeyword(value: string): string {
+    return value.trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  function trimSeoText(value: string, maxLength: number): string {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxLength) return normalized;
+    const sliced = normalized.slice(0, maxLength - 1);
+    const cut = sliced.lastIndexOf(' ');
+    return `${(cut > Math.floor(maxLength * 0.6) ? sliced.slice(0, cut) : sliced).trim()}…`;
+  }
+
+  function cleanSeoText(value: string | null | undefined): string | null {
+    if (!value) return null;
+    const text = value.replace(/\s+/g, ' ').replace(/[`*_#]/g, '').trim();
+    if (!text) return null;
+    return /[.!?]$/.test(text) ? text : `${text}.`;
+  }
+
+  function extractSeoTokens(value: string | null | undefined): string[] {
+    if (!value) return [];
+    const tokens = value.toLowerCase().match(/[a-z0-9][a-z0-9+#.-]*/g) || [];
+    const stopWords = new Set([
+      'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'is', 'it',
+      'of', 'on', 'or', 'that', 'the', 'this', 'to', 'with', 'we', 'our', 'you', 'your'
+    ]);
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const token of tokens) {
+      if (token.length < 3) continue;
+      if (/^\d+$/.test(token)) continue;
+      if (stopWords.has(token)) continue;
+      if (seen.has(token)) continue;
+      seen.add(token);
+      result.push(token);
+      if (result.length >= 4) break;
+    }
+    return result;
+  }
+
   const org = $derived(loadedOrg === undefined ? data.org : loadedOrg);
   const members = $derived(loadedMembers === undefined ? data.members : loadedMembers);
   const skills = $derived(loadedSkills === undefined ? data.skills : loadedSkills);
@@ -67,30 +114,126 @@
     org?.userRole && ["owner", "admin"].includes(org.userRole),
   );
   const orgName = $derived(org?.displayName || slug);
-  const canonicalUrl = $derived(`${SITE_URL}/org/${slug}`);
-  const ogImageUrl = $derived(
-    buildOgImageUrl({ type: 'org', slug })
+  const canonicalUrl = $derived(`${SITE_URL}/org/${encodeURIComponent(slug)}`);
+  const publicSkillsForSeo = $derived(skills.filter((skill) => skill.visibility === 'public'));
+  const orgPublicSkillCountForSeo = $derived(
+    org?.userRole ? publicSkillsForSeo.length : (org?.skillCount ?? publicSkillsForSeo.length)
   );
-  const pageTitle = $derived(org ? `${orgName} - SkillsCat` : 'Organization Not Found - SkillsCat');
+  const orgSeoUpdatedAt = $derived((() => {
+    const latestSkillUpdate = publicSkillsForSeo.reduce((max, skill) => Math.max(max, skill.updatedAt || 0), 0);
+    return latestSkillUpdate || org?.updatedAt || org?.createdAt || 0;
+  })());
+  const orgTopSkillNames = $derived(
+    publicSkillsForSeo
+      .slice()
+      .sort((a, b) => (b.stars || 0) - (a.stars || 0))
+      .slice(0, 3)
+      .map((skill) => skill.name)
+  );
+  const ogImageUrl = $derived(
+    buildOgImageUrl({
+      type: 'org',
+      slug,
+      version: orgSeoUpdatedAt || org?.skillCount || 0,
+    })
+  );
+  const pageTitle = $derived(
+    org
+      ? trimSeoText(
+          `${orgName} Organization AI Agent Skills${org.skillCount ? ` (${org.skillCount})` : ''} | SkillsCat`,
+          MAX_SEO_TITLE_LENGTH
+        )
+      : 'Organization Not Found - SkillsCat'
+  );
   const orgDescription = $derived(
-    org?.description?.trim() || `Explore ${orgName}'s public AI agent skills on SkillsCat.`
+    (() => {
+      const orgBio = cleanSeoText(org?.description);
+      const publicCount = publicSkillsForSeo.length || (org?.skillCount ?? 0);
+      const fallback = `Explore ${publicCount} public AI agent skill${publicCount === 1 ? '' : 's'} from ${orgName} on SkillsCat.`;
+      const topSkillsPart = orgTopSkillNames.length > 0
+        ? `Featured skills: ${orgTopSkillNames.slice(0, 2).join(', ')}.`
+        : '';
+      return trimSeoText(`${orgBio || fallback} ${topSkillsPart}`.trim(), MAX_SEO_DESCRIPTION_LENGTH);
+    })()
+  );
+  const orgSeoKeywords = $derived((() => {
+    const keywords: string[] = [];
+    const seen = new Set<string>();
+    const push = (value: string | null | undefined) => {
+      if (!value) return;
+      const normalized = normalizeSeoKeyword(value);
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+      keywords.push(value.trim());
+    };
+
+    push(orgName);
+    push(`@${slug}`);
+    push(`${orgName} organization skills`);
+    push(`${orgName} ai agent skills`);
+    push(`${slug} team skills`);
+    push('organization ai agent skills');
+    push('team ai automation skills');
+    for (const skillName of orgTopSkillNames) {
+      push(skillName);
+      push(`${skillName} skill`);
+    }
+    for (const token of extractSeoTokens(org?.description)) {
+      push(token);
+      push(`${token} organization`);
+    }
+    push('skillscat org');
+    push('skillscat');
+
+    return keywords.slice(0, 20);
+  })());
+  const orgSkillItemList = $derived(
+    publicSkillsForSeo
+      .slice(0, ORG_ITEMLIST_LIMIT)
+      .map((skill, index) => ({
+        '@type': 'ListItem',
+        position: index + 1,
+        url: `${SITE_URL}${buildSkillPath(skill.slug)}`,
+        name: skill.name,
+      }))
   );
   const orgStructuredData = $derived(
     org
-      ? {
-          '@context': 'https://schema.org',
-          '@type': 'ProfilePage',
-          name: pageTitle,
-          description: orgDescription,
-          url: canonicalUrl,
-          mainEntity: {
-            '@type': 'Organization',
-            name: orgName,
+      ? [
+          {
+            '@context': 'https://schema.org',
+            '@type': 'ProfilePage',
+            name: pageTitle,
+            description: orgDescription,
             url: canonicalUrl,
-            logo: org.avatarUrl || undefined,
-            description: org.description || undefined,
+            keywords: orgSeoKeywords.join(', '),
+            mainEntity: {
+              '@type': 'Organization',
+              name: orgName,
+              url: canonicalUrl,
+              logo: org.avatarUrl || undefined,
+              description: org.description || undefined,
+            },
           },
-        }
+          {
+            '@context': 'https://schema.org',
+            '@type': 'BreadcrumbList',
+            itemListElement: [
+              { '@type': 'ListItem', position: 1, name: 'Home', item: SITE_URL },
+              { '@type': 'ListItem', position: 2, name: 'Organizations', item: `${SITE_URL}/trending` },
+              { '@type': 'ListItem', position: 3, name: orgName, item: canonicalUrl },
+            ],
+          },
+          ...(orgSkillItemList.length > 0
+            ? [{
+                '@context': 'https://schema.org',
+                  '@type': 'ItemList',
+                  name: `${orgName} public skills`,
+                  url: canonicalUrl,
+                  itemListElement: orgSkillItemList,
+              }]
+            : [])
+        ]
       : null
   );
 
@@ -149,8 +292,9 @@
     image={ogImageUrl}
     imageAlt={`${orgName} organization social preview image`}
     type="profile"
-    keywords={['organization skills', 'team ai agent skills', 'skillscat org']}
-    structuredData={orgStructuredData}
+    keywords={orgSeoKeywords}
+    noindex={orgPublicSkillCountForSeo === 0}
+    structuredData={orgPublicSkillCountForSeo === 0 ? null : orgStructuredData}
   />
 {:else}
   <SEO
