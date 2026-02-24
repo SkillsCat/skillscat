@@ -49,9 +49,11 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
   const canViewEmails = requesterRole !== null && ['owner', 'admin'].includes(requesterRole);
 
   const results = await db.prepare(`
-    SELECT om.user_id, om.role, om.joined_at, u.name, u.email, u.image
+    SELECT om.user_id, om.role, om.joined_at, u.name, u.email, u.image,
+           a.username as github_username
     FROM org_members om
     LEFT JOIN user u ON om.user_id = u.id
+    LEFT JOIN authors a ON a.user_id = u.id
     WHERE om.org_id = ?
     ORDER BY om.joined_at
   `)
@@ -63,6 +65,7 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
       name: string | null;
       email: string | null;
       image: string | null;
+      github_username: string | null;
     }>();
 
   return json({
@@ -72,6 +75,7 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
       role: m.role,
       joinedAt: m.joined_at,
       name: m.name,
+      githubUsername: m.github_username,
       email: canViewEmails ? m.email : null,
       image: m.image,
     })),

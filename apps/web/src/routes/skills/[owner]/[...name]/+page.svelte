@@ -872,9 +872,10 @@
   function getAuthorProfileUrl(): string {
     if (!data.skill) return '#';
     if (data.skill.orgSlug) return `/org/${data.skill.orgSlug}`;
-    if (data.skill.ownerName) return `/u/${data.skill.ownerName}`;
-    if (data.skill.authorUsername) return `/u/${data.skill.authorUsername}`;
-    return `https://github.com/${data.skill.repoOwner}`;
+    if (data.skill.authorUsername) return `/u/${encodeURIComponent(data.skill.authorUsername)}`;
+    if (data.skill.ownerName) return `/u/${encodeURIComponent(data.skill.ownerName)}`;
+    if (data.skill.repoOwner) return `/u/${encodeURIComponent(data.skill.repoOwner)}`;
+    return '#';
   }
 
   // Get author display name for breadcrumb
@@ -894,12 +895,6 @@
     if (data.skill.ownerAvatar) return data.skill.ownerAvatar;
     if (data.skill.authorAvatar) return data.skill.authorAvatar;
     return `https://avatars.githubusercontent.com/${data.skill.repoOwner}?s=96`;
-  }
-
-  // Check if author link is external
-  function isAuthorExternal(): boolean {
-    if (!data.skill) return false;
-    return !data.skill.orgSlug && !data.skill.ownerName && !data.skill.authorUsername;
   }
 
   function toIsoTimestamp(timestamp: number | null | undefined): string | undefined {
@@ -1056,8 +1051,6 @@
         <li class="breadcrumb-truncate">
           <a
             href={getAuthorProfileUrl()}
-            target={isAuthorExternal() ? '_blank' : undefined}
-            rel={isAuthorExternal() ? 'noopener noreferrer' : undefined}
           >
             {getAuthorDisplayName()}
           </a>
@@ -1077,8 +1070,6 @@
             <!-- Avatar: clickable, links to author profile -->
             <a
               href={getAuthorProfileUrl()}
-              target={isAuthorExternal() ? '_blank' : undefined}
-              rel={isAuthorExternal() ? 'noopener noreferrer' : undefined}
               class="avatar-link flex-shrink-0"
             >
               <Avatar
@@ -1187,7 +1178,9 @@
               </a>
             {:else if data.skill.ownerName}
               <a
-                href="/u/{data.skill.ownerName}"
+                href={data.skill.authorUsername
+                  ? `/u/${encodeURIComponent(data.skill.authorUsername)}`
+                  : `/u/${encodeURIComponent(data.skill.ownerName)}`}
                 class="skill-meta-item"
               >
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1195,11 +1188,19 @@
                 </svg>
                 {data.skill.ownerName}
               </a>
+            {:else if data.skill.authorUsername}
+              <a
+                href={`/u/${encodeURIComponent(data.skill.authorUsername)}`}
+                class="skill-meta-item"
+              >
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                {data.skill.authorDisplayName || data.skill.authorUsername}
+              </a>
             {:else if data.skill.repoOwner}
               <a
-                href="https://github.com/{data.skill.repoOwner}"
-                target="_blank"
-                rel="noopener noreferrer"
+                href={`/u/${encodeURIComponent(data.skill.repoOwner)}`}
                 class="skill-meta-item"
               >
                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">

@@ -27,6 +27,7 @@
     name: string;
     image: string;
     role: string;
+    githubUsername?: string | null;
   }
 
   interface Skill {
@@ -115,6 +116,10 @@
   );
   const orgName = $derived(org?.displayName || slug);
   const canonicalUrl = $derived(`${SITE_URL}/org/${encodeURIComponent(slug)}`);
+  function getMemberProfileHref(member: Member): string {
+    const handle = member.githubUsername?.trim() || member.name?.trim();
+    return handle ? `/u/${encodeURIComponent(handle)}` : '#';
+  }
   const publicSkillsForSeo = $derived(skills.filter((skill) => skill.visibility === 'public'));
   const orgPublicSkillCountForSeo = $derived(
     org?.userRole ? publicSkillsForSeo.length : (org?.skillCount ?? publicSkillsForSeo.length)
@@ -483,7 +488,7 @@
         {#if members.length > 0}
           <div class="members-grid">
             {#each members as member}
-              <a href="/u/{member.name}" class="member-card">
+              <a href={getMemberProfileHref(member)} class="member-card">
                 <Avatar
                   src={member.image}
                   alt={member.name}

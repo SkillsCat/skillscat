@@ -10,6 +10,7 @@
   interface Member {
     userId: string;
     name: string;
+    githubUsername?: string | null;
     email: string;
     image: string;
     role: "owner" | "admin" | "member";
@@ -52,6 +53,10 @@
   const isAdmin = $derived(
     org?.userRole === "owner" || org?.userRole === "admin",
   );
+  function getMemberProfileHref(member: Member): string {
+    const handle = member.githubUsername?.trim() || member.name?.trim();
+    return handle ? `/u/${encodeURIComponent(handle)}` : '#';
+  }
 
   // Reload data after mutations
   async function reloadMembers() {
@@ -195,7 +200,7 @@
             />
             <div class="member-info">
               <div class="member-header">
-                <a href="/u/{member.name}" class="member-name">{member.name}</a>
+                <a href={getMemberProfileHref(member)} class="member-name">{member.name}</a>
                 <span class="role-badge {getRoleBadgeClass(member.role)}"
                   >{member.role}</span
                 >

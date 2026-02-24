@@ -38,9 +38,11 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
 
     // Get members
     const results = await db.prepare(`
-    SELECT om.user_id, om.role, om.joined_at, u.name, u.email, u.image
+    SELECT om.user_id, om.role, om.joined_at, u.name, u.email, u.image,
+           a.username as github_username
     FROM org_members om
     LEFT JOIN user u ON om.user_id = u.id
+    LEFT JOIN authors a ON a.user_id = u.id
     WHERE om.org_id = ?
     ORDER BY om.joined_at
   `)
@@ -52,6 +54,7 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
             name: string | null;
             email: string | null;
             image: string | null;
+            github_username: string | null;
         }>();
 
     return {
@@ -63,6 +66,7 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
             role: m.role as 'owner' | 'admin' | 'member',
             joinedAt: m.joined_at,
             name: m.name ?? '',
+            githubUsername: m.github_username,
             email: m.email ?? '',
             image: m.image ?? '',
         })),
