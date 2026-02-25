@@ -18,12 +18,12 @@ const QUEUE_DELAY_MS = 1000; // 1 second delay between queue messages
 const DOT_FOLDER_MIN_STARS = 500;
 /** Maximum size for submit request JSON body */
 const MAX_SUBMIT_BODY_BYTES = 16 * 1024;
-/** Fast-fail policy for token-authenticated submit calls */
-const GITHUB_TOKEN_SUBMIT_MAX_RETRIES = 0;
-const GITHUB_TOKEN_SUBMIT_MAX_DELAY_MS = 2_000;
+/** Fast-fail policy for submit-route GitHub calls (POST submit + GET /check) */
+const GITHUB_SUBMIT_FAST_FAIL_MAX_RETRIES = 0;
+const GITHUB_SUBMIT_FAST_FAIL_MAX_DELAY_MS = 2_000;
 
 type GitHubUpstreamErrorCode = 'github_rate_limited' | 'github_upstream_failure';
-type GitHubRequestMode = 'default' | 'token_fast_fail';
+type GitHubRequestMode = 'default' | 'submit_fast_fail';
 const ANON_CLI_SUBMIT_HEADER = 'x-skillscat-background-submit';
 const ANON_CLI_SUBMIT_SENTINEL = 'anonymous_cli';
 
@@ -159,9 +159,9 @@ async function githubRequestForSubmit(
     userAgent: 'SkillsCat/1.0',
   };
 
-  if (mode === 'token_fast_fail') {
-    requestOptions.maxRetries = GITHUB_TOKEN_SUBMIT_MAX_RETRIES;
-    requestOptions.maxDelayMs = GITHUB_TOKEN_SUBMIT_MAX_DELAY_MS;
+  if (mode === 'submit_fast_fail') {
+    requestOptions.maxRetries = GITHUB_SUBMIT_FAST_FAIL_MAX_RETRIES;
+    requestOptions.maxDelayMs = GITHUB_SUBMIT_FAST_FAIL_MAX_DELAY_MS;
   }
 
   try {
@@ -760,7 +760,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       throw error(401, 'Please sign in to submit a skill');
     }
 
-    const githubRequestMode: GitHubRequestMode = auth.authMethod === 'token' ? 'token_fast_fail' : 'default';
+    const githubRequestMode: GitHubRequestMode = 'submit_fast_fail';
 
     const body = await readLimitedJsonBody(request, MAX_SUBMIT_BODY_BYTES) as { url?: string; skillPath?: string };
     const { url, skillPath: explicitSkillPath } = body;
@@ -1067,7 +1067,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
     const githubToken = platform?.env?.GITHUB_TOKEN;
 
     // Fetch repository info first
-    const repoData = await fetchGitHubRepo(owner, repo, githubToken, 'default');
+    const repoData = await fetchGitHubRepo(owner, repo, githubToken, 'submit_fast_fail');
     if (!repoData) {
       return json({ valid: false, error: 'Repository not found' });
     }
@@ -1087,7 +1087,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
     const allowDotFolders = (repoData.stars ?? 0) >= DOT_FOLDER_MIN_STARS;
 
     // First, check if SKILL.md exists at the submitted path (or root if no path)
-    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, allowDotFolders, 'default');
+    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, allowDotFolders, 'submit_fast_fail');
 
     if (hasSkillMd) {
       // SKILL.md found at the submitted path - check if already exists in DB
@@ -1136,7 +1136,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
     }
 
     // No SKILL.md at submitted path - scan for SKILL.md files as fallback
-    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders, 'default');
+    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders, 'submit_fast_fail');
 
     if (scanResult.found.length === 0) {
       return json({ valid: false, error: 'No SKILL.md file found in the repository' });

@@ -10,21 +10,11 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { env } from '$env/dynamic/private';
-import { githubRequest } from '$lib/server/github-request';
+import { graphqlRepoResurrectionMetadata } from '$lib/server/github-client/queries';
 
 // Threshold for user-triggered resurrection (lower than quarterly batch)
 const USER_ACCESS_STAR_THRESHOLD = 20;
 const RECENT_ACTIVITY_DAYS = 90;
-
-interface GitHubGraphQLResponse {
-  data?: {
-    repository?: {
-      stargazerCount: number;
-      pushedAt: string;
-    };
-  };
-  errors?: Array<{ message: string }>;
-}
 
 function isRecentlyActive(pushedAt: string, days: number): boolean {
   const pushedDate = new Date(pushedAt);
@@ -38,35 +28,11 @@ async function fetchGitHubRepoData(
   name: string,
   token: string
 ): Promise<{ stargazerCount: number; pushedAt: string } | null> {
-  const query = `
-    query($owner: String!, $name: String!) {
-      repository(owner: $owner, name: $name) {
-        stargazerCount
-        pushedAt
-      }
-    }
-  `;
-
   try {
-    const response = await githubRequest('https://api.github.com/graphql', {
-      method: 'POST',
+    return await graphqlRepoResurrectionMetadata(owner, name, {
       token,
-      headers: {
-        'Content-Type': 'application/json',
-      },
       userAgent: 'SkillsCat/1.0',
-      body: JSON.stringify({
-        query,
-        variables: { owner, name },
-      }),
     });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = await response.json() as GitHubGraphQLResponse;
-    return data.data?.repository || null;
   } catch {
     return null;
   }

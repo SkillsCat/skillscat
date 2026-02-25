@@ -10,7 +10,7 @@
  */
 
 import type { BaseEnv, GitHubGraphQLRepoData, SkillTier, ExecutionContext, ScheduledController } from './shared/types';
-import { githubFetch } from './shared/utils';
+import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
 
 interface ResurrectionEnv extends BaseEnv {}
 
@@ -40,7 +40,6 @@ interface ArchiveData {
   archivedAt: string;
 }
 
-const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql';
 const BATCH_SIZE = 50;
 
 // Resurrection thresholds
@@ -82,42 +81,13 @@ async function batchFetchGitHubRepos(
     return results;
   }
 
-  const repoQueries = repos.map((repo, idx) => {
-    const alias = `repo${idx}`;
-    return `${alias}: repository(owner: "${repo.owner}", name: "${repo.name}") {
-      stargazerCount
-      forkCount
-      pushedAt
-      description
-      repositoryTopics(first: 10) {
-        nodes { topic { name } }
-      }
-    }`;
-  }).join('\n');
-
-  const query = `query { ${repoQueries} }`;
-
   try {
-    const data = await githubFetch<{ data: Record<string, GitHubGraphQLRepoData | null> }>(
-      GITHUB_GRAPHQL_URL,
-      {
-        token: env.GITHUB_TOKEN,
-        userAgent: 'SkillsCat-Resurrection-Worker/1.0',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ query }),
-        notFoundAsNull: false,
-      }
-    );
-    if (!data?.data) return results;
-
-    repos.forEach((repo, idx) => {
-      const repoData = data.data[`repo${idx}`];
-      if (repoData) {
-        results.set(repo.id, repoData);
-      }
+    const batch = await graphqlBatchRepoMetadata(repos, {
+      token: env.GITHUB_TOKEN,
+      userAgent: 'SkillsCat-Resurrection-Worker/1.0',
+    });
+    batch.forEach((value, key) => {
+      results.set(key, value as GitHubGraphQLRepoData);
     });
   } catch (error) {
     console.error('GitHub GraphQL batch fetch failed:', error);

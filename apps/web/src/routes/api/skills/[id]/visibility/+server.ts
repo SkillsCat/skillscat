@@ -2,7 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middleware/auth';
 import { isSkillOwner } from '$lib/server/permissions';
-import { githubRequest } from '$lib/server/github-request';
+import { getRepo } from '$lib/server/github-client/rest';
 
 /**
  * Verify that a GitHub repo exists and belongs to the user
@@ -20,7 +20,7 @@ async function verifyGitHubRepo(
 
   const [, owner, repo] = match;
 
-  const response = await githubRequest(`https://api.github.com/repos/${owner}/${repo.replace(/\.git$/, '')}`, {
+  const response = await getRepo(owner, repo.replace(/\.git$/, ''), {
     token: githubToken,
     userAgent: 'SkillsCat/1.0',
   });
