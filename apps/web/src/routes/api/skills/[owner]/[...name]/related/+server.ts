@@ -1,0 +1,170 @@
+import { json, error } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import type { ApiResponse, SkillCardData } from '$lib/types';
+import { getCached } from '$lib/server/cache';
+import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { checkSkillAccess } from '$lib/server/permissions';
+import { getRelatedSkills } from '$lib/server/db/utils';
+import { buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
+
+const RELATED_LIMIT = 6;
+const RELATED_CACHE_TTL = 300;
+
+interface SkillContextRow {
+  id: string;
+  repoOwner: string | null;
+  visibility: 'public' | 'private' | 'unlisted' | null;
+}
+
+interface CategoryRow {
+  category_slug: string;
+}
+
+function hasStatus(errorValue: unknown): errorValue is { status: number } {
+  return typeof errorValue === 'object' && errorValue !== null && 'status' in errorValue;
+}
+
+export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
+  const perfStart = performance.now();
+  const serverTimings: Array<{ name: string; dur: number; desc?: string }> = [];
+  const pushTiming = (name: string, start: number, desc?: string) => {
+    serverTimings.push({ name, dur: Math.max(0, performance.now() - start), desc });
+  };
+  const timed = async <T>(name: string, fn: () => Promise<T>, desc?: string): Promise<T> => {
+    const start = performance.now();
+    try {
+      return await fn();
+    } finally {
+      pushTiming(name, start, desc);
+    }
+  };
+  const buildServerTimingHeader = () => {
+    const entries = [
+      ...serverTimings,
+      { name: 'total', dur: Math.max(0, performance.now() - perfStart), desc: 'related api' }
+    ];
+    return entries
+      .map((entry) => {
+        const dur = Number(entry.dur.toFixed(1));
+        const descPart = entry.desc ? `;desc="${entry.desc.replace(/"/g, '')}"` : '';
+        return `${entry.name};dur=${dur}${descPart}`;
+      })
+      .join(', ');
+  };
+
+  const owner = normalizeSkillOwner(params.owner);
+  const name = normalizeSkillName(params.name);
+  if (!owner || !name) {
+    throw error(400, 'Invalid skill identifier');
+  }
+
+  const db = platform?.env?.DB;
+  if (!db) {
+    return json({
+      success: false,
+      error: 'Database not available',
+    } satisfies ApiResponse<never>, { status: 503 });
+  }
+
+  const slug = buildSkillSlug(owner, name);
+
+  try {
+    const skill = await timed(
+      'ctx_skill',
+      () => db.prepare(`
+      SELECT id, repo_owner as repoOwner, visibility
+      FROM skills
+      WHERE slug = ?
+      LIMIT 1
+    `)
+      .bind(slug)
+      .first<SkillContextRow>(),
+      'skill context'
+    );
+
+    if (!skill) {
+      return json({
+        success: false,
+        error: 'Skill not found',
+      } satisfies ApiResponse<never>, { status: 404 });
+    }
+
+    if (skill.visibility === 'private') {
+      const auth = await getAuthContext(request, locals, db);
+      if (!auth.userId) {
+        return json({
+          success: false,
+          error: 'Authentication required',
+        } satisfies ApiResponse<never>, { status: 401 });
+      }
+      requireScope(auth, 'read');
+      const hasAccess = await checkSkillAccess(skill.id, auth.userId, db);
+      if (!hasAccess) {
+        return json({
+          success: false,
+          error: 'You do not have permission to access this skill',
+        } satisfies ApiResponse<never>, { status: 403 });
+      }
+    }
+
+    const categoriesResult = await timed(
+      'ctx_cats',
+      () => db.prepare(`
+      SELECT category_slug
+      FROM skill_categories
+      WHERE skill_id = ?
+    `)
+      .bind(skill.id)
+      .all<CategoryRow>(),
+      'skill categories'
+    );
+
+    const categories = (categoriesResult.results || []).map((row) => row.category_slug);
+
+    const { data: relatedSkills, hit } = await timed(
+      'related_cached',
+      () => getCached(
+      `api:skill-related:${skill.id}:v1:${RELATED_LIMIT}`,
+      () => getRelatedSkills(
+        { DB: db },
+        skill.id,
+        categories,
+        skill.repoOwner || '',
+        RELATED_LIMIT,
+        (name, dur, desc) => {
+          serverTimings.push({ name, dur, desc });
+        }
+      ),
+      RELATED_CACHE_TTL
+    ),
+      'cache wrapper'
+    );
+
+    return json({
+      success: true,
+      data: {
+        relatedSkills,
+      },
+    } satisfies ApiResponse<{ relatedSkills: SkillCardData[] }>, {
+      headers: {
+        'Cache-Control': skill.visibility === 'private'
+          ? 'private, max-age=30, stale-while-revalidate=60'
+          : 'public, max-age=300, stale-while-revalidate=3600',
+        'X-Cache': hit ? 'HIT' : 'MISS',
+        'Server-Timing': buildServerTimingHeader(),
+      },
+    });
+  } catch (err) {
+    console.error('Error fetching related skills:', err);
+    if (hasStatus(err)) throw err;
+    return json({
+      success: false,
+      error: 'Failed to fetch related skills',
+    } satisfies ApiResponse<never>, {
+      status: 500,
+      headers: {
+        'Server-Timing': buildServerTimingHeader(),
+      }
+    });
+  }
+};

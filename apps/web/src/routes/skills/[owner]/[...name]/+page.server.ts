@@ -7,7 +7,7 @@ import { setPublicPageCache } from '$lib/server/page-cache';
 import { CATEGORIES } from '$lib/constants/categories';
 import type { Category } from '$lib/constants/categories';
 import { buildSkillPathFromOwnerAndName, buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
-import type { SkillDetail } from '$lib/types';
+import type { SkillCardData, SkillDetail } from '$lib/types';
 
 const BOT_UA_PATTERN = /\b(bot|crawler|spider|slurp|preview|headless|lighthouse)\b/i;
 const CATEGORY_BY_SLUG = new Map(CATEGORIES.map((category) => [category.slug, category] as const));
@@ -341,7 +341,13 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
   const slug = buildSkillSlug(normalizedOwner, normalizedName);
 
   try {
-    const skill = await timed('skill_detail', () => getSkillBySlug(env, slug, userId), 'db+r2');
+    const skill = await timed(
+      'skill_detail',
+      () => getSkillBySlug(env, slug, userId, (name, dur, desc) => {
+        serverTimings.push({ name, dur, desc });
+      }),
+      'db+r2'
+    );
 
     if (!skill) {
       setHeaders({ 'X-Skillscat-Status-Override': '404' });
@@ -359,18 +365,34 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       });
     }
 
-    const relatedSkillsPromise = timed(
-      'related',
-      async () => {
-        const { data } = await getCached(
-          `related:${skill.id}`,
-          () => getRelatedSkills(env, skill.id, skill.categories || [], skill.repoOwner || '', 10),
-          RELATED_SKILLS_CACHE_TTL
-        );
-        return data;
-      },
-      'secondary'
-    );
+    const deferRelatedSkills = Boolean(isDataRequest);
+    const relatedSkillsPromise = deferRelatedSkills
+      ? Promise.resolve<SkillCardData[]>([])
+      : timed(
+        'related',
+        async () => {
+          const { data } = await getCached(
+            `related:${skill.id}`,
+            () => getRelatedSkills(
+              env,
+              skill.id,
+              skill.categories || [],
+              skill.repoOwner || '',
+              10,
+              (name, dur, desc) => {
+                serverTimings.push({ name, dur, desc });
+              }
+            ),
+            RELATED_SKILLS_CACHE_TTL
+          );
+          return data;
+        },
+        'secondary'
+      );
+
+    if (deferRelatedSkills) {
+      serverTimings.push({ name: 'related', dur: 0, desc: 'deferred' });
+    }
 
     const renderedReadmePromise = timed(
       'readme_html',
@@ -432,6 +454,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       skill: skillForClient,
       renderedReadme,
       relatedSkills,
+      deferRelatedSkills,
       isBookmarked,
       isAuthenticated: !!userId,
       isDotFolderSkill,

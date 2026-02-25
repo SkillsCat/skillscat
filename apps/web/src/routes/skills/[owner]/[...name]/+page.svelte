@@ -18,6 +18,7 @@
     data: {
       skill: SkillDetail | null;
       relatedSkills: SkillCardData[];
+      deferRelatedSkills?: boolean;
       error?: string;
       isOwner?: boolean;
       isBookmarked?: boolean;
@@ -127,11 +128,65 @@
   let highlighter = $state<Highlighter | null>(null);
   let highlightedReadme = $state('');
   let isLoadingShiki = $state(false);
+  let deferredRelatedSkills = $state<SkillCardData[] | null>(null);
+  let isLoadingDeferredRelatedSkills = $state(false);
+  let deferredRelatedSkillsError = $state<string | null>(null);
 
   // Reset highlighted HTML whenever server-rendered markdown changes.
   $effect(() => {
     data.renderedReadme;
     highlightedReadme = '';
+  });
+
+  // For client-side navigations, related skills are fetched lazily to keep __data.json fast.
+  $effect(() => {
+    const skill = data.skill;
+    const shouldDefer = Boolean(data.deferRelatedSkills && skill);
+
+    deferredRelatedSkills = null;
+    deferredRelatedSkillsError = null;
+    isLoadingDeferredRelatedSkills = false;
+
+    if (!shouldDefer || !skill) return;
+
+    const controller = new AbortController();
+    isLoadingDeferredRelatedSkills = true;
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/skills/${encodeSkillSlugForPath(skill.slug)}/related`, {
+          signal: controller.signal,
+          headers: { accept: 'application/json' }
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const payload = await response.json() as {
+          success?: boolean;
+          error?: string;
+          data?: { relatedSkills?: SkillCardData[] };
+        };
+
+        if (!payload.success) {
+          throw new Error(payload.error || 'Failed to load related skills');
+        }
+
+        deferredRelatedSkills = payload.data?.relatedSkills || [];
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        console.error('Deferred related skills load failed:', err);
+        deferredRelatedSkillsError = 'Failed to load related skills';
+        deferredRelatedSkills = [];
+      } finally {
+        if (!controller.signal.aborted) {
+          isLoadingDeferredRelatedSkills = false;
+        }
+      }
+    })();
+
+    return () => controller.abort();
   });
 
   // Lazy-load shiki during idle time so it doesn't compete with first paint.
@@ -957,6 +1012,13 @@
     toIsoTimestamp(data.skill?.lastCommitAt ?? data.skill?.updatedAt)
   );
   const skillSeoKeywords = $derived(data.seo?.keywords ?? ['ai agent skill', 'skillscat']);
+  const displayRelatedSkills = $derived(deferredRelatedSkills ?? data.relatedSkills ?? []);
+  const showRelatedSkillsLoading = $derived(
+    Boolean(data.deferRelatedSkills && data.skill && isLoadingDeferredRelatedSkills && displayRelatedSkills.length === 0)
+  );
+  const showRelatedSkillsCard = $derived(
+    displayRelatedSkills.length > 0 || showRelatedSkillsLoading || Boolean(deferredRelatedSkillsError)
+  );
   const skillStructuredData = $derived(
     data.skill && data.skill.visibility === 'public'
       ? [
@@ -1498,14 +1560,24 @@
         {/if}
 
         <!-- Related Skills -->
-        {#if data.relatedSkills.length > 0}
+        {#if showRelatedSkillsCard}
           <div class="card">
             <h3 class="font-semibold text-fg mb-4">Related Skills</h3>
-            <div class="space-y-3">
-              {#each data.relatedSkills as relatedSkill (relatedSkill.id)}
-                <SkillCardCompact skill={relatedSkill} />
-              {/each}
-            </div>
+            {#if displayRelatedSkills.length > 0}
+              <div class="space-y-3">
+                {#each displayRelatedSkills as relatedSkill (relatedSkill.id)}
+                  <SkillCardCompact skill={relatedSkill} />
+                {/each}
+              </div>
+            {:else if showRelatedSkillsLoading}
+              <div class="space-y-3" aria-busy="true" aria-live="polite">
+                <div class="h-20 rounded-lg border border-border bg-bg-muted/40 animate-pulse"></div>
+                <div class="h-20 rounded-lg border border-border bg-bg-muted/40 animate-pulse"></div>
+                <div class="h-20 rounded-lg border border-border bg-bg-muted/40 animate-pulse"></div>
+              </div>
+            {:else}
+              <p class="text-sm text-fg-muted">Related skills are temporarily unavailable.</p>
+            {/if}
           </div>
         {/if}
       </div>

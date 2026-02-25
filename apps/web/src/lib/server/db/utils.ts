@@ -111,6 +111,32 @@ interface RelatedSkillCandidateRow extends SkillListRow {
   sharedTagCount?: number;
 }
 
+type TimingCollector = (name: string, dur: number, desc?: string) => void;
+
+function collectTiming(
+  collector: TimingCollector | undefined,
+  name: string,
+  start: number,
+  desc?: string
+): void {
+  if (!collector) return;
+  collector(name, Math.max(0, performance.now() - start), desc);
+}
+
+async function timedTask<T>(
+  collector: TimingCollector | undefined,
+  name: string,
+  task: () => Promise<T>,
+  desc?: string
+): Promise<T> {
+  const start = performance.now();
+  try {
+    return await task();
+  } finally {
+    collectTiming(collector, name, start, desc);
+  }
+}
+
 function parseFileTree(fileStructureRaw: string | null): FileNode[] {
   if (!fileStructureRaw) return [];
 
@@ -686,32 +712,38 @@ export async function searchSkills(
 export async function getSkillBySlug(
   env: DbEnv,
   slug: string,
-  userId?: string | null
+  userId?: string | null,
+  timingCollector?: TimingCollector
 ): Promise<SkillDetail | null> {
   if (!env.DB) return null;
 
-  const result = await env.DB.prepare(`
-    SELECT
-      s.*,
-      a.username as authorUsername,
-      a.display_name as authorDisplayName,
-      a.avatar_url as authorAvatar,
-      a.bio as authorBio,
-      a.skills_count as authorSkillsCount,
-      a.total_stars as authorTotalStars,
-      u.name as ownerName,
-      u.image as ownerAvatar,
-      o.name as orgName,
-      o.slug as orgSlug,
-      o.avatar_url as orgAvatar
-    FROM skills s
-    LEFT JOIN authors a ON s.repo_owner = a.username
-    LEFT JOIN user u ON s.owner_id = u.id
-    LEFT JOIN organizations o ON s.org_id = o.id
-    WHERE s.slug = ?
-  `)
-    .bind(slug)
-    .first<SkillDetailRow>();
+  const result = await timedTask(
+    timingCollector,
+    'sd_row',
+    () => env.DB!.prepare(`
+      SELECT
+        s.*,
+        a.username as authorUsername,
+        a.display_name as authorDisplayName,
+        a.avatar_url as authorAvatar,
+        a.bio as authorBio,
+        a.skills_count as authorSkillsCount,
+        a.total_stars as authorTotalStars,
+        u.name as ownerName,
+        u.image as ownerAvatar,
+        o.name as orgName,
+        o.slug as orgSlug,
+        o.avatar_url as orgAvatar
+      FROM skills s
+      LEFT JOIN authors a ON s.repo_owner = a.username
+      LEFT JOIN user u ON s.owner_id = u.id
+      LEFT JOIN organizations o ON s.org_id = o.id
+      WHERE s.slug = ?
+    `)
+      .bind(slug)
+      .first<SkillDetailRow>(),
+    'skill row'
+  );
 
   if (!result) return null;
 
@@ -729,24 +761,34 @@ export async function getSkillBySlug(
     // 检查是否是组织成员
     let isOrgMember = false;
     if (skillData.org_id) {
-      const membership = await env.DB.prepare(`
-        SELECT 1 FROM org_members WHERE org_id = ? AND user_id = ?
-      `)
-        .bind(skillData.org_id, userId)
-        .first();
+      const membership = await timedTask(
+        timingCollector,
+        'sd_perm_org',
+        () => env.DB!.prepare(`
+          SELECT 1 FROM org_members WHERE org_id = ? AND user_id = ?
+        `)
+          .bind(skillData.org_id, userId)
+          .first(),
+        'private org membership'
+      );
       isOrgMember = !!membership;
     }
 
     // 检查是否有显式权限
     let hasPermission = false;
     if (!isOwner && !isOrgMember) {
-      const permission = await env.DB.prepare(`
-        SELECT 1 FROM skill_permissions
-        WHERE skill_id = ? AND grantee_type = 'user' AND grantee_id = ?
-          AND (expires_at IS NULL OR expires_at > ?)
-      `)
-        .bind(skillData.id, userId, Date.now())
-        .first();
+      const permission = await timedTask(
+        timingCollector,
+        'sd_perm_user',
+        () => env.DB!.prepare(`
+          SELECT 1 FROM skill_permissions
+          WHERE skill_id = ? AND grantee_type = 'user' AND grantee_id = ?
+            AND (expires_at IS NULL OR expires_at > ?)
+        `)
+          .bind(skillData.id, userId, Date.now())
+          .first(),
+        'private explicit permission'
+      );
       hasPermission = !!permission;
     }
 
@@ -755,16 +797,22 @@ export async function getSkillBySlug(
     }
   }
 
-  const categoriesPromise = env.DB.prepare(`
-    SELECT category_slug FROM skill_categories WHERE skill_id = ?
-  `)
-    .bind(skillData.id)
-    .all<CategoryRow>();
+  const categoriesPromise = timedTask(
+    timingCollector,
+    'sd_cats',
+    () => env.DB!.prepare(`
+      SELECT category_slug FROM skill_categories WHERE skill_id = ?
+    `)
+      .bind(skillData.id)
+      .all<CategoryRow>(),
+    'skill categories'
+  );
 
   const readmePromise = (async (): Promise<string | null> => {
     let readme = skillData.readme;
     if (!env.R2 || readme) return readme;
 
+    const r2Start = performance.now();
     try {
       if (skillData.source_type === 'upload') {
         const slugParts = parseSkillSlug(skillData.slug);
@@ -804,6 +852,8 @@ export async function getSkillBySlug(
       }
     } catch (error) {
       console.error('Error reading SKILL.md from R2:', error);
+    } finally {
+      collectTiming(timingCollector, 'sd_readme_r2', r2Start, 'readme R2');
     }
 
     return readme;
@@ -812,7 +862,9 @@ export async function getSkillBySlug(
   const [categories, readme] = await Promise.all([categoriesPromise, readmePromise]);
 
   // 解析文件结构 (直接使用预构建的 fileTree)
+  const fileTreeParseStart = performance.now();
   const fileStructure = parseFileTree(skillData.file_structure);
+  collectTiming(timingCollector, 'sd_filetree', fileTreeParseStart, 'file tree parse');
 
   return {
     id: skillData.id,
@@ -865,17 +917,24 @@ export async function getRelatedSkills(
   skillId: string,
   categories: string[],
   repoOwner: string = '',
-  limit: number = 10
+  limit: number = 10,
+  timingCollector?: TimingCollector
 ): Promise<SkillCardData[]> {
-  if (!env.DB) return [];
+  const db = env.DB;
+  if (!db) return [];
 
   const MIN_CANDIDATES = limit * 2;
   const hasCategories = categories.length > 0;
 
   // Step 1: Get current skill's tags
-  const tagsResult = await env.DB.prepare(
-    'SELECT tag FROM skill_tags WHERE skill_id = ?'
-  ).bind(skillId).all<TagRow>();
+  const tagsResult = await timedTask(
+    timingCollector,
+    'rel_tags',
+    () => db.prepare(
+      'SELECT tag FROM skill_tags WHERE skill_id = ?'
+    ).bind(skillId).all<TagRow>(),
+    'current skill tags'
+  );
   const skillTags = tagsResult.results.map((row) => row.tag);
   const hasTags = skillTags.length > 0;
 
@@ -906,7 +965,10 @@ export async function getRelatedSkills(
   if (hasCategories) {
     const catPh = categories.map(() => '?').join(',');
     const exPh = excludePlaceholders();
-    const result = await env.DB.prepare(`
+    const result = await timedTask(
+      timingCollector,
+      'rel_t1',
+      () => db.prepare(`
       SELECT ${SKILL_COLUMNS},
         COUNT(sc.category_slug) as sharedCategoryCount
       FROM skills s
@@ -918,7 +980,9 @@ export async function getRelatedSkills(
       GROUP BY s.id
       ORDER BY sharedCategoryCount DESC, s.trending_score DESC
       LIMIT 30
-    `).bind(...categories, ...excludeIds).all<RelatedSkillCandidateRow>();
+    `).bind(...categories, ...excludeIds).all<RelatedSkillCandidateRow>(),
+      'tier1 category overlap'
+    );
     addCandidates(result.results, 1);
   }
 
@@ -926,7 +990,10 @@ export async function getRelatedSkills(
   if (hasTags && candidateMap.size < MIN_CANDIDATES) {
     const tagPh = skillTags.map(() => '?').join(',');
     const exPh = excludePlaceholders();
-    const result = await env.DB.prepare(`
+    const result = await timedTask(
+      timingCollector,
+      'rel_t2',
+      () => db.prepare(`
       SELECT ${SKILL_COLUMNS},
         COUNT(st.tag) as sharedTagCount
       FROM skills s
@@ -938,14 +1005,19 @@ export async function getRelatedSkills(
       GROUP BY s.id
       ORDER BY sharedTagCount DESC, s.trending_score DESC
       LIMIT 20
-    `).bind(...skillTags, ...excludeIds).all<RelatedSkillCandidateRow>();
+    `).bind(...skillTags, ...excludeIds).all<RelatedSkillCandidateRow>(),
+      'tier2 tag overlap'
+    );
     addCandidates(result.results, 2);
   }
 
   // Tier 3: Same author
   if (repoOwner && candidateMap.size < MIN_CANDIDATES) {
     const exPh = excludePlaceholders();
-    const result = await env.DB.prepare(`
+    const result = await timedTask(
+      timingCollector,
+      'rel_t3',
+      () => db.prepare(`
       SELECT ${SKILL_COLUMNS}
       FROM skills s
       LEFT JOIN authors a ON s.repo_owner = a.username
@@ -954,14 +1026,19 @@ export async function getRelatedSkills(
         AND s.visibility = 'public'
       ORDER BY s.trending_score DESC
       LIMIT 10
-    `).bind(repoOwner, ...excludeIds).all<RelatedSkillCandidateRow>();
+    `).bind(repoOwner, ...excludeIds).all<RelatedSkillCandidateRow>(),
+      'tier3 same author'
+    );
     addCandidates(result.results, 3);
   }
 
   // Tier 4: Trending fallback
   if (candidateMap.size < MIN_CANDIDATES) {
     const exPh = excludePlaceholders();
-    const result = await env.DB.prepare(`
+    const result = await timedTask(
+      timingCollector,
+      'rel_t4',
+      () => db.prepare(`
       SELECT ${SKILL_COLUMNS}
       FROM skills s
       LEFT JOIN authors a ON s.repo_owner = a.username
@@ -969,7 +1046,9 @@ export async function getRelatedSkills(
         AND s.visibility = 'public'
       ORDER BY s.trending_score DESC
       LIMIT 15
-    `).bind(...excludeIds).all<RelatedSkillCandidateRow>();
+    `).bind(...excludeIds).all<RelatedSkillCandidateRow>(),
+      'tier4 trending fallback'
+    );
     addCandidates(result.results, 4);
   }
 
@@ -985,12 +1064,17 @@ export async function getRelatedSkills(
   if (hasTags) {
     const idPh = allIds.map(() => '?').join(',');
     const tagPh = skillTags.map(() => '?').join(',');
-    const tagResult = await env.DB.prepare(`
+    const tagResult = await timedTask(
+      timingCollector,
+      'rel_tag_ov',
+      () => db.prepare(`
       SELECT skill_id, COUNT(*) as cnt
       FROM skill_tags
       WHERE skill_id IN (${idPh}) AND tag IN (${tagPh})
       GROUP BY skill_id
-    `).bind(...allIds, ...skillTags).all<OverlapCountRow>();
+    `).bind(...allIds, ...skillTags).all<OverlapCountRow>(),
+      'tag overlap batch'
+    );
     for (const row of tagResult.results) {
       tagOverlapMap[row.skill_id] = row.cnt;
     }
@@ -1003,12 +1087,17 @@ export async function getRelatedSkills(
   if (hasCategories && nonTier1Ids.length > 0) {
     const idPh = nonTier1Ids.map(() => '?').join(',');
     const catPh = categories.map(() => '?').join(',');
-    const catResult = await env.DB.prepare(`
+    const catResult = await timedTask(
+      timingCollector,
+      'rel_cat_ov',
+      () => db.prepare(`
       SELECT skill_id, COUNT(*) as cnt
       FROM skill_categories
       WHERE skill_id IN (${idPh}) AND category_slug IN (${catPh})
       GROUP BY skill_id
-    `).bind(...nonTier1Ids, ...categories).all<OverlapCountRow>();
+    `).bind(...nonTier1Ids, ...categories).all<OverlapCountRow>(),
+      'category overlap batch'
+    );
     for (const row of catResult.results) {
       catOverlapMap[row.skill_id] = row.cnt;
     }
@@ -1028,6 +1117,7 @@ export async function getRelatedSkills(
   const totalTags = Math.max(skillTags.length, 1);
   const tierDiscovery: Record<number, number> = { 1: 100, 2: 67, 3: 33, 4: 0 };
 
+  const scoreStart = performance.now();
   const scored = allCandidates.map(({ data: c, tier }) => {
     // Category score: Tier 1 has sharedCategoryCount from query, others from batch
     const sharedCats = tier === 1
@@ -1061,7 +1151,10 @@ export async function getRelatedSkills(
     return { ...c, relevanceScore, trendingScore: trending, stars };
   });
 
+  collectTiming(timingCollector, 'rel_score', scoreStart, 'score candidates');
+
   // Step 5: Sort, slice, enrich with categories
+  const sortSliceStart = performance.now();
   scored.sort((a, b) =>
     b.relevanceScore - a.relevanceScore
     || b.trendingScore - a.trendingScore
@@ -1071,8 +1164,14 @@ export async function getRelatedSkills(
   const top = scored.slice(0, limit).map(({
     relevanceScore, sharedCategoryCount, sharedTagCount, lastCommitAt, ...rest
   }) => rest);
+  collectTiming(timingCollector, 'rel_sort', sortSliceStart, 'sort and slice');
 
-  return addCategoriesToSkills(env.DB, top);
+  return timedTask(
+    timingCollector,
+    'rel_add_cats',
+    () => addCategoriesToSkills(db, top),
+    'hydrate categories'
+  );
 }
 
 /**

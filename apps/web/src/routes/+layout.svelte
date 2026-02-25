@@ -4,11 +4,91 @@
   import Footer from '$lib/components/layout/Footer.svelte';
   import Toast from '$lib/components/ui/Toast.svelte';
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
+  import { useSession } from '$lib/auth-client';
 
   let { children, data } = $props();
 
   let scrollY = $state(0);
   let isScrolled = $derived(scrollY > 20);
+  let unreadCount = $state(0);
+  let unreadCountLastFetchedAt = $state(0);
+  let unreadCountFetchUserId = $state<string | null>(null);
+  let isLoadingUnreadCount = $state(false);
+  const session = useSession();
+  const UNREAD_COUNT_REFRESH_INTERVAL_MS = 15_000;
+
+  async function loadUnreadCount(options?: { force?: boolean; signal?: AbortSignal }): Promise<void> {
+    const force = options?.force ?? false;
+    const userId = $session.data?.user?.id ?? null;
+    if (!userId) {
+      unreadCount = 0;
+      unreadCountFetchUserId = null;
+      unreadCountLastFetchedAt = 0;
+      return;
+    }
+
+    const now = Date.now();
+    const sameUser = unreadCountFetchUserId === userId;
+    if (!force && sameUser && now - unreadCountLastFetchedAt < UNREAD_COUNT_REFRESH_INTERVAL_MS) {
+      return;
+    }
+    if (isLoadingUnreadCount) return;
+
+    isLoadingUnreadCount = true;
+    try {
+      const response = await fetch('/api/notifications/unread-count', {
+        signal: options?.signal,
+        headers: { accept: 'application/json' }
+      });
+
+      if (response.status === 401) {
+        unreadCount = 0;
+        unreadCountFetchUserId = null;
+        unreadCountLastFetchedAt = Date.now();
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const payload = await response.json() as { success?: boolean; count?: number };
+      if (!payload.success) {
+        throw new Error('Failed to fetch unread count');
+      }
+
+      unreadCount = typeof payload.count === 'number' ? payload.count : 0;
+      unreadCountFetchUserId = userId;
+      unreadCountLastFetchedAt = Date.now();
+    } catch (err) {
+      if (options?.signal?.aborted) return;
+      console.error('Failed to load unread notification count:', err);
+    } finally {
+      if (!options?.signal?.aborted) {
+        isLoadingUnreadCount = false;
+      }
+    }
+  }
+
+  // Refresh unread count asynchronously after navigation/session changes without blocking SSR/data.json.
+  $effect(() => {
+    $page.url.pathname;
+    const userId = $session.data?.user?.id ?? null;
+    const pending = $session.isPending;
+
+    if (pending) return;
+    if (!userId) {
+      unreadCount = 0;
+      unreadCountFetchUserId = null;
+      unreadCountLastFetchedAt = 0;
+      return;
+    }
+
+    const controller = new AbortController();
+    void loadUnreadCount({ signal: controller.signal });
+    return () => controller.abort();
+  });
 
   onMount(() => {
     let rafId = 0;
@@ -80,7 +160,7 @@
       </div>
 
       <div class="main-content">
-        <Navbar unreadCount={data.unreadCount} />
+        <Navbar {unreadCount} />
 
         <main class="flex-1">
           {@render children()}
