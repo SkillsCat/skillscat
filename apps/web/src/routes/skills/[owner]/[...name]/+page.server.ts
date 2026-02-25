@@ -387,7 +387,8 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
               10,
               (name, dur, desc) => {
                 serverTimings.push({ name, dur, desc });
-              }
+              },
+              false
             ),
             RELATED_SKILLS_CACHE_TTL
           );
@@ -401,7 +402,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       platform?.context?.waitUntil?.(
         getCached(
           `related:${skill.id}`,
-          () => getRelatedSkills(env, skill.id, skill.categories || [], skill.repoOwner || '', 10),
+          () => getRelatedSkills(env, skill.id, skill.categories || [], skill.repoOwner || '', 10, undefined, false),
           RELATED_SKILLS_CACHE_TTL
         ).catch((err) => {
           console.error('Failed to prewarm related skills cache:', err);

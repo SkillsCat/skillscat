@@ -30,7 +30,6 @@
   let showTimeBadge = $state(true);
   let resizeObserver: ResizeObserver | null = null;
   let measureFrame = 0;
-  const TIME_MEASURE_LABEL_UNITS_THRESHOLD = 10;
   let primaryCategoryLabel = $derived(getPrimaryCategoryLabel());
   let relativeTimeLabel = $derived(formatRelativeTime(skill.updatedAt));
 
@@ -58,25 +57,8 @@
     return getCategoryBySlug(category)?.name || category;
   }
 
-  // Cheap width heuristic to avoid measuring every card:
-  // ASCII chars count as 1, spaces as 0.5, non-ASCII as 2.
-  function estimateTextWidthUnits(text: string): number {
-    let units = 0;
-    for (const ch of text.trim()) {
-      if (/\s/.test(ch)) {
-        units += 0.5;
-      } else if (ch.charCodeAt(0) > 127) {
-        units += 2;
-      } else {
-        units += 1;
-      }
-    }
-    return units;
-  }
-
-  function shouldMeasureTimeForCategory(label: string | null): boolean {
-    if (!label) return false;
-    return estimateTextWidthUnits(label) >= TIME_MEASURE_LABEL_UNITS_THRESHOLD;
+  function shouldMeasureTimeBadge(): boolean {
+    return true;
   }
 
   function parsePx(value: string): number {
@@ -84,14 +66,10 @@
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  function getHorizontalChromeWidth(el: HTMLElement): number {
+  function getIntrinsicOuterWidth(el: HTMLElement): number {
     const styles = getComputedStyle(el);
-    return (
-      parsePx(styles.paddingLeft) +
-      parsePx(styles.paddingRight) +
-      parsePx(styles.borderLeftWidth) +
-      parsePx(styles.borderRightWidth)
-    );
+    // scrollWidth includes content + padding, but excludes borders.
+    return el.scrollWidth + parsePx(styles.borderLeftWidth) + parsePx(styles.borderRightWidth);
   }
 
   function updateTimeBadgeVisibility() {
@@ -106,12 +84,12 @@
     const gap = parsePx(rowStyles.columnGap || rowStyles.gap);
     const hasCategory = !!categoryBadgeEl;
     const gapCount = hasCategory ? 2 : 1;
-    const categoryMinWidth = categoryBadgeEl ? getHorizontalChromeWidth(categoryBadgeEl) : 0;
+    const categoryRequiredWidth = categoryBadgeEl ? getIntrinsicOuterWidth(categoryBadgeEl) : 0;
 
     const requiredWidth =
       starsBadgeEl.offsetWidth +
       timeMeasureEl.offsetWidth +
-      categoryMinWidth +
+      categoryRequiredWidth +
       gap * gapCount;
 
     showTimeBadge = requiredWidth <= metaRowEl.clientWidth + 1;
@@ -163,7 +141,7 @@
     skill.stars;
     skill.updatedAt;
 
-    shouldMeasureTimeWidth = shouldMeasureTimeForCategory(primaryCategoryLabel);
+    shouldMeasureTimeWidth = shouldMeasureTimeBadge();
 
     if (shouldMeasureTimeWidth && !resizeObserver && typeof ResizeObserver !== 'undefined') {
       resizeObserver = new ResizeObserver(() => {
@@ -385,8 +363,8 @@
   }
 
   .meta-badge-category {
-    flex: 0 1 auto;
-    min-width: 0;
+    flex: 0 0 auto;
+    min-width: max-content;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

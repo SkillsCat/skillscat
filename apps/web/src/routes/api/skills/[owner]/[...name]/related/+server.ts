@@ -15,10 +15,7 @@ interface SkillContextRow {
   id: string;
   repoOwner: string | null;
   visibility: 'public' | 'private' | 'unlisted' | null;
-}
-
-interface CategoryRow {
-  category_slug: string;
+  categoriesJson: string | null;
 }
 
 function hasStatus(errorValue: unknown): errorValue is { status: number } {
@@ -73,14 +70,22 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     const skill = await timed(
       'ctx_skill',
       () => db.prepare(`
-      SELECT id, repo_owner as repoOwner, visibility
-      FROM skills
-      WHERE slug = ?
+      SELECT
+        s.id,
+        s.repo_owner as repoOwner,
+        s.visibility,
+        (
+          SELECT json_group_array(sc.category_slug)
+          FROM skill_categories sc
+          WHERE sc.skill_id = s.id
+        ) as categoriesJson
+      FROM skills s
+      WHERE s.slug = ?
       LIMIT 1
     `)
       .bind(slug)
       .first<SkillContextRow>(),
-      'skill context'
+      'skill context + categories'
     );
 
     if (!skill) {
@@ -108,19 +113,17 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
       }
     }
 
-    const categoriesResult = await timed(
-      'ctx_cats',
-      () => db.prepare(`
-      SELECT category_slug
-      FROM skill_categories
-      WHERE skill_id = ?
-    `)
-      .bind(skill.id)
-      .all<CategoryRow>(),
-      'skill categories'
-    );
-
-    const categories = (categoriesResult.results || []).map((row) => row.category_slug);
+    let categories: string[] = [];
+    if (skill.categoriesJson) {
+      try {
+        const parsed = JSON.parse(skill.categoriesJson) as unknown;
+        if (Array.isArray(parsed)) {
+          categories = parsed.filter((value): value is string => typeof value === 'string');
+        }
+      } catch {
+        categories = [];
+      }
+    }
 
     const { data: relatedSkills, hit } = await timed(
       'related_cached',
@@ -134,7 +137,8 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
         RELATED_CACHE_LIMIT,
         (name, dur, desc) => {
           serverTimings.push({ name, dur, desc });
-        }
+        },
+        false
       ),
       RELATED_CACHE_TTL
     ),

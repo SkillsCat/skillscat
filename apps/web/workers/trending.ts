@@ -22,6 +22,7 @@ import type {
 } from './shared/types';
 import { TIER_CONFIG } from './shared/types';
 import { githubFetch } from './shared/utils';
+import { getNonlinearStarScore, buildTopRatedSortScoreSql } from '../src/lib/server/ranking';
 
 const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql';
 const BATCH_SIZE = 50; // GitHub GraphQL limit
@@ -51,13 +52,20 @@ export function calculateTrendingScore(skill: {
 }): number {
   const now = Date.now();
 
-  const baseScore = Math.log10(skill.stars + 1) * 10;
-
   const stars7dAgo = getStarsAtDaysAgo(skill.starSnapshots, 7, skill.stars);
   const stars30dAgo = getStarsAtDaysAgo(skill.starSnapshots, 30, skill.stars);
 
-  const dailyGrowth7d = Math.max(0, (skill.stars - stars7dAgo) / 7);
-  const dailyGrowth30d = Math.max(0, (skill.stars - stars30dAgo) / 30);
+  // Compress marginal star advantage for very large repos. This reduces the
+  // chance that many sub-skills from a single fast-growing monorepo dominate
+  // trending purely because they inherit the same repo star trajectory.
+  const weightedStars = getNonlinearStarScore(skill.stars);
+  const weightedStars7dAgo = getNonlinearStarScore(stars7dAgo);
+  const weightedStars30dAgo = getNonlinearStarScore(stars30dAgo);
+
+  const baseScore = Math.log10(weightedStars + 1) * 10;
+
+  const dailyGrowth7d = Math.max(0, (weightedStars - weightedStars7dAgo) / 7);
+  const dailyGrowth30d = Math.max(0, (weightedStars - weightedStars30dAgo) / 30);
 
   const acceleration =
     dailyGrowth30d > 0.1
@@ -534,6 +542,7 @@ async function detectReclassificationNeeded(
 
 /**
  * Flush download/install counts from user_actions to skills rolling counters.
+ * Also records 90-day download/install rolling count for top-rated ranking stability.
  *
  * This avoids per-request KV read/write amplification by writing events directly
  * to D1 (`user_actions`) and running one daily aggregation job.
@@ -548,7 +557,8 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
     const now = Date.now();
     const sevenDaysAgo = now - 7 * 86400000;
     const thirtyDaysAgo = now - 30 * 86400000;
-    const cleanupBefore = now - 35 * 86400000;
+    const ninetyDaysAgo = now - 90 * 86400000;
+    const cleanupBefore = now - 95 * 86400000;
 
     // Keep event table bounded so daily aggregation stays cheap.
     await env.DB.prepare(`
@@ -563,21 +573,22 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
       SELECT
         skill_id as skillId,
         SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as sum7d,
-        COUNT(*) as sum30d
+        SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as sum30d,
+        COUNT(*) as sum90d
       FROM user_actions
       WHERE action_type IN ('download', 'install')
         AND skill_id IS NOT NULL
         AND created_at >= ?
       GROUP BY skill_id
     `)
-      .bind(sevenDaysAgo, thirtyDaysAgo)
-      .all<{ skillId: string; sum7d: number; sum30d: number }>();
+      .bind(sevenDaysAgo, thirtyDaysAgo, ninetyDaysAgo)
+      .all<{ skillId: string; sum7d: number; sum30d: number; sum90d: number }>();
 
     if ((aggregated.results || []).length === 0) {
       await env.DB.prepare(`
         UPDATE skills
-        SET download_count_7d = 0, download_count_30d = 0
-        WHERE download_count_7d != 0 OR download_count_30d != 0
+        SET download_count_7d = 0, download_count_30d = 0, download_count_90d = 0
+        WHERE download_count_7d != 0 OR download_count_30d != 0 OR download_count_90d != 0
       `).run();
       await env.KV.put('dl:last_flush_actions', today, { expirationTtl: 86400 });
       return 0;
@@ -590,18 +601,23 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
       const stmts = chunk.map((entry) =>
         env.DB.prepare(`
           UPDATE skills
-          SET download_count_7d = ?, download_count_30d = ?
+          SET download_count_7d = ?, download_count_30d = ?, download_count_90d = ?
           WHERE id = ?
-        `).bind(Number(entry.sum7d || 0), Number(entry.sum30d || 0), entry.skillId)
+        `).bind(
+          Number(entry.sum7d || 0),
+          Number(entry.sum30d || 0),
+          Number(entry.sum90d || 0),
+          entry.skillId
+        )
       );
       await env.DB.batch(stmts);
     }
 
-    // Clear stale counters for skills with no download/install events in 30 days.
+    // Clear stale counters for skills with no download/install events in 90 days.
     await env.DB.prepare(`
       UPDATE skills
-      SET download_count_7d = 0, download_count_30d = 0
-      WHERE (download_count_7d != 0 OR download_count_30d != 0)
+      SET download_count_7d = 0, download_count_30d = 0, download_count_90d = 0
+      WHERE (download_count_7d != 0 OR download_count_30d != 0 OR download_count_90d != 0)
         AND id NOT IN (
           SELECT DISTINCT skill_id
           FROM user_actions
@@ -610,7 +626,7 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
             AND created_at >= ?
         )
     `)
-      .bind(thirtyDaysAgo)
+      .bind(ninetyDaysAgo)
       .run();
 
     await env.KV.put('dl:last_flush_actions', today, { expirationTtl: 86400 });
@@ -623,6 +639,7 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
 
 async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   const now = Date.now();
+  const topRatedSortScoreSql = buildTopRatedSortScoreSql('s.stars', 's.download_count_90d');
 
   const trending = await env.DB.prepare(`
     SELECT s.id, s.name, s.slug, s.description,
@@ -665,7 +682,9 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
           AND s.skill_path NOT LIKE '%/.%'
         )
       )
-    ORDER BY s.stars DESC
+    ORDER BY ${topRatedSortScoreSql} DESC, s.download_count_90d DESC, s.download_count_30d DESC,
+             s.stars DESC, s.trending_score DESC,
+             COALESCE(s.last_commit_at, s.updated_at) DESC
     LIMIT 100
   `).all<SkillListItem>();
 

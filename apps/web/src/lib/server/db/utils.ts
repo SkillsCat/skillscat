@@ -4,6 +4,7 @@
 
 import type { FileNode, SkillCardData, SkillDetail } from '$lib/types';
 import { buildUploadSkillR2Key, parseSkillSlug } from '$lib/skill-path';
+import { buildTopRatedSortScoreSql } from '$lib/server/ranking';
 
 export interface DbEnv {
   DB?: D1Database;
@@ -543,12 +544,13 @@ export async function getRecentSkillsPaginated(
 }
 
 /**
- * 获取 top skills (by stars)
+ * 获取 top skills (stars-dominant weighted ranking)
  */
 export async function getTopSkills(
   env: DbEnv,
   limit: number = 12
 ): Promise<SkillCardData[]> {
+  const topRatedSortScoreSql = buildTopRatedSortScoreSql('s.stars', 's.download_count_90d');
   // 先尝试从 R2 缓存读取
   const cached = await getCachedList(env.R2, 'top', env.CACHE_VERSION, {
     maxAgeMs: LIST_CACHE_MAX_AGE_MS,
@@ -586,7 +588,9 @@ export async function getTopSkills(
           AND s.skill_path NOT LIKE '%/.%'
         )
       )
-    ORDER BY s.stars DESC
+    ORDER BY ${topRatedSortScoreSql} DESC, s.download_count_90d DESC, s.download_count_30d DESC,
+             s.stars DESC, s.trending_score DESC,
+             COALESCE(s.last_commit_at, s.updated_at) DESC
     LIMIT ?
   `)
     .bind(limit)
@@ -606,6 +610,7 @@ export async function getTopSkillsPaginated(
   if (!env.DB) return { skills: [], total: 0 };
 
   const offset = (page - 1) * limit;
+  const topRatedSortScoreSql = buildTopRatedSortScoreSql('s.stars', 's.download_count_90d');
 
   const result = await env.DB.prepare(`
     SELECT
@@ -631,7 +636,9 @@ export async function getTopSkillsPaginated(
           AND s.skill_path NOT LIKE '%/.%'
         )
       )
-    ORDER BY s.stars DESC
+    ORDER BY ${topRatedSortScoreSql} DESC, s.download_count_90d DESC, s.download_count_30d DESC,
+             s.stars DESC, s.trending_score DESC,
+             COALESCE(s.last_commit_at, s.updated_at) DESC
     LIMIT ? OFFSET ?
   `)
     .bind(limit, offset)
@@ -951,7 +958,8 @@ export async function getRelatedSkills(
   categories: string[],
   repoOwner: string = '',
   limit: number = 10,
-  timingCollector?: TimingCollector
+  timingCollector?: TimingCollector,
+  includeCategories: boolean = true
 ): Promise<SkillCardData[]> {
   const db = env.DB;
   if (!db) return [];
@@ -1094,47 +1102,54 @@ export async function getRelatedSkills(
   const tagOverlapMap: Record<string, number> = {};
   const catOverlapMap: Record<string, number> = {};
 
-  if (hasTags) {
-    const idPh = allIds.map(() => '?').join(',');
-    const tagPh = skillTags.map(() => '?').join(',');
-    const tagResult = await timedTask(
-      timingCollector,
-      'rel_tag_ov',
-      () => db.prepare(`
+  // Category overlap for non-Tier-1 candidates
+  const nonTier1Ids = allCandidates
+    .filter((c) => c.tier !== 1)
+    .map((c) => c.data.id);
+
+  const tagOverlapPromise = hasTags
+    ? (async () => {
+      const idPh = allIds.map(() => '?').join(',');
+      const tagPh = skillTags.map(() => '?').join(',');
+      const tagResult = await timedTask(
+        timingCollector,
+        'rel_tag_ov',
+        () => db.prepare(`
       SELECT skill_id, COUNT(*) as cnt
       FROM skill_tags
       WHERE skill_id IN (${idPh}) AND tag IN (${tagPh})
       GROUP BY skill_id
     `).bind(...allIds, ...skillTags).all<OverlapCountRow>(),
-      'tag overlap batch'
-    );
-    for (const row of tagResult.results) {
-      tagOverlapMap[row.skill_id] = row.cnt;
-    }
-  }
+        'tag overlap batch'
+      );
+      for (const row of tagResult.results) {
+        tagOverlapMap[row.skill_id] = row.cnt;
+      }
+    })()
+    : Promise.resolve();
 
-  // Category overlap for non-Tier-1 candidates
-  const nonTier1Ids = allCandidates
-    .filter((c) => c.tier !== 1)
-    .map((c) => c.data.id);
-  if (hasCategories && nonTier1Ids.length > 0) {
-    const idPh = nonTier1Ids.map(() => '?').join(',');
-    const catPh = categories.map(() => '?').join(',');
-    const catResult = await timedTask(
-      timingCollector,
-      'rel_cat_ov',
-      () => db.prepare(`
+  const categoryOverlapPromise = hasCategories && nonTier1Ids.length > 0
+    ? (async () => {
+      const idPh = nonTier1Ids.map(() => '?').join(',');
+      const catPh = categories.map(() => '?').join(',');
+      const catResult = await timedTask(
+        timingCollector,
+        'rel_cat_ov',
+        () => db.prepare(`
       SELECT skill_id, COUNT(*) as cnt
       FROM skill_categories
       WHERE skill_id IN (${idPh}) AND category_slug IN (${catPh})
       GROUP BY skill_id
     `).bind(...nonTier1Ids, ...categories).all<OverlapCountRow>(),
-      'category overlap batch'
-    );
-    for (const row of catResult.results) {
-      catOverlapMap[row.skill_id] = row.cnt;
-    }
-  }
+        'category overlap batch'
+      );
+      for (const row of catResult.results) {
+        catOverlapMap[row.skill_id] = row.cnt;
+      }
+    })()
+    : Promise.resolve();
+
+  await Promise.all([tagOverlapPromise, categoryOverlapPromise]);
 
   // Step 4: Adaptive weight scoring
   const weights = hasCategories && hasTags
@@ -1198,6 +1213,11 @@ export async function getRelatedSkills(
     relevanceScore, sharedCategoryCount, sharedTagCount, lastCommitAt, ...rest
   }) => rest);
   collectTiming(timingCollector, 'rel_sort', sortSliceStart, 'sort and slice');
+
+  if (!includeCategories) {
+    timingCollector?.('rel_add_cats', 0, 'skipped');
+    return top.map((skill) => ({ ...skill, categories: [] }));
+  }
 
   return timedTask(
     timingCollector,

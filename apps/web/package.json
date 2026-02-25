@@ -1,6 +1,6 @@
 {
   "name": "@skillscat/web",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "type": "module",
   "scripts": {
     "build:sw": "node scripts/build-sw.mjs",
@@ -8,6 +8,7 @@
     "build": "pnpm build:sw && vite build",
     "prepare:assetsignore": "node scripts/prepare-assetsignore.mjs",
     "preview": "node scripts/preview.mjs",
+    "preview:prod": "node scripts/preview.mjs --prod-data",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint .",
     "deploy": "pnpm build && pnpm prepare:assetsignore && wrangler deploy -c wrangler.preview.toml --env production",

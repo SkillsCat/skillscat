@@ -16,9 +16,53 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const webDir = resolve(__dirname, '..');
 const pnpmCmd = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+const cliArgs = process.argv.slice(2);
 
 // 检查是否跳过构建
-const skipBuild = process.argv.includes('--skip-build');
+const skipBuild = cliArgs.includes('--skip-build');
+const useProdData = cliArgs.includes('--prod-data');
+
+const passthroughArgs = [];
+let hasExplicitEnv = false;
+let hasExplicitPort = false;
+
+for (let i = 0; i < cliArgs.length; i++) {
+  const arg = cliArgs[i];
+
+  if (arg === '--') {
+    continue;
+  }
+
+  if (arg === '--skip-build' || arg === '--prod-data') {
+    continue;
+  }
+
+  if (arg === '-e' || arg === '--env') {
+    hasExplicitEnv = true;
+    passthroughArgs.push(arg);
+
+    const next = cliArgs[i + 1];
+    if (next) {
+      passthroughArgs.push(next);
+      i += 1;
+    }
+    continue;
+  }
+
+  if (arg.startsWith('--env=')) {
+    hasExplicitEnv = true;
+  }
+
+  if (arg === '--port') {
+    hasExplicitPort = true;
+  }
+
+  if (arg.startsWith('--port=')) {
+    hasExplicitPort = true;
+  }
+
+  passthroughArgs.push(arg);
+}
 
 // 配置文件列表
 const configs = [
@@ -61,16 +105,25 @@ if (!skipBuild) {
   console.log('Skipping build (--skip-build flag)\n');
 }
 
+const defaultPort = useProdData ? '3001' : '3000';
+
 // Step 2: 启动 wrangler dev
 const wranglerArgs = [
   'exec', 'wrangler', 'dev',
   ...configs.flatMap((config) => ['-c', config]),
   '--persist-to', './.wrangler/state',
-  '--port', '3000',
+  ...(hasExplicitPort ? [] : ['--port', defaultPort]),
+  ...(useProdData && !hasExplicitEnv ? ['-e', 'production'] : []),
+  ...passthroughArgs,
 ];
 
 console.log('Starting preview with configuration:');
 configs.forEach((config) => console.log(`  - ${config}`));
+if (useProdData) {
+  console.log('Mode: production environment with remote bindings (remote data)');
+  console.log('Warning: writes may affect production resources');
+}
+console.log(`Default port: ${defaultPort}${hasExplicitPort ? ' (overridden by CLI arg)' : ''}`);
 console.log(`\nWorking directory: ${webDir}`);
 console.log(`Command: ${pnpmCmd} ${wranglerArgs.join(' ')}\n`);
 

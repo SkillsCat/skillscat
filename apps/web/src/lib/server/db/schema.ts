@@ -116,6 +116,7 @@ export const skills = sqliteTable('skills', {
   nextUpdateAt: integer('next_update_at', { mode: 'timestamp_ms' }),
   downloadCount7d: integer('download_count_7d').notNull().default(0),
   downloadCount30d: integer('download_count_30d').notNull().default(0),
+  downloadCount90d: integer('download_count_90d').notNull().default(0),
   classificationMethod: text('classification_method'), // 'ai', 'keyword', 'skipped'
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),

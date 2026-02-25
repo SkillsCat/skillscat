@@ -1,0 +1,1 @@
+ALTER TABLE `skills` ADD `download_count_90d` integer DEFAULT 0 NOT NULL;

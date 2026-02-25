@@ -13,6 +13,7 @@
     "init:production": "node scripts/init.mjs --production",
     "dev:web": "pnpm --filter @skillscat/web dev",
     "preview:web": "pnpm --filter @skillscat/web preview",
+    "preview:web:prod": "pnpm --filter @skillscat/web preview:prod",
     "build": "pnpm --filter @skillscat/web build",
     "build:cli": "node scripts/cli-release.mjs build",
     "typecheck": "pnpm -r typecheck",

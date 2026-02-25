@@ -13,6 +13,8 @@ const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 declare const caches: CacheStorage & { default: Cache };
 
 let activeCacheVersion = DEFAULT_CACHE_VERSION;
+const pendingJsonFetches = new Map<string, Promise<unknown>>();
+const pendingTextFetches = new Map<string, Promise<string>>();
 
 function normalizeCacheVersion(version: string | undefined | null): string {
   const normalized = (version || '').trim();
@@ -49,10 +51,11 @@ export async function getCached<T>(
   fetcher: () => Promise<T>,
   ttl: number
 ): Promise<{ data: T; hit: boolean }> {
+  const versionedKey = getVersionedCacheKey(cacheKey);
+
   // Try to get from cache
   try {
     const cache = caches.default;
-    const versionedKey = getVersionedCacheKey(cacheKey);
     const versionedRequest = buildCacheRequest(versionedKey);
     const legacyRequest = buildCacheRequest(cacheKey);
 
@@ -76,26 +79,42 @@ export async function getCached<T>(
     // Cache API not available (local dev) or error, continue to fetch
   }
 
-  // Fetch fresh data
-  const data = await fetcher();
-
-  // Store in cache (fire and forget)
-  try {
-    const cache = caches.default;
-    const cacheUrl = buildCacheRequest(getVersionedCacheKey(cacheKey));
-    const response = new Response(JSON.stringify(data), {
-      headers: {
-        'Cache-Control': `public, max-age=${ttl}`,
-        'Content-Type': 'application/json'
-      }
-    });
-    // Don't await - let it happen in background
-    cache.put(cacheUrl, response);
-  } catch {
-    // Ignore cache write errors
+  const inFlight = pendingJsonFetches.get(versionedKey) as Promise<T> | undefined;
+  if (inFlight) {
+    const data = await inFlight;
+    return { data, hit: false };
   }
 
-  return { data, hit: false };
+  const fetchPromise = (async (): Promise<T> => {
+    const data = await fetcher();
+
+    // Store in cache (fire and forget)
+    try {
+      const cache = caches.default;
+      const cacheUrl = buildCacheRequest(versionedKey);
+      const response = new Response(JSON.stringify(data), {
+        headers: {
+          'Cache-Control': `public, max-age=${ttl}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      // Don't await - let it happen in background
+      cache.put(cacheUrl, response);
+    } catch {
+      // Ignore cache write errors
+    }
+
+    return data;
+  })();
+
+  pendingJsonFetches.set(versionedKey, fetchPromise as Promise<unknown>);
+
+  try {
+    const data = await fetchPromise;
+    return { data, hit: false };
+  } finally {
+    pendingJsonFetches.delete(versionedKey);
+  }
 }
 
 /**
@@ -106,9 +125,10 @@ export async function getCachedText(
   fetcher: () => Promise<string>,
   ttl: number
 ): Promise<{ data: string; hit: boolean }> {
+  const versionedKey = getVersionedCacheKey(cacheKey);
+
   try {
     const cache = caches.default;
-    const versionedKey = getVersionedCacheKey(cacheKey);
     const versionedRequest = buildCacheRequest(versionedKey);
     const legacyRequest = buildCacheRequest(cacheKey);
 
@@ -130,23 +150,40 @@ export async function getCachedText(
     // Cache API not available or error
   }
 
-  const data = await fetcher();
-
-  try {
-    const cache = caches.default;
-    const cacheUrl = buildCacheRequest(getVersionedCacheKey(cacheKey));
-    const response = new Response(data, {
-      headers: {
-        'Cache-Control': `public, max-age=${ttl}`,
-        'Content-Type': 'text/plain'
-      }
-    });
-    cache.put(cacheUrl, response);
-  } catch {
-    // Ignore cache write errors
+  const inFlight = pendingTextFetches.get(versionedKey);
+  if (inFlight) {
+    const data = await inFlight;
+    return { data, hit: false };
   }
 
-  return { data, hit: false };
+  const fetchPromise = (async (): Promise<string> => {
+    const data = await fetcher();
+
+    try {
+      const cache = caches.default;
+      const cacheUrl = buildCacheRequest(versionedKey);
+      const response = new Response(data, {
+        headers: {
+          'Cache-Control': `public, max-age=${ttl}`,
+          'Content-Type': 'text/plain'
+        }
+      });
+      cache.put(cacheUrl, response);
+    } catch {
+      // Ignore cache write errors
+    }
+
+    return data;
+  })();
+
+  pendingTextFetches.set(versionedKey, fetchPromise);
+
+  try {
+    const data = await fetchPromise;
+    return { data, hit: false };
+  } finally {
+    pendingTextFetches.delete(versionedKey);
+  }
 }
 
 /**
