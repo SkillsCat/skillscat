@@ -111,6 +111,11 @@ interface RelatedSkillCandidateRow extends SkillListRow {
   sharedTagCount?: number;
 }
 
+type SkillReadmeLookupInput = Pick<
+  SkillDetail,
+  'slug' | 'name' | 'repoOwner' | 'repoName' | 'skillPath' | 'sourceType'
+>;
+
 type TimingCollector = (name: string, dur: number, desc?: string) => void;
 
 function collectTiming(
@@ -135,6 +140,54 @@ async function timedTask<T>(
   } finally {
     collectTiming(collector, name, start, desc);
   }
+}
+
+export async function loadSkillReadmeFromR2(
+  env: Pick<DbEnv, 'R2'>,
+  skill: SkillReadmeLookupInput
+): Promise<string | null> {
+  if (!env.R2) return null;
+
+  let readme: string | null = null;
+
+  if (skill.sourceType === 'upload') {
+    const slugParts = parseSkillSlug(skill.slug);
+    const candidatePaths = new Set<string>();
+    const canonicalPath = buildUploadSkillR2Key(skill.slug, 'SKILL.md');
+    if (canonicalPath) {
+      candidatePaths.add(canonicalPath);
+    }
+    // Backward compatibility for older upload paths.
+    if (slugParts) {
+      candidatePaths.add(`skills/${slugParts.owner}/${slugParts.name.split('/')[0] || skill.name}/SKILL.md`);
+      candidatePaths.add(`skills/${slugParts.owner}/${skill.name}/SKILL.md`);
+    }
+
+    for (const path of candidatePaths) {
+      const object = await env.R2.get(path);
+      if (object) {
+        readme = await object.text();
+        break;
+      }
+    }
+  } else {
+    // Include skill_path in R2 path for multi-skill repos
+    const skillPathPart = skill.skillPath ? `/${skill.skillPath}` : '';
+    const candidatePaths = new Set<string>([
+      `skills/${skill.repoOwner}/${skill.repoName}${skillPathPart}/SKILL.md`,
+      `skills/${skill.repoOwner.toLowerCase()}/${skill.repoName.toLowerCase()}${skillPathPart}/SKILL.md`,
+    ]);
+
+    for (const path of candidatePaths) {
+      const object = await env.R2.get(path);
+      if (object) {
+        readme = await object.text();
+        break;
+      }
+    }
+  }
+
+  return readme;
 }
 
 function parseFileTree(fileStructureRaw: string | null): FileNode[] {
@@ -713,7 +766,8 @@ export async function getSkillBySlug(
   env: DbEnv,
   slug: string,
   userId?: string | null,
-  timingCollector?: TimingCollector
+  timingCollector?: TimingCollector,
+  skipR2Readme: boolean = false
 ): Promise<SkillDetail | null> {
   if (!env.DB) return null;
 
@@ -810,46 +864,18 @@ export async function getSkillBySlug(
 
   const readmePromise = (async (): Promise<string | null> => {
     let readme = skillData.readme;
-    if (!env.R2 || readme) return readme;
+    if (!env.R2 || readme || skipR2Readme) return readme;
 
     const r2Start = performance.now();
     try {
-      if (skillData.source_type === 'upload') {
-        const slugParts = parseSkillSlug(skillData.slug);
-        const candidatePaths = new Set<string>();
-        const canonicalPath = buildUploadSkillR2Key(skillData.slug, 'SKILL.md');
-        if (canonicalPath) {
-          candidatePaths.add(canonicalPath);
-        }
-        // Backward compatibility for older upload paths.
-        if (slugParts) {
-          candidatePaths.add(`skills/${slugParts.owner}/${slugParts.name.split('/')[0] || skillData.name}/SKILL.md`);
-          candidatePaths.add(`skills/${slugParts.owner}/${skillData.name}/SKILL.md`);
-        }
-
-        for (const path of candidatePaths) {
-          const object = await env.R2.get(path);
-          if (object) {
-            readme = await object.text();
-            break;
-          }
-        }
-      } else {
-        // Include skill_path in R2 path for multi-skill repos
-        const skillPathPart = skillData.skill_path ? `/${skillData.skill_path}` : '';
-        const candidatePaths = new Set<string>([
-          `skills/${skillData.repo_owner}/${skillData.repo_name}${skillPathPart}/SKILL.md`,
-          `skills/${skillData.repo_owner.toLowerCase()}/${skillData.repo_name.toLowerCase()}${skillPathPart}/SKILL.md`,
-        ]);
-
-        for (const path of candidatePaths) {
-          const object = await env.R2.get(path);
-          if (object) {
-            readme = await object.text();
-            break;
-          }
-        }
-      }
+      readme = await loadSkillReadmeFromR2(env, {
+        slug: skillData.slug,
+        name: skillData.name,
+        repoOwner: skillData.repo_owner,
+        repoName: skillData.repo_name,
+        skillPath: skillData.skill_path || '',
+        sourceType: skillData.source_type || 'github',
+      });
     } catch (error) {
       console.error('Error reading SKILL.md from R2:', error);
     } finally {

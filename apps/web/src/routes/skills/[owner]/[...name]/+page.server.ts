@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
-import { getSkillBySlug, getRelatedSkills, recordSkillAccess } from '$lib/server/db/utils';
+import { getSkillBySlug, getRelatedSkills, loadSkillReadmeFromR2, recordSkillAccess } from '$lib/server/db/utils';
 import { getCached } from '$lib/server/cache';
 import { renderReadmeMarkdown } from '$lib/server/markdown';
 import { setPublicPageCache } from '$lib/server/page-cache';
@@ -343,9 +343,15 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
   try {
     const skill = await timed(
       'skill_detail',
-      () => getSkillBySlug(env, slug, userId, (name, dur, desc) => {
-        serverTimings.push({ name, dur, desc });
-      }),
+      () => getSkillBySlug(
+        env,
+        slug,
+        userId,
+        (name, dur, desc) => {
+          serverTimings.push({ name, dur, desc });
+        },
+        Boolean(isDataRequest)
+      ),
       'db+r2'
     );
 
@@ -392,6 +398,16 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
 
     if (deferRelatedSkills) {
       serverTimings.push({ name: 'related', dur: 0, desc: 'deferred' });
+      platform?.context?.waitUntil?.(
+        getCached(
+          `related:${skill.id}`,
+          () => getRelatedSkills(env, skill.id, skill.categories || [], skill.repoOwner || '', 10),
+          RELATED_SKILLS_CACHE_TTL
+        ).catch((err) => {
+          console.error('Failed to prewarm related skills cache:', err);
+          return { data: [], hit: false };
+        })
+      );
     }
 
     const renderedReadmePromise = timed(
@@ -399,13 +415,17 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       async (): Promise<string> => {
         if (!skill.readme) return '';
         if (skill.visibility !== 'public') {
-          return renderReadmeMarkdown(skill.readme);
+          const rawReadme = skill.readme ?? await loadSkillReadmeFromR2(env, skill);
+          return rawReadme ? renderReadmeMarkdown(rawReadme) : '';
         }
 
         const readmeVersion = skill.updatedAt ?? skill.indexedAt ?? 0;
         const { data } = await getCached(
           `readme:html:${skill.id}:${readmeVersion}`,
-          () => Promise.resolve(renderReadmeMarkdown(skill.readme)),
+          async () => {
+            const rawReadme = skill.readme ?? await loadSkillReadmeFromR2(env, skill);
+            return rawReadme ? renderReadmeMarkdown(rawReadme) : '';
+          },
           README_HTML_CACHE_TTL
         );
         return data;
@@ -445,7 +465,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
 
     // Determine if this is a dot-folder skill (e.g., .claude/SKILL.md)
     const isDotFolderSkill = skill.skillPath ? /^\.[\w-]+/.test(skill.skillPath) : false;
-    const hasReadme = Boolean(skill.readme);
+    const hasReadme = Boolean(skill.readme) || Boolean(renderedReadme);
     // Avoid sending both raw markdown and rendered HTML in the same data payload.
     const skillForClient: SkillDetail = hasReadme ? { ...skill, readme: null } : skill;
     const seo = buildSkillSeoPayload(skill);

@@ -7,8 +7,9 @@ import { checkSkillAccess } from '$lib/server/permissions';
 import { getRelatedSkills } from '$lib/server/db/utils';
 import { buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
 
-const RELATED_LIMIT = 6;
-const RELATED_CACHE_TTL = 300;
+const RELATED_RESPONSE_LIMIT = 6;
+const RELATED_CACHE_LIMIT = 10;
+const RELATED_CACHE_TTL = 3600;
 
 interface SkillContextRow {
   id: string;
@@ -124,13 +125,13 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     const { data: relatedSkills, hit } = await timed(
       'related_cached',
       () => getCached(
-      `api:skill-related:${skill.id}:v1:${RELATED_LIMIT}`,
+      `related:${skill.id}`,
       () => getRelatedSkills(
         { DB: db },
         skill.id,
         categories,
         skill.repoOwner || '',
-        RELATED_LIMIT,
+        RELATED_CACHE_LIMIT,
         (name, dur, desc) => {
           serverTimings.push({ name, dur, desc });
         }
@@ -141,9 +142,9 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     );
 
     return json({
-      success: true,
-      data: {
-        relatedSkills,
+        success: true,
+        data: {
+        relatedSkills: relatedSkills.slice(0, RELATED_RESPONSE_LIMIT),
       },
     } satisfies ApiResponse<{ relatedSkills: SkillCardData[] }>, {
       headers: {
