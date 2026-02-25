@@ -6,7 +6,7 @@
  */
 
 import type { GithubEventsEnv, GitHubEvent, IndexingMessage } from './shared/types';
-import { githubFetch } from './shared/utils';
+import { listPublicEvents } from '../src/lib/server/github-client/rest';
 const EVENTS_PER_PAGE = 100;
 const REPO_QUEUE_DEDUP_TTL_SECONDS = 5 * 60;
 
@@ -17,13 +17,16 @@ async function fetchGitHubEvents(
   env: GithubEventsEnv,
   page: number = 1
 ): Promise<GitHubEvent[]> {
-  const url = `https://api.github.com/events?per_page=${EVENTS_PER_PAGE}&page=${page}`;
-  const events = await githubFetch<GitHubEvent[]>(url, {
+  const response = await listPublicEvents({
+    page,
+    perPage: EVENTS_PER_PAGE,
     token: env.GITHUB_TOKEN,
     userAgent: 'SkillsCat-Worker/1.0',
-    notFoundAsNull: false,
   });
-  return events ?? [];
+  if (!response.ok) {
+    throw new Error(`Failed to fetch GitHub events: ${response.status}`);
+  }
+  return await response.json() as GitHubEvent[];
 }
 
 /**

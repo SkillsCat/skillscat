@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { githubRequest } from '$lib/server/github-request';
+import { getOrgByLogin, getViewerOrgMembership } from '$lib/server/github-client/rest';
 
 /**
  * POST /api/orgs/[slug]/verify - Verify organization with GitHub
@@ -50,7 +50,7 @@ export const POST: RequestHandler = async ({ locals, platform, params }) => {
   }
 
   // Check if GitHub org exists with same name
-  const orgResponse = await githubRequest(`https://api.github.com/orgs/${org.name}`, {
+  const orgResponse = await getOrgByLogin(org.name, {
     token: account.access_token,
     userAgent: 'SkillsCat/1.0',
   });
@@ -67,13 +67,10 @@ export const POST: RequestHandler = async ({ locals, platform, params }) => {
 
   // Check if authenticated user is an admin of the GitHub org.
   // Use /user/memberships/orgs/:org to avoid relying on local display names.
-  const membershipResponse = await githubRequest(
-    `https://api.github.com/user/memberships/orgs/${org.name}`,
-    {
-      token: account.access_token,
-      userAgent: 'SkillsCat/1.0',
-    }
-  );
+  const membershipResponse = await getViewerOrgMembership(org.name, {
+    token: account.access_token,
+    userAgent: 'SkillsCat/1.0',
+  });
 
   if (!membershipResponse.ok) {
     if (membershipResponse.status === 404) {
