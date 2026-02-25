@@ -413,7 +413,6 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     const renderedReadmePromise = timed(
       'readme_html',
       async (): Promise<string> => {
-        if (!skill.readme) return '';
         if (skill.visibility !== 'public') {
           const rawReadme = skill.readme ?? await loadSkillReadmeFromR2(env, skill);
           return rawReadme ? renderReadmeMarkdown(rawReadme) : '';
