@@ -130,6 +130,7 @@ export const skills = sqliteTable('skills', {
   index('skills_visibility_org_idx').on(table.visibility, table.orgId),
   index('skills_visibility_trending_desc_idx').on(table.visibility, table.trendingScore),
   index('skills_visibility_stars_desc_idx').on(table.visibility, table.stars),
+  index('skills_repo_visibility_trending_idx').on(table.repoOwner, table.visibility, table.trendingScore),
   index('skills_visibility_recent_expr_idx').on(
     table.visibility,
     sql`CASE WHEN last_commit_at IS NULL THEN indexed_at ELSE last_commit_at END DESC`
@@ -146,6 +147,25 @@ export const skills = sqliteTable('skills', {
     table.repoName,
     sql`COALESCE(${table.skillPath}, '')`
   )
+]);
+
+// ========== Related Precompute State (one row per skill) ==========
+export const skillRelatedState = sqliteTable('skill_related_state', {
+  skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  dirty: integer('dirty').notNull().default(1),
+  nextUpdateAt: integer('next_update_at', { mode: 'timestamp_ms' }),
+  precomputedAt: integer('precomputed_at', { mode: 'timestamp_ms' }),
+  algoVersion: text('algo_version'),
+  failCount: integer('fail_count').notNull().default(0),
+  lastErrorAt: integer('last_error_at', { mode: 'timestamp_ms' }),
+  lastFallbackAt: integer('last_fallback_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  primaryKey({ columns: [table.skillId] }),
+  index('skill_related_state_dirty_due_idx').on(table.dirty, table.nextUpdateAt),
+  index('skill_related_state_due_idx').on(table.nextUpdateAt),
+  index('skill_related_state_algo_dirty_idx').on(table.algoVersion, table.dirty)
 ]);
 
 // ========== Authors ==========
@@ -222,7 +242,8 @@ export const skillCategories = sqliteTable('skill_categories', {
   categorySlug: text('category_slug').notNull() // References CATEGORIES constant or categories table
 }, (table) => [
   primaryKey({ columns: [table.skillId, table.categorySlug] }),
-  index('skill_categories_category_idx').on(table.categorySlug)
+  index('skill_categories_category_idx').on(table.categorySlug),
+  index('skill_categories_category_skill_idx').on(table.categorySlug, table.skillId)
 ]);
 
 // ========== Categories (for AI-suggested dynamic categories) ==========
@@ -248,7 +269,8 @@ export const skillTags = sqliteTable('skill_tags', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
   primaryKey({ columns: [table.skillId, table.tag] }),
-  index('skill_tags_tag_idx').on(table.tag)
+  index('skill_tags_tag_idx').on(table.tag),
+  index('skill_tags_tag_skill_idx').on(table.tag, table.skillId)
 ]);
 
 // ========== Favorites ==========

@@ -23,12 +23,15 @@ import type {
 import { TIER_CONFIG } from './shared/types';
 import { githubFetch } from './shared/utils';
 import { getNonlinearStarScore, buildTopRatedSortScoreSql } from '../src/lib/server/ranking';
+import { normalizeRelatedAlgoVersion } from '../src/lib/server/related-precompute';
 
 const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql';
 const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
 const AI_CLASSIFICATION_THRESHOLD = 100; // Stars threshold for AI classification
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
+const DEFAULT_RELATED_PRECOMPUTE_MAX_PER_RUN = 200;
+const DEFAULT_RELATED_PRECOMPUTE_TIME_BUDGET_MS = 15_000;
 
 function getListCachePaths(listName: string, cacheVersion?: string): string[] {
   const normalizedVersion = (cacheVersion || '').trim();
@@ -723,6 +726,161 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   console.log('Cache lists regenerated');
 }
 
+interface RelatedPrecomputeCandidate {
+  id: string;
+  slug: string;
+  tier: SkillTier;
+  trending_score: number;
+  last_accessed_at: number | null;
+  dirty: number | null;
+  next_update_at: number | null;
+  precomputed_at: number | null;
+  algo_version: string | null;
+}
+
+function isRelatedPrecomputeEnabled(env: TrendingEnv): boolean {
+  return (env.RELATED_PRECOMPUTE_ENABLED || '0').trim() === '1';
+}
+
+function getRelatedPrecomputeMaxPerRun(env: TrendingEnv): number {
+  const parsed = Number.parseInt(env.RELATED_PRECOMPUTE_MAX_PER_RUN || '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_RELATED_PRECOMPUTE_MAX_PER_RUN;
+  return Math.min(parsed, 2000);
+}
+
+function getRelatedPrecomputeTimeBudgetMs(env: TrendingEnv): number {
+  const parsed = Number.parseInt(env.RELATED_PRECOMPUTE_TIME_BUDGET_MS || '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_RELATED_PRECOMPUTE_TIME_BUDGET_MS;
+  return Math.min(parsed, 120_000);
+}
+
+function getAppOrigin(env: TrendingEnv): string | null {
+  const origin = (env.APP_ORIGIN || '').trim();
+  if (!origin) return null;
+  return origin.replace(/\/+$/, '');
+}
+
+function buildRelatedRefreshUrl(appOrigin: string, slug: string): string | null {
+  const parts = slug.split('/').filter(Boolean);
+  if (parts.length < 2) return null;
+  const [owner, ...nameParts] = parts;
+  const encodedOwner = encodeURIComponent(owner);
+  const encodedName = nameParts.map((part) => encodeURIComponent(part)).join('/');
+  return `${appOrigin}/api/skills/${encodedOwner}/${encodedName}/related?refresh=1`;
+}
+
+async function processRelatedPrecomputeBatch(env: TrendingEnv): Promise<{ attempted: number; succeeded: number; failed: number; skipped: number }> {
+  if (!isRelatedPrecomputeEnabled(env)) {
+    return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
+  }
+
+  const appOrigin = getAppOrigin(env);
+  if (!appOrigin) {
+    console.warn('Related precompute enabled but APP_ORIGIN is not configured');
+    return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
+  }
+
+  const now = Date.now();
+  const algoVersion = normalizeRelatedAlgoVersion(env.RELATED_ALGO_VERSION);
+  const limit = getRelatedPrecomputeMaxPerRun(env);
+  const timeBudgetMs = getRelatedPrecomputeTimeBudgetMs(env);
+
+  let candidatesResult;
+  try {
+    candidatesResult = await env.DB.prepare(`
+      SELECT
+        s.id,
+        s.slug,
+        s.tier,
+        s.trending_score,
+        s.last_accessed_at,
+        rs.dirty,
+        rs.next_update_at,
+        rs.precomputed_at,
+        rs.algo_version
+      FROM skills s
+      LEFT JOIN skill_related_state rs ON rs.skill_id = s.id
+      WHERE s.visibility = 'public'
+        AND s.tier != 'archived'
+        AND (
+          rs.skill_id IS NULL
+          OR rs.dirty = 1
+          OR rs.precomputed_at IS NULL
+          OR rs.next_update_at IS NULL
+          OR rs.next_update_at <= ?
+          OR rs.algo_version IS NULL
+          OR rs.algo_version != ?
+        )
+      ORDER BY
+        COALESCE(rs.dirty, 1) DESC,
+        CASE s.tier
+          WHEN 'hot' THEN 0
+          WHEN 'warm' THEN 1
+          WHEN 'cool' THEN 2
+          WHEN 'cold' THEN 3
+          ELSE 4
+        END ASC,
+        s.trending_score DESC,
+        CASE WHEN s.last_accessed_at IS NULL THEN 1 ELSE 0 END ASC,
+        s.last_accessed_at DESC,
+        COALESCE(rs.next_update_at, 0) ASC
+      LIMIT ?
+    `)
+      .bind(now, algoVersion, limit)
+      .all<RelatedPrecomputeCandidate>();
+  } catch (err) {
+    console.warn('Related precompute query failed (migration may not be applied yet):', err);
+    return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
+  }
+
+  const candidates = candidatesResult.results || [];
+  if (candidates.length === 0) {
+    return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
+  }
+
+  let attempted = 0;
+  let succeeded = 0;
+  let failed = 0;
+  let skipped = 0;
+  const startedAt = Date.now();
+
+  for (const candidate of candidates) {
+    if (Date.now() - startedAt >= timeBudgetMs) {
+      break;
+    }
+
+    const refreshUrl = buildRelatedRefreshUrl(appOrigin, candidate.slug);
+    if (!refreshUrl) {
+      skipped++;
+      continue;
+    }
+
+    attempted++;
+
+    try {
+      const headers: HeadersInit = {};
+      if (env.WORKER_SECRET) {
+        headers.Authorization = `Bearer ${env.WORKER_SECRET}`;
+      }
+
+      const response = await fetch(refreshUrl, { method: 'GET', headers });
+      if (!response.ok) {
+        failed++;
+        const body = await response.text();
+        console.warn(`Related precompute refresh failed for ${candidate.slug}: ${response.status} ${body.slice(0, 200)}`);
+        continue;
+      }
+
+      succeeded++;
+    } catch (err) {
+      failed++;
+      console.warn(`Related precompute request error for ${candidate.slug}:`, err);
+    }
+  }
+
+  return { attempted, succeeded, failed, skipped };
+}
+
 /**
  * Record cost metrics to KV for monitoring
  */
@@ -734,6 +892,9 @@ async function recordMetrics(
     warmUpdates: number;
     coolUpdates: number;
     githubApiCalls: number;
+    relatedPrecomputeAttempted?: number;
+    relatedPrecomputeSucceeded?: number;
+    relatedPrecomputeFailed?: number;
   }
 ): Promise<void> {
   const now = Date.now();
@@ -746,6 +907,9 @@ async function recordMetrics(
     warmUpdates: (existing?.warmUpdates || 0) + metrics.warmUpdates,
     coolUpdates: (existing?.coolUpdates || 0) + metrics.coolUpdates,
     githubApiCalls: (existing?.githubApiCalls || 0) + metrics.githubApiCalls,
+    relatedPrecomputeAttempted: (existing?.relatedPrecomputeAttempted || 0) + (metrics.relatedPrecomputeAttempted || 0),
+    relatedPrecomputeSucceeded: (existing?.relatedPrecomputeSucceeded || 0) + (metrics.relatedPrecomputeSucceeded || 0),
+    relatedPrecomputeFailed: (existing?.relatedPrecomputeFailed || 0) + (metrics.relatedPrecomputeFailed || 0),
     lastRun: now,
   };
 
@@ -799,7 +963,13 @@ export default {
     // 7. Regenerate list caches
     await regenerateListCaches(env);
 
-    // 8. Record metrics
+    // 8. Run related precompute refresh (optional, budgeted)
+    const relatedPrecompute = await processRelatedPrecomputeBatch(env);
+    if (relatedPrecompute.attempted > 0 || relatedPrecompute.skipped > 0) {
+      console.log(`Related precompute: attempted=${relatedPrecompute.attempted}, succeeded=${relatedPrecompute.succeeded}, failed=${relatedPrecompute.failed}, skipped=${relatedPrecompute.skipped}`);
+    }
+
+    // 9. Record metrics
     const totalBatches = Math.ceil((markedUpdates + hotResult.count + warmResult.count + coolResult.count) / BATCH_SIZE);
     await recordMetrics(env, {
       markedUpdates,
@@ -807,6 +977,9 @@ export default {
       warmUpdates: warmResult.count,
       coolUpdates: coolResult.count,
       githubApiCalls: totalBatches,
+      relatedPrecomputeAttempted: relatedPrecompute.attempted,
+      relatedPrecomputeSucceeded: relatedPrecompute.succeeded,
+      relatedPrecomputeFailed: relatedPrecompute.failed,
     });
 
     console.log('Trending update completed');

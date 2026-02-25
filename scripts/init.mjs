@@ -355,6 +355,8 @@ queue = "skillscat-classification"
 
 [env.production.vars]
 PUBLIC_APP_URL = "https://your-domain.com"
+CACHE_VERSION = "v1"
+RELATED_ALGO_VERSION = "v1"
 `.trim(),
   'wrangler.github-events.toml': `
 [env.production]
@@ -463,6 +465,12 @@ TRENDING_DECAY_HOURS = "72"
 TRENDING_STAR_WEIGHT = "1.0"
 TRENDING_FORK_WEIGHT = "2.0"
 TRENDING_VIEW_WEIGHT = "0.1"
+CACHE_VERSION = "v1"
+APP_ORIGIN = "https://your-domain.com"
+RELATED_PRECOMPUTE_ENABLED = "0"
+RELATED_PRECOMPUTE_MAX_PER_RUN = "200"
+RELATED_PRECOMPUTE_TIME_BUDGET_MS = "15000"
+RELATED_ALGO_VERSION = "v1"
 `.trim(),
   'wrangler.tier-recalc.toml': `
 [env.production]
@@ -744,6 +752,121 @@ function setProductionPublicAppUrl(url) {
 
   writeFileSync(configPath, `${lines.join('\n').trim()}\n`);
   return { exists: true, updated };
+}
+
+function upsertTomlVarsEntries(configFile, blockHeader, entries) {
+  const configPath = resolve(WEB_DIR, configFile);
+  if (!existsSync(configPath)) return { exists: false, updated: false };
+
+  const lines = readFileSync(configPath, 'utf-8').split('\n');
+  const escapedEntries = Object.entries(entries).map(([key, value]) => [key, String(value).replace(/"/g, '\\"')]);
+
+  let blockStart = -1;
+  let blockEnd = lines.length;
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i].trim();
+    if (trimmed === blockHeader) {
+      blockStart = i;
+      blockEnd = lines.length;
+      for (let j = i + 1; j < lines.length; j += 1) {
+        const nextTrimmed = lines[j].trim();
+        if (nextTrimmed.startsWith('[') && nextTrimmed.endsWith(']')) {
+          blockEnd = j;
+          break;
+        }
+      }
+      break;
+    }
+  }
+
+  let updated = false;
+
+  if (blockStart === -1) {
+    lines.push('', blockHeader);
+    for (const [key, escaped] of escapedEntries) {
+      lines.push(`${key} = "${escaped}"`);
+    }
+    updated = true;
+  } else {
+    for (const [key, escaped] of escapedEntries) {
+      const pattern = new RegExp(`^${key}\\s*=`);
+      let keyLineIndex = -1;
+      for (let i = blockStart + 1; i < blockEnd; i += 1) {
+        if (pattern.test(lines[i].trim())) {
+          keyLineIndex = i;
+          break;
+        }
+      }
+
+      const expectedLine = `${key} = "${escaped}"`;
+      if (keyLineIndex !== -1) {
+        if (lines[keyLineIndex] !== expectedLine) {
+          lines[keyLineIndex] = expectedLine;
+          updated = true;
+        }
+      } else {
+        lines.splice(blockEnd, 0, expectedLine);
+        blockEnd += 1;
+        updated = true;
+      }
+    }
+  }
+
+  if (!updated) return { exists: true, updated: false };
+
+  if (DRY_RUN) {
+    logDryRun(`Would update ${blockHeader} vars in ${configFile}`);
+    return { exists: true, updated: true };
+  }
+
+  writeFileSync(configPath, `${lines.join('\n').trim()}\n`);
+  return { exists: true, updated: true };
+}
+
+function ensureRelatedWorkerEnvVars({ productionAppUrl, includeProductionVars = true } = {}) {
+  const results = [];
+
+  results.push(
+    upsertTomlVarsEntries('wrangler.preview.toml', '[vars]', {
+      RELATED_ALGO_VERSION: 'v1',
+    }),
+  );
+  if (includeProductionVars) {
+    results.push(
+      upsertTomlVarsEntries('wrangler.preview.toml', '[env.production.vars]', {
+        CACHE_VERSION: 'v1',
+        RELATED_ALGO_VERSION: 'v1',
+      }),
+    );
+  }
+
+  results.push(
+    upsertTomlVarsEntries('wrangler.trending.toml', '[vars]', {
+      CACHE_VERSION: 'v1',
+      APP_ORIGIN: 'https://skills.cat',
+      RELATED_PRECOMPUTE_ENABLED: '0',
+      RELATED_PRECOMPUTE_MAX_PER_RUN: '200',
+      RELATED_PRECOMPUTE_TIME_BUDGET_MS: '15000',
+      RELATED_ALGO_VERSION: 'v1',
+    }),
+  );
+
+  if (includeProductionVars) {
+    const trendingProductionVars = {
+      CACHE_VERSION: 'v1',
+      APP_ORIGIN: productionAppUrl || 'https://your-domain.com',
+      RELATED_PRECOMPUTE_ENABLED: '0',
+      RELATED_PRECOMPUTE_MAX_PER_RUN: '200',
+      RELATED_PRECOMPUTE_TIME_BUDGET_MS: '15000',
+      RELATED_ALGO_VERSION: 'v1',
+    };
+
+    results.push(
+      upsertTomlVarsEntries('wrangler.trending.toml', '[env.production.vars]', trendingProductionVars),
+    );
+  }
+
+  return results;
 }
 
 /**
@@ -1299,6 +1422,12 @@ ${colors.cyan}╔═════════════════════
       }
     }
 
+    const localRelatedEnvUpdates = ensureRelatedWorkerEnvVars({ includeProductionVars: false });
+    const localRelatedVarsUpdated = localRelatedEnvUpdates.some((result) => result.exists && result.updated);
+    if (localRelatedVarsUpdated) {
+      logSuccess('Updated local wrangler vars for related precompute defaults');
+    }
+
     if (isProduction) {
       logInfo('Ensuring [env.production] exists in all wrangler config files...');
       for (const configFile of CONFIG_FILES) {
@@ -1406,6 +1535,20 @@ ${colors.gray}以下变量需要手动配置:
       const appUrlUpdate = setProductionPublicAppUrl(productionAppUrl);
       if (appUrlUpdate.exists && appUrlUpdate.updated) {
         logSuccess(`Updated env.production PUBLIC_APP_URL -> ${productionAppUrl}`);
+      }
+
+      const relatedEnvUpdates = ensureRelatedWorkerEnvVars({ productionAppUrl });
+      const previewRelatedVarsUpdated = relatedEnvUpdates
+        .slice(0, 2)
+        .some((result) => result.exists && result.updated);
+      const trendingRelatedVarsUpdated = relatedEnvUpdates
+        .slice(2)
+        .some((result) => result.exists && result.updated);
+      if (previewRelatedVarsUpdated) {
+        logSuccess('Updated preview worker related env vars');
+      }
+      if (trendingRelatedVarsUpdated) {
+        logSuccess('Updated trending worker related precompute env vars');
       }
 
       // 生产模式: 设置 Cloudflare secrets

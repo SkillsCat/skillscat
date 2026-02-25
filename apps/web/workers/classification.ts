@@ -19,6 +19,7 @@ import type {
 import { KNOWN_ORGS } from './shared/types';
 import { CATEGORIES, getCategorySlugs } from './shared/categories';
 import { createLogger } from './shared/utils';
+import { markRelatedDirty } from '../src/lib/server/related-precompute';
 
 const log = createLogger('Classification');
 
@@ -511,6 +512,8 @@ async function saveClassification(
       .bind(now, categorySlug)
       .run();
   }
+
+  await markRelatedDirty(env.DB, skillId, now);
 }
 
 /**
@@ -646,30 +649,5 @@ export default {
         log.log(`Message scheduled for retry: ${message.id}`);
       }
     }
-  },
-
-  async fetch(
-    request: Request,
-    env: ClassificationEnv,
-    _ctx: ExecutionContext
-  ): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Metrics endpoint for monitoring
-    if (url.pathname === '/metrics') {
-      const hourKey = `metrics:classification:${new Date().toISOString().slice(0, 13)}`;
-      const metrics = await env.KV.get(hourKey, 'json');
-      return new Response(JSON.stringify(metrics || {}), {
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    return new Response('Not Found', { status: 404 });
   },
 };

@@ -79,6 +79,11 @@ export interface TrendingEnv extends BaseEnv {
   TRENDING_STAR_WEIGHT?: string;
   TRENDING_FORK_WEIGHT?: string;
   TRENDING_VIEW_WEIGHT?: string;
+  APP_ORIGIN?: string;
+  RELATED_PRECOMPUTE_ENABLED?: string;
+  RELATED_PRECOMPUTE_MAX_PER_RUN?: string;
+  RELATED_PRECOMPUTE_TIME_BUDGET_MS?: string;
+  RELATED_ALGO_VERSION?: string;
   CLASSIFICATION_QUEUE?: Queue<ClassificationMessage>; // For reclassification
 }
 

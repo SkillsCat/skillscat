@@ -399,16 +399,6 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
 
     if (deferRelatedSkills) {
       serverTimings.push({ name: 'related', dur: 0, desc: 'deferred' });
-      platform?.context?.waitUntil?.(
-        getCached(
-          `related:${skill.id}`,
-          () => getRelatedSkills(env, skill.id, skill.categories || [], skill.repoOwner || '', 10, undefined, false),
-          RELATED_SKILLS_CACHE_TTL
-        ).catch((err) => {
-          console.error('Failed to prewarm related skills cache:', err);
-          return { data: [], hit: false };
-        })
-      );
     }
 
     const renderedReadmePromise = timed(

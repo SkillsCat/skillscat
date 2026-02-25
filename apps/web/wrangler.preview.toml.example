@@ -46,6 +46,7 @@ queue = "skillscat-classification"
 [vars]
 PUBLIC_APP_URL = "http://localhost:3000"
 CACHE_VERSION = "v1"
+RELATED_ALGO_VERSION = "v1"
 
 [env.production]
 name = "skillscat-web-production"
@@ -78,3 +79,4 @@ queue = "skillscat-classification"
 [env.production.vars]
 PUBLIC_APP_URL = "https://your-domain.com"
 CACHE_VERSION = "v1"
+RELATED_ALGO_VERSION = "v1"

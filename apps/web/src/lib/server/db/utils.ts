@@ -959,7 +959,8 @@ export async function getRelatedSkills(
   repoOwner: string = '',
   limit: number = 10,
   timingCollector?: TimingCollector,
-  includeCategories: boolean = true
+  includeCategories: boolean = true,
+  preloadedTags?: string[] | null
 ): Promise<SkillCardData[]> {
   const db = env.DB;
   if (!db) return [];
@@ -968,15 +969,22 @@ export async function getRelatedSkills(
   const hasCategories = categories.length > 0;
 
   // Step 1: Get current skill's tags
-  const tagsResult = await timedTask(
-    timingCollector,
-    'rel_tags',
-    () => db.prepare(
-      'SELECT tag FROM skill_tags WHERE skill_id = ?'
-    ).bind(skillId).all<TagRow>(),
-    'current skill tags'
-  );
-  const skillTags = tagsResult.results.map((row) => row.tag);
+  let skillTags: string[];
+  if (Array.isArray(preloadedTags)) {
+    const deduped = Array.from(new Set(preloadedTags.filter((tag): tag is string => typeof tag === 'string' && tag.length > 0)));
+    skillTags = deduped;
+    timingCollector?.('rel_tags', 0, 'preloaded');
+  } else {
+    const tagsResult = await timedTask(
+      timingCollector,
+      'rel_tags',
+      () => db.prepare(
+        'SELECT tag FROM skill_tags WHERE skill_id = ?'
+      ).bind(skillId).all<TagRow>(),
+      'current skill tags'
+    );
+    skillTags = tagsResult.results.map((row) => row.tag);
+  }
   const hasTags = skillTags.length > 0;
 
   // Step 2: Tiered candidate discovery

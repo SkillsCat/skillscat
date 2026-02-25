@@ -10,6 +10,7 @@
 
 import type { BaseEnv, SkillTier } from './shared/types';
 import { TIER_CONFIG } from './shared/types';
+import { getNextRelatedUpdateAt } from '../src/lib/server/related-precompute';
 
 interface TierRecalcEnv extends BaseEnv {}
 
@@ -173,6 +174,26 @@ async function recalculateTiers(env: TierRecalcEnv): Promise<{
       );
 
       await env.DB.batch(statements);
+
+      const relatedStateStatements = updates.map((u) =>
+        env.DB.prepare(`
+          INSERT INTO skill_related_state (
+            skill_id, dirty, next_update_at, precomputed_at, algo_version,
+            fail_count, last_error_at, last_fallback_at, created_at, updated_at
+          )
+          VALUES (?, 0, ?, NULL, NULL, 0, NULL, NULL, ?, ?)
+          ON CONFLICT(skill_id) DO UPDATE SET
+            next_update_at = excluded.next_update_at,
+            updated_at = excluded.updated_at
+        `).bind(
+          u.id,
+          getNextRelatedUpdateAt(u.tier, now),
+          now,
+          now
+        )
+      );
+
+      await env.DB.batch(relatedStateStatements);
     }
 
     offset += BATCH_SIZE;
