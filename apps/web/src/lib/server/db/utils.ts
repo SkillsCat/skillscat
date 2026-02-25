@@ -84,6 +84,7 @@ interface SkillDetailRow {
   orgName: string | null;
   orgSlug: string | null;
   orgAvatar: string | null;
+  categoriesJson: string | null;
 }
 
 interface CategoryRow {
@@ -777,6 +778,11 @@ export async function getSkillBySlug(
     () => env.DB!.prepare(`
       SELECT
         s.*,
+        (
+          SELECT json_group_array(sc.category_slug)
+          FROM skill_categories sc
+          WHERE sc.skill_id = s.id
+        ) as categoriesJson,
         a.username as authorUsername,
         a.display_name as authorDisplayName,
         a.avatar_url as authorAvatar,
@@ -851,17 +857,6 @@ export async function getSkillBySlug(
     }
   }
 
-  const categoriesPromise = timedTask(
-    timingCollector,
-    'sd_cats',
-    () => env.DB!.prepare(`
-      SELECT category_slug FROM skill_categories WHERE skill_id = ?
-    `)
-      .bind(skillData.id)
-      .all<CategoryRow>(),
-    'skill categories'
-  );
-
   const readmePromise = (async (): Promise<string | null> => {
     let readme = skillData.readme;
     if (!env.R2 || readme || skipR2Readme) return readme;
@@ -885,7 +880,19 @@ export async function getSkillBySlug(
     return readme;
   })();
 
-  const [categories, readme] = await Promise.all([categoriesPromise, readmePromise]);
+  const readme = await readmePromise;
+
+  let categories: string[] = [];
+  if (skillData.categoriesJson) {
+    try {
+      const parsed = JSON.parse(skillData.categoriesJson) as unknown;
+      if (Array.isArray(parsed)) {
+        categories = parsed.filter((value): value is string => typeof value === 'string');
+      }
+    } catch {
+      categories = [];
+    }
+  }
 
   // 解析文件结构 (直接使用预构建的 fileTree)
   const fileTreeParseStart = performance.now();
@@ -910,7 +917,7 @@ export async function getSkillBySlug(
     indexedAt: skillData.indexed_at,
     readme,
     fileStructure,
-    categories: categories.results.map((c) => c.category_slug),
+    categories,
     authorAvatar: skillData.authorAvatar,
     authorUsername: skillData.authorUsername,
     authorDisplayName: skillData.authorDisplayName,
