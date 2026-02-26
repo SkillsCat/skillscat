@@ -362,18 +362,33 @@ async function fallbackUserGet(ctx: GitHubRestFallbackContext): Promise<Response
   const parts = splitPathname(ctx.url.pathname);
   const login = parts[1];
   if (!login) return null;
-  const query = `query($login: String!) { user(login: $login) { databaseId login avatarUrl } }`;
-  const { data } = await githubGraphqlRequest<{ user: { databaseId: number | null; login: string; avatarUrl: string } | null }>(query, { login }, {
+  const query = `query($login: String!) {
+    repositoryOwner(login: $login) {
+      __typename
+      login
+      avatarUrl
+      ... on User { databaseId }
+      ... on Organization { databaseId }
+    }
+  }`;
+  const { data } = await githubGraphqlRequest<{
+    repositoryOwner: {
+      __typename: 'User' | 'Organization';
+      databaseId: number | null;
+      login: string;
+      avatarUrl: string;
+    } | null;
+  }>(query, { login }, {
     token: ctx.options.token,
     userAgent: ctx.options.userAgent,
     apiVersion: ctx.options.apiVersion,
   });
-  if (!data.user || data.user.databaseId == null) return jsonResponse({ message: 'Not Found' }, 404);
+  if (!data.repositoryOwner || data.repositoryOwner.databaseId == null) return jsonResponse({ message: 'Not Found' }, 404);
   return jsonResponse({
-    id: data.user.databaseId,
-    login: data.user.login,
-    avatar_url: data.user.avatarUrl,
-    type: 'User',
+    id: data.repositoryOwner.databaseId,
+    login: data.repositoryOwner.login,
+    avatar_url: data.repositoryOwner.avatarUrl,
+    type: data.repositoryOwner.__typename,
   });
 }
 

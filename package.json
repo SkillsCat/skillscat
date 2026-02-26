@@ -18,7 +18,6 @@
     "build:cli": "node scripts/cli-release.mjs build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
-    "lint:github-transport": "node scripts/check-github-api-usage.mjs",
     "lint:fix": "eslint . --fix",
     "db:generate": "pnpm --filter @skillscat/web db:generate",
     "db:migrate": "pnpm --filter @skillscat/web db:migrate",

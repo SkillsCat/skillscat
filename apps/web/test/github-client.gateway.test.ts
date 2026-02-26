@@ -48,7 +48,7 @@ describe('GitHub gateway', () => {
     vi.restoreAllMocks();
   });
 
-  it('reuses cached REST response when conditional GET returns 304', async () => {
+  it('reuses cached REST response when conditional GET returns 304 for unauthenticated requests', async () => {
     const cache = new MemoryCache();
     installCache(cache);
 
@@ -70,17 +70,38 @@ describe('GitHub gateway', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const url = 'https://api.github.com/repos/foo/bar';
-    const first = await githubRequest(url, { token: 't' });
+    const first = await githubRequest(url);
     expect(first.status).toBe(200);
     await expect(first.json()).resolves.toEqual({ value: 1 });
 
-    const second = await githubRequest(url, { token: 'another-token' });
+    const second = await githubRequest(url);
     expect(second.status).toBe(200);
     await expect(second.json()).resolves.toEqual({ value: 1 });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(cache.matchCalls).toBeGreaterThanOrEqual(1);
     expect(cache.putCalls).toBe(1);
+  });
+
+  it('does not use shared cache for authenticated REST GET requests', async () => {
+    const cache = new MemoryCache();
+    installCache(cache);
+
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ETag: '"abc"' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const url = 'https://api.github.com/repos/foo/bar';
+    const first = await githubRequest(url, { token: 't1' });
+    expect(first.status).toBe(200);
+    const second = await githubRequest(url, { token: 't2' });
+    expect(second.status).toBe(200);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(cache.matchCalls).toBe(0);
+    expect(cache.putCalls).toBe(0);
   });
 
   it('falls back to GraphQL for supported REST endpoint on rate limit', async () => {
@@ -146,6 +167,48 @@ describe('GitHub gateway', () => {
     expect(data.owner.login).toBe('foo');
     expect(data.default_branch).toBe('main');
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('supports organization logins in /users/{login} GraphQL fallback', async () => {
+    const cache = new MemoryCache();
+    installCache(cache);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://api.github.com/users/acme') {
+        return new Response(JSON.stringify({ message: 'rate limited' }), {
+          status: 429,
+          headers: { 'x-ratelimit-remaining': '0' },
+        });
+      }
+
+      if (url === 'https://api.github.com/graphql') {
+        return new Response(JSON.stringify({
+          data: {
+            repositoryOwner: {
+              __typename: 'Organization',
+              databaseId: 42,
+              login: 'acme',
+              avatarUrl: 'https://avatars.githubusercontent.com/u/42',
+            },
+          },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await githubRequest('https://api.github.com/users/acme');
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      login: 'acme',
+      type: 'Organization',
+    });
   });
 
   it('returns REST rate-limit response when GraphQL fallback is also rate limited', async () => {

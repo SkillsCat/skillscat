@@ -20,6 +20,12 @@ const DEFAULT_SHARED_CACHE_TTL_SECONDS = 3600;
 const ENABLE_REST_CONDITIONAL_CACHE = (typeof process !== 'undefined' ? process.env.GITHUB_REST_CONDITIONAL_CACHE_ENABLED : undefined) !== '0';
 const ENABLE_GRAPHQL_FALLBACK = (typeof process !== 'undefined' ? process.env.GITHUB_GRAPHQL_FALLBACK_ENABLED : undefined) !== '0';
 
+function hasAuthorizationContext(options: GitHubRequestOptions): boolean {
+  if (options.token) return true;
+  const headers = new Headers(options.headers ?? {});
+  return headers.has('Authorization');
+}
+
 function normalizeUrlForCache(url: URL): string {
   const cloned = new URL(url.toString());
   const entries = [...cloned.searchParams.entries()].sort((a, b) => {
@@ -58,6 +64,9 @@ function canUseSharedCache(endpoint: ReturnType<typeof classifyGitHubEndpoint>, 
   if (method !== 'GET') return false;
   if (endpoint.cachePolicy !== 'shared') return false;
   if (endpoint.viewerScoped || options.viewerScoped) return false;
+  // Do not share cached responses across callers when auth is attached.
+  // Some REST GET endpoints can return private/token-scoped data.
+  if (hasAuthorizationContext(options)) return false;
   return true;
 }
 

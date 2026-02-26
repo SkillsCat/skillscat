@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
 import { getCached } from '$lib/server/cache';
-import { githubRequest } from '$lib/server/github-request';
+import { getBlob, getCommitByRef, getRepo, getTreeRecursive } from '$lib/server/github-client/rest';
 import { buildUploadSkillR2Prefix, normalizeSkillSlug } from '$lib/skill-path';
 
 interface SkillFile {
@@ -80,7 +80,7 @@ async function getLatestCommitSha(
     `commit:${owner}/${repo}`,
     async () => {
       // Get repository info (includes default branch)
-      const repoRes = await githubRequest(`https://api.github.com/repos/${owner}/${repo}`, {
+      const repoRes = await getRepo(owner, repo, {
         token: githubToken,
         userAgent: 'SkillsCat/1.0',
       });
@@ -92,13 +92,10 @@ async function getLatestCommitSha(
       const branch = repoInfo.default_branch;
 
       // Get latest commit
-      const commitRes = await githubRequest(
-        `https://api.github.com/repos/${owner}/${repo}/commits/${branch}`,
-        {
-          token: githubToken,
-          userAgent: 'SkillsCat/1.0',
-        }
-      );
+      const commitRes = await getCommitByRef(owner, repo, branch, {
+        token: githubToken,
+        userAgent: 'SkillsCat/1.0',
+      });
       if (!commitRes.ok) return null;
       const commitInfo = await commitRes.json() as { sha: string };
 
@@ -120,8 +117,7 @@ async function fetchGitHubFiles(
   skillPath: string | null,
   githubToken?: string
 ): Promise<SkillFile[]> {
-  const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
-  const treeRes = await githubRequest(treeUrl, {
+  const treeRes = await getTreeRecursive(owner, repo, branch, {
     token: githubToken,
     userAgent: 'SkillsCat/1.0',
   });
@@ -153,13 +149,10 @@ async function fetchGitHubFiles(
 
     if (!isTextFile(relativePath)) continue;
 
-    const blobRes = await githubRequest(
-      `https://api.github.com/repos/${owner}/${repo}/git/blobs/${item.sha}`,
-      {
-        token: githubToken,
-        userAgent: 'SkillsCat/1.0',
-      }
-    );
+    const blobRes = await getBlob(owner, repo, item.sha, {
+      token: githubToken,
+      userAgent: 'SkillsCat/1.0',
+    });
     if (!blobRes.ok) continue;
     const blobData = await blobRes.json() as { content: string };
 
