@@ -188,22 +188,23 @@ function maybeBumpCliVersion(options) {
   const pkg = readJson(cliPackagePath);
   const currentVersion = pkg.version ?? INITIAL_VERSION;
   const nextVersion = options.bump ? bumpVersion(currentVersion, options.bump) : currentVersion;
+  const changed = currentVersion !== nextVersion;
 
   console.log(`CLI version: ${currentVersion}${nextVersion !== currentVersion ? ` -> ${nextVersion}` : ''}`);
 
   if (!options.bump) {
-    return { currentVersion, nextVersion };
+    return { currentVersion, nextVersion, changed };
   }
 
   if (options.dryRun) {
     console.log('[version] Dry-run enabled, apps/cli/package.json will not be changed.');
-    return { currentVersion, nextVersion };
+    return { currentVersion, nextVersion, changed };
   }
 
   pkg.version = nextVersion;
   writeJson(cliPackagePath, pkg);
   console.log(`[version] Updated apps/cli/package.json -> ${nextVersion}`);
-  return { currentVersion, nextVersion };
+  return { currentVersion, nextVersion, changed };
 }
 
 function resolveTag(version, options) {
@@ -246,7 +247,9 @@ function printPublishPlan(versionInfo, tag, options) {
   console.log(`- Test: ${options.skipTest ? 'skip' : 'run'}`);
   console.log('- Build: run');
   console.log('- Publish: npm publish --access public');
-  console.log(`- Tag: ${tag ? `create ${tag} (after publish)` : 'skip'}`);
+  console.log(`- Git commit version bump: ${versionInfo.changed ? 'yes' : 'skip (version unchanged)'}`);
+  console.log(`- Git push branch: ${versionInfo.changed ? 'yes' : 'skip (version unchanged)'}`);
+  console.log(`- Tag: ${tag ? `create ${tag} (after publish${versionInfo.changed ? ' + git push' : ''})` : 'skip'}`);
   console.log(`- Push tag: ${tag ? (options.pushTag ? 'yes' : 'no') : 'n/a (no tag)'}`);
   if (options.dryRun) {
     console.log('- Mode: dry-run');
@@ -262,6 +265,31 @@ function runBuild(options) {
   }
 
   runStep('build', 'pnpm', ['--filter', './apps/cli', 'build'], {
+    cwd: projectRoot,
+    dryRun: options.dryRun
+  });
+}
+
+function runPublishGitFlow(versionInfo, options) {
+  if (!versionInfo.changed) {
+    console.log('[git] Version unchanged, skipping commit/push.');
+    return;
+  }
+
+  runStep('git:add-version', 'git', ['add', 'apps/cli/package.json'], {
+    cwd: projectRoot,
+    dryRun: options.dryRun
+  });
+  runStep(
+    'git:commit-version',
+    'git',
+    ['commit', '-m', `chore(release): cli v${versionInfo.nextVersion}`, '--', 'apps/cli/package.json'],
+    {
+      cwd: projectRoot,
+      dryRun: options.dryRun
+    }
+  );
+  runStep('git:push-branch', 'git', ['push'], {
     cwd: projectRoot,
     dryRun: options.dryRun
   });
@@ -296,6 +324,7 @@ async function runPublish(options) {
     cwd: cliDir,
     dryRun: options.dryRun
   });
+  runPublishGitFlow(versionInfo, options);
   runTagFlow(tag, versionInfo.nextVersion, options);
 
   console.log('\nCLI publish flow completed.');
