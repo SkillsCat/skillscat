@@ -127,6 +127,9 @@ export const skills = sqliteTable('skills', {
   index('skills_stars_idx').on(table.stars),
   index('skills_indexed_idx').on(table.indexedAt),
   index('skills_visibility_idx').on(table.visibility),
+  index('skills_visibility_name_idx').on(table.visibility, table.name),
+  index('skills_visibility_repo_name_idx').on(table.visibility, table.repoName),
+  index('skills_visibility_slug_idx').on(table.visibility, table.slug),
   index('skills_visibility_org_idx').on(table.visibility, table.orgId),
   index('skills_visibility_trending_desc_idx').on(table.visibility, table.trendingScore),
   index('skills_visibility_stars_desc_idx').on(table.visibility, table.stars),
@@ -166,6 +169,41 @@ export const skillRelatedState = sqliteTable('skill_related_state', {
   index('skill_related_state_dirty_due_idx').on(table.dirty, table.nextUpdateAt),
   index('skill_related_state_due_idx').on(table.nextUpdateAt),
   index('skill_related_state_algo_dirty_idx').on(table.algoVersion, table.dirty)
+]);
+
+// ========== Search Precompute State (one row per skill) ==========
+export const skillSearchState = sqliteTable('skill_search_state', {
+  skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  dirty: integer('dirty').notNull().default(1),
+  nextUpdateAt: integer('next_update_at', { mode: 'timestamp_ms' }),
+  precomputedAt: integer('precomputed_at', { mode: 'timestamp_ms' }),
+  algoVersion: text('algo_version'),
+  score: real('score'),
+  failCount: integer('fail_count').notNull().default(0),
+  lastErrorAt: integer('last_error_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  primaryKey({ columns: [table.skillId] }),
+  index('skill_search_state_dirty_due_idx').on(table.dirty, table.nextUpdateAt),
+  index('skill_search_state_due_idx').on(table.nextUpdateAt),
+  index('skill_search_state_algo_dirty_idx').on(table.algoVersion, table.dirty),
+  index('skill_search_state_score_idx').on(table.score)
+]);
+
+// ========== Search Terms Index (one row per skill-term) ==========
+export const skillSearchTerms = sqliteTable('skill_search_terms', {
+  skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  term: text('term').notNull(),
+  source: text('source').notNull().default('token'),
+  weight: real('weight').notNull().default(1),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  primaryKey({ columns: [table.skillId, table.term] }),
+  index('skill_search_terms_term_idx').on(table.term),
+  index('skill_search_terms_skill_idx').on(table.skillId),
+  index('skill_search_terms_term_weight_idx').on(table.term, table.weight)
 ]);
 
 // ========== Authors ==========

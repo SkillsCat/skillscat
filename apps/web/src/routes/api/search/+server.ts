@@ -1,13 +1,81 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { CATEGORIES } from '$lib/constants';
-import type { SkillCardData, ApiResponse } from '$lib/types';
+import type { ApiResponse } from '$lib/types';
 import { getCached } from '$lib/server/cache';
+import { computeSearchScore, normalizeSearchText } from '$lib/server/search-precompute';
 
 const MIN_QUERY_LENGTH = 2;
 const MAX_QUERY_LENGTH = 120;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 20;
+const SEARCH_CACHE_TTL_SECONDS = 45;
+const SEARCH_CACHE_KEY_VERSION = 'v4';
+const TERM_CANDIDATE_LIMIT_MULTIPLIER = 4;
+const PREFIX_CANDIDATE_LIMIT_MULTIPLIER = 3;
+const FUZZY_CANDIDATE_LIMIT_MULTIPLIER = 2;
+const CATEGORY_CANDIDATE_LIMIT_MULTIPLIER = 2;
+const MAX_CANDIDATE_LIMIT = 80;
+const MAX_MATCHED_CATEGORIES = 4;
+const MAX_QUERY_TOKENS = 8;
+const MIN_QUERY_TOKEN_LENGTH = 2;
+const TOKEN_SPLIT_REGEX = /[^\p{L}\p{N}]+/u;
+
+let hasSkillSearchStateTable: boolean | null = null;
+let hasSkillSearchTermsTable: boolean | null = null;
+
+interface SearchSuggestionSkill {
+  id: string;
+  name: string;
+  slug: string;
+  repoOwner: string;
+  repoName: string;
+  stars: number;
+  authorAvatar?: string;
+}
+
+type SearchSuggestionCategory = (typeof CATEGORIES)[number];
+
+interface SearchSuggestionsResult {
+  skills: SearchSuggestionSkill[];
+  categories: SearchSuggestionCategory[];
+  total: number;
+}
+
+interface MatchedCategory {
+  slug: string;
+  score: number;
+}
+
+interface SearchCandidateRow {
+  id: string;
+  name: string;
+  slug: string;
+  repoOwner: string | null;
+  repoName: string | null;
+  stars: number | null;
+  authorAvatar: string | null;
+  precomputedScore: number | null;
+  trendingScore: number | null;
+  downloadCount30d: number | null;
+  downloadCount90d: number | null;
+  accessCount30d: number | null;
+  lastCommitAt: number | null;
+  updatedAt: number | null;
+  tier: string | null;
+  matchedCategoryCount?: number | null;
+  matchedTermCount?: number | null;
+  matchedTermWeight?: number | null;
+}
+
+interface RankedCandidate {
+  row: SearchCandidateRow;
+  queryRelevance: number;
+  qualityScore: number;
+  categoryBoost: number;
+  termBoost: number;
+  finalScore: number;
+}
 
 function parseLimit(rawLimit: string | null): number {
   const parsed = Number.parseInt(rawLimit || String(DEFAULT_LIMIT), 10);
@@ -17,9 +85,606 @@ function parseLimit(rawLimit: string | null): number {
   return Math.min(Math.max(parsed, 1), MAX_LIMIT);
 }
 
+function normalizeText(value: string | null | undefined): string {
+  return normalizeSearchText(value);
+}
+
+function splitQueryTokens(query: string): string[] {
+  const normalized = normalizeText(query);
+  if (!normalized) return [];
+
+  const dedup = new Set<string>();
+  for (const token of normalized.split(TOKEN_SPLIT_REGEX)) {
+    const term = normalizeText(token);
+    if (!term || term.length < MIN_QUERY_TOKEN_LENGTH) continue;
+    dedup.add(term);
+    if (dedup.size >= MAX_QUERY_TOKENS) break;
+  }
+
+  return Array.from(dedup);
+}
+
+function getCandidateLimit(limit: number, multiplier: number): number {
+  return Math.min(MAX_CANDIDATE_LIMIT, Math.max(limit, Math.ceil(limit * multiplier)));
+}
+
+function buildExclusionClause(ids: string[], column: string): { sql: string; params: string[] } {
+  const normalizedIds = Array.from(new Set(ids.filter(Boolean)));
+  if (normalizedIds.length === 0) {
+    return { sql: '', params: [] };
+  }
+
+  return {
+    sql: `AND ${column} NOT IN (${normalizedIds.map(() => '?').join(',')})`,
+    params: normalizedIds
+  };
+}
+
+function matchCategories(query: string): MatchedCategory[] {
+  const result: MatchedCategory[] = [];
+
+  for (const category of CATEGORIES) {
+    const slug = normalizeText(category.slug);
+    const name = normalizeText(category.name);
+    const desc = normalizeText(category.description);
+
+    let score = 0;
+    if (slug === query) score = 140;
+    else if (name === query) score = 130;
+    else if (slug.startsWith(query)) score = 115;
+    else if (name.startsWith(query)) score = 110;
+    else if (slug.includes(query)) score = 90;
+    else if (name.includes(query)) score = 88;
+    else if (desc.includes(query)) score = 64;
+
+    if (score === 0) {
+      for (const keyword of category.keywords) {
+        const normalizedKeyword = normalizeText(keyword);
+        if (!normalizedKeyword) continue;
+        if (normalizedKeyword === query) {
+          score = Math.max(score, 104);
+          break;
+        }
+        if (normalizedKeyword.startsWith(query)) {
+          score = Math.max(score, 86);
+          continue;
+        }
+        if (normalizedKeyword.includes(query)) {
+          score = Math.max(score, 72);
+        }
+      }
+    }
+
+    if (score > 0) {
+      result.push({ slug: category.slug, score });
+    }
+  }
+
+  return result
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_MATCHED_CATEGORIES);
+}
+
+function computeQueryRelevance(row: SearchCandidateRow, query: string, queryTokens: string[]): number {
+  const name = normalizeText(row.name);
+  const slug = normalizeText(row.slug);
+  const owner = normalizeText(row.repoOwner);
+  const repo = normalizeText(row.repoName);
+  const combinedRepo = `${owner}/${repo}`;
+
+  let score = 0;
+
+  if (name === query) score = Math.max(score, 130);
+  else if (name.startsWith(query)) score = Math.max(score, 116);
+  else if (name.includes(query)) score = Math.max(score, 84);
+
+  if (slug === query) score = Math.max(score, 122);
+  else if (slug.startsWith(query)) score = Math.max(score, 109);
+  else if (slug.includes(query)) score = Math.max(score, 78);
+
+  if (owner === query) score = Math.max(score, 106);
+  else if (owner.startsWith(query)) score = Math.max(score, 92);
+  else if (owner.includes(query)) score = Math.max(score, 70);
+
+  if (repo === query || combinedRepo === query) score = Math.max(score, 102);
+  else if (repo.startsWith(query) || combinedRepo.startsWith(query)) score = Math.max(score, 88);
+  else if (repo.includes(query) || combinedRepo.includes(query)) score = Math.max(score, 68);
+
+  if (queryTokens.length > 0) {
+    let tokenScore = 0;
+    for (const token of queryTokens) {
+      if (name.includes(token)) tokenScore += 14;
+      else if (slug.includes(token)) tokenScore += 11;
+      else if (repo.includes(token) || owner.includes(token)) tokenScore += 8;
+    }
+    score += Math.min(56, tokenScore);
+  }
+
+  return score;
+}
+
+function getQualityScore(row: SearchCandidateRow): number {
+  if (typeof row.precomputedScore === 'number' && Number.isFinite(row.precomputedScore)) {
+    return Math.max(0, row.precomputedScore);
+  }
+
+  return computeSearchScore({
+    stars: row.stars,
+    trendingScore: row.trendingScore,
+    downloadCount30d: row.downloadCount30d,
+    downloadCount90d: row.downloadCount90d,
+    accessCount30d: row.accessCount30d,
+    lastCommitAt: row.lastCommitAt,
+    updatedAt: row.updatedAt,
+    tier: row.tier
+  });
+}
+
+function toSuggestionSkill(row: SearchCandidateRow): SearchSuggestionSkill {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    repoOwner: row.repoOwner || '',
+    repoName: row.repoName || '',
+    stars: Number(row.stars || 0),
+    authorAvatar: row.authorAvatar || undefined
+  };
+}
+
+function rankCandidates(
+  query: string,
+  queryTokens: string[],
+  textRows: SearchCandidateRow[],
+  categoryRows: SearchCandidateRow[],
+  limit: number
+): SearchSuggestionSkill[] {
+  const merged = new Map<string, RankedCandidate>();
+
+  const upsert = (row: SearchCandidateRow, fromCategoryRecall: boolean) => {
+    const qualityScore = getQualityScore(row);
+    const queryRelevance = computeQueryRelevance(row, query, queryTokens);
+    const matchedCategoryCount = Math.max(0, Number(row.matchedCategoryCount || 0));
+    const categoryBoost = matchedCategoryCount > 0
+      ? Math.min(48, 30 + (matchedCategoryCount - 1) * 8)
+      : 0;
+
+    const matchedTermCount = Math.max(0, Number(row.matchedTermCount || 0));
+    const matchedTermWeight = Math.max(0, Number(row.matchedTermWeight || 0));
+    const termBoost = Math.min(120, matchedTermCount * 20 + matchedTermWeight * 7);
+
+    const sourceBoost = fromCategoryRecall ? 0 : 10;
+    const finalScore = queryRelevance * 100 + qualityScore * 10 + categoryBoost + termBoost + sourceBoost;
+
+    const existing = merged.get(row.id);
+    if (!existing || finalScore > existing.finalScore) {
+      merged.set(row.id, {
+        row,
+        queryRelevance,
+        qualityScore,
+        categoryBoost,
+        termBoost,
+        finalScore
+      });
+    }
+  };
+
+  for (const row of textRows) {
+    upsert(row, false);
+  }
+  for (const row of categoryRows) {
+    upsert(row, true);
+  }
+
+  return Array.from(merged.values())
+    .sort((a, b) => {
+      if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
+      if (b.queryRelevance !== a.queryRelevance) return b.queryRelevance - a.queryRelevance;
+      if (b.termBoost !== a.termBoost) return b.termBoost - a.termBoost;
+      if (b.qualityScore !== a.qualityScore) return b.qualityScore - a.qualityScore;
+      return Number(b.row.stars || 0) - Number(a.row.stars || 0);
+    })
+    .slice(0, limit)
+    .map((candidate) => toSuggestionSkill(candidate.row));
+}
+
+async function fetchTermCandidates(
+  db: D1Database,
+  queryTokens: string[],
+  limit: number,
+  useSearchState: boolean
+): Promise<SearchCandidateRow[]> {
+  if (queryTokens.length === 0) return [];
+
+  const candidateLimit = getCandidateLimit(limit, TERM_CANDIDATE_LIMIT_MULTIPLIER);
+  const exactLimit = Math.min(candidateLimit, Math.max(limit, Math.ceil(candidateLimit * 0.65)));
+
+  const searchStateJoinSql = useSearchState ? 'LEFT JOIN skill_search_state ss ON ss.skill_id = s.id' : '';
+  const searchScoreSelectSql = useSearchState ? 'ss.score as precomputedScore' : 'NULL as precomputedScore';
+  const searchScoreOrderSql = useSearchState ? 'COALESCE(ss.score, 0) DESC,' : '';
+
+  const tokenPlaceholders = queryTokens.map(() => '?').join(',');
+
+  const exactRows = await db.prepare(`
+    SELECT
+      s.id,
+      s.name,
+      s.slug,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.stars,
+      a.avatar_url as authorAvatar,
+      ${searchScoreSelectSql},
+      s.trending_score as trendingScore,
+      s.download_count_30d as downloadCount30d,
+      s.download_count_90d as downloadCount90d,
+      s.access_count_30d as accessCount30d,
+      s.last_commit_at as lastCommitAt,
+      s.updated_at as updatedAt,
+      s.tier,
+      COUNT(DISTINCT st.term) as matchedTermCount,
+      MAX(st.weight) as matchedTermWeight
+    FROM skill_search_terms st
+    INNER JOIN skills s ON s.id = st.skill_id
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    ${searchStateJoinSql}
+    WHERE s.visibility = 'public'
+      AND st.term IN (${tokenPlaceholders})
+    GROUP BY s.id
+    ORDER BY
+      matchedTermCount DESC,
+      matchedTermWeight DESC,
+      ${searchScoreOrderSql}
+      s.trending_score DESC
+    LIMIT ?
+  `)
+    .bind(...queryTokens, exactLimit)
+    .all<SearchCandidateRow>();
+
+  const merged = new Map<string, SearchCandidateRow>();
+  for (const row of exactRows.results || []) {
+    merged.set(row.id, row);
+  }
+
+  const remaining = Math.max(0, candidateLimit - merged.size);
+  if (remaining <= 0) {
+    return Array.from(merged.values());
+  }
+
+  const prefixPredicates = queryTokens.map(() => 'st.term LIKE ?').join(' OR ');
+  const exclusion = buildExclusionClause(Array.from(merged.keys()), 's.id');
+
+  const prefixRows = await db.prepare(`
+    SELECT
+      s.id,
+      s.name,
+      s.slug,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.stars,
+      a.avatar_url as authorAvatar,
+      ${searchScoreSelectSql},
+      s.trending_score as trendingScore,
+      s.download_count_30d as downloadCount30d,
+      s.download_count_90d as downloadCount90d,
+      s.access_count_30d as accessCount30d,
+      s.last_commit_at as lastCommitAt,
+      s.updated_at as updatedAt,
+      s.tier,
+      COUNT(DISTINCT st.term) as matchedTermCount,
+      MAX(st.weight) as matchedTermWeight
+    FROM skill_search_terms st
+    INNER JOIN skills s ON s.id = st.skill_id
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    ${searchStateJoinSql}
+    WHERE s.visibility = 'public'
+      AND (${prefixPredicates})
+      ${exclusion.sql}
+    GROUP BY s.id
+    ORDER BY
+      matchedTermCount DESC,
+      matchedTermWeight DESC,
+      ${searchScoreOrderSql}
+      s.trending_score DESC
+    LIMIT ?
+  `)
+    .bind(...queryTokens.map((token) => `${token}%`), ...exclusion.params, remaining)
+    .all<SearchCandidateRow>();
+
+  for (const row of prefixRows.results || []) {
+    if (!merged.has(row.id)) {
+      merged.set(row.id, row);
+    }
+  }
+
+  return Array.from(merged.values());
+}
+
+async function fetchTextCandidates(
+  db: D1Database,
+  query: string,
+  limit: number,
+  useSearchState: boolean,
+  excludedIds: string[]
+): Promise<SearchCandidateRow[]> {
+  const prefixQuery = `${query}%`;
+  const fuzzyQuery = `%${query}%`;
+
+  const prefixLimit = getCandidateLimit(limit, PREFIX_CANDIDATE_LIMIT_MULTIPLIER);
+  const fuzzyLimit = getCandidateLimit(limit, FUZZY_CANDIDATE_LIMIT_MULTIPLIER);
+
+  const searchStateJoinSql = useSearchState ? 'LEFT JOIN skill_search_state ss ON ss.skill_id = s.id' : '';
+  const searchScoreSelectSql = useSearchState ? 'ss.score as precomputedScore' : 'NULL as precomputedScore';
+  const searchScoreOrderSql = useSearchState ? 'COALESCE(ss.score, 0) DESC,' : '';
+  const prefixExclusion = buildExclusionClause(excludedIds, 's.id');
+
+  const prefixRows = await db.prepare(`
+    SELECT
+      s.id,
+      s.name,
+      s.slug,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.stars,
+      a.avatar_url as authorAvatar,
+      ${searchScoreSelectSql},
+      s.trending_score as trendingScore,
+      s.download_count_30d as downloadCount30d,
+      s.download_count_90d as downloadCount90d,
+      s.access_count_30d as accessCount30d,
+      s.last_commit_at as lastCommitAt,
+      s.updated_at as updatedAt,
+      s.tier
+    FROM skills s
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    ${searchStateJoinSql}
+    WHERE s.visibility = 'public'
+      AND (
+        s.name LIKE ?
+        OR s.slug LIKE ?
+        OR s.repo_owner LIKE ?
+        OR s.repo_name LIKE ?
+      )
+      ${prefixExclusion.sql}
+    ORDER BY
+      CASE
+        WHEN s.name = ? THEN 0
+        WHEN s.slug = ? THEN 1
+        WHEN s.repo_owner = ? THEN 2
+        WHEN s.repo_name = ? THEN 3
+        WHEN s.name LIKE ? THEN 4
+        WHEN s.slug LIKE ? THEN 5
+        WHEN s.repo_owner LIKE ? THEN 6
+        WHEN s.repo_name LIKE ? THEN 7
+        ELSE 8
+      END ASC,
+      ${searchScoreOrderSql}
+      s.trending_score DESC
+    LIMIT ?
+  `).bind(
+    prefixQuery,
+    prefixQuery,
+    prefixQuery,
+    prefixQuery,
+    ...prefixExclusion.params,
+    query,
+    query,
+    query,
+    query,
+    prefixQuery,
+    prefixQuery,
+    prefixQuery,
+    prefixQuery,
+    prefixLimit
+  ).all<SearchCandidateRow>();
+
+  const merged = new Map<string, SearchCandidateRow>();
+  for (const row of prefixRows.results || []) {
+    merged.set(row.id, row);
+  }
+
+  const remaining = Math.max(0, fuzzyLimit - merged.size);
+  if (remaining <= 0) {
+    return Array.from(merged.values());
+  }
+
+  const fuzzyExclusion = buildExclusionClause(
+    [...excludedIds, ...Array.from(merged.keys())],
+    's.id'
+  );
+
+  const fuzzyRows = await db.prepare(`
+    SELECT
+      s.id,
+      s.name,
+      s.slug,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.stars,
+      a.avatar_url as authorAvatar,
+      ${searchScoreSelectSql},
+      s.trending_score as trendingScore,
+      s.download_count_30d as downloadCount30d,
+      s.download_count_90d as downloadCount90d,
+      s.access_count_30d as accessCount30d,
+      s.last_commit_at as lastCommitAt,
+      s.updated_at as updatedAt,
+      s.tier
+    FROM skills s
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    ${searchStateJoinSql}
+    WHERE s.visibility = 'public'
+      AND (
+        s.name LIKE ?
+        OR s.slug LIKE ?
+        OR s.repo_owner LIKE ?
+        OR s.repo_name LIKE ?
+      )
+      ${fuzzyExclusion.sql}
+    ORDER BY
+      ${searchScoreOrderSql}
+      s.trending_score DESC
+    LIMIT ?
+  `).bind(
+    fuzzyQuery,
+    fuzzyQuery,
+    fuzzyQuery,
+    fuzzyQuery,
+    ...fuzzyExclusion.params,
+    remaining
+  ).all<SearchCandidateRow>();
+
+  for (const row of fuzzyRows.results || []) {
+    if (!merged.has(row.id)) {
+      merged.set(row.id, row);
+    }
+  }
+
+  return Array.from(merged.values());
+}
+
+async function fetchCategoryCandidates(
+  db: D1Database,
+  categorySlugs: string[],
+  limit: number,
+  excludedIds: string[],
+  useSearchState: boolean
+): Promise<SearchCandidateRow[]> {
+  if (categorySlugs.length === 0) return [];
+
+  const placeholders = categorySlugs.map(() => '?').join(',');
+  const exclusion = buildExclusionClause(excludedIds, 's.id');
+  const categoryLimit = getCandidateLimit(limit, CATEGORY_CANDIDATE_LIMIT_MULTIPLIER);
+
+  const searchStateJoinSql = useSearchState ? 'LEFT JOIN skill_search_state ss ON ss.skill_id = s.id' : '';
+  const searchScoreSelectSql = useSearchState ? 'ss.score as precomputedScore' : 'NULL as precomputedScore';
+  const searchScoreOrderSql = useSearchState ? 'COALESCE(ss.score, 0) DESC,' : '';
+
+  const sql = `
+    SELECT
+      s.id,
+      s.name,
+      s.slug,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.stars,
+      a.avatar_url as authorAvatar,
+      ${searchScoreSelectSql},
+      s.trending_score as trendingScore,
+      s.download_count_30d as downloadCount30d,
+      s.download_count_90d as downloadCount90d,
+      s.access_count_30d as accessCount30d,
+      s.last_commit_at as lastCommitAt,
+      s.updated_at as updatedAt,
+      s.tier,
+      COUNT(DISTINCT sc.category_slug) as matchedCategoryCount
+    FROM skill_categories sc
+    INNER JOIN skills s ON s.id = sc.skill_id
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    ${searchStateJoinSql}
+    WHERE s.visibility = 'public'
+      AND sc.category_slug IN (${placeholders})
+      ${exclusion.sql}
+    GROUP BY s.id
+    ORDER BY
+      COUNT(DISTINCT sc.category_slug) DESC,
+      ${searchScoreOrderSql}
+      s.trending_score DESC
+    LIMIT ?
+  `;
+
+  const params: (string | number)[] = [
+    ...categorySlugs,
+    ...exclusion.params,
+    categoryLimit
+  ];
+
+  const result = await db.prepare(sql).bind(...params).all<SearchCandidateRow>();
+  return result.results || [];
+}
+
+async function resolveSearchTableSupport(db: D1Database): Promise<{ searchState: boolean; searchTerms: boolean }> {
+  if (hasSkillSearchStateTable !== null && hasSkillSearchTermsTable !== null) {
+    return { searchState: hasSkillSearchStateTable, searchTerms: hasSkillSearchTermsTable };
+  }
+
+  try {
+    const result = await db.prepare(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name IN ('skill_search_state', 'skill_search_terms')
+    `).all<{ name: string }>();
+
+    const names = new Set((result.results || []).map((row) => row.name));
+    hasSkillSearchStateTable = names.has('skill_search_state');
+    hasSkillSearchTermsTable = names.has('skill_search_terms');
+  } catch {
+    hasSkillSearchStateTable = false;
+    hasSkillSearchTermsTable = false;
+  }
+
+  return {
+    searchState: Boolean(hasSkillSearchStateTable),
+    searchTerms: Boolean(hasSkillSearchTermsTable)
+  };
+}
+
+async function fetchSuggestions(db: D1Database, query: string, limit: number): Promise<SearchSuggestionsResult> {
+  const tableSupport = await resolveSearchTableSupport(db);
+  const queryTokens = splitQueryTokens(query);
+
+  const matchedCategories = matchCategories(query);
+  const matchedCategorySlugs = matchedCategories.map((item) => item.slug);
+  const matchedCategoryMap = new Map(matchedCategorySlugs.map((slug, index) => [slug, index]));
+  const matchedCategoryItems = CATEGORIES
+    .filter((category) => matchedCategoryMap.has(category.slug))
+    .sort((a, b) => (matchedCategoryMap.get(a.slug) ?? 0) - (matchedCategoryMap.get(b.slug) ?? 0));
+
+  const textCandidates = new Map<string, SearchCandidateRow>();
+
+  if (tableSupport.searchTerms && queryTokens.length > 0) {
+    const termCandidates = await fetchTermCandidates(db, queryTokens, limit, tableSupport.searchState);
+    for (const row of termCandidates) {
+      textCandidates.set(row.id, row);
+    }
+  }
+
+  if (textCandidates.size < limit) {
+    const fallbackRows = await fetchTextCandidates(
+      db,
+      query,
+      limit,
+      tableSupport.searchState,
+      Array.from(textCandidates.keys())
+    );
+
+    for (const row of fallbackRows) {
+      if (!textCandidates.has(row.id)) {
+        textCandidates.set(row.id, row);
+      }
+    }
+  }
+
+  const mergedTextCandidates = Array.from(textCandidates.values());
+  const categoryCandidates = await fetchCategoryCandidates(
+    db,
+    matchedCategorySlugs,
+    limit,
+    mergedTextCandidates.map((row) => row.id),
+    tableSupport.searchState
+  );
+
+  const rankedSkills = rankCandidates(query, queryTokens, mergedTextCandidates, categoryCandidates, limit);
+  return {
+    skills: rankedSkills,
+    categories: matchedCategoryItems,
+    total: rankedSkills.length
+  };
+}
+
 export const GET: RequestHandler = async ({ url, platform }) => {
   try {
-    const query = (url.searchParams.get('q') || '').trim().toLowerCase().slice(0, MAX_QUERY_LENGTH);
+    const query = normalizeText((url.searchParams.get('q') || '').slice(0, MAX_QUERY_LENGTH));
     const limit = parseLimit(url.searchParams.get('limit'));
 
     if (!query || query.length < MIN_QUERY_LENGTH) {
@@ -34,83 +699,20 @@ export const GET: RequestHandler = async ({ url, platform }) => {
     }
 
     const db = platform?.env?.DB;
-
     const { data, hit } = await getCached(
-      `api:search:${query}:${limit}`,
+      `api:search:${SEARCH_CACHE_KEY_VERSION}:${query}:${limit}`,
       async () => {
-        // Search categories (from constants)
-        const matchedCategories = CATEGORIES.filter(
-          (c) =>
-            c.name.toLowerCase().includes(query) ||
-            c.description.toLowerCase().includes(query) ||
-            c.keywords.some((k) => k.includes(query))
-        ).slice(0, 5);
-
-        // Search skills from D1 database
-        let skills: SkillCardData[] = [];
-
-        if (db) {
-          try {
-            const result = await db.prepare(`
-              SELECT
-                s.id,
-                s.name,
-                s.slug,
-                s.description,
-                s.repo_owner as repoOwner,
-                s.repo_name as repoName,
-                s.stars,
-                s.forks,
-                s.trending_score as trendingScore,
-                COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-                GROUP_CONCAT(sc.category_slug) as categories,
-                a.avatar_url as authorAvatar
-              FROM skills s
-              LEFT JOIN skill_categories sc ON s.id = sc.skill_id
-              LEFT JOIN authors a ON s.repo_owner = a.username
-              WHERE (s.name LIKE ? OR s.description LIKE ?)
-                AND s.visibility = 'public'
-              GROUP BY s.id
-              ORDER BY s.trending_score DESC
-              LIMIT ?
-            `).bind(`%${query}%`, `%${query}%`, limit).all<{
-              id: string;
-              name: string;
-              slug: string;
-              description: string | null;
-              repoOwner: string;
-              repoName: string;
-              stars: number;
-              forks: number;
-              trendingScore: number;
-              updatedAt: number;
-              categories: string | null;
-              authorAvatar: string | null;
-            }>();
-
-            skills = (result.results || []).map(row => ({
-              id: row.id,
-              name: row.name,
-              slug: row.slug,
-              description: row.description,
-              repoOwner: row.repoOwner,
-              repoName: row.repoName,
-              stars: row.stars,
-              forks: row.forks,
-              trendingScore: row.trendingScore,
-              updatedAt: row.updatedAt,
-              categories: row.categories ? row.categories.split(',') : [],
-              authorAvatar: row.authorAvatar || undefined
-            }));
-          } catch {
-            // Database query failed, return empty results
-          }
+        if (!db) {
+          return { skills: [], categories: [], total: 0 } satisfies SearchSuggestionsResult;
         }
 
-        const total = skills.length + matchedCategories.length;
-        return { skills, categories: matchedCategories, total };
+        try {
+          return await fetchSuggestions(db, query, limit);
+        } catch {
+          return { skills: [], categories: [], total: 0 } satisfies SearchSuggestionsResult;
+        }
       },
-      30
+      SEARCH_CACHE_TTL_SECONDS
     );
 
     return json({
@@ -122,9 +724,9 @@ export const GET: RequestHandler = async ({ url, platform }) => {
       meta: {
         total: data.total
       }
-    } satisfies ApiResponse<{ skills: SkillCardData[]; categories: typeof data.categories }>, {
+    } satisfies ApiResponse<{ skills: SearchSuggestionSkill[]; categories: SearchSuggestionCategory[] }>, {
       headers: {
-        'Cache-Control': 'public, max-age=30, stale-while-revalidate=90',
+        'Cache-Control': `public, max-age=${SEARCH_CACHE_TTL_SECONDS}, stale-while-revalidate=90`,
         'X-Cache': hit ? 'HIT' : 'MISS'
       }
     });

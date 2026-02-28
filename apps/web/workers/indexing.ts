@@ -48,6 +48,7 @@ const log = createLogger('Indexing');
 const MAX_FILES = 50;              // 最大文件数
 const MAX_FILE_SIZE = 512 * 1024;  // 单文件最大 512KB
 const MAX_TOTAL_SIZE = 5 * 1024 * 1024; // 总大小最大 5MB
+const INDEXING_RECENT_SUCCESS_TTL_SECONDS = 5 * 60;
 
 // ============================================
 // YAML Frontmatter Parsing
@@ -1139,6 +1140,25 @@ function extractFrontmatterCategories(frontmatter: SkillFrontmatter | null): str
   return [...new Set(categories)].filter(Boolean);
 }
 
+function getMessageDedupKey(message: IndexingMessage): string {
+  const owner = message.repoOwner.toLowerCase();
+  const repo = message.repoName.toLowerCase();
+  const path = (message.skillPath || '').toLowerCase();
+  return `${owner}/${repo}:${path}`;
+}
+
+async function wasProcessedRecently(env: IndexingEnv, dedupKey: string): Promise<boolean> {
+  const key = `indexing:recent:${dedupKey}`;
+  return (await env.KV.get(key)) !== null;
+}
+
+async function markProcessedRecently(env: IndexingEnv, dedupKey: string): Promise<void> {
+  const key = `indexing:recent:${dedupKey}`;
+  await env.KV.put(key, '1', {
+    expirationTtl: INDEXING_RECENT_SUCCESS_TTL_SECONDS,
+  });
+}
+
 async function processMessage(
   message: IndexingMessage,
   env: IndexingEnv
@@ -1423,11 +1443,33 @@ export default {
     _ctx: ExecutionContext
   ): Promise<void> {
     log.log(`Processing batch of ${batch.messages.length} messages`);
+    const seenInBatch = new Set<string>();
 
     for (const message of batch.messages) {
+      const dedupKey = getMessageDedupKey(message.body);
+
+      if (seenInBatch.has(dedupKey) && !message.body.forceReindex) {
+        log.log(`Skipping duplicate message in batch: ${dedupKey}`);
+        message.ack();
+        continue;
+      }
+      seenInBatch.add(dedupKey);
+
       try {
+        if (!message.body.forceReindex) {
+          const processedRecently = await wasProcessedRecently(env, dedupKey);
+          if (processedRecently) {
+            log.log(`Skipping recently processed message: ${dedupKey}`);
+            message.ack();
+            continue;
+          }
+        }
+
         log.log(`Processing message ID: ${message.id}`);
         await processMessage(message.body, env);
+        if (!message.body.forceReindex) {
+          await markProcessedRecently(env, dedupKey);
+        }
         message.ack();
         log.log(`Message acknowledged: ${message.id}`);
       } catch (error) {

@@ -14,6 +14,7 @@
  *   pnpm init:project              # 交互式初始化 (本地开发)
  *   pnpm init:project --local      # 仅本地配置 (不创建 Cloudflare 资源)
  *   pnpm init:project --production # 生产环境配置 (创建资源 + 设置 secrets)
+ *   pnpm init:project --workers trending,search-precompute # 仅初始化指定 workers
  *   pnpm init:project --force      # 强制覆盖现有配置
  *   pnpm init:project --production --dry-run # 预演生产初始化，不执行写入
  */
@@ -31,24 +32,14 @@ const WEB_DIR = resolve(ROOT_DIR, 'apps/web');
 let SELECTED_ACCOUNT_ID = '';
 let DRY_RUN = false;
 
-// Workers 列表 (用于生产环境设置 secrets)
-const WORKERS = [
-  'skillscat-web-production',
-  'skillscat-github-events-production',
-  'skillscat-indexing-production',
-  'skillscat-classification-production',
-  'skillscat-trending-production',
-  'skillscat-tier-recalc-production',
-  'skillscat-archive-production',
-  'skillscat-resurrection-production',
-];
-
+// 生产环境 worker 名称映射
 const PRODUCTION_WORKER_NAMES = {
   'wrangler.preview.toml': 'skillscat-web-production',
   'wrangler.github-events.toml': 'skillscat-github-events-production',
   'wrangler.indexing.toml': 'skillscat-indexing-production',
   'wrangler.classification.toml': 'skillscat-classification-production',
   'wrangler.trending.toml': 'skillscat-trending-production',
+  'wrangler.search-precompute.toml': 'skillscat-search-precompute-production',
   'wrangler.tier-recalc.toml': 'skillscat-tier-recalc-production',
   'wrangler.archive.toml': 'skillscat-archive-production',
   'wrangler.resurrection.toml': 'skillscat-resurrection-production',
@@ -61,10 +52,64 @@ const CONFIG_FILES = [
   'wrangler.indexing.toml',
   'wrangler.classification.toml',
   'wrangler.trending.toml',
+  'wrangler.search-precompute.toml',
   'wrangler.tier-recalc.toml',
   'wrangler.archive.toml',
   'wrangler.resurrection.toml',
 ];
+
+const R2_REQUIRED_WORKERS = new Set([
+  'preview',
+  'github-events',
+  'indexing',
+  'classification',
+  'trending',
+  'tier-recalc',
+  'archive',
+  'resurrection',
+]);
+
+const KV_REQUIRED_WORKERS = new Set([
+  'preview',
+  'github-events',
+  'indexing',
+  'classification',
+  'trending',
+  'tier-recalc',
+  'archive',
+  'resurrection',
+]);
+
+const QUEUE_REQUIRED_WORKERS = new Set([
+  'preview',
+  'github-events',
+  'indexing',
+  'classification',
+]);
+
+const REQUIRED_SECRETS_BY_WORKER = {
+  preview: ['BETTER_AUTH_SECRET', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'GITHUB_TOKEN'],
+  'github-events': ['GITHUB_TOKEN'],
+  indexing: ['GITHUB_TOKEN'],
+  classification: [],
+  trending: ['GITHUB_TOKEN'],
+  'search-precompute': ['WORKER_SECRET'],
+  'tier-recalc': [],
+  archive: [],
+  resurrection: ['GITHUB_TOKEN'],
+};
+
+const OPTIONAL_SECRETS_BY_WORKER = {
+  preview: [],
+  'github-events': [],
+  indexing: [],
+  classification: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY'],
+  trending: [],
+  'search-precompute': [],
+  'tier-recalc': [],
+  archive: [],
+  resurrection: [],
+};
 
 // 颜色输出
 const colors = {
@@ -77,6 +122,136 @@ const colors = {
   cyan: '\x1b[36m',
   gray: '\x1b[90m',
 };
+
+function splitListArg(value) {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getWorkerKeyFromConfigFile(configFile) {
+  const match = /^wrangler\.(.+)\.toml$/.exec(configFile);
+  return match ? match[1] : configFile;
+}
+
+function resolveSelectedWorkers(args) {
+  const requested = [];
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--workers' || arg === '--worker') {
+      const value = args[i + 1];
+      if (!value) {
+        throw new Error(`${arg} requires a value`);
+      }
+      requested.push(...splitListArg(value));
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--workers=')) {
+      requested.push(...splitListArg(arg.slice('--workers='.length)));
+      continue;
+    }
+
+    if (arg.startsWith('--worker=')) {
+      requested.push(...splitListArg(arg.slice('--worker='.length)));
+    }
+  }
+
+  if (requested.length === 0) {
+    return null;
+  }
+
+  const aliasToKey = new Map();
+  for (const configFile of CONFIG_FILES) {
+    const workerKey = getWorkerKeyFromConfigFile(configFile);
+    const productionName = PRODUCTION_WORKER_NAMES[configFile];
+
+    aliasToKey.set(workerKey.toLowerCase(), workerKey);
+    aliasToKey.set(configFile.toLowerCase(), workerKey);
+    if (productionName) {
+      aliasToKey.set(productionName.toLowerCase(), workerKey);
+    }
+  }
+  aliasToKey.set('web', 'preview');
+
+  const selected = [];
+  const unknown = [];
+  const seen = new Set();
+
+  for (const rawValue of requested) {
+    const value = rawValue.trim();
+    if (!value) continue;
+    const resolved = aliasToKey.get(value.toLowerCase());
+    if (!resolved) {
+      unknown.push(value);
+      continue;
+    }
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    selected.push(resolved);
+  }
+
+  if (unknown.length > 0) {
+    const allowed = CONFIG_FILES.map((file) => getWorkerKeyFromConfigFile(file)).join(', ');
+    throw new Error(`Unknown worker(s): ${unknown.join(', ')}. Allowed values: ${allowed}`);
+  }
+
+  return selected;
+}
+
+function getSelectedConfigFiles(selectedWorkerKeys) {
+  if (!selectedWorkerKeys || selectedWorkerKeys.length === 0) {
+    return [...CONFIG_FILES];
+  }
+
+  const selectedSet = new Set(selectedWorkerKeys);
+  return CONFIG_FILES.filter((configFile) => selectedSet.has(getWorkerKeyFromConfigFile(configFile)));
+}
+
+function getSelectedProductionWorkers(selectedConfigFiles) {
+  return selectedConfigFiles
+    .map((configFile) => PRODUCTION_WORKER_NAMES[configFile])
+    .filter(Boolean);
+}
+
+function getRequiredResources(selectedWorkerKeys) {
+  const workerKeys = selectedWorkerKeys && selectedWorkerKeys.length > 0
+    ? selectedWorkerKeys
+    : CONFIG_FILES.map((configFile) => getWorkerKeyFromConfigFile(configFile));
+
+  const needsD1 = workerKeys.length > 0;
+  const needsR2 = workerKeys.some((key) => R2_REQUIRED_WORKERS.has(key));
+  const needsKV = workerKeys.some((key) => KV_REQUIRED_WORKERS.has(key));
+  const needsQueues = workerKeys.some((key) => QUEUE_REQUIRED_WORKERS.has(key));
+
+  return { needsD1, needsR2, needsKV, needsQueues };
+}
+
+function getSecretRequirements(selectedWorkerKeys) {
+  const workerKeys = selectedWorkerKeys && selectedWorkerKeys.length > 0
+    ? selectedWorkerKeys
+    : CONFIG_FILES.map((configFile) => getWorkerKeyFromConfigFile(configFile));
+
+  const required = new Set();
+  const optional = new Set();
+
+  for (const workerKey of workerKeys) {
+    for (const key of (REQUIRED_SECRETS_BY_WORKER[workerKey] || [])) {
+      required.add(key);
+    }
+    for (const key of (OPTIONAL_SECRETS_BY_WORKER[workerKey] || [])) {
+      optional.add(key);
+    }
+  }
+
+  return {
+    required: Array.from(required),
+    optional: Array.from(optional),
+  };
+}
 
 function logStep(step, message) {
   console.log(`\n${colors.cyan}[${step}]${colors.reset} ${colors.bold}${message}${colors.reset}`);
@@ -285,13 +460,14 @@ function runWrangler(args, options = {}) {
 
 /**
  * 复制 wrangler 配置文件 (从 example 复制)
+ * @param {string[]} configFiles - 目标配置文件列表
  * @param {boolean} force - 强制覆盖
  */
-function copyWranglerConfigs(force = false) {
+function copyWranglerConfigs(configFiles, force = false) {
   const copied = [];
   const skipped = [];
 
-  for (const config of CONFIG_FILES) {
+  for (const config of configFiles) {
     const examplePath = resolve(WEB_DIR, `${config}.example`);
     const targetPath = resolve(WEB_DIR, config);
 
@@ -466,11 +642,30 @@ TRENDING_STAR_WEIGHT = "1.0"
 TRENDING_FORK_WEIGHT = "2.0"
 TRENDING_VIEW_WEIGHT = "0.1"
 CACHE_VERSION = "v1"
+`.trim(),
+  'wrangler.search-precompute.toml': `
+[env.production]
+name = "skillscat-search-precompute-production"
+
+[env.production.triggers]
+crons = ["15 * * * *"]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[env.production.vars]
 APP_ORIGIN = "https://your-domain.com"
-RELATED_PRECOMPUTE_ENABLED = "0"
+RELATED_PRECOMPUTE_ENABLED = "1"
 RELATED_PRECOMPUTE_MAX_PER_RUN = "200"
 RELATED_PRECOMPUTE_TIME_BUDGET_MS = "15000"
+RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS = "2500"
 RELATED_ALGO_VERSION = "v1"
+SEARCH_PRECOMPUTE_ENABLED = "1"
+SEARCH_PRECOMPUTE_MAX_PER_RUN = "500"
+SEARCH_PRECOMPUTE_TIME_BUDGET_MS = "10000"
+SEARCH_PRECOMPUTE_ALGO_VERSION = "v1"
 `.trim(),
   'wrangler.tier-recalc.toml': `
 [env.production]
@@ -823,46 +1018,64 @@ function upsertTomlVarsEntries(configFile, blockHeader, entries) {
   return { exists: true, updated: true };
 }
 
-function ensureRelatedWorkerEnvVars({ productionAppUrl, includeProductionVars = true } = {}) {
+function ensurePrecomputeWorkerEnvVars({
+  productionAppUrl,
+  includeProductionVars = true,
+  includePreview = true,
+  includeSearchPrecompute = true,
+} = {}) {
   const results = [];
 
-  results.push(
-    upsertTomlVarsEntries('wrangler.preview.toml', '[vars]', {
-      RELATED_ALGO_VERSION: 'v1',
-    }),
-  );
-  if (includeProductionVars) {
+  if (includePreview) {
     results.push(
-      upsertTomlVarsEntries('wrangler.preview.toml', '[env.production.vars]', {
-        CACHE_VERSION: 'v1',
+      upsertTomlVarsEntries('wrangler.preview.toml', '[vars]', {
         RELATED_ALGO_VERSION: 'v1',
+      }),
+    );
+
+    if (includeProductionVars) {
+      results.push(
+        upsertTomlVarsEntries('wrangler.preview.toml', '[env.production.vars]', {
+          CACHE_VERSION: 'v1',
+          RELATED_ALGO_VERSION: 'v1',
+        }),
+      );
+    }
+  }
+
+  if (includeSearchPrecompute) {
+    results.push(
+      upsertTomlVarsEntries('wrangler.search-precompute.toml', '[vars]', {
+        APP_ORIGIN: 'http://localhost:3000',
+        RELATED_PRECOMPUTE_ENABLED: '1',
+        RELATED_PRECOMPUTE_MAX_PER_RUN: '200',
+        RELATED_PRECOMPUTE_TIME_BUDGET_MS: '15000',
+        RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS: '2500',
+        RELATED_ALGO_VERSION: 'v1',
+        SEARCH_PRECOMPUTE_ENABLED: '1',
+        SEARCH_PRECOMPUTE_MAX_PER_RUN: '500',
+        SEARCH_PRECOMPUTE_TIME_BUDGET_MS: '10000',
+        SEARCH_PRECOMPUTE_ALGO_VERSION: 'v1',
       }),
     );
   }
 
-  results.push(
-    upsertTomlVarsEntries('wrangler.trending.toml', '[vars]', {
-      CACHE_VERSION: 'v1',
-      APP_ORIGIN: 'https://skills.cat',
-      RELATED_PRECOMPUTE_ENABLED: '0',
-      RELATED_PRECOMPUTE_MAX_PER_RUN: '200',
-      RELATED_PRECOMPUTE_TIME_BUDGET_MS: '15000',
-      RELATED_ALGO_VERSION: 'v1',
-    }),
-  );
-
-  if (includeProductionVars) {
-    const trendingProductionVars = {
-      CACHE_VERSION: 'v1',
+  if (includeProductionVars && includeSearchPrecompute) {
+    const precomputeProductionVars = {
       APP_ORIGIN: productionAppUrl || 'https://your-domain.com',
-      RELATED_PRECOMPUTE_ENABLED: '0',
+      RELATED_PRECOMPUTE_ENABLED: '1',
       RELATED_PRECOMPUTE_MAX_PER_RUN: '200',
       RELATED_PRECOMPUTE_TIME_BUDGET_MS: '15000',
+      RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS: '2500',
       RELATED_ALGO_VERSION: 'v1',
+      SEARCH_PRECOMPUTE_ENABLED: '1',
+      SEARCH_PRECOMPUTE_MAX_PER_RUN: '500',
+      SEARCH_PRECOMPUTE_TIME_BUDGET_MS: '10000',
+      SEARCH_PRECOMPUTE_ALGO_VERSION: 'v1',
     };
 
     results.push(
-      upsertTomlVarsEntries('wrangler.trending.toml', '[env.production.vars]', trendingProductionVars),
+      upsertTomlVarsEntries('wrangler.search-precompute.toml', '[env.production.vars]', precomputeProductionVars),
     );
   }
 
@@ -1277,6 +1490,32 @@ async function main() {
   const isProduction = args.includes('--production');
   const force = args.includes('--force');
   const dryRun = args.includes('--dry-run');
+  const selectedWorkerKeys = resolveSelectedWorkers(args);
+  const hasWorkerSelection = Array.isArray(selectedWorkerKeys) && selectedWorkerKeys.length > 0;
+  const selectedConfigFiles = getSelectedConfigFiles(selectedWorkerKeys);
+  const selectedProductionWorkers = getSelectedProductionWorkers(selectedConfigFiles);
+  const requiredResources = getRequiredResources(selectedWorkerKeys);
+  const secretRequirements = getSecretRequirements(selectedWorkerKeys);
+  const requiredSecretKeys = new Set(secretRequirements.required);
+  const optionalSecretKeys = new Set(secretRequirements.optional);
+  const needsSecretSetup = requiredSecretKeys.size > 0 || optionalSecretKeys.size > 0;
+  const needsBetterAuthSecret = requiredSecretKeys.has('BETTER_AUTH_SECRET');
+  const needsWorkerSecret = requiredSecretKeys.has('WORKER_SECRET');
+  const needsGitHubClientId = requiredSecretKeys.has('GITHUB_CLIENT_ID');
+  const needsGitHubClientSecret = requiredSecretKeys.has('GITHUB_CLIENT_SECRET');
+  const needsGitHubToken = requiredSecretKeys.has('GITHUB_TOKEN');
+  const needsOpenRouter = optionalSecretKeys.has('OPENROUTER_API_KEY');
+  const needsDeepSeek = optionalSecretKeys.has('DEEPSEEK_API_KEY');
+  const needsGeneratedSecrets = needsBetterAuthSecret || needsWorkerSecret;
+  const includePreviewWorker = !hasWorkerSelection || selectedWorkerKeys.includes('preview');
+  const includeSearchPrecomputeWorker = !hasWorkerSelection || selectedWorkerKeys.includes('search-precompute');
+  const needsProductionAppUrl = includePreviewWorker || includeSearchPrecomputeWorker;
+  const needsEnvInput = needsGitHubClientId
+    || needsGitHubClientSecret
+    || needsGitHubToken
+    || needsOpenRouter
+    || needsDeepSeek
+    || (isProduction && needsProductionAppUrl);
   DRY_RUN = dryRun;
 
   const modeTitle = isProduction ? '线上环境初始化' : '本地开发环境初始化';
@@ -1295,6 +1534,9 @@ ${colors.cyan}╔═════════════════════
   try {
     if (DRY_RUN) {
       logDryRun('Running in preview mode. No create/write/secret operations will be executed.');
+    }
+    if (hasWorkerSelection) {
+      logInfo(`Worker scope: ${selectedWorkerKeys.join(', ')}`);
     }
 
     // 生产模式: 先检查 Cloudflare 认证
@@ -1338,59 +1580,71 @@ ${colors.cyan}╔═════════════════════
       logStep('3/6', '创建 Cloudflare 资源');
       const resourceErrors = [];
       logInfo('Will ensure required resources (check first, create only if missing):');
-      logInfo('- D1: skillscat-db');
-      logInfo('- R2: skillscat-storage');
-      logInfo('- KV: skillscat-kv');
-      logInfo('- Queues: skillscat-indexing, skillscat-classification, skillscat-indexing-dlq, skillscat-classification-dlq');
-
-      // D1 Database
-      const d1Result = await createD1Database('skillscat-db');
-      if (d1Result.success && d1Result.id) {
-        resourceIds.databaseId = d1Result.id;
-        logSuccess(`D1 Database: ${d1Result.id}`);
-      } else {
-        const error = `Failed to create D1 database: ${d1Result.error || 'database id missing'}`;
-        resourceErrors.push(error);
-        logError(error);
+      if (requiredResources.needsD1) {
+        logInfo('- D1: skillscat-db');
+      }
+      if (requiredResources.needsR2) {
+        logInfo('- R2: skillscat-storage');
+      }
+      if (requiredResources.needsKV) {
+        logInfo('- KV: skillscat-kv');
+      }
+      if (requiredResources.needsQueues) {
+        logInfo('- Queues: skillscat-indexing, skillscat-classification, skillscat-indexing-dlq, skillscat-classification-dlq');
       }
 
-      // R2 Bucket
-      const r2Result = await createR2Bucket('skillscat-storage');
-      if (r2Result.success) {
-        logSuccess(`R2 Bucket: skillscat-storage`);
-      } else {
-        const error = `Failed to create R2 bucket: ${r2Result.error}`;
-        resourceErrors.push(error);
-        logError(error);
-      }
-
-      // KV Namespace
-      const kvResult = await createKVNamespace('skillscat-kv');
-      if (kvResult.success && kvResult.id) {
-        resourceIds.kvId = kvResult.id;
-        logSuccess(`KV Namespace: ${kvResult.id}`);
-      } else {
-        const error = `Failed to create KV namespace: ${kvResult.error || 'namespace id missing'}`;
-        resourceErrors.push(error);
-        logError(error);
-      }
-
-      // Queues
-      const queues = [
-        'skillscat-indexing',
-        'skillscat-classification',
-        'skillscat-indexing-dlq',
-        'skillscat-classification-dlq',
-      ];
-
-      for (const queue of queues) {
-        const queueResult = await createQueue(queue);
-        if (queueResult.success) {
-          logSuccess(`Queue: ${queue}`);
+      if (requiredResources.needsD1) {
+        const d1Result = await createD1Database('skillscat-db');
+        if (d1Result.success && d1Result.id) {
+          resourceIds.databaseId = d1Result.id;
+          logSuccess(`D1 Database: ${d1Result.id}`);
         } else {
-          const error = `Failed to create queue ${queue}: ${queueResult.error}`;
+          const error = `Failed to create D1 database: ${d1Result.error || 'database id missing'}`;
           resourceErrors.push(error);
           logError(error);
+        }
+      }
+
+      if (requiredResources.needsR2) {
+        const r2Result = await createR2Bucket('skillscat-storage');
+        if (r2Result.success) {
+          logSuccess('R2 Bucket: skillscat-storage');
+        } else {
+          const error = `Failed to create R2 bucket: ${r2Result.error}`;
+          resourceErrors.push(error);
+          logError(error);
+        }
+      }
+
+      if (requiredResources.needsKV) {
+        const kvResult = await createKVNamespace('skillscat-kv');
+        if (kvResult.success && kvResult.id) {
+          resourceIds.kvId = kvResult.id;
+          logSuccess(`KV Namespace: ${kvResult.id}`);
+        } else {
+          const error = `Failed to create KV namespace: ${kvResult.error || 'namespace id missing'}`;
+          resourceErrors.push(error);
+          logError(error);
+        }
+      }
+
+      if (requiredResources.needsQueues) {
+        const queues = [
+          'skillscat-indexing',
+          'skillscat-classification',
+          'skillscat-indexing-dlq',
+          'skillscat-classification-dlq',
+        ];
+
+        for (const queue of queues) {
+          const queueResult = await createQueue(queue);
+          if (queueResult.success) {
+            logSuccess(`Queue: ${queue}`);
+          } else {
+            const error = `Failed to create queue ${queue}: ${queueResult.error}`;
+            resourceErrors.push(error);
+            logError(error);
+          }
         }
       }
 
@@ -1403,7 +1657,7 @@ ${colors.cyan}╔═════════════════════
     // Step: 复制 wrangler 配置文件
     logStep(isProduction ? '4/6' : '1/5', '复制 Wrangler 配置文件');
 
-    const { copied, skipped } = copyWranglerConfigs(force);
+    const { copied, skipped } = copyWranglerConfigs(selectedConfigFiles, force);
 
     for (const file of copied) {
       logSuccess(`Created ${file}`);
@@ -1413,7 +1667,7 @@ ${colors.cyan}╔═════════════════════
     }
 
     logInfo('Enforcing worker runtime settings (workers_dev=false, preview_urls=false, observability.enabled=true)...');
-    for (const configFile of CONFIG_FILES) {
+    for (const configFile of selectedConfigFiles) {
       const result = ensureWorkerRuntimeSettings(configFile);
       if (!result.exists) {
         logWarning(`Config file not found: ${configFile}`);
@@ -1422,15 +1676,19 @@ ${colors.cyan}╔═════════════════════
       }
     }
 
-    const localRelatedEnvUpdates = ensureRelatedWorkerEnvVars({ includeProductionVars: false });
-    const localRelatedVarsUpdated = localRelatedEnvUpdates.some((result) => result.exists && result.updated);
-    if (localRelatedVarsUpdated) {
-      logSuccess('Updated local wrangler vars for related precompute defaults');
+    const localPrecomputeEnvUpdates = ensurePrecomputeWorkerEnvVars({
+      includeProductionVars: false,
+      includePreview: includePreviewWorker,
+      includeSearchPrecompute: includeSearchPrecomputeWorker,
+    });
+    const localPrecomputeVarsUpdated = localPrecomputeEnvUpdates.some((result) => result.exists && result.updated);
+    if (localPrecomputeVarsUpdated) {
+      logSuccess('Updated local wrangler vars for search/related precompute defaults');
     }
 
     if (isProduction) {
       logInfo('Ensuring [env.production] exists in all wrangler config files...');
-      for (const configFile of CONFIG_FILES) {
+      for (const configFile of selectedConfigFiles) {
         const result = ensureProductionEnvSection(configFile);
         if (!result.exists) {
           logWarning(`Config file not found: ${configFile}`);
@@ -1440,7 +1698,7 @@ ${colors.cyan}╔═════════════════════
       }
 
       logInfo('Ensuring env.production worker names use *-production...');
-      for (const configFile of CONFIG_FILES) {
+      for (const configFile of selectedConfigFiles) {
         const result = ensureProductionWorkerName(configFile);
         if (!result.exists) {
           logWarning(`Config file not found: ${configFile}`);
@@ -1451,7 +1709,7 @@ ${colors.cyan}╔═════════════════════
 
       if (SELECTED_ACCOUNT_ID) {
         logInfo('Writing account_id to wrangler config files...');
-        for (const configFile of CONFIG_FILES) {
+        for (const configFile of selectedConfigFiles) {
           const result = updateWranglerAccountId(configFile, SELECTED_ACCOUNT_ID);
           if (result.exists && result.updated) {
             logSuccess(`Updated account_id in ${configFile}`);
@@ -1464,7 +1722,7 @@ ${colors.cyan}╔═════════════════════
     if (isProduction && (resourceIds.databaseId || resourceIds.kvId)) {
       logInfo('Updating wrangler config files with resource IDs...');
 
-      for (const configFile of CONFIG_FILES) {
+      for (const configFile of selectedConfigFiles) {
         const result = updateWranglerConfig(configFile, resourceIds, {
           replaceAny: true,
           targetScope: 'production',
@@ -1479,31 +1737,28 @@ ${colors.cyan}╔═════════════════════
       }
     }
 
-    // Step: 生成 secrets
-    logStep(isProduction ? '5/6' : '2/5', '生成随机 Secrets');
+    // Step: 生成 secrets（按需）
+    let betterAuthSecret = '';
+    let workerSecret = '';
+    if (needsGeneratedSecrets) {
+      logStep(isProduction ? '5/6' : '2/5', '生成随机 Secrets');
+      if (needsBetterAuthSecret) {
+        betterAuthSecret = generateSecret(32);
+        logSuccess('Generated BETTER_AUTH_SECRET');
+      }
+      if (needsWorkerSecret) {
+        workerSecret = generateSecret(32);
+        logSuccess('Generated WORKER_SECRET');
+      }
+    } else {
+      logStep(isProduction ? '5/6' : '2/5', '生成随机 Secrets');
+      logInfo('Skipped (selected workers do not require generated secrets)');
+    }
 
-    const betterAuthSecret = generateSecret(32);
-    const workerSecret = generateSecret(32);
-
-    logSuccess(`Generated BETTER_AUTH_SECRET`);
-    logSuccess(`Generated WORKER_SECRET`);
-
-    // Step: 收集用户输入的 secrets
+    // Step: 环境变量与 secrets（按需）
     logStep(isProduction ? '5/6' : '3/5', '配置环境变量');
 
-    // Read existing .dev.vars to preserve configured values
     const existingVars = readExistingDevVars();
-
-    console.log(`
-${colors.gray}以下变量需要手动配置:
-- GitHub OAuth: https://github.com/settings/developers
-  Authorization callback URL: ${isProduction ? 'https://your-domain.com' : 'http://localhost:5173'}/api/auth/callback/github
-- GitHub Token: https://github.com/settings/tokens (需要 public_repo 权限)
-- OpenRouter: https://openrouter.ai/keys (可选，用于 AI 分类)
-  注意: 我们只使用免费模型，无需付费
-- DeepSeek: https://platform.deepseek.com/api_keys (可选，AI 分类兜底)${colors.reset}
-`);
-
     let githubClientId = '';
     let githubClientSecret = '';
     let githubToken = '';
@@ -1511,110 +1766,172 @@ ${colors.gray}以下变量需要手动配置:
     let deepseekApiKey = '';
     let productionAppUrl = '';
 
-    if (DRY_RUN) {
-      logDryRun('Skipping interactive env/secrets prompts; using existing values or placeholders.');
-      githubClientId = existingVars.GITHUB_CLIENT_ID || '<dry-run-github-client-id>';
-      githubClientSecret = existingVars.GITHUB_CLIENT_SECRET || '<dry-run-github-client-secret>';
-      githubToken = existingVars.GITHUB_TOKEN || '<dry-run-github-token>';
-      openrouterApiKey = existingVars.OPENROUTER_API_KEY || '';
-      deepseekApiKey = existingVars.DEEPSEEK_API_KEY || '';
-      productionAppUrl = isProduction ? 'https://your-domain.com' : '';
+    if (!needsEnvInput && !needsSecretSetup) {
+      logInfo('Skipped (selected workers do not require env vars or secrets)');
     } else {
-      // Only prompt for values that are not already configured
-      githubClientId = existingVars.GITHUB_CLIENT_ID || await ask(rl, 'GitHub Client ID', '');
-      githubClientSecret = existingVars.GITHUB_CLIENT_SECRET || await ask(rl, 'GitHub Client Secret', '');
-      githubToken = existingVars.GITHUB_TOKEN || await ask(rl, 'GitHub Personal Access Token', '');
-      openrouterApiKey = existingVars.OPENROUTER_API_KEY || await ask(rl, 'OpenRouter API Key (可选，免费模型)', '');
-      deepseekApiKey = existingVars.DEEPSEEK_API_KEY || await ask(rl, 'DeepSeek API Key (可选，兜底策略)', '');
-      productionAppUrl = isProduction
-        ? await ask(rl, 'Production PUBLIC_APP_URL', 'https://your-domain.com')
-        : '';
-    }
-
-    if (isProduction) {
-      const appUrlUpdate = setProductionPublicAppUrl(productionAppUrl);
-      if (appUrlUpdate.exists && appUrlUpdate.updated) {
-        logSuccess(`Updated env.production PUBLIC_APP_URL -> ${productionAppUrl}`);
+      const lines = [];
+      if (needsGitHubClientId || needsGitHubClientSecret) {
+        lines.push('- GitHub OAuth: https://github.com/settings/developers');
+        lines.push(`  Authorization callback URL: ${(isProduction && needsProductionAppUrl) ? 'https://your-domain.com' : 'http://localhost:5173'}/api/auth/callback/github`);
+      }
+      if (needsGitHubToken) {
+        lines.push('- GitHub Token: https://github.com/settings/tokens (需要 public_repo 权限)');
+      }
+      if (needsOpenRouter) {
+        lines.push('- OpenRouter: https://openrouter.ai/keys (可选，用于 AI 分类)');
+        lines.push('  注意: 我们只使用免费模型，无需付费');
+      }
+      if (needsDeepSeek) {
+        lines.push('- DeepSeek: https://platform.deepseek.com/api_keys (可选，AI 分类兜底)');
+      }
+      if (lines.length > 0) {
+        console.log(`\n${colors.gray}以下变量需要手动配置:\n${lines.join('\n')}${colors.reset}\n`);
       }
 
-      const relatedEnvUpdates = ensureRelatedWorkerEnvVars({ productionAppUrl });
-      const previewRelatedVarsUpdated = relatedEnvUpdates
-        .slice(0, 2)
-        .some((result) => result.exists && result.updated);
-      const trendingRelatedVarsUpdated = relatedEnvUpdates
-        .slice(2)
-        .some((result) => result.exists && result.updated);
-      if (previewRelatedVarsUpdated) {
-        logSuccess('Updated preview worker related env vars');
-      }
-      if (trendingRelatedVarsUpdated) {
-        logSuccess('Updated trending worker related precompute env vars');
-      }
-
-      // 生产模式: 设置 Cloudflare secrets
-      const shouldSetSecrets = DRY_RUN
-        ? true
-        : await askYesNo(rl, 'Set secrets to Cloudflare Workers now?');
-
-      if (shouldSetSecrets) {
-        if (DRY_RUN) {
-          logDryRun('Simulating Cloudflare secret writes to all workers.');
+      if (DRY_RUN) {
+        logDryRun('Skipping interactive env/secrets prompts; using existing values or placeholders.');
+        if (needsGitHubClientId) {
+          githubClientId = existingVars.GITHUB_CLIENT_ID || '<dry-run-github-client-id>';
         }
+        if (needsGitHubClientSecret) {
+          githubClientSecret = existingVars.GITHUB_CLIENT_SECRET || '<dry-run-github-client-secret>';
+        }
+        if (needsGitHubToken) {
+          githubToken = existingVars.GITHUB_TOKEN || '<dry-run-github-token>';
+        }
+        if (needsOpenRouter) {
+          openrouterApiKey = existingVars.OPENROUTER_API_KEY || '';
+        }
+        if (needsDeepSeek) {
+          deepseekApiKey = existingVars.DEEPSEEK_API_KEY || '';
+        }
+        productionAppUrl = (isProduction && needsProductionAppUrl) ? 'https://your-domain.com' : '';
+      } else {
+        if (needsGitHubClientId) {
+          githubClientId = existingVars.GITHUB_CLIENT_ID || await ask(rl, 'GitHub Client ID', '');
+        }
+        if (needsGitHubClientSecret) {
+          githubClientSecret = existingVars.GITHUB_CLIENT_SECRET || await ask(rl, 'GitHub Client Secret', '');
+        }
+        if (needsGitHubToken) {
+          githubToken = existingVars.GITHUB_TOKEN || await ask(rl, 'GitHub Personal Access Token', '');
+        }
+        if (needsOpenRouter) {
+          openrouterApiKey = existingVars.OPENROUTER_API_KEY || await ask(rl, 'OpenRouter API Key (可选，免费模型)', '');
+        }
+        if (needsDeepSeek) {
+          deepseekApiKey = existingVars.DEEPSEEK_API_KEY || await ask(rl, 'DeepSeek API Key (可选，兜底策略)', '');
+        }
+        if (isProduction && needsProductionAppUrl) {
+          productionAppUrl = await ask(rl, 'Production PUBLIC_APP_URL', 'https://your-domain.com');
+        }
+      }
 
-        const secrets = {
-          BETTER_AUTH_SECRET: betterAuthSecret,
-          WORKER_SECRET: workerSecret,
-          GITHUB_CLIENT_ID: githubClientId,
-          GITHUB_CLIENT_SECRET: githubClientSecret,
-          GITHUB_TOKEN: githubToken,
-        };
-
-        if (openrouterApiKey) secrets.OPENROUTER_API_KEY = openrouterApiKey;
-        if (deepseekApiKey) secrets.DEEPSEEK_API_KEY = deepseekApiKey;
-
-        // 为每个 worker 设置 secrets
-        const secretErrors = [];
-        for (const worker of WORKERS) {
-          logInfo(`Setting secrets for ${worker}...`);
-          for (const [name, value] of Object.entries(secrets)) {
-            if (value) {
-              const result = await setSecret(worker, name, value, 'production');
-              if (!result.success) {
-                const error = `Failed to set ${name} for ${worker}: ${result.error}`;
-                secretErrors.push(error);
-                logError(error);
-              }
-            }
+      if (isProduction) {
+        if (includePreviewWorker && needsProductionAppUrl) {
+          const appUrlUpdate = setProductionPublicAppUrl(productionAppUrl);
+          if (appUrlUpdate.exists && appUrlUpdate.updated) {
+            logSuccess(`Updated env.production PUBLIC_APP_URL -> ${productionAppUrl}`);
           }
         }
 
-        if (secretErrors.length > 0) {
-          logError('Production initialization aborted due to secret configuration errors');
-          process.exit(1);
+        const previewEnvUpdates = ensurePrecomputeWorkerEnvVars({
+          productionAppUrl,
+          includePreview: includePreviewWorker,
+          includeSearchPrecompute: false,
+        });
+        const precomputeWorkerEnvUpdates = ensurePrecomputeWorkerEnvVars({
+          productionAppUrl,
+          includePreview: false,
+          includeSearchPrecompute: includeSearchPrecomputeWorker,
+        });
+        const previewRelatedVarsUpdated = previewEnvUpdates.some((result) => result.exists && result.updated);
+        const precomputeWorkerVarsUpdated = precomputeWorkerEnvUpdates.some((result) => result.exists && result.updated);
+        if (previewRelatedVarsUpdated) {
+          logSuccess('Updated preview worker related env vars');
+        }
+        if (precomputeWorkerVarsUpdated) {
+          logSuccess('Updated search-precompute worker env vars');
         }
 
-        logSuccess('Secrets configured');
-      } else {
-        logInfo('Skipped secrets configuration');
-        logInfo('You can set secrets later using: npx wrangler secret put <SECRET_NAME> --name <WORKER_NAME> --env production');
-      }
-    } else {
-      // 本地模式: 创建 .dev.vars
-      const devVars = {
-        BETTER_AUTH_SECRET: existingVars.BETTER_AUTH_SECRET || betterAuthSecret,
-        WORKER_SECRET: existingVars.WORKER_SECRET || workerSecret,
-        GITHUB_CLIENT_ID: githubClientId || 'your-github-client-id',
-        GITHUB_CLIENT_SECRET: githubClientSecret || 'your-github-client-secret',
-        GITHUB_TOKEN: githubToken || 'your-github-token',
-        OPENROUTER_API_KEY: openrouterApiKey || '',
-        DEEPSEEK_API_KEY: deepseekApiKey || '',
-      };
+        if (needsSecretSetup && selectedProductionWorkers.length > 0) {
+          const shouldSetSecrets = DRY_RUN
+            ? true
+            : await askYesNo(rl, 'Set secrets to Cloudflare Workers now?');
 
-      const devVarsResult = createDevVars(devVars, force);
-      if (devVarsResult.created) {
-        logSuccess(`Created .dev.vars`);
+          if (shouldSetSecrets) {
+            if (DRY_RUN) {
+              logDryRun(`Simulating Cloudflare secret writes to ${selectedProductionWorkers.length} worker(s).`);
+            }
+
+            const secrets = {};
+            if (needsBetterAuthSecret) secrets.BETTER_AUTH_SECRET = betterAuthSecret;
+            if (needsWorkerSecret) secrets.WORKER_SECRET = workerSecret;
+            if (needsGitHubClientId) secrets.GITHUB_CLIENT_ID = githubClientId;
+            if (needsGitHubClientSecret) secrets.GITHUB_CLIENT_SECRET = githubClientSecret;
+            if (needsGitHubToken) secrets.GITHUB_TOKEN = githubToken;
+            if (needsOpenRouter && openrouterApiKey) secrets.OPENROUTER_API_KEY = openrouterApiKey;
+            if (needsDeepSeek && deepseekApiKey) secrets.DEEPSEEK_API_KEY = deepseekApiKey;
+
+            const secretErrors = [];
+            for (const worker of selectedProductionWorkers) {
+              logInfo(`Setting secrets for ${worker}...`);
+              for (const [name, value] of Object.entries(secrets)) {
+                if (!value) continue;
+                const result = await setSecret(worker, name, value, 'production');
+                if (!result.success) {
+                  const error = `Failed to set ${name} for ${worker}: ${result.error}`;
+                  secretErrors.push(error);
+                  logError(error);
+                }
+              }
+            }
+
+            if (secretErrors.length > 0) {
+              logError('Production initialization aborted due to secret configuration errors');
+              process.exit(1);
+            }
+
+            logSuccess('Secrets configured');
+          } else {
+            logInfo('Skipped secrets configuration');
+            logInfo('You can set secrets later using: npx wrangler secret put <SECRET_NAME> --name <WORKER_NAME> --env production');
+          }
+        } else {
+          logInfo('Skipped secrets configuration (selected workers do not require secrets)');
+        }
+      } else if (needsSecretSetup) {
+        const devVars = {};
+        if (needsBetterAuthSecret) {
+          devVars.BETTER_AUTH_SECRET = existingVars.BETTER_AUTH_SECRET || betterAuthSecret;
+        }
+        if (needsWorkerSecret) {
+          devVars.WORKER_SECRET = existingVars.WORKER_SECRET || workerSecret;
+        }
+        if (needsGitHubClientId) {
+          devVars.GITHUB_CLIENT_ID = githubClientId || 'your-github-client-id';
+        }
+        if (needsGitHubClientSecret) {
+          devVars.GITHUB_CLIENT_SECRET = githubClientSecret || 'your-github-client-secret';
+        }
+        if (needsGitHubToken) {
+          devVars.GITHUB_TOKEN = githubToken || 'your-github-token';
+        }
+        if (needsOpenRouter) {
+          devVars.OPENROUTER_API_KEY = openrouterApiKey || '';
+        }
+        if (needsDeepSeek) {
+          devVars.DEEPSEEK_API_KEY = deepseekApiKey || '';
+        }
+
+        const devVarsResult = createDevVars(devVars, force);
+        if (devVarsResult.created) {
+          logSuccess('.dev.vars updated for selected workers');
+        } else {
+          logWarning('.dev.vars already exists (use --force to overwrite)');
+        }
       } else {
-        logWarning(`.dev.vars already exists (use --force to overwrite)`);
+        logInfo('Skipped .dev.vars update (selected workers do not require secrets)');
       }
     }
 
@@ -1644,56 +1961,59 @@ ${colors.gray}以下变量需要手动配置:
           const shouldCreate = await askYesNo(rl, 'Create Cloudflare resources (D1, R2, KV, Queues)?');
 
           if (shouldCreate) {
-            // D1 Database
-            const d1Result = await createD1Database('skillscat-db');
-            if (d1Result.success && d1Result.id) {
-              resourceIds.databaseId = d1Result.id;
-              logSuccess(`D1 Database created: ${d1Result.id}`);
-            } else {
-              logError(`Failed to create D1 database: ${d1Result.error}`);
+            if (requiredResources.needsD1) {
+              const d1Result = await createD1Database('skillscat-db');
+              if (d1Result.success && d1Result.id) {
+                resourceIds.databaseId = d1Result.id;
+                logSuccess(`D1 Database created: ${d1Result.id}`);
+              } else {
+                logError(`Failed to create D1 database: ${d1Result.error}`);
+              }
             }
 
-            // R2 Bucket
-            const r2Result = await createR2Bucket('skillscat-storage');
-            if (r2Result.success) {
-              logSuccess(`R2 Bucket created: skillscat-storage`);
-            } else {
-              logError(`Failed to create R2 bucket: ${r2Result.error}`);
+            if (requiredResources.needsR2) {
+              const r2Result = await createR2Bucket('skillscat-storage');
+              if (r2Result.success) {
+                logSuccess('R2 Bucket created: skillscat-storage');
+              } else {
+                logError(`Failed to create R2 bucket: ${r2Result.error}`);
+              }
             }
 
-            // KV Namespace
-            const kvResult = await createKVNamespace('skillscat-kv');
-            if (kvResult.success && kvResult.id) {
-              resourceIds.kvId = kvResult.id;
-              logSuccess(`KV Namespace created: ${kvResult.id}`);
-            } else {
-              logError(`Failed to create KV namespace: ${kvResult.error}`);
+            if (requiredResources.needsKV) {
+              const kvResult = await createKVNamespace('skillscat-kv');
+              if (kvResult.success && kvResult.id) {
+                resourceIds.kvId = kvResult.id;
+                logSuccess(`KV Namespace created: ${kvResult.id}`);
+              } else {
+                logError(`Failed to create KV namespace: ${kvResult.error}`);
+              }
             }
 
-            // Queues
-            const indexingQueueResult = await createQueue('skillscat-indexing');
-            if (indexingQueueResult.success) {
-              logSuccess(`Queue created: skillscat-indexing`);
-            } else {
-              logError(`Failed to create indexing queue: ${indexingQueueResult.error}`);
-            }
+            if (requiredResources.needsQueues) {
+              const indexingQueueResult = await createQueue('skillscat-indexing');
+              if (indexingQueueResult.success) {
+                logSuccess('Queue created: skillscat-indexing');
+              } else {
+                logError(`Failed to create indexing queue: ${indexingQueueResult.error}`);
+              }
 
-            const classificationQueueResult = await createQueue('skillscat-classification');
-            if (classificationQueueResult.success) {
-              logSuccess(`Queue created: skillscat-classification`);
-            } else {
-              logError(`Failed to create classification queue: ${classificationQueueResult.error}`);
-            }
+              const classificationQueueResult = await createQueue('skillscat-classification');
+              if (classificationQueueResult.success) {
+                logSuccess('Queue created: skillscat-classification');
+              } else {
+                logError(`Failed to create classification queue: ${classificationQueueResult.error}`);
+              }
 
-            // Dead letter queues
-            await createQueue('skillscat-indexing-dlq');
-            await createQueue('skillscat-classification-dlq');
+              await createQueue('skillscat-indexing-dlq');
+              await createQueue('skillscat-classification-dlq');
+            }
 
             // 更新 wrangler 配置文件
             if (resourceIds.databaseId || resourceIds.kvId) {
               logInfo('Updating wrangler config files...');
 
-              for (const configFile of CONFIG_FILES) {
+              for (const configFile of selectedConfigFiles) {
                 const result = updateWranglerConfig(configFile, resourceIds, {
                   replaceLocal: true,
                   targetScope: 'top',

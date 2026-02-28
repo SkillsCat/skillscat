@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { createLogger } from '$lib';
 import type { SkillMdLocation, ScanResult } from '$lib/types';
 import { githubRequest } from '$lib/server/github-request';
+import { getCached } from '$lib/server/cache';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middleware/auth';
 
 const log = createLogger('Submit');
@@ -21,6 +22,7 @@ const MAX_SUBMIT_BODY_BYTES = 16 * 1024;
 /** Fast-fail policy for submit-route GitHub calls (POST submit + GET /check) */
 const GITHUB_SUBMIT_FAST_FAIL_MAX_RETRIES = 0;
 const GITHUB_SUBMIT_FAST_FAIL_MAX_DELAY_MS = 2_000;
+const SUBMIT_CHECK_CACHE_TTL_SECONDS = 60;
 
 type GitHubUpstreamErrorCode = 'github_rate_limited' | 'github_upstream_failure';
 type GitHubRequestMode = 'default' | 'submit_fast_fail';
@@ -1045,6 +1047,85 @@ async function submitSingleSkill({
   });
 }
 
+function buildSubmitCheckCacheKey(repoUrl: string): string {
+  return `submit:check:${encodeURIComponent(repoUrl.trim())}`;
+}
+
+interface SubmitCheckPayload {
+  valid: boolean;
+  error?: string;
+  owner?: string;
+  repo?: string;
+  path?: string;
+  archived?: boolean;
+  existingSlug?: string;
+  message?: string;
+  multipleFound?: boolean;
+  skills?: SkillMdLocation[];
+  truncated?: boolean;
+  repoName?: string;
+  description?: string;
+  stars?: number;
+}
+
+interface ExistingSkillRow {
+  slug: string;
+  tier: string;
+}
+
+async function refreshSubmitCheckExistingState(
+  payload: SubmitCheckPayload,
+  db?: D1Database
+): Promise<SubmitCheckPayload> {
+  if (!db || !payload.owner || !payload.repo || payload.multipleFound || typeof payload.path !== 'string') {
+    return payload;
+  }
+
+  const existing = await db.prepare(`
+    SELECT slug, tier FROM skills
+    WHERE repo_owner = ? AND repo_name = ?
+    AND COALESCE(skill_path, '') = ?
+  `)
+    .bind(payload.owner, payload.repo, payload.path || '')
+    .first<ExistingSkillRow>();
+
+  if (!existing) {
+    if (payload.error === 'This skill already exists' || payload.archived) {
+      return {
+        valid: true,
+        owner: payload.owner,
+        repo: payload.repo,
+        path: payload.path,
+        repoName: payload.repoName,
+        description: payload.description,
+        stars: payload.stars,
+      };
+    }
+    return payload;
+  }
+
+  if (existing.tier === 'archived') {
+    return {
+      valid: true,
+      owner: payload.owner,
+      repo: payload.repo,
+      path: payload.path,
+      archived: true,
+      existingSlug: existing.slug,
+      message: 'This skill is archived and will be resurrected upon submission.',
+      repoName: payload.repoName,
+      description: payload.description,
+      stars: payload.stars,
+    };
+  }
+
+  return {
+    valid: false,
+    error: 'This skill already exists',
+    existingSlug: existing.slug,
+  };
+}
+
 /**
  * GET /api/submit/check - Check if URL is valid
  */
@@ -1054,152 +1135,178 @@ export const GET: RequestHandler = async ({ platform, url }) => {
     if (!repoUrl) {
       throw error(400, 'URL is required');
     }
+    const cacheKey = buildSubmitCheckCacheKey(repoUrl);
+    const { data } = await getCached(
+      cacheKey,
+      async () => {
+        // Parse URL
+        const repoInfo = parseRepoUrl(repoUrl);
+        if (!repoInfo) {
+          return { valid: false, error: 'Invalid repository URL. Only GitHub repositories are supported.' };
+        }
 
-    // Parse URL
-    const repoInfo = parseRepoUrl(repoUrl);
-    if (!repoInfo) {
-      return json({ valid: false, error: 'Invalid repository URL. Only GitHub repositories are supported.' });
-    }
+        const { owner, repo } = repoInfo;
 
-    const { owner, repo } = repoInfo;
+        const db = platform?.env?.DB;
+        const githubToken = platform?.env?.GITHUB_TOKEN;
 
-    const db = platform?.env?.DB;
-    const githubToken = platform?.env?.GITHUB_TOKEN;
+        // Fetch repository info first
+        const repoData = await fetchGitHubRepo(owner, repo, githubToken, 'submit_fast_fail');
+        if (!repoData) {
+          return { valid: false, error: 'Repository not found' };
+        }
 
-    // Fetch repository info first
-    const repoData = await fetchGitHubRepo(owner, repo, githubToken, 'submit_fast_fail');
-    if (!repoData) {
-      return json({ valid: false, error: 'Repository not found' });
-    }
+        if (repoData.fork) {
+          return { valid: false, error: 'Forked repositories are not accepted' };
+        }
 
-    if (repoData.fork) {
-      return json({ valid: false, error: 'Forked repositories are not accepted' });
-    }
+        const resolvedPath = resolveSubmittedPath(repoInfo, repoData.defaultBranch);
+        if ('error' in resolvedPath) {
+          return { valid: false, error: resolvedPath.error };
+        }
 
-    const resolvedPath = resolveSubmittedPath(repoInfo, repoData.defaultBranch);
-    if ('error' in resolvedPath) {
-      return json({ valid: false, error: resolvedPath.error });
-    }
+        const path = resolvedPath.path;
 
-    const path = resolvedPath.path;
+        // Determine if dot-folder skills are allowed based on star count
+        const allowDotFolders = (repoData.stars ?? 0) >= DOT_FOLDER_MIN_STARS;
 
-    // Determine if dot-folder skills are allowed based on star count
-    const allowDotFolders = (repoData.stars ?? 0) >= DOT_FOLDER_MIN_STARS;
+        // First, check if SKILL.md exists at the submitted path (or root if no path)
+        const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, allowDotFolders, 'submit_fast_fail');
 
-    // First, check if SKILL.md exists at the submitted path (or root if no path)
-    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, allowDotFolders, 'submit_fast_fail');
+        if (hasSkillMd) {
+          // SKILL.md found at the submitted path - check if already exists in DB
+          if (db) {
+            const existing = await db.prepare(`
+              SELECT slug, tier FROM skills
+              WHERE repo_owner = ? AND repo_name = ?
+              AND COALESCE(skill_path, '') = ?
+            `)
+              .bind(owner, repo, path || '')
+              .first<{ slug: string; tier: string }>();
 
-    if (hasSkillMd) {
-      // SKILL.md found at the submitted path - check if already exists in DB
-      if (db) {
-        const existing = await db.prepare(`
-          SELECT slug, tier FROM skills
-          WHERE repo_owner = ? AND repo_name = ?
-          AND COALESCE(skill_path, '') = ?
-        `)
-          .bind(owner, repo, path || '')
-          .first<{ slug: string; tier: string }>();
+            if (existing) {
+              if (existing.tier === 'archived') {
+                return {
+                  valid: true,
+                  owner,
+                  repo,
+                  path,
+                  archived: true,
+                  existingSlug: existing.slug,
+                  message: 'This skill is archived and will be resurrected upon submission.',
+                  repoName: repoData.name,
+                  description: repoData.description,
+                  stars: repoData.stars,
+                };
+              }
 
-        if (existing) {
-          if (existing.tier === 'archived') {
-            return json({
-              valid: true,
-              owner,
-              repo,
-              path,
-              archived: true,
-              existingSlug: existing.slug,
-              message: 'This skill is archived and will be resurrected upon submission.',
-              repoName: repoData.name,
-              description: repoData.description,
-              stars: repoData.stars,
-            });
+              return {
+                valid: false,
+                error: 'This skill already exists',
+                owner,
+                repo,
+                path,
+                existingSlug: existing.slug,
+                repoName: repoData.name,
+                description: repoData.description,
+                stars: repoData.stars,
+              };
+            }
           }
 
-          return json({
-            valid: false,
-            error: 'This skill already exists',
-            existingSlug: existing.slug,
-          });
-        }
-      }
-
-      return json({
-        valid: true,
-        owner,
-        repo,
-        path,
-        repoName: repoData.name,
-        description: repoData.description,
-        stars: repoData.stars,
-      });
-    }
-
-    // No SKILL.md at submitted path - scan for SKILL.md files as fallback
-    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders, 'submit_fast_fail');
-
-    if (scanResult.found.length === 0) {
-      return json({ valid: false, error: 'No SKILL.md file found in the repository' });
-    }
-
-    if (scanResult.found.length > 1) {
-      // Multiple SKILL.md files found
-      return json({
-        valid: true,
-        multipleFound: true,
-        skills: scanResult.found,
-        truncated: scanResult.truncated,
-        owner,
-        repo,
-        repoName: repoData.name,
-        description: repoData.description,
-        stars: repoData.stars,
-      });
-    }
-
-    // Single SKILL.md found - check if it already exists
-    const singlePath = scanResult.found[0].skillPath;
-    if (db) {
-      const existing = await db.prepare(`
-        SELECT slug, tier FROM skills
-        WHERE repo_owner = ? AND repo_name = ?
-        AND COALESCE(skill_path, '') = ?
-      `)
-        .bind(owner, repo, singlePath || '')
-        .first<{ slug: string; tier: string }>();
-
-      if (existing) {
-        if (existing.tier === 'archived') {
-          return json({
+          return {
             valid: true,
             owner,
             repo,
-            path: singlePath,
-            archived: true,
-            existingSlug: existing.slug,
-            message: 'This skill is archived and will be resurrected upon submission.',
+            path,
             repoName: repoData.name,
             description: repoData.description,
             stars: repoData.stars,
-          });
+          };
         }
 
-        return json({
-          valid: false,
-          error: 'This skill already exists',
-          existingSlug: existing.slug,
-        });
-      }
-    }
+        // No SKILL.md at submitted path - scan for SKILL.md files as fallback
+        const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders, 'submit_fast_fail');
 
-    return json({
-      valid: true,
-      owner,
-      repo,
-      path: singlePath,
-      repoName: repoData.name,
-      description: repoData.description,
-      stars: repoData.stars,
+        if (scanResult.found.length === 0) {
+          return { valid: false, error: 'No SKILL.md file found in the repository' };
+        }
+
+        if (scanResult.found.length > 1) {
+          // Multiple SKILL.md files found
+          return {
+            valid: true,
+            multipleFound: true,
+            skills: scanResult.found,
+            truncated: scanResult.truncated,
+            owner,
+            repo,
+            repoName: repoData.name,
+            description: repoData.description,
+            stars: repoData.stars,
+          };
+        }
+
+        // Single SKILL.md found - check if it already exists
+        const singlePath = scanResult.found[0].skillPath;
+        if (db) {
+          const existing = await db.prepare(`
+            SELECT slug, tier FROM skills
+            WHERE repo_owner = ? AND repo_name = ?
+            AND COALESCE(skill_path, '') = ?
+          `)
+            .bind(owner, repo, singlePath || '')
+            .first<{ slug: string; tier: string }>();
+
+          if (existing) {
+            if (existing.tier === 'archived') {
+              return {
+                valid: true,
+                owner,
+                repo,
+                path: singlePath,
+                archived: true,
+                existingSlug: existing.slug,
+                message: 'This skill is archived and will be resurrected upon submission.',
+                repoName: repoData.name,
+                description: repoData.description,
+                stars: repoData.stars,
+              };
+            }
+
+            return {
+              valid: false,
+              error: 'This skill already exists',
+              owner,
+              repo,
+              path: singlePath,
+              existingSlug: existing.slug,
+              repoName: repoData.name,
+              description: repoData.description,
+              stars: repoData.stars,
+            };
+          }
+        }
+
+        return {
+          valid: true,
+          owner,
+          repo,
+          path: singlePath,
+          repoName: repoData.name,
+          description: repoData.description,
+          stars: repoData.stars,
+        };
+      },
+      SUBMIT_CHECK_CACHE_TTL_SECONDS
+    );
+
+    const responsePayload = await refreshSubmitCheckExistingState(data as SubmitCheckPayload, platform?.env?.DB);
+
+    return json(responsePayload, {
+      headers: {
+        'Cache-Control': `public, max-age=${SUBMIT_CHECK_CACHE_TTL_SECONDS}`
+      }
     });
   } catch (err: unknown) {
     if (err instanceof GitHubUpstreamError) {

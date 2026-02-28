@@ -17,6 +17,8 @@ interface SkillInfo {
   visibility: string;
 }
 
+const CLIENT_GITHUB_RATE_LIMIT_HEADER = 'x-skillscat-client-github-rate-limited';
+
 // Text file extensions
 const TEXT_EXTENSIONS = new Set([
   'md', 'txt', 'json', 'yaml', 'yml', 'toml',
@@ -45,6 +47,19 @@ function decodeBase64ToUtf8(base64: string): string {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return new TextDecoder('utf-8').decode(bytes);
+}
+
+async function recordClientGitHubRateLimited(db: D1Database, skillId: string): Promise<void> {
+  try {
+    await db.prepare(`
+      INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
+      VALUES (?, NULL, ?, 'github_client_rate_limited', ?)
+    `)
+      .bind(crypto.randomUUID(), skillId, Date.now())
+      .run();
+  } catch {
+    // non-critical telemetry
+  }
 }
 
 /**
@@ -94,6 +109,10 @@ export const GET: RequestHandler = async ({ params, platform, request, url, loca
     if (!hasAccess) {
       throw error(403, 'You do not have permission to access this skill');
     }
+  }
+
+  if (request.headers.get(CLIENT_GITHUB_RATE_LIMIT_HEADER) === '1') {
+    await recordClientGitHubRateLimited(db, skill.id);
   }
 
   const cacheControl = skill.visibility === 'private' ? 'private, no-cache' : 'public, max-age=300';

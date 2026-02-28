@@ -1,0 +1,57 @@
+# Search/Related Precompute Worker 配置
+# 复制此文件为 wrangler.search-precompute.toml 并填入你的配置
+
+name = "skillscat-search-precompute"
+main = "workers/search-precompute.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[triggers]
+crons = ["15 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-database-id>"
+
+[vars]
+APP_ORIGIN = "http://localhost:3000"
+RELATED_PRECOMPUTE_ENABLED = "1"
+RELATED_PRECOMPUTE_MAX_PER_RUN = "200"
+RELATED_PRECOMPUTE_TIME_BUDGET_MS = "15000"
+RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS = "2500"
+RELATED_ALGO_VERSION = "v1"
+SEARCH_PRECOMPUTE_ENABLED = "1"
+SEARCH_PRECOMPUTE_MAX_PER_RUN = "500"
+SEARCH_PRECOMPUTE_TIME_BUDGET_MS = "10000"
+SEARCH_PRECOMPUTE_ALGO_VERSION = "v1"
+
+[env.production]
+name = "skillscat-search-precompute-production"
+
+[env.production.triggers]
+crons = ["15 * * * *"]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[env.production.vars]
+APP_ORIGIN = "https://your-domain.com"
+RELATED_PRECOMPUTE_ENABLED = "1"
+RELATED_PRECOMPUTE_MAX_PER_RUN = "200"
+RELATED_PRECOMPUTE_TIME_BUDGET_MS = "15000"
+RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS = "2500"
+RELATED_ALGO_VERSION = "v1"
+SEARCH_PRECOMPUTE_ENABLED = "1"
+SEARCH_PRECOMPUTE_MAX_PER_RUN = "500"
+SEARCH_PRECOMPUTE_TIME_BUDGET_MS = "10000"
+SEARCH_PRECOMPUTE_ALGO_VERSION = "v1"

@@ -71,6 +71,7 @@ const configs = [
   'wrangler.indexing.toml',
   'wrangler.classification.toml',
   'wrangler.trending.toml',
+  'wrangler.search-precompute.toml',
   'wrangler.tier-recalc.toml',
   'wrangler.archive.toml',
   'wrangler.resurrection.toml',

@@ -20,6 +20,7 @@ import { KNOWN_ORGS } from './shared/types';
 import { CATEGORIES, getCategorySlugs } from './shared/categories';
 import { createLogger } from './shared/utils';
 import { markRelatedDirty } from '../src/lib/server/related-precompute';
+import { markSearchDirty } from '../src/lib/server/search-precompute';
 
 const log = createLogger('Classification');
 
@@ -514,6 +515,7 @@ async function saveClassification(
   }
 
   await markRelatedDirty(env.DB, skillId, now);
+  await markSearchDirty(env.DB, skillId, now);
 }
 
 /**

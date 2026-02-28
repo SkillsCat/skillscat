@@ -45,7 +45,6 @@
     slug: string;
     repoOwner: string;
     repoName: string;
-    description: string | null;
     stars: number;
     authorAvatar?: string | null;
   }
@@ -56,9 +55,13 @@
     slug?: string;
     repoOwner?: string;
     repoName?: string;
-    description?: string | null;
     stars?: number;
     authorAvatar?: string | null;
+  }
+
+  interface SuggestionCacheEntry {
+    skills: SkillSuggestion[];
+    expiresAt: number;
   }
 
   let {
@@ -72,14 +75,34 @@
   }: Props = $props();
 
   let isFocused = $state(false);
+  let searchFormEl: HTMLFormElement;
   let inputElement: HTMLInputElement;
   let skillSuggestions = $state<SkillSuggestion[]>([]);
   let suggestionLimit = $state(5);
+  let suggestionsDropdownInlineStyle = $state('');
+  let suggestionsLayoutFrame = 0;
 
   const MOBILE_SUGGESTION_LIMIT = 4;
   const DESKTOP_LIMIT_SHORT = 6;
   const DESKTOP_LIMIT_MEDIUM = 7;
   const DESKTOP_LIMIT_TALL = 8;
+  const SUGGESTION_FETCH_DEBOUNCE_MS = 160;
+  const CLIENT_SUGGESTION_CACHE_TTL_MS = 45_000;
+  const CLIENT_SUGGESTION_CACHE_MAX_ENTRIES = 80;
+  const NAVBAR_WIDE_SUG_CLASS = 'navbar-wide-sug';
+  const DESKTOP_SUG_EXTRA_WIDTH = 24;
+  const MOBILE_SUG_EXTRA_WIDTH = 12;
+  const DESKTOP_SUG_VIEWPORT_GAP = 16;
+  const MOBILE_SUG_VIEWPORT_GAP = 8;
+
+  const enableWideNavbarSuggestions = $derived(
+    className
+      .split(/\s+/)
+      .filter(Boolean)
+      .includes(NAVBAR_WIDE_SUG_CLASS)
+  );
+
+  const suggestionCache = new Map<string, SuggestionCacheEntry>();
 
   function getSuggestionLimit(): number {
     if (typeof window === 'undefined') return 5;
@@ -98,12 +121,14 @@
   onMount(() => {
     const updateSuggestionLimit = () => {
       suggestionLimit = getSuggestionLimit();
+      scheduleSuggestionsDropdownLayout();
     };
 
     updateSuggestionLimit();
     window.addEventListener('resize', updateSuggestionLimit);
 
     return () => {
+      if (suggestionsLayoutFrame) cancelAnimationFrame(suggestionsLayoutFrame);
       window.removeEventListener('resize', updateSuggestionLimit);
     };
   });
@@ -159,6 +184,17 @@
     }
 
     const requestQuery = query.toLowerCase();
+    const cacheKey = `${requestQuery}:${suggestionLimit}`;
+    const cached = suggestionCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      skillSuggestions = cached.skills;
+      return;
+    }
+
+    if (cached) {
+      suggestionCache.delete(cacheKey);
+    }
+
     const controller = new AbortController();
     let disposed = false;
 
@@ -177,7 +213,7 @@
         if (disposed || value.trim().toLowerCase() !== requestQuery) return;
 
         const skills = Array.isArray(payload?.data?.skills) ? payload.data.skills : [];
-        skillSuggestions = skills
+        const normalizedSkills = skills
           .filter((skill): skill is SearchApiSkill & { slug: string; name: string } => Boolean(skill?.slug && skill?.name))
           .map((skill) => ({
             id: skill.id || skill.slug,
@@ -185,16 +221,26 @@
             slug: skill.slug,
             repoOwner: skill.repoOwner || '',
             repoName: skill.repoName || '',
-            description: skill.description || null,
             stars: Number(skill.stars || 0),
             authorAvatar: skill.authorAvatar || undefined
           }));
+
+        skillSuggestions = normalizedSkills;
+        suggestionCache.set(cacheKey, {
+          skills: normalizedSkills,
+          expiresAt: Date.now() + CLIENT_SUGGESTION_CACHE_TTL_MS
+        });
+
+        if (suggestionCache.size > CLIENT_SUGGESTION_CACHE_MAX_ENTRIES) {
+          const oldestKey = suggestionCache.keys().next().value;
+          if (oldestKey) suggestionCache.delete(oldestKey);
+        }
       } catch (error) {
         if ((error as DOMException).name !== 'AbortError') {
           skillSuggestions = [];
         }
       }
-    }, 160);
+    }, SUGGESTION_FETCH_DEBOUNCE_MS);
 
     return () => {
       disposed = true;
@@ -242,15 +288,78 @@
     inputElement?.focus();
   }
 
+  function updateSuggestionsDropdownLayout() {
+    if (typeof window === 'undefined' || !enableWideNavbarSuggestions || !searchFormEl) {
+      suggestionsDropdownInlineStyle = '';
+      return;
+    }
+
+    const rect = searchFormEl.getBoundingClientRect();
+    if (!rect.width) {
+      suggestionsDropdownInlineStyle = '';
+      return;
+    }
+
+    const isDesktop = window.matchMedia('(min-width: 768px)').matches;
+    const viewportGap = isDesktop ? DESKTOP_SUG_VIEWPORT_GAP : MOBILE_SUG_VIEWPORT_GAP;
+    const extraWidth = isDesktop ? DESKTOP_SUG_EXTRA_WIDTH : MOBILE_SUG_EXTRA_WIDTH;
+    const maxWidth = Math.max(0, window.innerWidth - viewportGap * 2);
+    const width = Math.min(rect.width + extraWidth, maxWidth);
+
+    if (width <= 0) {
+      suggestionsDropdownInlineStyle = '';
+      return;
+    }
+
+    const idealLeft = rect.left - (width - rect.width) / 2;
+    const minLeft = viewportGap;
+    const maxLeft = Math.max(viewportGap, window.innerWidth - viewportGap - width);
+    const clampedLeft = Math.min(Math.max(idealLeft, minLeft), maxLeft);
+    const leftOffset = clampedLeft - rect.left;
+
+    suggestionsDropdownInlineStyle = `left: ${leftOffset}px; width: ${width}px; right: auto;`;
+  }
+
+  function scheduleSuggestionsDropdownLayout() {
+    if (typeof window === 'undefined') return;
+
+    if (suggestionsLayoutFrame) cancelAnimationFrame(suggestionsLayoutFrame);
+    suggestionsLayoutFrame = requestAnimationFrame(() => {
+      suggestionsLayoutFrame = 0;
+      updateSuggestionsDropdownLayout();
+    });
+  }
+
   function formatStars(stars: number): string {
     if (stars >= 1000) {
       return `${(stars / 1000).toFixed(1).replace(/\.0$/, '')}K`;
     }
     return String(stars);
   }
+
+  $effect(() => {
+    if (!enableWideNavbarSuggestions) {
+      suggestionsDropdownInlineStyle = '';
+      return;
+    }
+
+    const hasSuggestions = suggestionMode === 'skills'
+      ? skillSuggestions.length > 0
+      : categorySuggestions().length > 0;
+
+    isFocused;
+    value;
+
+    if (!hasSuggestions || !isFocused) {
+      suggestionsDropdownInlineStyle = '';
+      return;
+    }
+
+    scheduleSuggestionsDropdownLayout();
+  });
 </script>
 
-<form onsubmit={handleSubmit} class="search-form {className}">
+<form bind:this={searchFormEl} onsubmit={handleSubmit} class="search-form {className}">
   <!-- Search Input -->
   <div class="search-input-wrapper">
     <div class="search-icon">
@@ -283,7 +392,7 @@
 
   <!-- Suggestions Dropdown -->
   {#if suggestionMode === 'skills' ? skillSuggestions.length > 0 : categorySuggestions().length > 0}
-    <div class="suggestions-dropdown">
+    <div class="suggestions-dropdown" style={suggestionsDropdownInlineStyle}>
       <div class="suggestions-list">
         {#if suggestionMode === 'skills'}
           {#each skillSuggestions as skill (skill.id)}
@@ -447,7 +556,7 @@
     position: absolute;
     top: 100%;
     left: 0;
-    right: 0;
+    width: 100%;
     margin-top: 0.5rem;
     z-index: 50;
     background: var(--card);
