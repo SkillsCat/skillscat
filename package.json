@@ -47,6 +47,7 @@
     "deploy:worker:github-events": "node scripts/deploy-workers.mjs --worker github-events --env production",
     "deploy:worker:indexing": "node scripts/deploy-workers.mjs --worker indexing --env production",
     "deploy:worker:resurrection": "node scripts/deploy-workers.mjs --worker resurrection --env production",
+    "deploy:worker:search-precompute": "node scripts/deploy-workers.mjs --worker search-precompute --env production",
     "deploy:worker:tier-recalc": "node scripts/deploy-workers.mjs --worker tier-recalc --env production",
     "deploy:worker:trending": "node scripts/deploy-workers.mjs --worker trending --env production",
     "cleanup:workers": "node scripts/cleanup-workers.mjs",

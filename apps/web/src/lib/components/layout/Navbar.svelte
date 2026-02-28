@@ -156,6 +156,7 @@
       <!-- Search (Desktop) -->
       <div class="search-desktop">
         <SearchBox
+          class="navbar-wide-sug"
           bind:value={searchQuery}
           onSearch={handleSearch}
           onSelectSkill={handleSkillSuggestionSelect}
@@ -247,6 +248,7 @@
         <!-- Search -->
         <div class="mobile-search">
           <SearchBox
+            class="navbar-wide-sug"
             bind:value={searchQuery}
             onSearch={handleSearch}
             onSelectSkill={handleSkillSuggestionSelect}

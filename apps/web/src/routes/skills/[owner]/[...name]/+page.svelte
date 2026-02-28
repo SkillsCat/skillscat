@@ -363,7 +363,11 @@
   const MAX_DIRECT_DOWNLOAD_FILES = 12;
   const MAX_DIRECT_FILE_SIZE = 512 * 1024;
   const MIN_DIRECT_RATE_LIMIT_REMAINING = 15;
+  const CLIENT_GITHUB_RATE_LIMIT_UNTIL_KEY = 'skillscat:github-client-rate-limit-until';
+  const CLIENT_GITHUB_RATE_LIMIT_FALLBACK_HEADER = 'x-skillscat-client-github-rate-limited';
+  const DEFAULT_CLIENT_GITHUB_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
   let allowDirectGitHubRead = $state(true);
+  let pendingClientRateLimitSignal = $state(false);
 
   interface GitHubContentResponse {
     content?: string;
@@ -421,6 +425,67 @@
     return Number.isFinite(parsed) ? parsed : null;
   }
 
+  function parseRateLimitResetMs(headers: Headers): number | null {
+    const retryAfter = headers.get('retry-after');
+    if (retryAfter) {
+      const seconds = Number.parseInt(retryAfter, 10);
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        return Date.now() + (seconds * 1000);
+      }
+
+      const asDate = Date.parse(retryAfter);
+      if (Number.isFinite(asDate)) {
+        return asDate;
+      }
+    }
+
+    const resetEpoch = headers.get('x-ratelimit-reset');
+    if (!resetEpoch) return null;
+    const parsed = Number.parseInt(resetEpoch, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed * 1000;
+  }
+
+  function getStoredClientRateLimitUntil(): number | null {
+    if (typeof window === 'undefined') return null;
+    const raw = window.sessionStorage.getItem(CLIENT_GITHUB_RATE_LIMIT_UNTIL_KEY);
+    if (!raw) return null;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function setStoredClientRateLimitUntil(untilMs: number): void {
+    if (typeof window === 'undefined') return;
+    window.sessionStorage.setItem(CLIENT_GITHUB_RATE_LIMIT_UNTIL_KEY, String(untilMs));
+  }
+
+  function markClientGithubRateLimited(headers: Headers): void {
+    allowDirectGitHubRead = false;
+    pendingClientRateLimitSignal = true;
+
+    const resetAt = parseRateLimitResetMs(headers) ?? (Date.now() + DEFAULT_CLIENT_GITHUB_RATE_LIMIT_WINDOW_MS);
+    setStoredClientRateLimitUntil(resetAt);
+  }
+
+  function consumeClientRateLimitSignalHeaders(): HeadersInit | undefined {
+    if (!pendingClientRateLimitSignal) return undefined;
+    pendingClientRateLimitSignal = false;
+    return { [CLIENT_GITHUB_RATE_LIMIT_FALLBACK_HEADER]: '1' };
+  }
+
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    const storedUntil = getStoredClientRateLimitUntil();
+    if (!storedUntil) return;
+
+    if (storedUntil > Date.now()) {
+      allowDirectGitHubRead = false;
+      return;
+    }
+
+    window.sessionStorage.removeItem(CLIENT_GITHUB_RATE_LIMIT_UNTIL_KEY);
+  });
+
   async function fetchGitHubFileDirect(relativePath: string): Promise<DirectGitHubFileResult> {
     const contentUrl = buildGitHubContentApiUrl(relativePath);
     if (!contentUrl) return { content: null, remaining: null };
@@ -436,12 +501,18 @@
       allowDirectGitHubRead = false;
     }
 
-    if (response.status === 404) return { content: null, remaining };
+    if (response.status === 404) {
+      // Selected path should exist from file tree. 404 usually means repo/path is not
+      // directly accessible (e.g. private repo), so disable direct mode and fallback.
+      allowDirectGitHubRead = false;
+      return { content: null, remaining };
+    }
     if (
       response.status === 429 ||
       (response.status === 403 && remaining === 0)
     ) {
-      allowDirectGitHubRead = false;
+      markClientGithubRateLimited(response.headers);
+      return { content: null, remaining };
     }
     if (!response.ok) throw new Error(`GitHub fetch failed (${response.status})`);
 
@@ -580,7 +651,11 @@
           // Public GitHub skills: optimistic direct fetch (unauthorized), fallback to platform API.
           let payload = await fetchSkillFilesDirectFromGitHub();
           if (!payload) {
-            const response = await fetch(`/api/skills/${encodedApiSkillSlug}/files`);
+            const fallbackHeaders = consumeClientRateLimitSignalHeaders();
+            const response = await fetch(
+              `/api/skills/${encodedApiSkillSlug}/files`,
+              fallbackHeaders ? { headers: fallbackHeaders } : undefined
+            );
             if (!response.ok) {
               if (response.status === 429) {
                 toast('Too many requests. Please wait a moment.', 'warning');
@@ -704,7 +779,11 @@
       if (directContent !== null) {
         fileContent = directContent;
       } else {
-        const res = await fetch(`/api/skills/${encodedApiSkillSlug}/file?path=${encodeURIComponent(path)}`);
+        const fallbackHeaders = consumeClientRateLimitSignalHeaders();
+        const res = await fetch(
+          `/api/skills/${encodedApiSkillSlug}/file?path=${encodeURIComponent(path)}`,
+          fallbackHeaders ? { headers: fallbackHeaders } : undefined
+        );
         if (!res.ok) {
           const err = await res.json().catch(() => ({ message: 'Failed to load file' })) as { message?: string };
           throw new Error(err.message || 'Failed to load file');
@@ -752,7 +831,7 @@
 
   // Navigate to a file from a relative link
   function navigateToFile(relativePath: string) {
-    if (!data.skill?.fileStructure) return;
+    if (resourceFileStructure.length === 0) return;
 
     // Normalize the path (remove leading ./)
     let normalizedPath = relativePath.replace(/^\.\//, '');
@@ -771,7 +850,7 @@
       return null;
     }
 
-    const file = findFile(data.skill.fileStructure, normalizedPath);
+    const file = findFile(resourceFileStructure, normalizedPath);
     if (file) {
       expandParentFolders(file.path);
       selectFile(file.path);
@@ -806,17 +885,49 @@
     return path.replace(/^\.\//, '').toLowerCase() === 'skill.md';
   }
 
-  function hasNonReadmeFiles(nodes: FileNode[]): boolean {
+  function filterResourceNodes(nodes: FileNode[]): FileNode[] {
+    const filtered: FileNode[] = [];
+
     for (const node of nodes) {
-      if (node.type === 'file' && !isSkillReadmeFile(node.path)) {
-        return true;
+      if (node.type === 'file') {
+        if (!isSkillReadmeFile(node.path)) {
+          filtered.push(node);
+        }
+        continue;
       }
-      if (node.children && hasNonReadmeFiles(node.children)) {
-        return true;
-      }
+
+      const children = node.children ? filterResourceNodes(node.children) : [];
+      if (children.length === 0) continue;
+      filtered.push({
+        ...node,
+        children,
+      });
+    }
+
+    return filtered;
+  }
+
+  const resourceFileStructure = $derived(
+    data.skill?.fileStructure ? filterResourceNodes(data.skill.fileStructure) : []
+  );
+
+  function resourceTreeHasPath(nodes: FileNode[], targetPath: string): boolean {
+    for (const node of nodes) {
+      if (node.path === targetPath) return true;
+      if (node.children && resourceTreeHasPath(node.children, targetPath)) return true;
     }
     return false;
   }
+
+  $effect(() => {
+    if (!selectedFile) return;
+    if (isSkillReadmeFile(selectedFile) || !resourceTreeHasPath(resourceFileStructure, selectedFile)) {
+      selectedFile = null;
+      fileContent = null;
+      highlightedFileContent = '';
+      fileError = null;
+    }
+  });
 
   // SVG icons for different file types (VS Code style)
   function getFileIconSvg(node: FileNode): string {
@@ -1310,10 +1421,10 @@
           </div>
         </div>
 
-        <!-- File Browser (show above SKILL.md when files exist) -->
-        {#if data.skill.fileStructure && data.skill.fileStructure.length > 0 && hasNonReadmeFiles(data.skill.fileStructure)}
+        <!-- Resources (show above SKILL.md when non-readme files exist) -->
+        {#if resourceFileStructure.length > 0}
           <div class="card">
-            <h2 class="text-lg font-semibold text-fg mb-4">Files</h2>
+            <h2 class="text-lg font-semibold text-fg mb-4">Resources</h2>
             <div class="file-browser">
               {#snippet renderFileTree(nodes: FileNode[], depth: number = 0)}
                 {#each nodes as node (node.path)}
@@ -1357,11 +1468,11 @@
                   </div>
                 {/each}
               {/snippet}
-              {@render renderFileTree(data.skill.fileStructure)}
+              {@render renderFileTree(resourceFileStructure)}
             </div>
 
             <!-- File Content Viewer -->
-            {#if selectedFile && !isSkillReadmeFile(selectedFile)}
+            {#if selectedFile}
               <div class="file-content-viewer">
                 <div class="file-content-header">
                   <span class="file-content-path">{selectedFile}</span>

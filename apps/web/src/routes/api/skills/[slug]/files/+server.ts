@@ -21,6 +21,9 @@ interface SkillInfo {
   skill_path: string | null;
   readme: string | null;
   visibility: string;
+  last_commit_at: number | null;
+  indexed_at: number | null;
+  updated_at: number | null;
 }
 
 interface GitHubTreeItem {
@@ -31,6 +34,9 @@ interface GitHubTreeItem {
 }
 
 const COMMIT_CACHE_TTL = 300; // 5 minutes cache for commit SHA
+const STALE_SKILL_REFRESH_AFTER_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+const STALE_SKILL_COMMIT_CACHE_TTL_SECONDS = 6 * 60 * 60; // 6 hours
+const CLIENT_GITHUB_RATE_LIMIT_HEADER = 'x-skillscat-client-github-rate-limited';
 
 // Text file extensions that we should include
 const TEXT_EXTENSIONS = new Set([
@@ -68,16 +74,43 @@ function decodeBase64ToUtf8(base64: string): string {
   return new TextDecoder('utf-8').decode(bytes);
 }
 
+function getSkillFreshnessTimestamp(skill: SkillInfo): number {
+  return skill.last_commit_at || skill.indexed_at || skill.updated_at || 0;
+}
+
+function shouldRunRealtimeRefresh(skill: SkillInfo, hasR2Files: boolean): boolean {
+  if (!hasR2Files) return true;
+  const freshnessTs = getSkillFreshnessTimestamp(skill);
+  if (!freshnessTs) return true;
+  return Date.now() - freshnessTs >= STALE_SKILL_REFRESH_AFTER_MS;
+}
+
+async function recordClientGitHubRateLimited(db: D1Database, skillId: string): Promise<void> {
+  try {
+    await db.prepare(`
+      INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
+      VALUES (?, NULL, ?, 'github_client_rate_limited', ?)
+    `)
+      .bind(crypto.randomUUID(), skillId, Date.now())
+      .run();
+  } catch {
+    // non-critical telemetry
+  }
+}
+
 /**
  * Get the latest commit SHA from GitHub repository (with Cache API caching)
  */
 async function getLatestCommitSha(
   owner: string,
   repo: string,
-  githubToken?: string
+  githubToken?: string,
+  options: { cacheTtlSeconds?: number; cacheKeySuffix?: string } = {}
 ): Promise<{ sha: string; branch: string } | null> {
+  const cacheTtlSeconds = options.cacheTtlSeconds ?? COMMIT_CACHE_TTL;
+  const cacheKeySuffix = options.cacheKeySuffix ?? 'default';
   const { data } = await getCached(
-    `commit:${owner}/${repo}`,
+    `commit:${owner}/${repo}:${cacheKeySuffix}`,
     async () => {
       // Get repository info (includes default branch)
       const repoRes = await getRepo(owner, repo, {
@@ -101,7 +134,7 @@ async function getLatestCommitSha(
 
       return { sha: commitInfo.sha, branch };
     },
-    COMMIT_CACHE_TTL
+    cacheTtlSeconds
   );
 
   return data;
@@ -238,7 +271,8 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
   }
 
   const skill = await db.prepare(`
-    SELECT id, name, slug, source_type, repo_owner, repo_name, skill_path, readme, visibility
+    SELECT id, name, slug, source_type, repo_owner, repo_name, skill_path, readme, visibility,
+           last_commit_at, indexed_at, updated_at
     FROM skills WHERE slug = ?
   `).bind(slug).first<SkillInfo>();
 
@@ -254,6 +288,10 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     if (!hasAccess) {
       throw error(403, 'You do not have permission to access this skill');
     }
+  }
+
+  if (request.headers.get(CLIENT_GITHUB_RATE_LIMIT_HEADER) === '1') {
+    await recordClientGitHubRateLimited(db, skill.id);
   }
 
   const files: SkillFile[] = [];
@@ -272,54 +310,60 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     r2Prefix = `skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/`;
   }
 
-  // Public GitHub skills: check for updates
+  // Public GitHub skills: prefer R2 cache and only run real-time checks for stale skills.
   if (skill.source_type === 'github' && skill.visibility === 'public' && skill.repo_owner && skill.repo_name) {
-    try {
-      // Get latest commit SHA (with KV caching to reduce GitHub API calls)
-      const latestCommit = await getLatestCommitSha(
-        skill.repo_owner,
-        skill.repo_name,
-        githubToken
-      );
+    const r2Files = await fetchR2Files(r2, r2Prefix);
+    const hasR2Files = r2Files.length > 0;
+    const shouldRealtimeRefresh = shouldRunRealtimeRefresh(skill, hasR2Files);
 
-      if (!latestCommit) {
-        throw error(404, 'Repository not found - it may have been deleted');
-      }
-
-      // Get cached commit SHA from R2
-      const cachedSha = await getR2CacheSha(r2, r2Prefix);
-
-      if (cachedSha === latestCommit.sha) {
-        // Cache is up to date, fetch from R2
-        const r2Files = await fetchR2Files(r2, r2Prefix);
-        files.push(...r2Files);
-      } else {
-        // Cache is stale, fetch from GitHub and update cache
-        const githubFiles = await fetchGitHubFiles(
+    if (!shouldRealtimeRefresh) {
+      files.push(...r2Files);
+    } else {
+      try {
+        const commitCacheTtl = hasR2Files ? STALE_SKILL_COMMIT_CACHE_TTL_SECONDS : COMMIT_CACHE_TTL;
+        const latestCommit = await getLatestCommitSha(
           skill.repo_owner,
           skill.repo_name,
-          latestCommit.branch,
-          skill.skill_path,
-          githubToken
+          githubToken,
+          {
+            cacheTtlSeconds: commitCacheTtl,
+            cacheKeySuffix: hasR2Files ? 'stale' : 'default'
+          }
         );
 
-        if (githubFiles.length > 0) {
-          // Update R2 cache
-          await updateR2Cache(r2, r2Prefix, githubFiles, latestCommit.sha);
-          files.push(...githubFiles);
-        } else {
-          // GitHub returned no files, try R2 cache as fallback
-          const r2Files = await fetchR2Files(r2, r2Prefix);
-          files.push(...r2Files);
+        if (!latestCommit) {
+          throw error(404, 'Repository not found - it may have been deleted');
         }
+
+        // Get cached commit SHA from R2
+        const cachedSha = await getR2CacheSha(r2, r2Prefix);
+
+        if (cachedSha === latestCommit.sha && hasR2Files) {
+          files.push(...r2Files);
+        } else {
+          // Cache is stale/missing, fetch from GitHub and update cache
+          const githubFiles = await fetchGitHubFiles(
+            skill.repo_owner,
+            skill.repo_name,
+            latestCommit.branch,
+            skill.skill_path,
+            githubToken
+          );
+
+          if (githubFiles.length > 0) {
+            await updateR2Cache(r2, r2Prefix, githubFiles, latestCommit.sha);
+            files.push(...githubFiles);
+          } else {
+            files.push(...r2Files);
+          }
+        }
+      } catch (err: unknown) {
+        if (err && typeof err === 'object' && 'status' in err && (err.status === 404 || err.status === 429)) {
+          throw err;
+        }
+        console.error('GitHub fetch failed, falling back to R2:', err);
+        files.push(...r2Files);
       }
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'status' in err && (err.status === 404 || err.status === 429)) {
-        throw err;
-      }
-      console.error('GitHub fetch failed, falling back to R2:', err);
-      const r2Files = await fetchR2Files(r2, r2Prefix);
-      files.push(...r2Files);
     }
   } else {
     // Private/Uploaded skills: fetch directly from R2

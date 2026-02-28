@@ -79,12 +79,22 @@ export interface TrendingEnv extends BaseEnv {
   TRENDING_STAR_WEIGHT?: string;
   TRENDING_FORK_WEIGHT?: string;
   TRENDING_VIEW_WEIGHT?: string;
+  CLASSIFICATION_QUEUE?: Queue<ClassificationMessage>; // For reclassification
+}
+
+export interface SearchPrecomputeEnv {
+  DB: D1Database;
+  WORKER_SECRET?: string;
   APP_ORIGIN?: string;
   RELATED_PRECOMPUTE_ENABLED?: string;
   RELATED_PRECOMPUTE_MAX_PER_RUN?: string;
   RELATED_PRECOMPUTE_TIME_BUDGET_MS?: string;
+  RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS?: string;
   RELATED_ALGO_VERSION?: string;
-  CLASSIFICATION_QUEUE?: Queue<ClassificationMessage>; // For reclassification
+  SEARCH_PRECOMPUTE_ENABLED?: string;
+  SEARCH_PRECOMPUTE_MAX_PER_RUN?: string;
+  SEARCH_PRECOMPUTE_TIME_BUDGET_MS?: string;
+  SEARCH_PRECOMPUTE_ALGO_VERSION?: string;
 }
 
 // ============================================
