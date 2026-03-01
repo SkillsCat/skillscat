@@ -10,10 +10,9 @@ const MAX_QUERY_LENGTH = 120;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 20;
 const SEARCH_CACHE_TTL_SECONDS = 45;
-const SEARCH_CACHE_KEY_VERSION = 'v4';
+const SEARCH_CACHE_KEY_VERSION = 'v5';
 const TERM_CANDIDATE_LIMIT_MULTIPLIER = 4;
 const PREFIX_CANDIDATE_LIMIT_MULTIPLIER = 3;
-const FUZZY_CANDIDATE_LIMIT_MULTIPLIER = 2;
 const CATEGORY_CANDIDATE_LIMIT_MULTIPLIER = 2;
 const MAX_CANDIDATE_LIMIT = 80;
 const MAX_MATCHED_CATEGORIES = 4;
@@ -306,6 +305,15 @@ async function fetchTermCandidates(
   const tokenPlaceholders = queryTokens.map(() => '?').join(',');
 
   const exactRows = await db.prepare(`
+    WITH matched_terms AS (
+      SELECT
+        st.skill_id as skillId,
+        COUNT(*) as matchedTermCount,
+        MAX(st.weight) as matchedTermWeight
+      FROM skill_search_terms st
+      WHERE st.term IN (${tokenPlaceholders})
+      GROUP BY st.skill_id
+    )
     SELECT
       s.id,
       s.name,
@@ -322,18 +330,17 @@ async function fetchTermCandidates(
       s.last_commit_at as lastCommitAt,
       s.updated_at as updatedAt,
       s.tier,
-      COUNT(DISTINCT st.term) as matchedTermCount,
-      MAX(st.weight) as matchedTermWeight
-    FROM skill_search_terms st
-    INNER JOIN skills s ON s.id = st.skill_id
+      matched.matchedTermCount as matchedTermCount,
+      matched.matchedTermWeight as matchedTermWeight
+    FROM matched_terms matched
+    CROSS JOIN skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     ${searchStateJoinSql}
-    WHERE s.visibility = 'public'
-      AND st.term IN (${tokenPlaceholders})
-    GROUP BY s.id
+    WHERE s.id = matched.skillId
+      AND s.visibility = 'public'
     ORDER BY
-      matchedTermCount DESC,
-      matchedTermWeight DESC,
+      matched.matchedTermCount DESC,
+      matched.matchedTermWeight DESC,
       ${searchScoreOrderSql}
       s.trending_score DESC
     LIMIT ?
@@ -355,6 +362,15 @@ async function fetchTermCandidates(
   const exclusion = buildExclusionClause(Array.from(merged.keys()), 's.id');
 
   const prefixRows = await db.prepare(`
+    WITH matched_terms AS (
+      SELECT
+        st.skill_id as skillId,
+        COUNT(*) as matchedTermCount,
+        MAX(st.weight) as matchedTermWeight
+      FROM skill_search_terms st
+      WHERE (${prefixPredicates})
+      GROUP BY st.skill_id
+    )
     SELECT
       s.id,
       s.name,
@@ -371,19 +387,18 @@ async function fetchTermCandidates(
       s.last_commit_at as lastCommitAt,
       s.updated_at as updatedAt,
       s.tier,
-      COUNT(DISTINCT st.term) as matchedTermCount,
-      MAX(st.weight) as matchedTermWeight
-    FROM skill_search_terms st
-    INNER JOIN skills s ON s.id = st.skill_id
+      matched.matchedTermCount as matchedTermCount,
+      matched.matchedTermWeight as matchedTermWeight
+    FROM matched_terms matched
+    CROSS JOIN skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     ${searchStateJoinSql}
-    WHERE s.visibility = 'public'
-      AND (${prefixPredicates})
+    WHERE s.id = matched.skillId
+      AND s.visibility = 'public'
       ${exclusion.sql}
-    GROUP BY s.id
     ORDER BY
-      matchedTermCount DESC,
-      matchedTermWeight DESC,
+      matched.matchedTermCount DESC,
+      matched.matchedTermWeight DESC,
       ${searchScoreOrderSql}
       s.trending_score DESC
     LIMIT ?
@@ -411,7 +426,8 @@ async function fetchTextCandidates(
   const fuzzyQuery = `%${query}%`;
 
   const prefixLimit = getCandidateLimit(limit, PREFIX_CANDIDATE_LIMIT_MULTIPLIER);
-  const fuzzyLimit = getCandidateLimit(limit, FUZZY_CANDIDATE_LIMIT_MULTIPLIER);
+  const fuzzyLimit = limit;
+  const prefixPerColumnLimit = Math.max(limit, Math.ceil(prefixLimit / 2));
 
   const searchStateJoinSql = useSearchState ? 'LEFT JOIN skill_search_state ss ON ss.skill_id = s.id' : '';
   const searchScoreSelectSql = useSearchState ? 'ss.score as precomputedScore' : 'NULL as precomputedScore';
@@ -419,6 +435,41 @@ async function fetchTextCandidates(
   const prefixExclusion = buildExclusionClause(excludedIds, 's.id');
 
   const prefixRows = await db.prepare(`
+    WITH prefix_ids AS (
+      SELECT id FROM (
+        SELECT id
+        FROM skills INDEXED BY skills_visibility_name_idx
+        WHERE visibility = 'public' AND name LIKE ?
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT id FROM (
+        SELECT id
+        FROM skills INDEXED BY skills_visibility_slug_idx
+        WHERE visibility = 'public' AND slug LIKE ?
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT id FROM (
+        SELECT id
+        FROM skills INDEXED BY skills_visibility_repo_owner_idx
+        WHERE visibility = 'public' AND repo_owner LIKE ?
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT id FROM (
+        SELECT id
+        FROM skills INDEXED BY skills_visibility_repo_name_idx
+        WHERE visibility = 'public' AND repo_name LIKE ?
+        LIMIT ?
+      )
+    ),
+    dedup_ids AS (
+      SELECT id
+      FROM prefix_ids
+      GROUP BY id
+      LIMIT ?
+    )
     SELECT
       s.id,
       s.name,
@@ -435,16 +486,11 @@ async function fetchTextCandidates(
       s.last_commit_at as lastCommitAt,
       s.updated_at as updatedAt,
       s.tier
-    FROM skills s
+    FROM dedup_ids d
+    CROSS JOIN skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     ${searchStateJoinSql}
-    WHERE s.visibility = 'public'
-      AND (
-        s.name LIKE ?
-        OR s.slug LIKE ?
-        OR s.repo_owner LIKE ?
-        OR s.repo_name LIKE ?
-      )
+    WHERE s.id = d.id
       ${prefixExclusion.sql}
     ORDER BY
       CASE
@@ -463,9 +509,14 @@ async function fetchTextCandidates(
     LIMIT ?
   `).bind(
     prefixQuery,
+    prefixPerColumnLimit,
     prefixQuery,
+    prefixPerColumnLimit,
     prefixQuery,
+    prefixPerColumnLimit,
     prefixQuery,
+    prefixPerColumnLimit,
+    prefixLimit,
     ...prefixExclusion.params,
     query,
     query,
@@ -483,8 +534,11 @@ async function fetchTextCandidates(
     merged.set(row.id, row);
   }
 
-  const remaining = Math.max(0, fuzzyLimit - merged.size);
-  if (remaining <= 0) {
+  const fuzzyBudget = Math.min(
+    Math.max(0, fuzzyLimit - merged.size),
+    Math.max(6, Math.ceil(limit / 2))
+  );
+  if (fuzzyBudget <= 0) {
     return Array.from(merged.values());
   }
 
@@ -531,7 +585,7 @@ async function fetchTextCandidates(
     fuzzyQuery,
     fuzzyQuery,
     ...fuzzyExclusion.params,
-    remaining
+    fuzzyBudget
   ).all<SearchCandidateRow>();
 
   for (const row of fuzzyRows.results || []) {
@@ -561,6 +615,14 @@ async function fetchCategoryCandidates(
   const searchScoreOrderSql = useSearchState ? 'COALESCE(ss.score, 0) DESC,' : '';
 
   const sql = `
+    WITH matched_categories AS (
+      SELECT
+        sc.skill_id as skillId,
+        COUNT(*) as matchedCategoryCount
+      FROM skill_categories sc
+      WHERE sc.category_slug IN (${placeholders})
+      GROUP BY sc.skill_id
+    )
     SELECT
       s.id,
       s.name,
@@ -577,17 +639,16 @@ async function fetchCategoryCandidates(
       s.last_commit_at as lastCommitAt,
       s.updated_at as updatedAt,
       s.tier,
-      COUNT(DISTINCT sc.category_slug) as matchedCategoryCount
-    FROM skill_categories sc
-    INNER JOIN skills s ON s.id = sc.skill_id
+      matched.matchedCategoryCount as matchedCategoryCount
+    FROM matched_categories matched
+    CROSS JOIN skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     ${searchStateJoinSql}
-    WHERE s.visibility = 'public'
-      AND sc.category_slug IN (${placeholders})
+    WHERE s.id = matched.skillId
+      AND s.visibility = 'public'
       ${exclusion.sql}
-    GROUP BY s.id
     ORDER BY
-      COUNT(DISTINCT sc.category_slug) DESC,
+      matched.matchedCategoryCount DESC,
       ${searchScoreOrderSql}
       s.trending_score DESC
     LIMIT ?

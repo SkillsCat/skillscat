@@ -5,6 +5,7 @@
 import type { FileNode, SkillCardData, SkillDetail } from '$lib/types';
 import { buildUploadSkillR2Key, parseSkillSlug } from '$lib/skill-path';
 import { buildTopRatedSortScoreSql } from '$lib/server/ranking';
+import { CATEGORIES } from '$lib/constants/categories';
 
 export interface DbEnv {
   DB?: D1Database;
@@ -17,6 +18,7 @@ export interface DbEnv {
 
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 const LIST_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+const PREDEFINED_CATEGORY_SLUGS = CATEGORIES.map((category) => category.slug);
 
 interface CachedSkillCardRaw {
   id: string;
@@ -550,7 +552,7 @@ export async function getTopSkills(
   env: DbEnv,
   limit: number = 12
 ): Promise<SkillCardData[]> {
-  const topRatedSortScoreSql = buildTopRatedSortScoreSql('s.stars', 's.download_count_90d');
+  const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
   // 先尝试从 R2 缓存读取
   const cached = await getCachedList(env.R2, 'top', env.CACHE_VERSION, {
     maxAgeMs: LIST_CACHE_MAX_AGE_MS,
@@ -610,7 +612,7 @@ export async function getTopSkillsPaginated(
   if (!env.DB) return { skills: [], total: 0 };
 
   const offset = (page - 1) * limit;
-  const topRatedSortScoreSql = buildTopRatedSortScoreSql('s.stars', 's.download_count_90d');
+  const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
 
   const result = await env.DB.prepare(`
     SELECT
@@ -679,32 +681,41 @@ export async function getSkillsByCategory(
   if (!env.DB) return { skills: [], total: 0 };
 
   const result = await env.DB.prepare(`
-    SELECT
-      s.id,
-      s.name,
-      s.slug,
-      s.description,
-      s.repo_owner as repoOwner,
-      s.repo_name as repoName,
-      s.stars,
-      s.forks,
-      s.trending_score as trendingScore,
-      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-      a.avatar_url as authorAvatar
-    FROM skills s
-    JOIN skill_categories sc ON s.id = sc.skill_id
-    LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE sc.category_slug = ? AND s.visibility = 'public'
-    ORDER BY s.trending_score DESC
-    LIMIT ? OFFSET ?
+    WITH matched AS (
+      SELECT
+        s.id,
+        s.name,
+        s.slug,
+        s.description,
+        s.repo_owner as repoOwner,
+        s.repo_name as repoName,
+        s.stars,
+        s.forks,
+        s.trending_score as trendingScore,
+        COALESCE(s.last_commit_at, s.updated_at) as updatedAt
+      FROM skill_categories sc
+      CROSS JOIN skills s
+      WHERE s.id = sc.skill_id
+        AND sc.category_slug = ?
+        AND s.visibility = 'public'
+      ORDER BY s.trending_score DESC
+      LIMIT ? OFFSET ?
+    )
+    SELECT matched.*, a.avatar_url as authorAvatar
+    FROM matched
+    LEFT JOIN authors a ON matched.repoOwner = a.username
+    ORDER BY matched.trendingScore DESC
   `)
     .bind(categorySlug, limit, offset)
     .all<SkillListRow>();
 
   const countResult = await env.DB.prepare(`
-    SELECT COUNT(*) as total FROM skill_categories sc
-    JOIN skills s ON sc.skill_id = s.id
-    WHERE sc.category_slug = ? AND s.visibility = 'public'
+    SELECT COUNT(*) as total
+    FROM skill_categories sc
+    CROSS JOIN skills s
+    WHERE s.id = sc.skill_id
+      AND sc.category_slug = ?
+      AND s.visibility = 'public'
   `)
     .bind(categorySlug)
     .first<{ total: number }>();
@@ -740,9 +751,46 @@ export async function searchSkills(
 ): Promise<SkillCardData[]> {
   if (!env.DB || !query) return [];
 
-  const searchTerm = `%${query}%`;
+  const prefixTerm = `${query}%`;
+  const fuzzyTerm = `%${query}%`;
+  const prefixPerColumnLimit = Math.max(limit, Math.ceil(limit / 2));
 
-  const result = await env.DB.prepare(`
+  const prefixResult = await env.DB.prepare(`
+    WITH prefix_ids AS (
+      SELECT id FROM (
+        SELECT id
+        FROM skills INDEXED BY skills_visibility_name_idx
+        WHERE visibility = 'public' AND name LIKE ?
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT id FROM (
+        SELECT id
+        FROM skills INDEXED BY skills_visibility_slug_idx
+        WHERE visibility = 'public' AND slug LIKE ?
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT id FROM (
+        SELECT id
+        FROM skills INDEXED BY skills_visibility_repo_owner_idx
+        WHERE visibility = 'public' AND repo_owner LIKE ?
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT id FROM (
+        SELECT id
+        FROM skills INDEXED BY skills_visibility_repo_name_idx
+        WHERE visibility = 'public' AND repo_name LIKE ?
+        LIMIT ?
+      )
+    ),
+    dedup_ids AS (
+      SELECT id
+      FROM prefix_ids
+      GROUP BY id
+      LIMIT ?
+    )
     SELECT
       s.id,
       s.name,
@@ -755,16 +803,109 @@ export async function searchSkills(
       s.trending_score as trendingScore,
       COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       a.avatar_url as authorAvatar
-    FROM skills s
+    FROM dedup_ids d
+    CROSS JOIN skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE s.visibility = 'public' AND (s.name LIKE ? OR s.description LIKE ? OR s.repo_owner LIKE ?)
-    ORDER BY s.trending_score DESC
+    WHERE s.id = d.id
+    ORDER BY
+      CASE
+        WHEN s.name = ? THEN 0
+        WHEN s.slug = ? THEN 1
+        WHEN s.repo_owner = ? THEN 2
+        WHEN s.repo_name = ? THEN 3
+        WHEN s.name LIKE ? THEN 4
+        WHEN s.slug LIKE ? THEN 5
+        WHEN s.repo_owner LIKE ? THEN 6
+        WHEN s.repo_name LIKE ? THEN 7
+        ELSE 8
+      END ASC,
+      s.trending_score DESC
     LIMIT ?
   `)
-    .bind(searchTerm, searchTerm, searchTerm, limit)
+    .bind(
+      prefixTerm,
+      prefixPerColumnLimit,
+      prefixTerm,
+      prefixPerColumnLimit,
+      prefixTerm,
+      prefixPerColumnLimit,
+      prefixTerm,
+      prefixPerColumnLimit,
+      limit,
+      query,
+      query,
+      query,
+      query,
+      prefixTerm,
+      prefixTerm,
+      prefixTerm,
+      prefixTerm,
+      limit
+    )
     .all<SkillListRow>();
 
-  return addCategoriesToSkills(env.DB, result.results);
+  const merged = new Map<string, SkillListRow>();
+  for (const row of prefixResult.results || []) {
+    merged.set(row.id, row);
+  }
+
+  const fuzzyBudget = Math.min(
+    Math.max(0, limit - merged.size),
+    Math.max(8, Math.ceil(limit / 3))
+  );
+
+  if (fuzzyBudget > 0) {
+    const excludedIds = Array.from(merged.keys());
+    const exclusionSql = excludedIds.length > 0
+      ? `AND s.id NOT IN (${excludedIds.map(() => '?').join(',')})`
+      : '';
+
+    const fuzzyResult = await env.DB.prepare(`
+      SELECT
+        s.id,
+        s.name,
+        s.slug,
+        s.description,
+        s.repo_owner as repoOwner,
+        s.repo_name as repoName,
+        s.stars,
+        s.forks,
+        s.trending_score as trendingScore,
+        COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
+        a.avatar_url as authorAvatar
+      FROM skills s
+      LEFT JOIN authors a ON s.repo_owner = a.username
+      WHERE s.visibility = 'public'
+        AND (
+          s.name LIKE ?
+          OR s.slug LIKE ?
+          OR s.repo_owner LIKE ?
+          OR s.repo_name LIKE ?
+          OR s.description LIKE ?
+        )
+        ${exclusionSql}
+      ORDER BY s.trending_score DESC
+      LIMIT ?
+    `)
+      .bind(
+        fuzzyTerm,
+        fuzzyTerm,
+        fuzzyTerm,
+        fuzzyTerm,
+        fuzzyTerm,
+        ...excludedIds,
+        fuzzyBudget
+      )
+      .all<SkillListRow>();
+
+    for (const row of fuzzyResult.results || []) {
+      if (!merged.has(row.id)) {
+        merged.set(row.id, row);
+      }
+    }
+  }
+
+  return addCategoriesToSkills(env.DB, Array.from(merged.values()).slice(0, limit));
 }
 
 /**
@@ -992,11 +1133,14 @@ export async function getRelatedSkills(
   const candidateMap = new Map<string, { data: RelatedSkillCandidateRow; tier: number }>();
   const excludeIds: string[] = [skillId];
 
-  const SKILL_COLUMNS = `
+  const SKILL_COLUMNS_BASE = `
     s.id, s.name, s.slug, s.description,
     s.repo_owner as repoOwner, s.repo_name as repoName,
     s.stars, s.forks, s.trending_score as trendingScore,
-    COALESCE(s.last_commit_at, s.updated_at) as updatedAt, s.last_commit_at as lastCommitAt,
+    COALESCE(s.last_commit_at, s.updated_at) as updatedAt, s.last_commit_at as lastCommitAt`;
+
+  const SKILL_COLUMNS_WITH_AUTHOR = `
+    ${SKILL_COLUMNS_BASE},
     a.avatar_url as authorAvatar`;
 
   const addCandidates = (rows: RelatedSkillCandidateRow[], tier: number) => {
@@ -1018,16 +1162,22 @@ export async function getRelatedSkills(
       timingCollector,
       'rel_t1',
       () => db.prepare(`
-      SELECT ${SKILL_COLUMNS},
-        COUNT(sc.category_slug) as sharedCategoryCount
-      FROM skills s
-      JOIN skill_categories sc ON s.id = sc.skill_id
-      LEFT JOIN authors a ON s.repo_owner = a.username
-      WHERE sc.category_slug IN (${catPh})
-        AND s.id NOT IN (${exPh})
-        AND s.visibility = 'public'
-      GROUP BY s.id
-      ORDER BY sharedCategoryCount DESC, s.trending_score DESC
+      WITH matched AS (
+        SELECT
+          ${SKILL_COLUMNS_BASE},
+          COUNT(sc.category_slug) as sharedCategoryCount
+        FROM skill_categories sc
+        CROSS JOIN skills s
+        WHERE s.id = sc.skill_id
+          AND sc.category_slug IN (${catPh})
+          AND s.id NOT IN (${exPh})
+          AND s.visibility = 'public'
+        GROUP BY s.id
+      )
+      SELECT matched.*, a.avatar_url as authorAvatar
+      FROM matched
+      LEFT JOIN authors a ON matched.repoOwner = a.username
+      ORDER BY matched.sharedCategoryCount DESC, matched.trendingScore DESC
       LIMIT 30
     `).bind(...categories, ...excludeIds).all<RelatedSkillCandidateRow>(),
       'tier1 category overlap'
@@ -1043,16 +1193,22 @@ export async function getRelatedSkills(
       timingCollector,
       'rel_t2',
       () => db.prepare(`
-      SELECT ${SKILL_COLUMNS},
-        COUNT(st.tag) as sharedTagCount
-      FROM skills s
-      JOIN skill_tags st ON s.id = st.skill_id
-      LEFT JOIN authors a ON s.repo_owner = a.username
-      WHERE st.tag IN (${tagPh})
-        AND s.id NOT IN (${exPh})
-        AND s.visibility = 'public'
-      GROUP BY s.id
-      ORDER BY sharedTagCount DESC, s.trending_score DESC
+      WITH matched AS (
+        SELECT
+          ${SKILL_COLUMNS_BASE},
+          COUNT(st.tag) as sharedTagCount
+        FROM skill_tags st
+        CROSS JOIN skills s
+        WHERE s.id = st.skill_id
+          AND st.tag IN (${tagPh})
+          AND s.id NOT IN (${exPh})
+          AND s.visibility = 'public'
+        GROUP BY s.id
+      )
+      SELECT matched.*, a.avatar_url as authorAvatar
+      FROM matched
+      LEFT JOIN authors a ON matched.repoOwner = a.username
+      ORDER BY matched.sharedTagCount DESC, matched.trendingScore DESC
       LIMIT 20
     `).bind(...skillTags, ...excludeIds).all<RelatedSkillCandidateRow>(),
       'tier2 tag overlap'
@@ -1067,7 +1223,7 @@ export async function getRelatedSkills(
       timingCollector,
       'rel_t3',
       () => db.prepare(`
-      SELECT ${SKILL_COLUMNS}
+      SELECT ${SKILL_COLUMNS_WITH_AUTHOR}
       FROM skills s
       LEFT JOIN authors a ON s.repo_owner = a.username
       WHERE s.repo_owner = ?
@@ -1088,7 +1244,7 @@ export async function getRelatedSkills(
       timingCollector,
       'rel_t4',
       () => db.prepare(`
-      SELECT ${SKILL_COLUMNS}
+      SELECT ${SKILL_COLUMNS_WITH_AUTHOR}
       FROM skills s
       LEFT JOIN authors a ON s.repo_owner = a.username
       WHERE s.id NOT IN (${exPh})
@@ -1254,15 +1410,21 @@ export async function getStats(env: DbEnv): Promise<{ totalSkills: number }> {
 export async function getCategoryStats(
   env: DbEnv
 ): Promise<Record<string, number>> {
-  if (!env.DB) return {};
+  if (!env.DB || PREDEFINED_CATEGORY_SLUGS.length === 0) return {};
+
+  const categoryPlaceholders = PREDEFINED_CATEGORY_SLUGS.map(() => '?').join(',');
 
   const result = await env.DB.prepare(`
     SELECT sc.category_slug, COUNT(*) as count
     FROM skill_categories sc
-    JOIN skills s ON sc.skill_id = s.id
-    WHERE s.visibility = 'public'
+    CROSS JOIN skills s
+    WHERE s.id = sc.skill_id
+      AND s.visibility = 'public'
+      AND sc.category_slug IN (${categoryPlaceholders})
     GROUP BY sc.category_slug
-  `).all<CategoryCountRow>();
+  `)
+    .bind(...PREDEFINED_CATEGORY_SLUGS)
+    .all<CategoryCountRow>();
 
   const stats: Record<string, number> = {};
   for (const row of result.results) {

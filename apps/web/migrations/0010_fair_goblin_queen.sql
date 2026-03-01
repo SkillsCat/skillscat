@@ -1,0 +1,1 @@
+CREATE INDEX `skills_visibility_repo_owner_idx` ON `skills` (`visibility`,`repo_owner`);

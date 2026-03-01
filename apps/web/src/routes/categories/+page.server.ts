@@ -41,19 +41,30 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
       if (env.DB) {
         try {
           const result = await env.DB.prepare(`
+            WITH ai_categories AS (
+              SELECT slug, name, description, type
+              FROM categories
+              WHERE type = 'ai-suggested'
+            ),
+            public_counts AS (
+              SELECT sc.category_slug, COUNT(*) as skillCount
+              FROM skill_categories sc
+              CROSS JOIN skills s
+              WHERE s.id = sc.skill_id
+                AND s.visibility = 'public'
+                AND sc.category_slug IN (SELECT slug FROM ai_categories)
+              GROUP BY sc.category_slug
+            )
             SELECT
-              c.slug,
-              c.name,
-              c.description,
-              c.type,
-              COUNT(s.id) as skillCount
-            FROM categories c
-            LEFT JOIN skill_categories sc ON c.slug = sc.category_slug
-            LEFT JOIN skills s ON sc.skill_id = s.id AND s.visibility = 'public'
-            WHERE c.type = 'ai-suggested'
-            GROUP BY c.id, c.slug, c.name, c.description, c.type
-            HAVING COUNT(s.id) > 0
-            ORDER BY skillCount DESC
+              ai.slug,
+              ai.name,
+              ai.description,
+              ai.type,
+              pc.skillCount
+            FROM public_counts pc
+            CROSS JOIN ai_categories ai
+            WHERE ai.slug = pc.category_slug
+            ORDER BY pc.skillCount DESC
             LIMIT 50
           `).all<DynamicCategory>();
           dynamicCategories = result.results || [];

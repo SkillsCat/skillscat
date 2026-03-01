@@ -139,29 +139,39 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
 
         if (skill.categories.length > 0) {
           const relatedResult = await db.prepare(`
-            SELECT DISTINCT
-              s.id,
-              s.name,
-              s.slug,
-              s.description,
-              s.repo_owner as repoOwner,
-              s.repo_name as repoName,
-              s.stars,
-              s.forks,
-              s.trending_score as trendingScore,
-              COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-              GROUP_CONCAT(sc2.category_slug) as categories,
+            WITH matched AS (
+              SELECT
+                s.id,
+                s.name,
+                s.slug,
+                s.description,
+                s.repo_owner as repoOwner,
+                s.repo_name as repoName,
+                s.stars,
+                s.forks,
+                s.trending_score as trendingScore,
+                COALESCE(s.last_commit_at, s.updated_at) as updatedAt
+              FROM skill_categories sc
+              CROSS JOIN skills s
+              WHERE s.id = sc.skill_id
+                AND sc.category_slug IN (${skill.categories.map(() => '?').join(',')})
+                AND s.id != ?
+                AND s.visibility = 'public'
+              GROUP BY s.id
+              ORDER BY s.trending_score DESC
+              LIMIT 6
+            )
+            SELECT
+              matched.*,
+              (
+                SELECT GROUP_CONCAT(sc2.category_slug)
+                FROM skill_categories sc2
+                WHERE sc2.skill_id = matched.id
+              ) as categories,
               a.avatar_url as authorAvatar
-            FROM skills s
-            INNER JOIN skill_categories sc ON s.id = sc.skill_id
-            LEFT JOIN skill_categories sc2 ON s.id = sc2.skill_id
-            LEFT JOIN authors a ON s.repo_owner = a.username
-            WHERE sc.category_slug IN (${skill.categories.map(() => '?').join(',')})
-              AND s.id != ?
-              AND s.visibility = 'public'
-            GROUP BY s.id
-            ORDER BY s.trending_score DESC
-            LIMIT 6
+            FROM matched
+            LEFT JOIN authors a ON matched.repoOwner = a.username
+            ORDER BY matched.trendingScore DESC
           `).bind(...skill.categories, row.id).all<{
             id: string;
             name: string;

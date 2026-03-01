@@ -57,6 +57,34 @@
       "when": 1772300659974,
       "tag": "0007_gorgeous_wong",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1772303171011,
+      "tag": "0008_reflective_warlock",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1772346934021,
+      "tag": "0009_right_xavin",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1772357568809,
+      "tag": "0010_fair_goblin_queen",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1772358006602,
+      "tag": "0011_absurd_the_leader",
+      "breakpoints": true
     }
   ]
 }

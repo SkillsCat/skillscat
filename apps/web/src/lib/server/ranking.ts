@@ -83,7 +83,8 @@ export function getTopRatedSortScore(stars: number, engagement90d: number): numb
 export function buildNonlinearStarScoreSql(starsExpr: string): string {
   const t = STAR_NONLINEAR_THRESHOLD;
   const k = STAR_NONLINEAR_LOG_TAIL_WIDTH;
-  const s = `COALESCE(${starsExpr}, 0)`;
+  const nullableStars = `(CASE WHEN ${starsExpr} IS NULL THEN 0 ELSE ${starsExpr} END)`;
+  const s = `(CASE WHEN ${nullableStars} < 0 THEN 0 ELSE ${nullableStars} END)`;
   const tSql = `${t}.0`;
   const kSql = `${k}.0`;
 
@@ -101,17 +102,25 @@ export function buildNonlinearStarScoreSql(starsExpr: string): string {
  */
 export function buildTopRatedSortScoreSql(starsExpr: string, engagement90dExpr: string): string {
   const weightedStars = buildNonlinearStarScoreSql(starsExpr);
-  const rawStars = `MAX(COALESCE(${starsExpr}, 0), 0)`;
-  const installs = `MAX(COALESCE(${engagement90dExpr}, 0), 0)`;
+  const nullableStars = `(CASE WHEN ${starsExpr} IS NULL THEN 0 ELSE ${starsExpr} END)`;
+  const rawStars = `(CASE WHEN ${nullableStars} < 0 THEN 0 ELSE ${nullableStars} END)`;
+  const nullableInstalls = `(CASE WHEN ${engagement90dExpr} IS NULL THEN 0 ELSE ${engagement90dExpr} END)`;
+  const installs = `(CASE WHEN ${nullableInstalls} < 0 THEN 0 ELSE ${nullableInstalls} END)`;
   const requiredInstalls = `(${TOP_RATED_INSTALL_BASE_REQUIREMENT}
     + (LOG((${rawStars}) + 1) / LOG(2.0)) * ${TOP_RATED_INSTALL_REQUIREMENT_LOG_MULTIPLIER})`;
+  const readinessRatio = `((LOG((${installs}) + 1) / LOG(2.0)) / (LOG((${requiredInstalls}) + 1) / LOG(2.0)))`;
   const readiness = `(CASE
     WHEN LOG((${installs}) + 1) <= 0 OR LOG((${requiredInstalls}) + 1) <= 0 THEN 0
-    ELSE MIN(1.0, (LOG((${installs}) + 1) / LOG(2.0)) / (LOG((${requiredInstalls}) + 1) / LOG(2.0)))
+    WHEN ${readinessRatio} < 1.0 THEN ${readinessRatio}
+    ELSE 1.0
   END)`;
   const starFactor = `(${TOP_RATED_STAR_FACTOR_FLOOR}
     + (1.0 - ${TOP_RATED_STAR_FACTOR_FLOOR}) * ${readiness})`;
-  const installBonus = `MIN(${TOP_RATED_INSTALL_BONUS_CAP}, (LOG((${installs}) + 1) / LOG(2.0)) * ${TOP_RATED_INSTALL_BONUS_SCALE})`;
+  const installBonusRaw = `((LOG((${installs}) + 1) / LOG(2.0)) * ${TOP_RATED_INSTALL_BONUS_SCALE})`;
+  const installBonus = `(CASE
+    WHEN ${installBonusRaw} < ${TOP_RATED_INSTALL_BONUS_CAP} THEN ${installBonusRaw}
+    ELSE ${TOP_RATED_INSTALL_BONUS_CAP}
+  END)`;
 
   return `((${weightedStars}) * (${starFactor}) + (${installBonus}))`;
 }

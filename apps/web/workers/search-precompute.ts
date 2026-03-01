@@ -25,6 +25,8 @@ const DEFAULT_RELATED_PRECOMPUTE_TIME_BUDGET_MS = 15_000;
 const DEFAULT_RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS = 2_500;
 const DEFAULT_SEARCH_PRECOMPUTE_MAX_PER_RUN = 500;
 const DEFAULT_SEARCH_PRECOMPUTE_TIME_BUDGET_MS = 10_000;
+const DEFAULT_MISSING_STATE_SCAN_HOUR_UTC = 3;
+const DEFAULT_MISSING_STATE_SCAN_LIMIT = 200;
 
 interface RelatedPrecomputeCandidate {
   id: string;
@@ -114,50 +116,127 @@ async function processRelatedPrecomputeBatch(env: SearchPrecomputeEnv): Promise<
   const limit = getRelatedPrecomputeMaxPerRun(env);
   const timeBudgetMs = getRelatedPrecomputeTimeBudgetMs(env);
   const requestTimeoutMs = getRelatedPrecomputeRequestTimeoutMs(env);
+  const relatedMissingScanHour = parseMissingStateScanHour(env.RELATED_MISSING_STATE_SCAN_HOUR_UTC);
+  const relatedMissingScanLimit = parseMissingStateScanLimit(env.RELATED_MISSING_STATE_SCAN_LIMIT);
+  const includeRelatedMissingStateScan = shouldRunMissingStateScan(now, relatedMissingScanHour);
 
   let candidatesResult;
   try {
-    candidatesResult = await env.DB.prepare(`
-      SELECT
-        s.id,
-        s.slug,
-        s.tier,
-        s.trending_score,
-        s.last_accessed_at,
-        rs.dirty,
-        rs.next_update_at,
-        rs.precomputed_at,
-        rs.algo_version
-      FROM skills s
-      LEFT JOIN skill_related_state rs ON rs.skill_id = s.id
-      WHERE s.visibility = 'public'
-        AND s.tier != 'archived'
-        AND (
-          rs.skill_id IS NULL
-          OR rs.dirty = 1
-          OR rs.precomputed_at IS NULL
-          OR rs.next_update_at IS NULL
-          OR rs.next_update_at <= ?
-          OR rs.algo_version IS NULL
-          OR rs.algo_version != ?
+    if (includeRelatedMissingStateScan) {
+      candidatesResult = await env.DB.prepare(`
+        WITH state_candidates AS (
+          SELECT skill_id FROM skill_related_state WHERE dirty = 1
+          UNION
+          SELECT skill_id FROM skill_related_state WHERE precomputed_at IS NULL
+          UNION
+          SELECT skill_id FROM skill_related_state WHERE next_update_at IS NULL
+          UNION
+          SELECT skill_id FROM skill_related_state WHERE next_update_at <= ?
+          UNION
+          SELECT skill_id FROM skill_related_state WHERE algo_version IS NULL
+          UNION
+          SELECT skill_id FROM skill_related_state WHERE algo_version != ?
+        ),
+        missing_state AS (
+          SELECT s.id as skill_id
+          FROM skills s
+          LEFT JOIN skill_related_state rs ON rs.skill_id = s.id
+          WHERE rs.skill_id IS NULL
+            AND s.visibility = 'public'
+            AND s.tier != 'archived'
+          ORDER BY s.indexed_at DESC
+          LIMIT ?
+        ),
+        candidate_ids AS (
+          SELECT skill_id FROM state_candidates
+          UNION
+          SELECT skill_id FROM missing_state
         )
-      ORDER BY
-        COALESCE(rs.dirty, 1) DESC,
-        CASE s.tier
-          WHEN 'hot' THEN 0
-          WHEN 'warm' THEN 1
-          WHEN 'cool' THEN 2
-          WHEN 'cold' THEN 3
-          ELSE 4
-        END ASC,
-        s.trending_score DESC,
-        CASE WHEN s.last_accessed_at IS NULL THEN 1 ELSE 0 END ASC,
-        s.last_accessed_at DESC,
-        COALESCE(rs.next_update_at, 0) ASC
-      LIMIT ?
-    `)
-      .bind(now, algoVersion, limit)
-      .all<RelatedPrecomputeCandidate>();
+        SELECT
+          s.id,
+          s.slug,
+          s.tier,
+          s.trending_score,
+          s.last_accessed_at,
+          rs.dirty,
+          rs.next_update_at,
+          rs.precomputed_at,
+          rs.algo_version
+        FROM candidate_ids c
+        CROSS JOIN skills s
+        LEFT JOIN skill_related_state rs ON rs.skill_id = s.id
+        WHERE s.id = c.skill_id
+          AND s.visibility = 'public'
+          AND s.tier != 'archived'
+        ORDER BY
+          COALESCE(rs.dirty, 1) DESC,
+          CASE s.tier
+            WHEN 'hot' THEN 0
+            WHEN 'warm' THEN 1
+            WHEN 'cool' THEN 2
+            WHEN 'cold' THEN 3
+            ELSE 4
+          END ASC,
+          s.trending_score DESC,
+          CASE WHEN s.last_accessed_at IS NULL THEN 1 ELSE 0 END ASC,
+          s.last_accessed_at DESC,
+          COALESCE(rs.next_update_at, 0) ASC
+        LIMIT ?
+      `)
+        .bind(now, algoVersion, relatedMissingScanLimit, limit)
+        .all<RelatedPrecomputeCandidate>();
+    } else {
+      candidatesResult = await env.DB.prepare(`
+        WITH state_candidates AS (
+          SELECT skill_id FROM skill_related_state WHERE dirty = 1
+          UNION
+          SELECT skill_id FROM skill_related_state WHERE precomputed_at IS NULL
+          UNION
+          SELECT skill_id FROM skill_related_state WHERE next_update_at IS NULL
+          UNION
+          SELECT skill_id FROM skill_related_state WHERE next_update_at <= ?
+          UNION
+          SELECT skill_id FROM skill_related_state WHERE algo_version IS NULL
+          UNION
+          SELECT skill_id FROM skill_related_state WHERE algo_version != ?
+        ),
+        candidate_ids AS (
+          SELECT skill_id FROM state_candidates
+        )
+        SELECT
+          s.id,
+          s.slug,
+          s.tier,
+          s.trending_score,
+          s.last_accessed_at,
+          rs.dirty,
+          rs.next_update_at,
+          rs.precomputed_at,
+          rs.algo_version
+        FROM candidate_ids c
+        CROSS JOIN skills s
+        LEFT JOIN skill_related_state rs ON rs.skill_id = s.id
+        WHERE s.id = c.skill_id
+          AND s.visibility = 'public'
+          AND s.tier != 'archived'
+        ORDER BY
+          COALESCE(rs.dirty, 1) DESC,
+          CASE s.tier
+            WHEN 'hot' THEN 0
+            WHEN 'warm' THEN 1
+            WHEN 'cool' THEN 2
+            WHEN 'cold' THEN 3
+            ELSE 4
+          END ASC,
+          s.trending_score DESC,
+          CASE WHEN s.last_accessed_at IS NULL THEN 1 ELSE 0 END ASC,
+          s.last_accessed_at DESC,
+          COALESCE(rs.next_update_at, 0) ASC
+        LIMIT ?
+      `)
+        .bind(now, algoVersion, limit)
+        .all<RelatedPrecomputeCandidate>();
+    }
   } catch (err) {
     console.warn('Related precompute query failed (migration may not be applied yet):', err);
     return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
@@ -234,6 +313,22 @@ function getSearchPrecomputeTimeBudgetMs(env: SearchPrecomputeEnv): number {
   return Math.min(parsed, 120_000);
 }
 
+function parseMissingStateScanHour(raw: string | undefined): number {
+  const parsed = Number.parseInt(raw || '', 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_MISSING_STATE_SCAN_HOUR_UTC;
+  return Math.min(23, Math.max(0, parsed));
+}
+
+function parseMissingStateScanLimit(raw: string | undefined): number {
+  const parsed = Number.parseInt(raw || '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MISSING_STATE_SCAN_LIMIT;
+  return Math.min(parsed, 2000);
+}
+
+function shouldRunMissingStateScan(now: number, hourUtc: number): boolean {
+  return new Date(now).getUTCHours() === hourUtc;
+}
+
 async function hasTable(db: D1Database, tableName: string): Promise<boolean> {
   const row = await db.prepare(`
     SELECT 1 as has_table
@@ -266,6 +361,9 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
   const algoVersion = normalizeSearchAlgoVersion(env.SEARCH_PRECOMPUTE_ALGO_VERSION);
   const limit = getSearchPrecomputeMaxPerRun(env);
   const timeBudgetMs = getSearchPrecomputeTimeBudgetMs(env);
+  const searchMissingScanHour = parseMissingStateScanHour(env.SEARCH_MISSING_STATE_SCAN_HOUR_UTC);
+  const searchMissingScanLimit = parseMissingStateScanLimit(env.SEARCH_MISSING_STATE_SCAN_LIMIT);
+  const includeSearchMissingStateScan = shouldRunMissingStateScan(now, searchMissingScanHour);
   const searchTermsEnabled = await hasTable(env.DB, 'skill_search_terms').catch(() => false);
   if (!searchTermsEnabled) {
     console.warn('Search precompute term index table missing; quality score precompute will continue without terms');
@@ -273,64 +371,155 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
 
   let candidatesResult;
   try {
-    candidatesResult = await env.DB.prepare(`
-      SELECT
-        s.id,
-        s.name,
-        s.slug,
-        s.repo_owner,
-        s.repo_name,
-        s.description,
-        (
-          SELECT json_group_array(sc.category_slug)
-          FROM skill_categories sc
-          WHERE sc.skill_id = s.id
-        ) as categories_json,
-        (
-          SELECT json_group_array(st.tag)
-          FROM skill_tags st
-          WHERE st.skill_id = s.id
-        ) as tags_json,
-        s.tier,
-        s.stars,
-        s.trending_score,
-        s.download_count_30d,
-        s.download_count_90d,
-        s.access_count_30d,
-        s.last_commit_at,
-        s.updated_at,
-        ss.dirty,
-        ss.next_update_at,
-        ss.precomputed_at,
-        ss.algo_version
-      FROM skills s
-      LEFT JOIN skill_search_state ss ON ss.skill_id = s.id
-      WHERE s.visibility = 'public'
-        AND s.tier != 'archived'
-        AND (
-          ss.skill_id IS NULL
-          OR ss.dirty = 1
-          OR ss.precomputed_at IS NULL
-          OR ss.next_update_at IS NULL
-          OR ss.next_update_at <= ?
-          OR ss.algo_version IS NULL
-          OR ss.algo_version != ?
+    if (includeSearchMissingStateScan) {
+      candidatesResult = await env.DB.prepare(`
+        WITH state_candidates AS (
+          SELECT skill_id FROM skill_search_state WHERE dirty = 1
+          UNION
+          SELECT skill_id FROM skill_search_state WHERE precomputed_at IS NULL
+          UNION
+          SELECT skill_id FROM skill_search_state WHERE next_update_at IS NULL
+          UNION
+          SELECT skill_id FROM skill_search_state WHERE next_update_at <= ?
+          UNION
+          SELECT skill_id FROM skill_search_state WHERE algo_version IS NULL
+          UNION
+          SELECT skill_id FROM skill_search_state WHERE algo_version != ?
+        ),
+        missing_state AS (
+          SELECT s.id as skill_id
+          FROM skills s
+          LEFT JOIN skill_search_state ss ON ss.skill_id = s.id
+          WHERE ss.skill_id IS NULL
+            AND s.visibility = 'public'
+            AND s.tier != 'archived'
+          ORDER BY s.indexed_at DESC
+          LIMIT ?
+        ),
+        candidate_ids AS (
+          SELECT skill_id FROM state_candidates
+          UNION
+          SELECT skill_id FROM missing_state
         )
-      ORDER BY
-        COALESCE(ss.dirty, 1) DESC,
-        CASE s.tier
-          WHEN 'hot' THEN 0
-          WHEN 'warm' THEN 1
-          WHEN 'cool' THEN 2
-          WHEN 'cold' THEN 3
-          ELSE 4
-        END ASC,
-        s.trending_score DESC,
-        COALESCE(ss.next_update_at, 0) ASC
-      LIMIT ?
-    `)
-      .bind(now, algoVersion, limit)
-      .all<SearchPrecomputeCandidate>();
+        SELECT
+          s.id,
+          s.name,
+          s.slug,
+          s.repo_owner,
+          s.repo_name,
+          s.description,
+          (
+            SELECT json_group_array(sc.category_slug)
+            FROM skill_categories sc
+            WHERE sc.skill_id = s.id
+          ) as categories_json,
+          (
+            SELECT json_group_array(st.tag)
+            FROM skill_tags st
+            WHERE st.skill_id = s.id
+          ) as tags_json,
+          s.tier,
+          s.stars,
+          s.trending_score,
+          s.download_count_30d,
+          s.download_count_90d,
+          s.access_count_30d,
+          s.last_commit_at,
+          s.updated_at,
+          ss.dirty,
+          ss.next_update_at,
+          ss.precomputed_at,
+          ss.algo_version
+        FROM candidate_ids c
+        CROSS JOIN skills s
+        LEFT JOIN skill_search_state ss ON ss.skill_id = s.id
+        WHERE s.id = c.skill_id
+          AND s.visibility = 'public'
+          AND s.tier != 'archived'
+        ORDER BY
+          COALESCE(ss.dirty, 1) DESC,
+          CASE s.tier
+            WHEN 'hot' THEN 0
+            WHEN 'warm' THEN 1
+            WHEN 'cool' THEN 2
+            WHEN 'cold' THEN 3
+            ELSE 4
+          END ASC,
+          s.trending_score DESC,
+          COALESCE(ss.next_update_at, 0) ASC
+        LIMIT ?
+      `)
+        .bind(now, algoVersion, searchMissingScanLimit, limit)
+        .all<SearchPrecomputeCandidate>();
+    } else {
+      candidatesResult = await env.DB.prepare(`
+        WITH state_candidates AS (
+          SELECT skill_id FROM skill_search_state WHERE dirty = 1
+          UNION
+          SELECT skill_id FROM skill_search_state WHERE precomputed_at IS NULL
+          UNION
+          SELECT skill_id FROM skill_search_state WHERE next_update_at IS NULL
+          UNION
+          SELECT skill_id FROM skill_search_state WHERE next_update_at <= ?
+          UNION
+          SELECT skill_id FROM skill_search_state WHERE algo_version IS NULL
+          UNION
+          SELECT skill_id FROM skill_search_state WHERE algo_version != ?
+        ),
+        candidate_ids AS (
+          SELECT skill_id FROM state_candidates
+        )
+        SELECT
+          s.id,
+          s.name,
+          s.slug,
+          s.repo_owner,
+          s.repo_name,
+          s.description,
+          (
+            SELECT json_group_array(sc.category_slug)
+            FROM skill_categories sc
+            WHERE sc.skill_id = s.id
+          ) as categories_json,
+          (
+            SELECT json_group_array(st.tag)
+            FROM skill_tags st
+            WHERE st.skill_id = s.id
+          ) as tags_json,
+          s.tier,
+          s.stars,
+          s.trending_score,
+          s.download_count_30d,
+          s.download_count_90d,
+          s.access_count_30d,
+          s.last_commit_at,
+          s.updated_at,
+          ss.dirty,
+          ss.next_update_at,
+          ss.precomputed_at,
+          ss.algo_version
+        FROM candidate_ids c
+        CROSS JOIN skills s
+        LEFT JOIN skill_search_state ss ON ss.skill_id = s.id
+        WHERE s.id = c.skill_id
+          AND s.visibility = 'public'
+          AND s.tier != 'archived'
+        ORDER BY
+          COALESCE(ss.dirty, 1) DESC,
+          CASE s.tier
+            WHEN 'hot' THEN 0
+            WHEN 'warm' THEN 1
+            WHEN 'cool' THEN 2
+            WHEN 'cold' THEN 3
+            ELSE 4
+          END ASC,
+          s.trending_score DESC,
+          COALESCE(ss.next_update_at, 0) ASC
+        LIMIT ?
+      `)
+        .bind(now, algoVersion, limit)
+        .all<SearchPrecomputeCandidate>();
+    }
   } catch (err) {
     console.warn('Search precompute query failed (migration may not be applied yet):', err);
     return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };

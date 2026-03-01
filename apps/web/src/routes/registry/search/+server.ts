@@ -121,6 +121,24 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
   }
 };
 
+function buildVisibilityFilter(
+  accessiblePrivateIds: string[],
+  tableAlias: string
+): { sql: string; params: string[] } {
+  if (accessiblePrivateIds.length === 0) {
+    return {
+      sql: `${tableAlias}.visibility = 'public'`,
+      params: []
+    };
+  }
+
+  const placeholders = accessiblePrivateIds.map(() => '?').join(',');
+  return {
+    sql: `(${tableAlias}.visibility = 'public' OR ${tableAlias}.id IN (${placeholders}))`,
+    params: [...accessiblePrivateIds]
+  };
+}
+
 async function fetchSearchResults(
   db: D1Database,
   query: string,
@@ -129,8 +147,66 @@ async function fetchSearchResults(
   offset: number,
   accessiblePrivateIds: string[]
 ): Promise<RegistrySearchResult> {
-  // Build query
-  let sql = `
+  const visibilityFilter = buildVisibilityFilter(accessiblePrivateIds, 's');
+  const queryLike = `%${query}%`;
+  const queryFilterSql = query ? 'AND (s.name LIKE ? OR s.description LIKE ?)' : '';
+  const queryFilterParams: string[] = query ? [queryLike, queryLike] : [];
+
+  const pageIdsResult = category
+    ? await db.prepare(`
+      SELECT s.id
+      FROM skill_categories sc
+      CROSS JOIN skills s
+      WHERE s.id = sc.skill_id
+        AND sc.category_slug = ?
+        AND ${visibilityFilter.sql}
+        ${queryFilterSql}
+      ORDER BY s.trending_score DESC
+      LIMIT ? OFFSET ?
+    `)
+      .bind(category, ...visibilityFilter.params, ...queryFilterParams, limit, offset)
+      .all<{ id: string }>()
+    : await db.prepare(`
+      SELECT s.id
+      FROM skills s
+      WHERE ${visibilityFilter.sql}
+        ${queryFilterSql}
+      ORDER BY s.trending_score DESC
+      LIMIT ? OFFSET ?
+    `)
+      .bind(...visibilityFilter.params, ...queryFilterParams, limit, offset)
+      .all<{ id: string }>();
+
+  const pageIds = (pageIdsResult.results || []).map((row) => row.id);
+
+  const countResult = category
+    ? await db.prepare(`
+      SELECT COUNT(*) as total
+      FROM skill_categories sc
+      CROSS JOIN skills s
+      WHERE s.id = sc.skill_id
+        AND sc.category_slug = ?
+        AND ${visibilityFilter.sql}
+        ${queryFilterSql}
+    `)
+      .bind(category, ...visibilityFilter.params, ...queryFilterParams)
+      .first<{ total: number }>()
+    : await db.prepare(`
+      SELECT COUNT(*) as total
+      FROM skills s
+      WHERE ${visibilityFilter.sql}
+        ${queryFilterSql}
+    `)
+      .bind(...visibilityFilter.params, ...queryFilterParams)
+      .first<{ total: number }>();
+
+  if (pageIds.length === 0) {
+    return { skills: [], total: countResult?.total || 0 };
+  }
+
+  const idPlaceholders = pageIds.map(() => '?').join(',');
+
+  const skillRows = await db.prepare(`
     SELECT
       s.id,
       s.name,
@@ -140,38 +216,12 @@ async function fetchSearchResults(
       s.repo_name as repo,
       s.stars,
       COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-      s.visibility,
-      GROUP_CONCAT(sc.category_slug) as categories
+      s.visibility
     FROM skills s
-    LEFT JOIN skill_categories sc ON s.id = sc.skill_id
-    WHERE (s.visibility = 'public'
-  `;
-  const params: (string | number)[] = [];
-
-  // Include user's accessible private skills
-  if (accessiblePrivateIds.length > 0) {
-    const placeholders = accessiblePrivateIds.map(() => '?').join(',');
-    sql += ` OR s.id IN (${placeholders})`;
-    params.push(...accessiblePrivateIds);
-  }
-
-  sql += `)`;
-
-  if (query) {
-    sql += ` AND (s.name LIKE ? OR s.description LIKE ?)`;
-    params.push(`%${query}%`, `%${query}%`);
-  }
-
-  if (category) {
-    sql += ` AND sc.category_slug = ?`;
-    params.push(category);
-  }
-
-  sql += ` GROUP BY s.id ORDER BY s.trending_score DESC LIMIT ? OFFSET ?`;
-  params.push(limit, offset);
-
-  // Execute query
-  const result = await db.prepare(sql).bind(...params).all<{
+    WHERE s.id IN (${idPlaceholders})
+  `)
+    .bind(...pageIds)
+    .all<{
     id: string;
     name: string;
     slug: string;
@@ -181,51 +231,52 @@ async function fetchSearchResults(
     stars: number;
     updatedAt: number;
     visibility: string;
-    categories: string | null;
   }>();
 
-  const skills: RegistrySkillItem[] = (result.results || []).map(row => ({
-    name: row.name,
-    description: row.description || '',
-    owner: row.owner || '',
-    repo: row.repo || '',
-    stars: row.stars || 0,
-    updatedAt: row.updatedAt,
-    categories: row.categories ? row.categories.split(',') : [],
-    visibility: (row.visibility || 'public') as 'public' | 'private' | 'unlisted',
-    slug: row.slug
-  }));
-
-  // Get total count using the same visibility logic as the result query
-  let countSql = `SELECT COUNT(DISTINCT s.id) as total FROM skills s`;
-  const countParams: (string | number)[] = [];
-
+  const categoryMap = new Map<string, string[]>();
   if (category) {
-    countSql += ` LEFT JOIN skill_categories sc ON s.id = sc.skill_id`;
+    for (const id of pageIds) {
+      categoryMap.set(id, [category]);
+    }
+  } else {
+    const categoriesResult = await db.prepare(`
+      SELECT skill_id, category_slug
+      FROM skill_categories
+      WHERE skill_id IN (${idPlaceholders})
+    `)
+      .bind(...pageIds)
+      .all<{ skill_id: string; category_slug: string }>();
+
+    for (const row of categoriesResult.results || []) {
+      const existing = categoryMap.get(row.skill_id);
+      if (existing) {
+        existing.push(row.category_slug);
+        continue;
+      }
+      categoryMap.set(row.skill_id, [row.category_slug]);
+    }
   }
 
-  countSql += ` WHERE (s.visibility = 'public'`;
-  if (accessiblePrivateIds.length > 0) {
-    const placeholders = accessiblePrivateIds.map(() => '?').join(',');
-    countSql += ` OR s.id IN (${placeholders})`;
-    countParams.push(...accessiblePrivateIds);
-  }
-  countSql += `)`;
+  const skillMap = new Map(
+    (skillRows.results || []).map((row) => [row.id, row] as const)
+  );
 
-  if (query) {
-    countSql += ` AND (s.name LIKE ? OR s.description LIKE ?)`;
-    countParams.push(`%${query}%`, `%${query}%`);
-  }
+  const skills: RegistrySkillItem[] = pageIds
+    .map((id) => skillMap.get(id))
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .map((row) => ({
+      name: row.name,
+      description: row.description || '',
+      owner: row.owner || '',
+      repo: row.repo || '',
+      stars: row.stars || 0,
+      updatedAt: row.updatedAt,
+      categories: categoryMap.get(row.id) || [],
+      visibility: (row.visibility || 'public') as 'public' | 'private' | 'unlisted',
+      slug: row.slug
+    }));
 
-  if (category) {
-    countSql += ` AND sc.category_slug = ?`;
-    countParams.push(category);
-  }
-
-  const countResult = await db.prepare(countSql).bind(...countParams).first<{ total: number }>();
-  const total = countResult?.total || 0;
-
-  return { skills, total };
+  return { skills, total: countResult?.total || 0 };
 }
 
 // Handle CORS preflight

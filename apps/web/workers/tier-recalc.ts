@@ -123,7 +123,8 @@ async function recalculateTiers(env: TierRecalcEnv): Promise<{
   byTier: Record<SkillTier, number>;
 }> {
   const BATCH_SIZE = 1000;
-  let offset = 0;
+  let lastSeenId: string | null = null;
+  let scanned = 0;
   let total = 0;
   let changed = 0;
   const byTier: Record<SkillTier, number> = {
@@ -135,21 +136,37 @@ async function recalculateTiers(env: TierRecalcEnv): Promise<{
   };
 
   while (true) {
-    const skills = await env.DB.prepare(`
-      SELECT id, stars, tier, last_accessed_at, access_count_7d, access_count_30d, last_commit_at
-      FROM skills
-      WHERE visibility = 'public'
-      ORDER BY id
-      LIMIT ? OFFSET ?
-    `)
-      .bind(BATCH_SIZE, offset)
-      .all<SkillForTierCalc>();
+    let rows: SkillForTierCalc[] = [];
+    if (lastSeenId) {
+      const result = await env.DB.prepare(`
+        SELECT id, stars, tier, last_accessed_at, access_count_7d, access_count_30d, last_commit_at
+        FROM skills
+        WHERE visibility = 'public' AND id > ?
+        ORDER BY id
+        LIMIT ?
+      `)
+        .bind(lastSeenId, BATCH_SIZE)
+        .all<SkillForTierCalc>();
+      rows = result.results || [];
+    } else {
+      const result = await env.DB.prepare(`
+        SELECT id, stars, tier, last_accessed_at, access_count_7d, access_count_30d, last_commit_at
+        FROM skills
+        WHERE visibility = 'public'
+        ORDER BY id
+        LIMIT ?
+      `)
+        .bind(BATCH_SIZE)
+        .all<SkillForTierCalc>();
+      rows = result.results || [];
+    }
 
-    if (skills.results.length === 0) break;
+    if (rows.length === 0) break;
+    scanned += rows.length;
 
     const updates: Array<{ id: string; tier: SkillTier; nextUpdateAt: number | null }> = [];
 
-    for (const skill of skills.results) {
+    for (const skill of rows) {
       const newTier = calculateTier(skill);
       byTier[newTier]++;
       total++;
@@ -196,10 +213,10 @@ async function recalculateTiers(env: TierRecalcEnv): Promise<{
       await env.DB.batch(relatedStateStatements);
     }
 
-    offset += BATCH_SIZE;
+    lastSeenId = rows[rows.length - 1]?.id || lastSeenId;
 
     // Safety limit
-    if (offset > 10000000) {
+    if (scanned > 10000000) {
       console.warn('Tier recalculation hit safety limit');
       break;
     }
