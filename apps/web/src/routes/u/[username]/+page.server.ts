@@ -10,6 +10,50 @@ interface UserProfileLoadResult {
   error?: string;
 }
 
+interface UserSkillRow {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  stars: number;
+  updatedAt: number;
+}
+
+interface SkillCategoryRow {
+  skill_id: string;
+  category_slug: string;
+}
+
+async function hydrateCategories(
+  db: D1Database,
+  rows: UserSkillRow[]
+): Promise<Array<UserSkillRow & { categories: string[] }>> {
+  if (rows.length === 0) return [];
+
+  const ids = rows.map((row) => row.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const categoryRows = await db.prepare(`
+    SELECT skill_id, category_slug
+    FROM skill_categories
+    WHERE skill_id IN (${placeholders})
+  `)
+    .bind(...ids)
+    .all<SkillCategoryRow>();
+
+  const categoryMap: Record<string, string[]> = {};
+  for (const row of categoryRows.results || []) {
+    if (!categoryMap[row.skill_id]) {
+      categoryMap[row.skill_id] = [];
+    }
+    categoryMap[row.skill_id].push(row.category_slug);
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    categories: categoryMap[row.id] || []
+  }));
+}
+
 export const load: PageServerLoad = async ({ params, platform, setHeaders, locals, request, cookies }) => {
   setPublicPageCache({
     setHeaders,
@@ -52,15 +96,17 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
   // Try to find registered user by:
   // 1. GitHub account_id (username from GitHub OAuth)
   // 2. User name (display name)
-  const user = await db.prepare(`
+  let user = await db.prepare(`
     SELECT u.id, u.name, u.email, u.image, u.created_at as joinedAt,
            a.account_id as githubUsername
-    FROM user u
-    LEFT JOIN account a ON u.id = a.user_id AND a.provider_id = 'github'
-    WHERE a.account_id = ? OR u.name = ?
+    FROM account a
+    CROSS JOIN user u
+    WHERE u.id = a.user_id
+      AND a.provider_id = 'github'
+      AND a.account_id = ?
     LIMIT 1
   `)
-    .bind(username, username)
+    .bind(username)
     .first<{
       id: string;
       name: string;
@@ -69,6 +115,26 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
       joinedAt: number;
       githubUsername: string | null;
     }>();
+
+  if (!user) {
+    user = await db.prepare(`
+      SELECT u.id, u.name, u.email, u.image, u.created_at as joinedAt,
+             a.account_id as githubUsername
+      FROM user u
+      LEFT JOIN account a ON u.id = a.user_id AND a.provider_id = 'github'
+      WHERE u.name = ?
+      LIMIT 1
+    `)
+      .bind(username)
+      .first<{
+        id: string;
+        name: string;
+        email: string | null;
+        image: string | null;
+        joinedAt: number;
+        githubUsername: string | null;
+      }>();
+  }
 
   if (user) {
     // Found registered user - get their skills by owner_id
@@ -79,26 +145,15 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
         s.slug,
         s.description,
         s.stars,
-        COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-        GROUP_CONCAT(sc.category_slug) as categories
+        COALESCE(s.last_commit_at, s.updated_at) as updatedAt
       FROM skills s
-      LEFT JOIN skill_categories sc ON s.id = sc.skill_id
       WHERE s.owner_id = ? AND s.visibility = 'public'
-      GROUP BY s.id
       ORDER BY s.stars DESC, COALESCE(s.last_commit_at, s.updated_at) DESC
     `)
       .bind(user.id)
-      .all<{
-        id: string;
-        name: string;
-        slug: string;
-        description: string | null;
-        stars: number;
-        updatedAt: number;
-        categories: string | null;
-      }>();
+      .all<UserSkillRow>();
 
-    const skills = skillsResult.results || [];
+    const skills = await hydrateCategories(db, skillsResult.results || []);
     const totalStars = skills.reduce((sum, s) => sum + (s.stars || 0), 0);
 
     const result = {
@@ -120,7 +175,7 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
         slug: s.slug,
         description: s.description || '',
         stars: s.stars || 0,
-        categories: s.categories ? s.categories.split(',') : [],
+        categories: s.categories,
         updatedAt: s.updatedAt,
       })),
     };
@@ -190,26 +245,15 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
       s.slug,
       s.description,
       s.stars,
-      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-      GROUP_CONCAT(sc.category_slug) as categories
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt
     FROM skills s
-    LEFT JOIN skill_categories sc ON s.id = sc.skill_id
     WHERE s.repo_owner = ? AND s.visibility = 'public'
-    GROUP BY s.id
     ORDER BY s.stars DESC, COALESCE(s.last_commit_at, s.updated_at) DESC
   `)
     .bind(username)
-    .all<{
-      id: string;
-      name: string;
-      slug: string;
-      description: string | null;
-      stars: number;
-      updatedAt: number;
-      categories: string | null;
-    }>();
+    .all<UserSkillRow>();
 
-  const skills = skillsResult.results || [];
+  const skills = await hydrateCategories(db, skillsResult.results || []);
   const totalStars = skills.reduce((sum, s) => sum + (s.stars || 0), 0);
 
   const result = {
@@ -231,7 +275,7 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
       slug: s.slug,
       description: s.description || '',
       stars: s.stars || 0,
-      categories: s.categories ? s.categories.split(',') : [],
+      categories: s.categories,
       updatedAt: s.updatedAt,
     })),
   };

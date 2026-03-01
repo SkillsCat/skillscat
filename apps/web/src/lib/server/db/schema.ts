@@ -1,5 +1,8 @@
 import { sqliteTable, text, integer, real, primaryKey, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
+import { buildTopRatedSortScoreSql } from '../ranking';
+
+const TOP_RATED_SORT_SCORE_SQL = buildTopRatedSortScoreSql('stars', 'download_count_90d');
 
 // ========== Better Auth Tables ==========
 export const user = sqliteTable('user', {
@@ -10,7 +13,9 @@ export const user = sqliteTable('user', {
   image: text('image'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
-});
+}, (table) => [
+  index('user_name_idx').on(table.name),
+]);
 
 export const session = sqliteTable('session', {
   id: text('id').primaryKey(),
@@ -41,6 +46,7 @@ export const account = sqliteTable('account', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 }, (table) => [
   index('account_user_idx').on(table.userId),
+  index('account_provider_account_idx').on(table.providerId, table.accountId),
 ]);
 
 export const verification = sqliteTable('verification', {
@@ -127,7 +133,9 @@ export const skills = sqliteTable('skills', {
   index('skills_stars_idx').on(table.stars),
   index('skills_indexed_idx').on(table.indexedAt),
   index('skills_visibility_idx').on(table.visibility),
+  index('skills_visibility_id_idx').on(table.visibility, table.id),
   index('skills_visibility_name_idx').on(table.visibility, table.name),
+  index('skills_visibility_repo_owner_idx').on(table.visibility, table.repoOwner),
   index('skills_visibility_repo_name_idx').on(table.visibility, table.repoName),
   index('skills_visibility_slug_idx').on(table.visibility, table.slug),
   index('skills_visibility_org_idx').on(table.visibility, table.orgId),
@@ -139,11 +147,37 @@ export const skills = sqliteTable('skills', {
     sql`CASE WHEN last_commit_at IS NULL THEN indexed_at ELSE last_commit_at END DESC`
   ),
   index('skills_owner_idx').on(table.ownerId),
+  index('skills_owner_created_idx').on(table.ownerId, table.createdAt),
+  index('skills_owner_visibility_stars_idx').on(table.ownerId, table.visibility, table.stars),
   index('skills_org_stars_created_idx').on(table.orgId, table.stars, table.createdAt),
+  index('skills_org_visibility_stars_created_idx').on(table.orgId, table.visibility, table.stars, table.createdAt),
   index('skills_content_hash_idx').on(table.contentHash),
   // Cost optimization indexes
   index('skills_tier_idx').on(table.tier),
   index('skills_next_update_idx').on(table.nextUpdateAt),
+  index('skills_nonzero_download_counts_idx')
+    .on(table.id)
+    .where(sql`${table.downloadCount7d} != 0 OR ${table.downloadCount30d} != 0 OR ${table.downloadCount90d} != 0`),
+  index('skills_public_tier_due_idx')
+    .on(table.tier, table.nextUpdateAt)
+    .where(sql`${table.visibility} = 'public'`),
+  index('skills_top_public_rank_expr_idx')
+    .on(
+      sql.raw(`${TOP_RATED_SORT_SCORE_SQL} DESC`),
+      sql.raw(`download_count_90d DESC`),
+      sql.raw(`download_count_30d DESC`),
+      sql.raw(`stars DESC`),
+      sql.raw(`trending_score DESC`),
+      sql.raw(`CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC`)
+    )
+    .where(sql.raw(`visibility = 'public' AND (
+      skill_path IS NULL
+      OR skill_path = ''
+      OR (
+        skill_path NOT LIKE '.%'
+        AND skill_path NOT LIKE '%/.%'
+      )
+    )`)),
   // Unique constraint for multi-skill repos (same repo can have multiple skills with different paths)
   uniqueIndex('skills_repo_path_unique').on(
     table.repoOwner,
@@ -168,7 +202,16 @@ export const skillRelatedState = sqliteTable('skill_related_state', {
   primaryKey({ columns: [table.skillId] }),
   index('skill_related_state_dirty_due_idx').on(table.dirty, table.nextUpdateAt),
   index('skill_related_state_due_idx').on(table.nextUpdateAt),
-  index('skill_related_state_algo_dirty_idx').on(table.algoVersion, table.dirty)
+  index('skill_related_state_algo_dirty_idx').on(table.algoVersion, table.dirty),
+  index('skill_related_state_precomputed_null_idx')
+    .on(table.skillId)
+    .where(sql`${table.precomputedAt} IS NULL`),
+  index('skill_related_state_next_update_null_idx')
+    .on(table.skillId)
+    .where(sql`${table.nextUpdateAt} IS NULL`),
+  index('skill_related_state_algo_null_idx')
+    .on(table.skillId)
+    .where(sql`${table.algoVersion} IS NULL`)
 ]);
 
 // ========== Search Precompute State (one row per skill) ==========
@@ -188,7 +231,16 @@ export const skillSearchState = sqliteTable('skill_search_state', {
   index('skill_search_state_dirty_due_idx').on(table.dirty, table.nextUpdateAt),
   index('skill_search_state_due_idx').on(table.nextUpdateAt),
   index('skill_search_state_algo_dirty_idx').on(table.algoVersion, table.dirty),
-  index('skill_search_state_score_idx').on(table.score)
+  index('skill_search_state_score_idx').on(table.score),
+  index('skill_search_state_precomputed_null_idx')
+    .on(table.skillId)
+    .where(sql`${table.precomputedAt} IS NULL`),
+  index('skill_search_state_next_update_null_idx')
+    .on(table.skillId)
+    .where(sql`${table.nextUpdateAt} IS NULL`),
+  index('skill_search_state_algo_null_idx')
+    .on(table.skillId)
+    .where(sql`${table.algoVersion} IS NULL`)
 ]);
 
 // ========== Search Terms Index (one row per skill-term) ==========
@@ -317,7 +369,8 @@ export const favorites = sqliteTable('favorites', {
   skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
-  primaryKey({ columns: [table.userId, table.skillId] })
+  primaryKey({ columns: [table.userId, table.skillId] }),
+  index('favorites_user_created_idx').on(table.userId, table.createdAt)
 ]);
 
 // ========== User Actions ==========

@@ -60,10 +60,16 @@ export async function checkForDuplicate(
 }> {
   // Check for exact match in content_hashes table
   const match = await db.prepare(`
-    SELECT ch.skill_id, s.slug, s.stars
-    FROM content_hashes ch
-    INNER JOIN skills s ON ch.skill_id = s.id
-    WHERE ch.hash_value = ?
+    WITH matched_hash AS (
+      SELECT skill_id
+      FROM content_hashes
+      WHERE hash_type = 'normalized'
+        AND hash_value = ?
+    )
+    SELECT mh.skill_id, s.slug, s.stars
+    FROM matched_hash mh
+    CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
+    WHERE s.id = mh.skill_id
       AND s.stars >= ?
       AND s.visibility = 'public'
     ORDER BY s.stars DESC

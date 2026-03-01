@@ -338,33 +338,71 @@ async function updateSkillsByTier(
 ): Promise<{ count: number; updatedIds: string[] }> {
   const now = Date.now();
   const tierPlaceholders = tiers.map(() => '?').join(',');
+  const skillSelectColumns = `
+    id, repo_owner, repo_name, stars, star_snapshots, indexed_at, last_commit_at,
+    tier, last_accessed_at, access_count_7d, download_count_7d, next_update_at`;
 
-  // Only fetch skills that are due for update
-  const skills = await env.DB.prepare(`
-    SELECT id, repo_owner, repo_name, stars, star_snapshots, indexed_at, last_commit_at,
-           tier, last_accessed_at, access_count_7d, download_count_7d
+  const skillSelectSql = `
+    SELECT ${skillSelectColumns}
     FROM skills
-    WHERE tier IN (${tierPlaceholders})
-      AND (next_update_at IS NULL OR next_update_at < ?)
+    WHERE tier IN (${tierPlaceholders})`;
+
+  // Keep old ordering semantics: NULL next_update_at first, then due timestamps ascending.
+  const dueWithoutSchedule = await env.DB.prepare(`
+    ${skillSelectSql}
+      AND next_update_at IS NULL
       AND visibility = 'public'
-    ORDER BY next_update_at ASC
+    ORDER BY tier ASC, next_update_at ASC
     LIMIT ?
   `)
-    .bind(...tiers, now, limit)
+    .bind(...tiers, limit)
     .all<SkillRecord>();
 
-  if (skills.results.length === 0) {
+  const selectedSkills = [...dueWithoutSchedule.results];
+
+  if (selectedSkills.length < limit) {
+    const remaining = limit - selectedSkills.length;
+    const dueByTierSql = tiers.map(() => `
+      SELECT * FROM (
+        SELECT ${skillSelectColumns}
+        FROM skills INDEXED BY skills_public_tier_due_idx
+        WHERE tier = ?
+          AND next_update_at < ?
+          AND visibility = 'public'
+        ORDER BY next_update_at ASC
+        LIMIT ?
+      )
+    `).join('\nUNION ALL\n');
+
+    const dueByTimestamp = await env.DB.prepare(`
+      WITH due_by_tier AS (
+        ${dueByTierSql}
+      )
+      SELECT
+        id, repo_owner, repo_name, stars, star_snapshots, indexed_at, last_commit_at,
+        tier, last_accessed_at, access_count_7d, download_count_7d
+      FROM due_by_tier
+      ORDER BY next_update_at ASC
+      LIMIT ?
+    `)
+      .bind(...tiers.flatMap((tier) => [tier, now, remaining]), remaining)
+      .all<SkillRecord>();
+
+    selectedSkills.push(...dueByTimestamp.results);
+  }
+
+  if (selectedSkills.length === 0) {
     return { count: 0, updatedIds: [] };
   }
 
-  console.log(`Processing ${skills.results.length} skills from tiers: ${tiers.join(', ')}`);
+  console.log(`Processing ${selectedSkills.length} skills from tiers: ${tiers.join(', ')}`);
 
   // Process in batches of BATCH_SIZE for GraphQL
   let totalUpdated = 0;
   const allUpdatedIds: string[] = [];
 
-  for (let i = 0; i < skills.results.length; i += BATCH_SIZE) {
-    const batch = skills.results.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < selectedSkills.length; i += BATCH_SIZE) {
+    const batch = selectedSkills.slice(i, i + BATCH_SIZE);
     const reposToFetch = batch.map(s => ({
       owner: s.repo_owner,
       name: s.repo_name,
@@ -595,12 +633,13 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
       UPDATE skills
       SET download_count_7d = 0, download_count_30d = 0, download_count_90d = 0
       WHERE (download_count_7d != 0 OR download_count_30d != 0 OR download_count_90d != 0)
-        AND id NOT IN (
-          SELECT DISTINCT skill_id
-          FROM user_actions
-          WHERE action_type IN ('download', 'install')
-            AND skill_id IS NOT NULL
-            AND created_at >= ?
+        AND NOT EXISTS (
+          SELECT 1
+          FROM user_actions ua
+          WHERE ua.skill_id = skills.id
+            AND ua.action_type IN ('download', 'install')
+            AND ua.skill_id IS NOT NULL
+            AND ua.created_at >= ?
         )
     `)
       .bind(ninetyDaysAgo)
@@ -616,7 +655,7 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
 
 async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   const now = Date.now();
-  const topRatedSortScoreSql = buildTopRatedSortScoreSql('s.stars', 's.download_count_90d');
+  const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
 
   const trending = await env.DB.prepare(`
     SELECT s.id, s.name, s.slug, s.description,
