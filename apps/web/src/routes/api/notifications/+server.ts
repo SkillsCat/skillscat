@@ -1,6 +1,21 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 100;
+
+function parseLimit(raw: string | null): number {
+  const parsed = Number.parseInt(raw || String(DEFAULT_LIMIT), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_LIMIT;
+  return Math.min(parsed, MAX_LIMIT);
+}
+
+function parseOffset(raw: string | null): number {
+  const parsed = Number.parseInt(raw || '0', 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+}
+
 /**
  * GET /api/notifications - List user notifications
  */
@@ -15,8 +30,8 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
     throw error(500, 'Database not available');
   }
 
-  const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 100);
-  const offset = parseInt(url.searchParams.get('offset') || '0');
+  const limit = parseLimit(url.searchParams.get('pageSize') ?? url.searchParams.get('limit'));
+  const offset = parseOffset(url.searchParams.get('offset'));
   const unreadOnly = url.searchParams.get('unread') === 'true';
 
   let query = `

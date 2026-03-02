@@ -22,6 +22,21 @@ interface SkillCategoryRow {
   category_slug: string;
 }
 
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 100;
+
+function parseLimit(raw: string | null): number {
+  const parsed = Number.parseInt(raw || String(DEFAULT_LIMIT), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_LIMIT;
+  return Math.min(parsed, MAX_LIMIT);
+}
+
+function parseOffset(raw: string | null): number {
+  const parsed = Number.parseInt(raw || '0', 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+}
+
 function hasStatus(errorValue: unknown): errorValue is { status: number } {
   if (typeof errorValue !== 'object' || errorValue === null) return false;
   if (!('status' in errorValue)) return false;
@@ -40,8 +55,9 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
     }
 
     const userId = session.user.id;
-    const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 100);
-    const offset = parseInt(url.searchParams.get('offset') || '0');
+    const limit = parseLimit(url.searchParams.get('pageSize') ?? url.searchParams.get('limit'));
+    const offset = parseOffset(url.searchParams.get('offset'));
+    const queryLimit = offset === 0 ? limit + 1 : limit;
     const now = Date.now();
 
     // 从 D1 获取收藏列表
@@ -94,37 +110,46 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
       ORDER BY f.created_at DESC
       LIMIT ? OFFSET ?
     `)
-      .bind(userId, userId, userId, userId, now, limit, offset)
+      .bind(userId, userId, userId, userId, now, queryLimit, offset)
       .all<FavoriteSkillRow>();
 
-    // 获取总数
-    const countResult = await db.prepare(`
-      SELECT COUNT(*) as total
-      FROM favorites f
-      JOIN skills s ON f.skill_id = s.id
-      WHERE f.user_id = ?
-        AND (
-          s.visibility = 'public'
-          OR s.visibility = 'unlisted'
-          OR s.owner_id = ?
-          OR EXISTS (
-            SELECT 1 FROM org_members om
-            WHERE om.org_id = s.org_id AND om.user_id = ?
+    const hasMoreOnFirstPage = offset === 0 && favorites.results.length > limit;
+    const pageRows = hasMoreOnFirstPage ? favorites.results.slice(0, limit) : favorites.results;
+
+    let total = 0;
+    if (offset === 0 && !hasMoreOnFirstPage) {
+      total = pageRows.length;
+    } else {
+      // 获取总数
+      const countResult = await db.prepare(`
+        SELECT COUNT(*) as total
+        FROM favorites f
+        JOIN skills s ON f.skill_id = s.id
+        WHERE f.user_id = ?
+          AND (
+            s.visibility = 'public'
+            OR s.visibility = 'unlisted'
+            OR s.owner_id = ?
+            OR EXISTS (
+              SELECT 1 FROM org_members om
+              WHERE om.org_id = s.org_id AND om.user_id = ?
+            )
+            OR EXISTS (
+              SELECT 1 FROM skill_permissions sp
+              WHERE sp.skill_id = s.id
+                AND sp.grantee_type = 'user'
+                AND sp.grantee_id = ?
+                AND (sp.expires_at IS NULL OR sp.expires_at > ?)
+            )
           )
-          OR EXISTS (
-            SELECT 1 FROM skill_permissions sp
-            WHERE sp.skill_id = s.id
-              AND sp.grantee_type = 'user'
-              AND sp.grantee_id = ?
-              AND (sp.expires_at IS NULL OR sp.expires_at > ?)
-          )
-        )
-    `)
-      .bind(userId, userId, userId, userId, now)
-      .first<{ total: number }>();
+      `)
+        .bind(userId, userId, userId, userId, now)
+        .first<{ total: number }>();
+      total = countResult?.total || 0;
+    }
 
     // 获取每个 skill 的分类
-    const skillIds = favorites.results.map((favorite) => favorite.id);
+    const skillIds = pageRows.map((favorite) => favorite.id);
     let categoriesMap: Record<string, string[]> = {};
 
     if (skillIds.length > 0) {
@@ -145,14 +170,14 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
     }
 
     // 组装结果
-    const results = favorites.results.map((favorite) => ({
+    const results = pageRows.map((favorite) => ({
       ...favorite,
       categories: categoriesMap[favorite.id] || [],
     }));
 
     return json({
       favorites: results,
-      total: countResult?.total || 0,
+      total,
       limit,
       offset,
     });

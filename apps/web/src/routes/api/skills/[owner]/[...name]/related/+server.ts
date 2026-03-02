@@ -19,6 +19,12 @@ const RELATED_RESPONSE_LIMIT = 6;
 const RELATED_CACHE_LIMIT = 10;
 const RELATED_CACHE_TTL = 3600;
 const PRECOMPUTED_READ_CACHE_TTL = 120;
+const PUBLIC_RELATED_MAX_AGE_SECONDS = 1800; // 30 minutes
+const PUBLIC_RELATED_STALE_WHILE_REVALIDATE_SECONDS = 86400; // 1 day
+
+function buildPublicRelatedCacheControl(): string {
+  return `public, max-age=${PUBLIC_RELATED_MAX_AGE_SECONDS}, stale-while-revalidate=${PUBLIC_RELATED_STALE_WHILE_REVALIDATE_SECONDS}`;
+}
 
 interface RuntimeEnv {
   DB?: D1Database;
@@ -33,8 +39,6 @@ interface SkillContextRow {
   repoOwner: string | null;
   visibility: 'public' | 'private' | 'unlisted' | null;
   tier: string | null;
-  categoriesJson: string | null;
-  tagsJson: string | null;
   relatedDirty: number | null;
   relatedNextUpdateAt: number | null;
   relatedPrecomputedAt: number | null;
@@ -145,16 +149,6 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
         s.repo_owner as repoOwner,
         s.visibility,
         s.tier,
-        (
-          SELECT json_group_array(sc.category_slug)
-          FROM skill_categories sc
-          WHERE sc.skill_id = s.id
-        ) as categoriesJson,
-        (
-          SELECT json_group_array(st.tag)
-          FROM skill_tags st
-          WHERE st.skill_id = s.id
-        ) as tagsJson,
         rs.dirty as relatedDirty,
         rs.next_update_at as relatedNextUpdateAt,
         rs.precomputed_at as relatedPrecomputedAt,
@@ -194,23 +188,56 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       }
     }
 
-    const categories = parseJsonStringArray(skill.categoriesJson);
-    const preloadedTags = parseJsonStringArray(skill.tagsJson);
+    let skillCategories: string[] | null = null;
+    let skillTags: string[] | null = null;
+    const loadSkillSignals = async (): Promise<{ categories: string[]; tags: string[] }> => {
+      if (skillCategories && skillTags) {
+        return { categories: skillCategories, tags: skillTags };
+      }
+
+      const signals = await timed(
+        'ctx_signals',
+        () => db.prepare(`
+          SELECT
+            (
+              SELECT json_group_array(sc.category_slug)
+              FROM skill_categories sc
+              WHERE sc.skill_id = ?
+            ) as categoriesJson,
+            (
+              SELECT json_group_array(st.tag)
+              FROM skill_tags st
+              WHERE st.skill_id = ?
+            ) as tagsJson
+        `)
+          .bind(skill.id, skill.id)
+          .first<{ categoriesJson: string | null; tagsJson: string | null }>(),
+        'skill categories + tags'
+      );
+
+      skillCategories = parseJsonStringArray(signals?.categoriesJson ?? null);
+      skillTags = parseJsonStringArray(signals?.tagsJson ?? null);
+      return { categories: skillCategories, tags: skillTags };
+    };
+
     const precomputedCacheKey = `related:precomputed:${skill.id}:${algoVersion}`;
 
     const computeRelatedOnline = async (useOnlineCache: boolean): Promise<SkillCardData[]> => {
-      const runCompute = () => getRelatedSkills(
-        { DB: db },
-        skill.id,
-        categories,
-        skill.repoOwner || '',
-        RELATED_CACHE_LIMIT,
-        (name, dur, desc) => {
-          serverTimings.push({ name, dur, desc });
-        },
-        false,
-        preloadedTags
-      );
+      const runCompute = async () => {
+        const signals = await loadSkillSignals();
+        return getRelatedSkills(
+          { DB: db },
+          skill.id,
+          signals.categories,
+          skill.repoOwner || '',
+          RELATED_CACHE_LIMIT,
+          (name, dur, desc) => {
+            serverTimings.push({ name, dur, desc });
+          },
+          false,
+          signals.tags
+        );
+      };
 
       if (!useOnlineCache) {
         return runCompute();
@@ -318,7 +345,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
           },
         } satisfies ApiResponse<{ relatedSkills: SkillCardData[] }>, {
           headers: {
-            'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600',
+            'Cache-Control': buildPublicRelatedCacheControl(),
             'X-Cache': precomputedCacheHit ? 'HIT' : 'MISS',
             'Server-Timing': buildServerTimingHeader(),
           },
@@ -368,7 +395,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       headers: {
         'Cache-Control': skill.visibility === 'private'
           ? 'private, max-age=30, stale-while-revalidate=60'
-          : 'public, max-age=300, stale-while-revalidate=3600',
+          : buildPublicRelatedCacheControl(),
         'X-Cache': 'MISS',
         'Server-Timing': buildServerTimingHeader(),
       },

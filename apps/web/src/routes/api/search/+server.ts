@@ -746,7 +746,7 @@ async function fetchSuggestions(db: D1Database, query: string, limit: number): P
 export const GET: RequestHandler = async ({ url, platform }) => {
   try {
     const query = normalizeText((url.searchParams.get('q') || '').slice(0, MAX_QUERY_LENGTH));
-    const limit = parseLimit(url.searchParams.get('limit'));
+    const limit = parseLimit(url.searchParams.get('pageSize') ?? url.searchParams.get('limit'));
 
     if (!query || query.length < MIN_QUERY_LENGTH) {
       return json({

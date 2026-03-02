@@ -279,7 +279,9 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   // Check if there's an existing public skill with the same content hash
   const contentHash = await computeContentHash(skillMdContent);
   const existingPublicByHash = await db.prepare(`
-    SELECT slug FROM skills WHERE content_hash = ? AND visibility = 'public'
+    SELECT slug FROM skills INDEXED BY skills_content_hash_idx
+    WHERE content_hash = ? AND visibility = 'public'
+    LIMIT 1
   `)
     .bind(contentHash)
     .first<{ slug: string }>();

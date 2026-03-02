@@ -129,8 +129,6 @@ async function processRelatedPrecomputeBatch(env: SearchPrecomputeEnv): Promise<
           UNION
           SELECT skill_id FROM skill_related_state WHERE precomputed_at IS NULL
           UNION
-          SELECT skill_id FROM skill_related_state WHERE next_update_at IS NULL
-          UNION
           SELECT skill_id FROM skill_related_state WHERE next_update_at <= ?
           UNION
           SELECT skill_id FROM skill_related_state WHERE algo_version IS NULL
@@ -191,8 +189,6 @@ async function processRelatedPrecomputeBatch(env: SearchPrecomputeEnv): Promise<
           SELECT skill_id FROM skill_related_state WHERE dirty = 1
           UNION
           SELECT skill_id FROM skill_related_state WHERE precomputed_at IS NULL
-          UNION
-          SELECT skill_id FROM skill_related_state WHERE next_update_at IS NULL
           UNION
           SELECT skill_id FROM skill_related_state WHERE next_update_at <= ?
           UNION

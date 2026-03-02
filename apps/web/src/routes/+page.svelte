@@ -15,7 +15,7 @@
   } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
   import { buildOgImageUrl } from '$lib/seo/og';
-  import { SITE_TITLE, SITE_URL } from '$lib/seo/constants';
+  import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from '$lib/seo/constants';
 
   interface Props {
     data: {
@@ -31,7 +31,8 @@
   const SKILL_COUNT_FORMATTER = new Intl.NumberFormat('en-US');
   let displayCount = $derived(SKILL_COUNT_FORMATTER.format(data.stats.totalSkills));
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'home' });
-  const homeDescription = 'Discover, share, and install open-source AI agent skills. Explore trending, recent, and top-rated skills on SkillsCat.';
+  const heroDescription = SITE_DESCRIPTION;
+  const homeDescription = heroDescription;
   const homeStructuredData = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
@@ -56,7 +57,7 @@
 </script>
 
 <SEO
-  title={SITE_TITLE}
+  title={SITE_NAME}
   description={homeDescription}
   url="/"
   image={ogImageUrl}
@@ -75,7 +76,7 @@
         <div class="hero-circle hero-circle-blue"></div>
 
         <div class="hero-content">
-          <h1 class="hero-title">An open platform for discovering, sharing, and installing AI agent skills.</h1>
+          <h1 class="hero-title">{heroDescription}</h1>
           <p class="hero-subtitle">
             Browse {displayCount} community skills to extend agent capabilities.
           </p>

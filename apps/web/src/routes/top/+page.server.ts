@@ -4,6 +4,11 @@ import { getCached } from '$lib/server/cache';
 import { setPublicPageCache } from '$lib/server/page-cache';
 
 const ITEMS_PER_PAGE = 24;
+function parsePage(raw: string | null): number {
+  const parsed = Number.parseInt(raw || '1', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 1;
+  return parsed;
+}
 
 export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, request, cookies }) => {
   setPublicPageCache({
@@ -20,7 +25,7 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
     R2: platform?.env?.R2,
   };
 
-  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+  const page = parsePage(url.searchParams.get('page'));
   const { data } = await getCached(
     `page:top:v1:${page}`,
     () => getTopSkillsPaginated(env, page, ITEMS_PER_PAGE),

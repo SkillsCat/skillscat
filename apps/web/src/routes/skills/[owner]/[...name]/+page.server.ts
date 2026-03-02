@@ -6,7 +6,7 @@ import { renderReadmeMarkdown } from '$lib/server/markdown';
 import { setPublicPageCache } from '$lib/server/page-cache';
 import { CATEGORIES } from '$lib/constants/categories';
 import type { Category } from '$lib/constants/categories';
-import { buildSkillPathFromOwnerAndName, buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
+import { buildSkillPathFromOwnerAndName, buildSkillSlug, encodeSkillSlugForPath, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
 import type { SkillCardData, SkillDetail } from '$lib/types';
 
 const BOT_UA_PATTERN = /\b(bot|crawler|spider|slurp|preview|headless|lighthouse)\b/i;
@@ -251,7 +251,7 @@ function getAccessClientKey(request: Request, userId: string | null): string | u
  *
  * with unified slug format: owner/name...
  */
-export const load: PageServerLoad = async ({ params, platform, locals, request, setHeaders, cookies, isDataRequest }) => {
+export const load: PageServerLoad = async ({ params, platform, locals, request, fetch, setHeaders, cookies, isDataRequest }) => {
   const perfStart = performance.now();
   const serverTimings: Array<{ name: string; dur: number; desc?: string }> = [];
   let serverTimingFlushed = false;
@@ -377,6 +377,28 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       : timed(
         'related',
         async () => {
+          if (skill.visibility === 'public') {
+            const encodedSlug = encodeSkillSlugForPath(skill.slug);
+            if (encodedSlug) {
+              try {
+                const response = await fetch(`/api/skills/${encodedSlug}/related`, {
+                  headers: { accept: 'application/json' }
+                });
+                if (response.ok) {
+                  const payload = await response.json() as {
+                    success?: boolean;
+                    data?: { relatedSkills?: SkillCardData[] };
+                  };
+                  if (payload.success) {
+                    return payload.data?.relatedSkills || [];
+                  }
+                }
+              } catch (relatedApiError) {
+                console.warn('SSR related API fetch failed, fallback to DB query:', relatedApiError);
+              }
+            }
+          }
+
           const { data } = await getCached(
             `related:${skill.id}`,
             () => getRelatedSkills(

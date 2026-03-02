@@ -392,7 +392,7 @@ async function checkForDuplicate(
     )
     SELECT mh.skill_id, s.slug, s.stars
     FROM matched_hash mh
-    CROSS JOIN skills s
+    CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
     WHERE s.id = mh.skill_id
       AND s.stars >= ?
       AND s.visibility = 'public'
@@ -449,7 +449,7 @@ async function checkAndConvertPrivateSkill(
 ): Promise<{ converted: boolean; skillId?: string; slug?: string }> {
   // Find a private skill with the same content hash
   const existingPrivate = await env.DB.prepare(`
-    SELECT id, slug, owner_id, org_id FROM skills
+    SELECT id, slug, owner_id, org_id FROM skills INDEXED BY skills_content_hash_idx
     WHERE content_hash = ? AND visibility = 'private'
     ORDER BY created_at ASC
     LIMIT 1

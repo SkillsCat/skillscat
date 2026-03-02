@@ -239,7 +239,9 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
   // Check if there's an existing public skill with the same content hash
   const contentHash = await computeContentHash(skillMdContent);
   const existingPublicByHash = await db.prepare(`
-    SELECT slug FROM skills WHERE content_hash = ? AND visibility = 'public'
+    SELECT slug FROM skills INDEXED BY skills_content_hash_idx
+    WHERE content_hash = ? AND visibility = 'public'
+    LIMIT 1
   `)
     .bind(contentHash)
     .first<{ slug: string }>();
@@ -364,7 +366,9 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   if (visibility === 'private') {
     // Check by content hash - cannot publish as private if identical public skill exists
     const existingPublicByHash = await db.prepare(`
-      SELECT slug FROM skills WHERE content_hash = ? AND visibility = 'public'
+      SELECT slug FROM skills INDEXED BY skills_content_hash_idx
+      WHERE content_hash = ? AND visibility = 'public'
+      LIMIT 1
     `)
       .bind(contentHash)
       .first<{ slug: string }>();
