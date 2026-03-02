@@ -158,6 +158,9 @@ export const skills = sqliteTable('skills', {
   index('skills_nonzero_download_counts_idx')
     .on(table.id)
     .where(sql`${table.downloadCount7d} != 0 OR ${table.downloadCount30d} != 0 OR ${table.downloadCount90d} != 0`),
+  index('skills_nonzero_access_counts_idx')
+    .on(table.id)
+    .where(sql`${table.accessCount7d} != 0 OR ${table.accessCount30d} != 0`),
   index('skills_public_tier_due_idx')
     .on(table.tier, table.nextUpdateAt)
     .where(sql`${table.visibility} = 'public'`),

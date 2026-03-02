@@ -415,6 +415,7 @@ export async function getTrendingSkillsPaginated(
   if (!env.DB) return { skills: [], total: 0 };
 
   const offset = (page - 1) * limit;
+  const queryLimit = offset === 0 ? limit + 1 : limit;
 
   const result = await env.DB.prepare(`
     SELECT
@@ -435,17 +436,26 @@ export async function getTrendingSkillsPaginated(
     ORDER BY s.trending_score DESC
     LIMIT ? OFFSET ?
   `)
-    .bind(limit, offset)
+    .bind(queryLimit, offset)
     .all<SkillListRow>();
 
-  const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
-    .first<{ total: number }>();
+  const hasMoreOnFirstPage = offset === 0 && result.results.length > limit;
+  const pageRows = hasMoreOnFirstPage ? result.results.slice(0, limit) : result.results;
 
-  const skills = await addCategoriesToSkills(env.DB, result.results);
+  let total: number;
+  if (offset === 0 && !hasMoreOnFirstPage) {
+    total = pageRows.length;
+  } else {
+    const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
+      .first<{ total: number }>();
+    total = countResult?.total || 0;
+  }
+
+  const skills = await addCategoriesToSkills(env.DB, pageRows);
 
   return {
     skills,
-    total: countResult?.total || 0,
+    total,
   };
 }
 
@@ -508,6 +518,7 @@ export async function getRecentSkillsPaginated(
   if (!env.DB) return { skills: [], total: 0 };
 
   const offset = (page - 1) * limit;
+  const queryLimit = offset === 0 ? limit + 1 : limit;
 
   const result = await env.DB.prepare(`
     SELECT
@@ -531,17 +542,26 @@ export async function getRecentSkillsPaginated(
     END DESC
     LIMIT ? OFFSET ?
   `)
-    .bind(limit, offset)
+    .bind(queryLimit, offset)
     .all<SkillListRow>();
 
-  const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
-    .first<{ total: number }>();
+  const hasMoreOnFirstPage = offset === 0 && result.results.length > limit;
+  const pageRows = hasMoreOnFirstPage ? result.results.slice(0, limit) : result.results;
 
-  const skills = await addCategoriesToSkills(env.DB, result.results);
+  let total: number;
+  if (offset === 0 && !hasMoreOnFirstPage) {
+    total = pageRows.length;
+  } else {
+    const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
+      .first<{ total: number }>();
+    total = countResult?.total || 0;
+  }
+
+  const skills = await addCategoriesToSkills(env.DB, pageRows);
 
   return {
     skills,
-    total: countResult?.total || 0,
+    total,
   };
 }
 
@@ -612,6 +632,7 @@ export async function getTopSkillsPaginated(
   if (!env.DB) return { skills: [], total: 0 };
 
   const offset = (page - 1) * limit;
+  const queryLimit = offset === 0 ? limit + 1 : limit;
   const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
 
   const result = await env.DB.prepare(`
@@ -643,29 +664,38 @@ export async function getTopSkillsPaginated(
              COALESCE(s.last_commit_at, s.updated_at) DESC
     LIMIT ? OFFSET ?
   `)
-    .bind(limit, offset)
+    .bind(queryLimit, offset)
     .all<SkillListRow>();
 
-  const countResult = await env.DB.prepare(`
-    SELECT COUNT(*) as total
-    FROM skills
-    WHERE visibility = 'public'
-      AND (
-        skill_path IS NULL
-        OR skill_path = ''
-        OR (
-          skill_path NOT LIKE '.%'
-          AND skill_path NOT LIKE '%/.%'
-        )
-      )
-  `)
-    .first<{ total: number }>();
+  const hasMoreOnFirstPage = offset === 0 && result.results.length > limit;
+  const pageRows = hasMoreOnFirstPage ? result.results.slice(0, limit) : result.results;
 
-  const skills = await addCategoriesToSkills(env.DB, result.results);
+  let total: number;
+  if (offset === 0 && !hasMoreOnFirstPage) {
+    total = pageRows.length;
+  } else {
+    const countResult = await env.DB.prepare(`
+      SELECT COUNT(*) as total
+      FROM skills
+      WHERE visibility = 'public'
+        AND (
+          skill_path IS NULL
+          OR skill_path = ''
+          OR (
+            skill_path NOT LIKE '.%'
+            AND skill_path NOT LIKE '%/.%'
+          )
+        )
+    `)
+      .first<{ total: number }>();
+    total = countResult?.total || 0;
+  }
+
+  const skills = await addCategoriesToSkills(env.DB, pageRows);
 
   return {
     skills,
-    total: countResult?.total || 0,
+    total,
   };
 }
 
@@ -679,6 +709,7 @@ export async function getSkillsByCategory(
   offset: number = 0
 ): Promise<{ skills: SkillCardData[]; total: number }> {
   if (!env.DB) return { skills: [], total: 0 };
+  const queryLimit = offset === 0 ? limit + 1 : limit;
 
   const result = await env.DB.prepare(`
     WITH matched AS (
@@ -706,25 +737,34 @@ export async function getSkillsByCategory(
     LEFT JOIN authors a ON matched.repoOwner = a.username
     ORDER BY matched.trendingScore DESC
   `)
-    .bind(categorySlug, limit, offset)
+    .bind(categorySlug, queryLimit, offset)
     .all<SkillListRow>();
 
-  const countResult = await env.DB.prepare(`
-    SELECT COUNT(*) as total
-    FROM skill_categories sc
-    CROSS JOIN skills s
-    WHERE s.id = sc.skill_id
-      AND sc.category_slug = ?
-      AND s.visibility = 'public'
-  `)
-    .bind(categorySlug)
-    .first<{ total: number }>();
+  const hasMoreOnFirstPage = offset === 0 && result.results.length > limit;
+  const pageRows = hasMoreOnFirstPage ? result.results.slice(0, limit) : result.results;
 
-  const skills = await addCategoriesToSkills(env.DB, result.results);
+  let total: number;
+  if (offset === 0 && !hasMoreOnFirstPage) {
+    total = pageRows.length;
+  } else {
+    const countResult = await env.DB.prepare(`
+      SELECT COUNT(*) as total
+      FROM skill_categories sc
+      CROSS JOIN skills s
+      WHERE s.id = sc.skill_id
+        AND sc.category_slug = ?
+        AND s.visibility = 'public'
+    `)
+      .bind(categorySlug)
+      .first<{ total: number }>();
+    total = countResult?.total || 0;
+  }
+
+  const skills = await addCategoriesToSkills(env.DB, pageRows);
 
   return {
     skills,
-    total: countResult?.total || 0,
+    total,
   };
 }
 
@@ -1667,7 +1707,8 @@ export async function resetAccessCounts(env: DbEnv): Promise<void> {
   await env.DB.prepare(`
     UPDATE skills
     SET access_count_7d = 0
-    WHERE last_accessed_at IS NULL OR last_accessed_at < ?
+    WHERE access_count_7d != 0
+      AND (last_accessed_at IS NULL OR last_accessed_at < ?)
   `)
     .bind(sevenDaysAgo)
     .run();
@@ -1676,7 +1717,8 @@ export async function resetAccessCounts(env: DbEnv): Promise<void> {
   await env.DB.prepare(`
     UPDATE skills
     SET access_count_30d = 0
-    WHERE last_accessed_at IS NULL OR last_accessed_at < ?
+    WHERE access_count_30d != 0
+      AND (last_accessed_at IS NULL OR last_accessed_at < ?)
   `)
     .bind(thirtyDaysAgo)
     .run();

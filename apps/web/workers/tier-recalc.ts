@@ -94,7 +94,8 @@ async function resetAccessCounts(env: TierRecalcEnv): Promise<void> {
   await env.DB.prepare(`
     UPDATE skills
     SET access_count_7d = 0
-    WHERE last_accessed_at IS NULL OR last_accessed_at < ?
+    WHERE access_count_7d != 0
+      AND (last_accessed_at IS NULL OR last_accessed_at < ?)
   `)
     .bind(sevenDaysAgo)
     .run();
@@ -103,7 +104,8 @@ async function resetAccessCounts(env: TierRecalcEnv): Promise<void> {
   await env.DB.prepare(`
     UPDATE skills
     SET access_count_30d = 0
-    WHERE last_accessed_at IS NULL OR last_accessed_at < ?
+    WHERE access_count_30d != 0
+      AND (last_accessed_at IS NULL OR last_accessed_at < ?)
   `)
     .bind(thirtyDaysAgo)
     .run();

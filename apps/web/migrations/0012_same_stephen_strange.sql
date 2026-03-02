@@ -1,0 +1,1 @@
+CREATE INDEX `skills_nonzero_access_counts_idx` ON `skills` (`id`) WHERE "skills"."access_count_7d" != 0 OR "skills"."access_count_30d" != 0;

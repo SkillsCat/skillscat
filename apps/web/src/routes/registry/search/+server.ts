@@ -6,7 +6,6 @@ import { getCached } from '$lib/server/cache';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
-const MAX_OFFSET = 5000;
 const MAX_QUERY_LENGTH = 120;
 const MAX_CATEGORY_LENGTH = 64;
 
@@ -16,6 +15,14 @@ function parseClampedInt(raw: string | null, fallback: number, min: number, max:
     return fallback;
   }
   return Math.min(Math.max(parsed, min), max);
+}
+
+function parseNonNegativeInt(raw: string | null, fallback: number): number {
+  const parsed = Number.parseInt(raw || String(fallback), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+  return parsed;
 }
 
 function normalizeQuery(value: string | null): string {
@@ -56,8 +63,8 @@ export interface RegistrySearchResult {
 export const GET: RequestHandler = async ({ url, platform, request, locals }) => {
   const query = normalizeQuery(url.searchParams.get('q'));
   const category = normalizeCategory(url.searchParams.get('category'));
-  const limit = parseClampedInt(url.searchParams.get('limit'), DEFAULT_LIMIT, 1, MAX_LIMIT);
-  const offset = parseClampedInt(url.searchParams.get('offset'), 0, 0, MAX_OFFSET);
+  const limit = parseClampedInt(url.searchParams.get('pageSize') ?? url.searchParams.get('limit'), DEFAULT_LIMIT, 1, MAX_LIMIT);
+  const offset = parseNonNegativeInt(url.searchParams.get('offset'), 0);
   const includePrivate = url.searchParams.get('include_private') === 'true';
 
   const db = platform?.env?.DB;
@@ -151,6 +158,7 @@ async function fetchSearchResults(
   const queryLike = `%${query}%`;
   const queryFilterSql = query ? 'AND (s.name LIKE ? OR s.description LIKE ?)' : '';
   const queryFilterParams: string[] = query ? [queryLike, queryLike] : [];
+  const queryLimit = offset === 0 ? limit + 1 : limit;
 
   const pageIdsResult = category
     ? await db.prepare(`
@@ -164,7 +172,7 @@ async function fetchSearchResults(
       ORDER BY s.trending_score DESC
       LIMIT ? OFFSET ?
     `)
-      .bind(category, ...visibilityFilter.params, ...queryFilterParams, limit, offset)
+      .bind(category, ...visibilityFilter.params, ...queryFilterParams, queryLimit, offset)
       .all<{ id: string }>()
     : await db.prepare(`
       SELECT s.id
@@ -174,34 +182,44 @@ async function fetchSearchResults(
       ORDER BY s.trending_score DESC
       LIMIT ? OFFSET ?
     `)
-      .bind(...visibilityFilter.params, ...queryFilterParams, limit, offset)
+      .bind(...visibilityFilter.params, ...queryFilterParams, queryLimit, offset)
       .all<{ id: string }>();
 
-  const pageIds = (pageIdsResult.results || []).map((row) => row.id);
+  const rawPageIds = (pageIdsResult.results || []).map((row) => row.id);
+  const hasMoreOnFirstPage = offset === 0 && rawPageIds.length > limit;
+  const pageIds = hasMoreOnFirstPage ? rawPageIds.slice(0, limit) : rawPageIds;
 
-  const countResult = category
-    ? await db.prepare(`
-      SELECT COUNT(*) as total
-      FROM skill_categories sc
-      CROSS JOIN skills s
-      WHERE s.id = sc.skill_id
-        AND sc.category_slug = ?
-        AND ${visibilityFilter.sql}
-        ${queryFilterSql}
-    `)
-      .bind(category, ...visibilityFilter.params, ...queryFilterParams)
-      .first<{ total: number }>()
-    : await db.prepare(`
-      SELECT COUNT(*) as total
-      FROM skills s
-      WHERE ${visibilityFilter.sql}
-        ${queryFilterSql}
-    `)
-      .bind(...visibilityFilter.params, ...queryFilterParams)
-      .first<{ total: number }>();
+  // Fast-path: on first page, if returned rows are fewer than requested limit,
+  // this page already contains all matches so no COUNT(*) scan is needed.
+  let total: number;
+  if (offset === 0 && !hasMoreOnFirstPage) {
+    total = pageIds.length;
+  } else {
+    const countResult = category
+      ? await db.prepare(`
+        SELECT COUNT(*) as total
+        FROM skill_categories sc
+        CROSS JOIN skills s
+        WHERE s.id = sc.skill_id
+          AND sc.category_slug = ?
+          AND ${visibilityFilter.sql}
+          ${queryFilterSql}
+      `)
+        .bind(category, ...visibilityFilter.params, ...queryFilterParams)
+        .first<{ total: number }>()
+      : await db.prepare(`
+        SELECT COUNT(*) as total
+        FROM skills s
+        WHERE ${visibilityFilter.sql}
+          ${queryFilterSql}
+      `)
+        .bind(...visibilityFilter.params, ...queryFilterParams)
+        .first<{ total: number }>();
+    total = countResult?.total || 0;
+  }
 
   if (pageIds.length === 0) {
-    return { skills: [], total: countResult?.total || 0 };
+    return { skills: [], total };
   }
 
   const idPlaceholders = pageIds.map(() => '?').join(',');
@@ -276,7 +294,7 @@ async function fetchSearchResults(
       slug: row.slug
     }));
 
-  return { skills, total: countResult?.total || 0 };
+  return { skills, total };
 }
 
 // Handle CORS preflight

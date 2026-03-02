@@ -360,7 +360,7 @@ async function updateSkillsByTier(
 
   const selectedSkills = [...dueWithoutSchedule.results];
 
-  if (selectedSkills.length < limit) {
+  if (selectedSkills.length < limit && tiers.length > 0) {
     const remaining = limit - selectedSkills.length;
     const dueByTierSql = tiers.map(() => `
       SELECT * FROM (

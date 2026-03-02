@@ -1,14 +1,17 @@
 import type { RequestHandler } from './$types';
 import { Resvg } from '@cf-wasm/resvg';
-import { SITE_TITLE, SITE_DESCRIPTION, SITE_OG_DEFAULT_SUBTITLE } from '$lib/seo/constants';
+import { SITE_NAME, SITE_DESCRIPTION, SITE_OG_DEFAULT_SUBTITLE, SITE_URL } from '$lib/seo/constants';
+import { OG_IMAGE_VERSION } from '$lib/seo/og';
 import { getSkillBySlug, type DbEnv } from '$lib/server/db/utils';
 import { getCategoryBySlug } from '$lib/constants/categories';
 
 const WIDTH = 1200;
 const HEIGHT = 630;
-const DEFAULT_TITLE = 'SkillsCat';
+const DEFAULT_TITLE = SITE_NAME;
 const DEFAULT_SUBTITLE = SITE_OG_DEFAULT_SUBTITLE;
 const DEFAULT_TAG = 'skills.cat';
+const VERSIONED_CACHE_CONTROL = 'public, max-age=31536000, s-maxage=31536000, immutable';
+const DEFAULT_CACHE_CONTROL = 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800';
 
 const COLOR = {
   primary: '#d4842a',
@@ -32,7 +35,7 @@ interface OgData {
 }
 
 const STATIC_PAGES: Record<string, OgData> = {
-  home: { title: SITE_TITLE, subtitle: SITE_DESCRIPTION, tag: 'Home', author: '', avatarUrl: '', stars: 0, installSlug: '' },
+  home: { title: SITE_NAME, subtitle: SITE_DESCRIPTION, tag: 'Home', author: '', avatarUrl: '', stars: 0, installSlug: '' },
   trending: { title: 'Trending Skills', subtitle: SITE_DESCRIPTION, tag: 'Trending', author: '', avatarUrl: '', stars: 0, installSlug: '' },
   top: { title: 'Top Rated Skills', subtitle: SITE_DESCRIPTION, tag: 'Top Rated', author: '', avatarUrl: '', stars: 0, installSlug: '' },
   recent: { title: 'Recently Added Skills', subtitle: SITE_DESCRIPTION, tag: 'Recent', author: '', avatarUrl: '', stars: 0, installSlug: '' },
@@ -155,6 +158,29 @@ function truncate(value: string, maxLength: number): string {
   const cleaned = value.replace(/[\x00-\x1f\x7f]/g, '').replace(/\s+/g, ' ').trim();
   if (!cleaned) return '';
   return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 1)}…` : cleaned;
+}
+
+function normalizeEtagPart(value: string, fallback: string): string {
+  const normalized = value.trim();
+  if (!normalized) return fallback;
+  return normalized.replace(/\s+/g, ' ').slice(0, 256);
+}
+
+function fnv1aHex(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function buildOgEtag(type: string, slug: string, version: string): string {
+  const safeType = normalizeEtagPart(type, 'default');
+  const safeSlug = normalizeEtagPart(slug, 'default');
+  const safeVersion = normalizeEtagPart(version, 'none');
+  const digest = fnv1aHex(`${safeType}\u001f${safeSlug}\u001f${safeVersion}`);
+  return `"og:${OG_IMAGE_VERSION}:${digest}"`;
 }
 
 function wrapLines(text: string, maxCharsPerLine: number, maxLines: number): string[] {
@@ -344,6 +370,7 @@ function buildInstallCapsule(installSlug: string, cardX: number, cardY: number, 
 let fontBuffer: Uint8Array | null = null;
 let fontDataUri: string | null = null;
 let logoDataUri: string | null = null;
+const LOGO_CANDIDATE_PATHS = ['/favicon-128x128.png', '/favicon-256x256.png'] as const;
 
 async function loadFont(): Promise<{ buffer: Uint8Array; dataUri: string }> {
   if (fontBuffer && fontDataUri) return { buffer: fontBuffer, dataUri: fontDataUri };
@@ -363,16 +390,6 @@ async function loadFont(): Promise<{ buffer: Uint8Array; dataUri: string }> {
   return { buffer: fontBuffer, dataUri: fontDataUri };
 }
 
-async function getLogoDataUri(origin: string): Promise<string> {
-  if (logoDataUri) return logoDataUri;
-  const buf = await fetch(`${origin}/favicon-128x128.png`).then((r) => r.arrayBuffer());
-  const bytes = new Uint8Array(buf);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  logoDataUri = `data:image/png;base64,${btoa(binary)}`;
-  return logoDataUri;
-}
-
 async function fetchImageDataUri(url: string): Promise<string | null> {
   try {
     const res = await fetch(url);
@@ -386,6 +403,23 @@ async function fetchImageDataUri(url: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+async function getLogoDataUri(origin: string): Promise<string> {
+  if (logoDataUri) return logoDataUri;
+
+  const baseUrls = Array.from(new Set([origin, SITE_URL]));
+  for (const baseUrl of baseUrls) {
+    for (const logoPath of LOGO_CANDIDATE_PATHS) {
+      const dataUri = await fetchImageDataUri(`${baseUrl}${logoPath}`);
+      if (dataUri) {
+        logoDataUri = dataUri;
+        return logoDataUri;
+      }
+    }
+  }
+
+  throw new Error('Failed to load OG logo asset');
 }
 
 function buildSvg(
@@ -520,9 +554,33 @@ function buildSvg(
 </svg>`;
 }
 
-export const GET: RequestHandler = async ({ url, platform }) => {
+export const GET: RequestHandler = async ({ url, platform, request }) => {
   const type = url.searchParams.get('type') || '';
   const slug = url.searchParams.get('slug') || '';
+  const version = url.searchParams.get('v')?.trim() || '';
+  const hasVersion = version.length > 0;
+  const cacheControl = hasVersion ? VERSIONED_CACHE_CONTROL : DEFAULT_CACHE_CONTROL;
+  const etag = buildOgEtag(type, slug, version);
+
+  const ifNoneMatch = request.headers.get('if-none-match');
+  const matchesEtag = Boolean(
+    ifNoneMatch
+      && ifNoneMatch
+        .split(',')
+        .map((value) => value.trim())
+        .includes(etag)
+  );
+
+  if (matchesEtag) {
+    return new Response(null, {
+      status: 304,
+      headers: {
+        ETag: etag,
+        'Cache-Control': cacheControl,
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  }
 
   const env: DbEnv = {
     DB: platform?.env?.DB,
@@ -561,7 +619,8 @@ export const GET: RequestHandler = async ({ url, platform }) => {
   return new Response(pngData.buffer as ArrayBuffer, {
     headers: {
       'Content-Type': 'image/png',
-      'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800',
+      ETag: etag,
+      'Cache-Control': cacheControl,
       'X-Content-Type-Options': 'nosniff',
     },
   });

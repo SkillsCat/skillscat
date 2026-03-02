@@ -59,9 +59,9 @@ export function getNextRelatedUpdateAt(
     case 'hot':
       return now + 6 * 60 * 60 * 1000;
     case 'warm':
-      return now + 24 * 60 * 60 * 1000;
+      return now + 48 * 60 * 60 * 1000;
     case 'cool':
-      return now + 7 * 24 * 60 * 60 * 1000;
+      return now + 14 * 24 * 60 * 60 * 1000;
     case 'cold':
     case 'archived':
     default:
@@ -243,4 +243,3 @@ export async function markRelatedFallbackServed(
     .bind(skillId, now, now, now, now)
     .run();
 }
-
