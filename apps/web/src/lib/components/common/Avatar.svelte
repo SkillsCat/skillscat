@@ -21,7 +21,7 @@
     fallback = null,
     size = "md",
     shape = "squircle",
-    border = true,
+    border = false,
     shadow = false,
     class: className = "",
     useGithubFallback = false,

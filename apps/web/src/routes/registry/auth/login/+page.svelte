@@ -105,7 +105,7 @@
 <div class="cli-auth-page">
   <div class="cli-auth-card">
     <div class="logo-centered">
-      <img src="/favicon-256x256.png" alt="SkillsCat" width="128" height="128" />
+      <img src="/favicon-256x256.png" alt="SkillsCat" width="88" height="88" />
     </div>
 
     <h1>Authorize CLI</h1>
@@ -238,11 +238,13 @@
   .logo-centered {
     display: flex;
     justify-content: center;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.25rem;
   }
 
   .logo-centered img {
-    border-radius: 20px;
+    width: 88px;
+    height: 88px;
+    border-radius: 16px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   }
 

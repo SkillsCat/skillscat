@@ -1,6 +1,7 @@
 <script lang="ts">
   import { signIn } from '$lib/auth-client';
   import Avatar from '$lib/components/common/Avatar.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
   import { toast } from '$lib/components/ui/Toast.svelte';
 
   interface Props {
@@ -53,10 +54,6 @@
     verifying = true;
 
     try {
-      const res = await fetch(`/device?code=${encodeURIComponent(userCode)}`);
-      const html = await res.text();
-
-      // Reload the page with the code parameter
       window.location.href = `/device?code=${encodeURIComponent(userCode)}`;
     } catch {
       toast('Failed to verify code', 'error');
@@ -128,13 +125,10 @@
   <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
-<div class="device-page">
-  <div class="device-card">
-    <div class="logo">
-      <svg width="48" height="48" viewBox="0 0 32 32" fill="none">
-        <rect width="32" height="32" rx="8" fill="var(--primary)"/>
-        <path d="M8 12h16M8 16h12M8 20h8" stroke="white" stroke-width="2" stroke-linecap="round"/>
-      </svg>
+<div class="cli-auth-page">
+  <div class="cli-auth-card">
+    <div class="logo-centered">
+      <img src="/favicon-256x256.png" alt="SkillsCat" width="88" height="88" />
     </div>
 
     <h1>Authorize CLI</h1>
@@ -148,7 +142,7 @@
           </svg>
         </div>
         <h2>Device Authorized</h2>
-        <p>You can close this window and return to your terminal.</p>
+        <p>You can close this tab and return to your terminal.</p>
       </div>
     {:else if denied}
       <div class="denied-state">
@@ -159,10 +153,9 @@
           </svg>
         </div>
         <h2>Authorization Denied</h2>
-        <p>The device was not authorized. You can close this window.</p>
+        <p>The device was not authorized. You can close this tab.</p>
       </div>
     {:else if !data.user}
-      <!-- Not logged in -->
       <p class="description">
         Sign in to authorize the SkillsCat CLI on your device.
       </p>
@@ -181,7 +174,6 @@
         <span>Sign in with GitHub</span>
       </button>
     {:else if deviceInfo}
-      <!-- Logged in with valid code -->
       <p class="description">
         The SkillsCat CLI is requesting access to your account.
       </p>
@@ -237,25 +229,14 @@
       </div>
 
       <div class="actions">
-        <button
-          type="button"
-          onclick={() => authorize('approve')}
-          class="btn-approve"
-          disabled={loading}
-        >
+        <Button variant="cute" onclick={() => authorize('approve')} disabled={loading}>
           {loading ? 'Authorizing...' : 'Authorize'}
-        </button>
-        <button
-          type="button"
-          onclick={() => authorize('deny')}
-          class="btn-deny"
-          disabled={loading}
-        >
+        </Button>
+        <Button variant="outline" onclick={() => authorize('deny')} disabled={loading}>
           Deny
-        </button>
+        </Button>
       </div>
     {:else}
-      <!-- Logged in but no code entered -->
       <p class="description">
         Enter the code displayed in your terminal to authorize the CLI.
       </p>
@@ -296,7 +277,7 @@
 </div>
 
 <style>
-  .device-page {
+  .cli-auth-page {
     min-height: 100vh;
     display: flex;
     align-items: center;
@@ -305,7 +286,7 @@
     background: var(--background);
   }
 
-  .device-card {
+  .cli-auth-card {
     width: 100%;
     max-width: 400px;
     padding: 2rem;
@@ -315,8 +296,17 @@
     text-align: center;
   }
 
-  .logo {
-    margin-bottom: 1.5rem;
+  .logo-centered {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+  }
+
+  .logo-centered img {
+    width: 88px;
+    height: 88px;
+    border-radius: 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   }
 
   h1 {
@@ -351,7 +341,7 @@
     padding: 1rem;
     background: var(--background);
     border-radius: 0.5rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
   }
 
   .code-label {
@@ -362,7 +352,7 @@
   }
 
   .code-value {
-    font-size: 1.75rem;
+    font-size: 1.6rem;
     font-weight: 700;
     font-family: monospace;
     letter-spacing: 0.1em;
@@ -396,7 +386,8 @@
     border-color: var(--primary);
   }
 
-  .client-info, .permissions {
+  .client-info,
+  .permissions {
     text-align: left;
     padding: 1rem;
     background: var(--background);
@@ -404,7 +395,8 @@
     margin-bottom: 1rem;
   }
 
-  .client-info ul, .permissions ul {
+  .client-info ul,
+  .permissions ul {
     list-style: none;
     padding: 0;
     margin: 0;
@@ -481,54 +473,50 @@
     margin-top: 1.5rem;
   }
 
-  .btn-approve, .btn-deny, .btn-verify {
+  .actions :global(.btn) {
     flex: 1;
+  }
+
+  .btn-verify {
+    width: 100%;
     padding: 0.875rem 1.25rem;
     font-size: 0.9375rem;
     font-weight: 600;
     border-radius: 0.5rem;
     cursor: pointer;
     border: none;
+    background: var(--primary);
+    color: white;
     transition: opacity 0.15s ease;
   }
 
-  .btn-approve {
-    background: var(--primary);
-    color: white;
-  }
-
-  .btn-deny {
-    background: var(--background);
-    color: var(--foreground);
-    border: 1px solid var(--border);
-  }
-
-  .btn-verify {
-    width: 100%;
-    background: var(--primary);
-    color: white;
-  }
-
-  .btn-approve:disabled, .btn-deny:disabled, .btn-verify:disabled {
+  .btn-verify:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
 
-  .success-state, .denied-state {
+  .success-state,
+  .denied-state {
     padding: 1rem 0;
+  }
+
+  .success-icon,
+  .denied-icon {
+    margin-bottom: 0.5rem;
+    display: flex;
+    justify-content: center;
   }
 
   .success-icon {
     color: #22c55e;
-    margin-bottom: 0.5rem;
   }
 
   .denied-icon {
     color: #ef4444;
-    margin-bottom: 0.5rem;
   }
 
-  .success-state p, .denied-state p {
+  .success-state p,
+  .denied-state p {
     color: var(--muted-foreground);
   }
 </style>
