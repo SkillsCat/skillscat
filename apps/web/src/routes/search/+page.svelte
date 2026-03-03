@@ -181,7 +181,7 @@
     <!-- Skills -->
     {#if data.skills.length > 0}
       <Section title="Skills">
-        <Grid cols={4}>
+        <Grid cols={3}>
           {#each data.skills as skill (skill.id)}
             <SkillCard {skill} />
           {/each}

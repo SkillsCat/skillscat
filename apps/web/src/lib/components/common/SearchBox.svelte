@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
+  import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     Search01Icon,
     Cancel01Icon,
     StarIcon,
+    Delete02Icon,
     GitBranchIcon,
     CodeIcon,
     RefreshIcon,
@@ -28,6 +30,12 @@
     SparklesIcon
   } from '@hugeicons/core-free-icons';
   import { CATEGORIES } from '$lib/constants';
+  import {
+    addSearchHistoryEntry,
+    filterSearchHistory,
+    loadSearchHistory,
+    saveSearchHistory
+  } from '$lib/search-history';
 
   interface Props {
     value?: string;
@@ -103,6 +111,21 @@
   );
 
   const suggestionCache = new Map<string, SuggestionCacheEntry>();
+  let queryHistory = $state<string[]>([]);
+  let showClearHistoryDialog = $state(false);
+
+  function addQueryToHistory(query: string) {
+    const nextEntries = addSearchHistoryEntry(queryHistory, query);
+    if (nextEntries === queryHistory) return;
+
+    queryHistory = nextEntries;
+    saveSearchHistory(nextEntries);
+  }
+
+  const visibleQueryHistory = $derived(() => {
+    if (!isFocused || !showSuggestions) return [];
+    return filterSearchHistory(queryHistory, value);
+  });
 
   function getSuggestionLimit(): number {
     if (typeof window === 'undefined') return 5;
@@ -125,6 +148,7 @@
     };
 
     updateSuggestionLimit();
+    queryHistory = loadSearchHistory();
     window.addEventListener('resize', updateSuggestionLimit);
 
     return () => {
@@ -169,6 +193,16 @@
       )
       .slice(0, suggestionLimit);
   });
+
+  const hasSuggestionItems = $derived(() => (
+    suggestionMode === 'skills'
+      ? skillSuggestions.length > 0
+      : categorySuggestions().length > 0
+  ));
+
+  const hasDropdownItems = $derived(() => (
+    hasSuggestionItems() || visibleQueryHistory().length > 0
+  ));
 
   // Fetch skill suggestions from the database-backed search API.
   $effect(() => {
@@ -252,12 +286,14 @@
   function handleSubmit(e: Event) {
     e.preventDefault();
     isFocused = false;
+    addQueryToHistory(value);
     onSearch?.(value);
   }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       isFocused = false;
+      addQueryToHistory(value);
       onSearch?.(value);
     } else if (e.key === 'Escape') {
       isFocused = false;
@@ -266,21 +302,37 @@
   }
 
   function selectCategorySuggestion(categoryName: string) {
-    value = categoryName;
     isFocused = false;
-    onSearch?.(value);
+    addQueryToHistory(categoryName);
+    onSearch?.(categoryName);
+    value = '';
   }
 
   function selectSkillSuggestion(skill: SkillSuggestion) {
-    value = skill.name;
     isFocused = false;
+    addQueryToHistory(skill.name);
 
     if (onSelectSkill) {
       onSelectSkill(skill);
+      value = '';
       return;
     }
 
     onSearch?.(skill.name);
+    value = '';
+  }
+
+  function selectHistoryQuery(query: string) {
+    isFocused = false;
+    addQueryToHistory(query);
+    onSearch?.(query);
+    value = '';
+  }
+
+  function clearQueryHistory() {
+    queryHistory = [];
+    saveSearchHistory([]);
+    showClearHistoryDialog = false;
   }
 
   function clearSearch() {
@@ -343,14 +395,13 @@
       return;
     }
 
-    const hasSuggestions = suggestionMode === 'skills'
-      ? skillSuggestions.length > 0
-      : categorySuggestions().length > 0;
+    const hasHistory = visibleQueryHistory().length > 0;
+    const hasSuggestions = hasSuggestionItems();
 
     isFocused;
     value;
 
-    if (!hasSuggestions || !isFocused) {
+    if ((!hasHistory && !hasSuggestions) || !isFocused) {
       suggestionsDropdownInlineStyle = '';
       return;
     }
@@ -391,9 +442,39 @@
   </div>
 
   <!-- Suggestions Dropdown -->
-  {#if suggestionMode === 'skills' ? skillSuggestions.length > 0 : categorySuggestions().length > 0}
+  {#if hasDropdownItems()}
     <div class="suggestions-dropdown" style={suggestionsDropdownInlineStyle}>
       <div class="suggestions-list">
+        {#if visibleQueryHistory().length > 0}
+          <div class="history-header">
+            <span class="history-title">Recent searches</span>
+            <button
+              type="button"
+              class="history-clear-btn"
+              aria-label="Clear search history"
+              onclick={() => showClearHistoryDialog = true}
+            >
+              <HugeiconsIcon icon={Delete02Icon} size={14} strokeWidth={2.25} />
+            </button>
+          </div>
+
+          <div class="history-chips">
+            {#each visibleQueryHistory() as historyQuery (historyQuery)}
+              <button
+                type="button"
+                onclick={() => selectHistoryQuery(historyQuery)}
+                class="history-chip"
+              >
+                {historyQuery}
+              </button>
+            {/each}
+          </div>
+
+          {#if hasSuggestionItems()}
+            <div class="suggestions-divider"></div>
+          {/if}
+        {/if}
+
         {#if suggestionMode === 'skills'}
           {#each skillSuggestions as skill (skill.id)}
             <button
@@ -445,6 +526,17 @@
     </div>
   {/if}
 </form>
+
+<ConfirmDialog
+  open={showClearHistoryDialog}
+  title="Clear search history"
+  description="This will remove all recent search queries from suggestions."
+  confirmText="Clear all"
+  cancelText="Cancel"
+  onConfirm={clearQueryHistory}
+  onCancel={() => showClearHistoryDialog = false}
+  danger={true}
+/>
 
 <style>
   .search-form {
@@ -568,6 +660,79 @@
 
   .suggestions-list {
     padding: 0.5rem;
+  }
+
+  .history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.375rem 0.5rem 0.5rem;
+  }
+
+  .history-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--fg-subtle);
+    text-transform: uppercase;
+  }
+
+  .history-clear-btn {
+    width: 1.5rem;
+    height: 1.5rem;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    color: var(--fg-subtle);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .history-clear-btn:hover {
+    color: var(--destructive);
+    background: var(--primary-subtle);
+  }
+
+  .history-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    padding: 0 0.5rem 0.25rem;
+  }
+
+  .history-chip {
+    max-width: 100%;
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.75rem;
+    padding: 0.25rem 0.625rem;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-full);
+    background: var(--background);
+    color: var(--foreground);
+    font-size: 0.75rem;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: all 0.15s ease;
+  }
+
+  .history-chip:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: var(--primary-subtle);
+  }
+
+  .suggestions-divider {
+    height: 1px;
+    margin: 0.5rem 0.375rem;
+    background: var(--border);
   }
 
   .suggestion-item {
