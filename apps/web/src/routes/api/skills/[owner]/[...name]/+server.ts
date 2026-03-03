@@ -144,11 +144,11 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
           sourceType: (row.sourceType as 'github' | 'upload') || 'github',
         };
 
-        // Get related skills (same category, exclude current)
-        let relatedSkills: SkillCardData[] = [];
+        // Get recommend skills (same category, exclude current)
+        let recommendSkills: SkillCardData[] = [];
 
         if (skill.categories.length > 0) {
-          const relatedResult = await db.prepare(`
+          const recommendResult = await db.prepare(`
             WITH matched AS (
               SELECT
                 s.id,
@@ -197,7 +197,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
             authorAvatar: string | null;
           }>();
 
-          relatedSkills = (relatedResult.results || []).map(r => ({
+          recommendSkills = (recommendResult.results || []).map(r => ({
             id: r.id,
             name: r.name,
             slug: r.slug,
@@ -213,7 +213,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
           }));
         }
 
-        return { skill, relatedSkills };
+        return { skill, recommendSkills };
       },
       300
     );
@@ -249,7 +249,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     return json({
       success: true,
       data
-    } satisfies ApiResponse<{ skill: SkillDetail; relatedSkills: SkillCardData[] }>, {
+    } satisfies ApiResponse<{ skill: SkillDetail; recommendSkills: SkillCardData[] }>, {
       headers: {
         'Cache-Control': isPrivate ? 'private, no-cache' : 'public, max-age=300, stale-while-revalidate=600',
         'X-Cache': hit ? 'HIT' : 'MISS'
@@ -356,7 +356,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
     .all<{ category_slug: string }>();
   const categorySlugs = (categoryResult.results || []).map((row) => row.category_slug);
 
-  // Delete from database (cascades handle related tables like skill_categories, skill_tags, etc.)
+  // Delete from database (cascades handle dependent tables like skill_categories, skill_tags, etc.)
   await db.prepare('DELETE FROM skills WHERE id = ?').bind(skill.id).run();
 
   // Delete R2 files
@@ -374,7 +374,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
     const cacheKeys = new Set<string>([
       `api:skill:${skill.slug}`,
       `skill:${skill.id}`,
-      `related:${skill.id}`,
+      `recommend:${skill.id}`,
       'page:home:v1',
       'page:trending:v1:1',
       'page:recent:v1:1',

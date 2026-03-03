@@ -109,7 +109,7 @@ interface OverlapCountRow {
   cnt: number;
 }
 
-interface RelatedSkillCandidateRow extends SkillListRow {
+interface RecommendSkillCandidateRow extends SkillListRow {
   lastCommitAt: number | null;
   sharedCategoryCount?: number;
   sharedTagCount?: number;
@@ -1133,7 +1133,7 @@ export async function getSkillBySlug(
  *
  * Adaptive weights adjust based on available signals (categories, tags, both, neither).
  */
-export async function getRelatedSkills(
+export async function getRecommendedSkills(
   env: DbEnv,
   skillId: string,
   categories: string[],
@@ -1170,7 +1170,7 @@ export async function getRelatedSkills(
 
   // Step 2: Tiered candidate discovery
   // Each candidate tracks which tier discovered it
-  const candidateMap = new Map<string, { data: RelatedSkillCandidateRow; tier: number }>();
+  const candidateMap = new Map<string, { data: RecommendSkillCandidateRow; tier: number }>();
   const excludeIds: string[] = [skillId];
 
   const SKILL_COLUMNS_BASE = `
@@ -1183,7 +1183,7 @@ export async function getRelatedSkills(
     ${SKILL_COLUMNS_BASE},
     a.avatar_url as authorAvatar`;
 
-  const addCandidates = (rows: RelatedSkillCandidateRow[], tier: number) => {
+  const addCandidates = (rows: RecommendSkillCandidateRow[], tier: number) => {
     for (const row of rows) {
       if (!candidateMap.has(row.id)) {
         candidateMap.set(row.id, { data: row, tier });
@@ -1219,7 +1219,7 @@ export async function getRelatedSkills(
       LEFT JOIN authors a ON matched.repoOwner = a.username
       ORDER BY matched.sharedCategoryCount DESC, matched.trendingScore DESC
       LIMIT 30
-    `).bind(...categories, ...excludeIds).all<RelatedSkillCandidateRow>(),
+    `).bind(...categories, ...excludeIds).all<RecommendSkillCandidateRow>(),
       'tier1 category overlap'
     );
     addCandidates(result.results, 1);
@@ -1250,7 +1250,7 @@ export async function getRelatedSkills(
       LEFT JOIN authors a ON matched.repoOwner = a.username
       ORDER BY matched.sharedTagCount DESC, matched.trendingScore DESC
       LIMIT 20
-    `).bind(...skillTags, ...excludeIds).all<RelatedSkillCandidateRow>(),
+    `).bind(...skillTags, ...excludeIds).all<RecommendSkillCandidateRow>(),
       'tier2 tag overlap'
     );
     addCandidates(result.results, 2);
@@ -1271,7 +1271,7 @@ export async function getRelatedSkills(
         AND s.visibility = 'public'
       ORDER BY s.trending_score DESC
       LIMIT 10
-    `).bind(repoOwner, ...excludeIds).all<RelatedSkillCandidateRow>(),
+    `).bind(repoOwner, ...excludeIds).all<RecommendSkillCandidateRow>(),
       'tier3 same author'
     );
     addCandidates(result.results, 3);
@@ -1291,7 +1291,7 @@ export async function getRelatedSkills(
         AND s.visibility = 'public'
       ORDER BY s.trending_score DESC
       LIMIT 15
-    `).bind(...excludeIds).all<RelatedSkillCandidateRow>(),
+    `).bind(...excludeIds).all<RecommendSkillCandidateRow>(),
       'tier4 trending fallback'
     );
     addCandidates(result.results, 4);

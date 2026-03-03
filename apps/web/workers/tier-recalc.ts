@@ -10,7 +10,7 @@
 
 import type { BaseEnv, SkillTier } from './shared/types';
 import { TIER_CONFIG } from './shared/types';
-import { getNextRelatedUpdateAt } from '../src/lib/server/related-precompute';
+import { getNextRecommendUpdateAt } from '../src/lib/server/recommend-precompute';
 
 interface TierRecalcEnv extends BaseEnv {}
 
@@ -194,9 +194,9 @@ async function recalculateTiers(env: TierRecalcEnv): Promise<{
 
       await env.DB.batch(statements);
 
-      const relatedStateStatements = updates.map((u) =>
+      const recommendStateStatements = updates.map((u) =>
         env.DB.prepare(`
-          INSERT INTO skill_related_state (
+          INSERT INTO skill_recommend_state (
             skill_id, dirty, next_update_at, precomputed_at, algo_version,
             fail_count, last_error_at, last_fallback_at, created_at, updated_at
           )
@@ -206,13 +206,13 @@ async function recalculateTiers(env: TierRecalcEnv): Promise<{
             updated_at = excluded.updated_at
         `).bind(
           u.id,
-          getNextRelatedUpdateAt(u.tier, now),
+          getNextRecommendUpdateAt(u.tier, now),
           now,
           now
         )
       );
 
-      await env.DB.batch(relatedStateStatements);
+      await env.DB.batch(recommendStateStatements);
     }
 
     lastSeenId = rows[rows.length - 1]?.id || lastSeenId;

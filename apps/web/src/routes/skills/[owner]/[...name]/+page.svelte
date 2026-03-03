@@ -17,8 +17,8 @@
   interface Props {
     data: {
       skill: SkillDetail | null;
-      relatedSkills: SkillCardData[];
-      deferRelatedSkills?: boolean;
+      recommendSkills: SkillCardData[];
+      deferRecommendSkills?: boolean;
       error?: string;
       isOwner?: boolean;
       isBookmarked?: boolean;
@@ -128,9 +128,9 @@
   let highlighter = $state<Highlighter | null>(null);
   let highlightedReadme = $state('');
   let isLoadingShiki = $state(false);
-  let deferredRelatedSkills = $state<SkillCardData[] | null>(null);
-  let isLoadingDeferredRelatedSkills = $state(false);
-  let deferredRelatedSkillsError = $state<string | null>(null);
+  let deferredRecommendSkills = $state<SkillCardData[] | null>(null);
+  let isLoadingDeferredRecommendSkills = $state(false);
+  let deferredRecommendSkillsError = $state<string | null>(null);
 
   // Reset highlighted HTML whenever server-rendered markdown changes.
   $effect(() => {
@@ -138,23 +138,23 @@
     highlightedReadme = '';
   });
 
-  // For client-side navigations, related skills are fetched lazily to keep __data.json fast.
+  // For client-side navigations, recommend skills are fetched lazily to keep __data.json fast.
   $effect(() => {
     const skill = data.skill;
-    const shouldDefer = Boolean(data.deferRelatedSkills && skill);
+    const shouldDefer = Boolean(data.deferRecommendSkills && skill);
 
-    deferredRelatedSkills = null;
-    deferredRelatedSkillsError = null;
-    isLoadingDeferredRelatedSkills = false;
+    deferredRecommendSkills = null;
+    deferredRecommendSkillsError = null;
+    isLoadingDeferredRecommendSkills = false;
 
     if (!shouldDefer || !skill) return;
 
     const controller = new AbortController();
-    isLoadingDeferredRelatedSkills = true;
+    isLoadingDeferredRecommendSkills = true;
 
     void (async () => {
       try {
-        const response = await fetch(`/api/skills/${encodeSkillSlugForPath(skill.slug)}/related`, {
+        const response = await fetch(`/api/skills/${encodeSkillSlugForPath(skill.slug)}/recommend`, {
           signal: controller.signal,
           headers: { accept: 'application/json' }
         });
@@ -166,22 +166,22 @@
         const payload = await response.json() as {
           success?: boolean;
           error?: string;
-          data?: { relatedSkills?: SkillCardData[] };
+          data?: { recommendSkills?: SkillCardData[] };
         };
 
         if (!payload.success) {
-          throw new Error(payload.error || 'Failed to load related skills');
+          throw new Error(payload.error || 'Failed to load recommend skills');
         }
 
-        deferredRelatedSkills = payload.data?.relatedSkills || [];
+        deferredRecommendSkills = payload.data?.recommendSkills || [];
       } catch (err) {
         if (controller.signal.aborted) return;
-        console.error('Deferred related skills load failed:', err);
-        deferredRelatedSkillsError = 'Failed to load related skills';
-        deferredRelatedSkills = [];
+        console.error('Deferred recommend skills load failed:', err);
+        deferredRecommendSkillsError = 'Failed to load recommend skills';
+        deferredRecommendSkills = [];
       } finally {
         if (!controller.signal.aborted) {
-          isLoadingDeferredRelatedSkills = false;
+          isLoadingDeferredRecommendSkills = false;
         }
       }
     })();
@@ -1123,12 +1123,12 @@
     toIsoTimestamp(data.skill?.lastCommitAt ?? data.skill?.updatedAt)
   );
   const skillSeoKeywords = $derived(data.seo?.keywords ?? ['ai agent skill', 'skillscat']);
-  const displayRelatedSkills = $derived(deferredRelatedSkills ?? data.relatedSkills ?? []);
-  const showRelatedSkillsLoading = $derived(
-    Boolean(data.deferRelatedSkills && data.skill && isLoadingDeferredRelatedSkills && displayRelatedSkills.length === 0)
+  const displayRecommendSkills = $derived(deferredRecommendSkills ?? data.recommendSkills ?? []);
+  const showRecommendSkillsLoading = $derived(
+    Boolean(data.deferRecommendSkills && data.skill && isLoadingDeferredRecommendSkills && displayRecommendSkills.length === 0)
   );
-  const showRelatedSkillsCard = $derived(
-    displayRelatedSkills.length > 0 || showRelatedSkillsLoading || Boolean(deferredRelatedSkillsError)
+  const showRecommendSkillsCard = $derived(
+    displayRecommendSkills.length > 0 || showRecommendSkillsLoading || Boolean(deferredRecommendSkillsError)
   );
   const skillStructuredData = $derived(
     data.skill && data.skill.visibility === 'public'
@@ -1670,24 +1670,24 @@
           </div>
         {/if}
 
-        <!-- Related Skills -->
-        {#if showRelatedSkillsCard}
+        <!-- Recommend Skills -->
+        {#if showRecommendSkillsCard}
           <div class="card">
-            <h3 class="font-semibold text-fg mb-4">Related Skills</h3>
-            {#if displayRelatedSkills.length > 0}
+            <h3 class="font-semibold text-fg mb-4">Recommend Skills</h3>
+            {#if displayRecommendSkills.length > 0}
               <div class="space-y-3">
-                {#each displayRelatedSkills as relatedSkill (relatedSkill.id)}
-                  <SkillCardCompact skill={relatedSkill} />
+                {#each displayRecommendSkills as recommendSkill (recommendSkill.id)}
+                  <SkillCardCompact skill={recommendSkill} />
                 {/each}
               </div>
-            {:else if showRelatedSkillsLoading}
+            {:else if showRecommendSkillsLoading}
               <div class="space-y-3" aria-busy="true" aria-live="polite">
                 <div class="h-20 rounded-lg border border-border bg-bg-muted/40 animate-pulse"></div>
                 <div class="h-20 rounded-lg border border-border bg-bg-muted/40 animate-pulse"></div>
                 <div class="h-20 rounded-lg border border-border bg-bg-muted/40 animate-pulse"></div>
               </div>
             {:else}
-              <p class="text-sm text-fg-muted">Related skills are temporarily unavailable.</p>
+              <p class="text-sm text-fg-muted">Recommend skills are temporarily unavailable.</p>
             {/if}
           </div>
         {/if}
