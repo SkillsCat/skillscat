@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
-import { getSkillBySlug, getRelatedSkills, loadSkillReadmeFromR2, recordSkillAccess } from '$lib/server/db/utils';
+import { getSkillBySlug, getRecommendedSkills, loadSkillReadmeFromR2, recordSkillAccess } from '$lib/server/db/utils';
 import { getCached } from '$lib/server/cache';
 import { renderReadmeMarkdown } from '$lib/server/markdown';
 import { setPublicPageCache } from '$lib/server/page-cache';
@@ -19,7 +19,7 @@ const SEO_DESCRIPTION_STOP_WORDS = new Set([
 const MAX_SEO_DESCRIPTION_SCAN_CHARS = 500;
 const MAX_SEO_TITLE_LENGTH = 68;
 const MAX_SEO_DESCRIPTION_LENGTH = 160;
-const RELATED_SKILLS_CACHE_TTL = 3600;
+const RECOMMEND_SKILLS_CACHE_TTL = 3600;
 // Keyed by skill ID + readme version, so entries are immutable after a skill update.
 const README_HTML_CACHE_TTL = 60 * 60 * 24 * 30;
 
@@ -320,7 +320,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     setHeaders({ 'X-Skillscat-Status-Override': '404' });
     return finish({
       skill: null,
-      relatedSkills: [],
+      recommendSkills: [],
       error: 'Skill not found or you do not have permission to view it.',
     });
   }
@@ -329,7 +329,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     setHeaders({ 'X-Skillscat-Status-Override': '404' });
     return finish({
       skill: null,
-      relatedSkills: [],
+      recommendSkills: [],
       error: 'Skill not found or you do not have permission to view it.',
     });
   }
@@ -359,7 +359,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       setHeaders({ 'X-Skillscat-Status-Override': '404' });
       return finish({
         skill: null,
-        relatedSkills: [],
+        recommendSkills: [],
         error: 'Skill not found or you do not have permission to view it.',
       });
     }
@@ -371,37 +371,37 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       });
     }
 
-    const deferRelatedSkills = Boolean(isDataRequest);
-    const relatedSkillsPromise = deferRelatedSkills
+    const deferRecommendSkills = Boolean(isDataRequest);
+    const recommendSkillsPromise = deferRecommendSkills
       ? Promise.resolve<SkillCardData[]>([])
       : timed(
-        'related',
+        'recommend',
         async () => {
           if (skill.visibility === 'public') {
             const encodedSlug = encodeSkillSlugForPath(skill.slug);
             if (encodedSlug) {
               try {
-                const response = await fetch(`/api/skills/${encodedSlug}/related`, {
+                const response = await fetch(`/api/skills/${encodedSlug}/recommend`, {
                   headers: { accept: 'application/json' }
                 });
                 if (response.ok) {
                   const payload = await response.json() as {
                     success?: boolean;
-                    data?: { relatedSkills?: SkillCardData[] };
+                    data?: { recommendSkills?: SkillCardData[] };
                   };
                   if (payload.success) {
-                    return payload.data?.relatedSkills || [];
+                    return payload.data?.recommendSkills || [];
                   }
                 }
-              } catch (relatedApiError) {
-                console.warn('SSR related API fetch failed, fallback to DB query:', relatedApiError);
+              } catch (recommendApiError) {
+                console.warn('SSR recommend API fetch failed, fallback to DB query:', recommendApiError);
               }
             }
           }
 
           const { data } = await getCached(
-            `related:${skill.id}`,
-            () => getRelatedSkills(
+            `recommend:${skill.id}`,
+            () => getRecommendedSkills(
               env,
               skill.id,
               skill.categories || [],
@@ -412,15 +412,15 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
               },
               false
             ),
-            RELATED_SKILLS_CACHE_TTL
+            RECOMMEND_SKILLS_CACHE_TTL
           );
           return data;
         },
         'secondary'
       );
 
-    if (deferRelatedSkills) {
-      serverTimings.push({ name: 'related', dur: 0, desc: 'deferred' });
+    if (deferRecommendSkills) {
+      serverTimings.push({ name: 'recommend', dur: 0, desc: 'deferred' });
     }
 
     const renderedReadmePromise = timed(
@@ -457,15 +457,15 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       'secondary'
     );
 
-    const [relatedSkillsResult, renderedReadmeResult, isBookmarkedResult] = await Promise.allSettled([
-      relatedSkillsPromise,
+    const [recommendSkillsResult, renderedReadmeResult, isBookmarkedResult] = await Promise.allSettled([
+      recommendSkillsPromise,
       renderedReadmePromise,
       isBookmarkedPromise,
     ]);
 
-    const relatedSkills = relatedSkillsResult.status === 'fulfilled'
-      ? relatedSkillsResult.value
-      : (console.error('Failed to load related skills:', relatedSkillsResult.reason), []);
+    const recommendSkills = recommendSkillsResult.status === 'fulfilled'
+      ? recommendSkillsResult.value
+      : (console.error('Failed to load recommend skills:', recommendSkillsResult.reason), []);
 
     const renderedReadme = renderedReadmeResult.status === 'fulfilled'
       ? renderedReadmeResult.value
@@ -485,8 +485,8 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     return finish({
       skill: skillForClient,
       renderedReadme,
-      relatedSkills,
-      deferRelatedSkills,
+      recommendSkills,
+      deferRecommendSkills,
       isBookmarked,
       isAuthenticated: !!userId,
       isDotFolderSkill,
@@ -497,7 +497,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     console.error('Error loading skill:', error);
     return finish({
       skill: null,
-      relatedSkills: [],
+      recommendSkills: [],
       error: 'Failed to load skill',
     });
   }

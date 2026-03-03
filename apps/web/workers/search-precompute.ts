@@ -1,8 +1,8 @@
 /**
- * Search/Related Precompute Worker
+ * Search/Recommend Precompute Worker
  *
  * Dedicated offline worker for:
- * 1) related skills precompute refresh
+ * 1) recommend skills precompute refresh
  * 2) search quality score precompute refresh
  *
  * This keeps the trending worker focused on list/trending updates and reduces
@@ -10,7 +10,7 @@
  */
 
 import type { ExecutionContext, ScheduledController, SearchPrecomputeEnv } from './shared/types';
-import { normalizeRelatedAlgoVersion } from '../src/lib/server/related-precompute';
+import { normalizeRecommendAlgoVersion } from '../src/lib/server/recommend-precompute';
 import {
   buildSearchTermEntries,
   computeSearchScore,
@@ -20,15 +20,15 @@ import {
   upsertSearchStateSuccess,
 } from '../src/lib/server/search-precompute';
 
-const DEFAULT_RELATED_PRECOMPUTE_MAX_PER_RUN = 200;
-const DEFAULT_RELATED_PRECOMPUTE_TIME_BUDGET_MS = 15_000;
-const DEFAULT_RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS = 2_500;
+const DEFAULT_RECOMMEND_PRECOMPUTE_MAX_PER_RUN = 200;
+const DEFAULT_RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = 15_000;
+const DEFAULT_RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS = 2_500;
 const DEFAULT_SEARCH_PRECOMPUTE_MAX_PER_RUN = 500;
 const DEFAULT_SEARCH_PRECOMPUTE_TIME_BUDGET_MS = 10_000;
 const DEFAULT_MISSING_STATE_SCAN_HOUR_UTC = 3;
 const DEFAULT_MISSING_STATE_SCAN_LIMIT = 200;
 
-interface RelatedPrecomputeCandidate {
+interface RecommendPrecomputeCandidate {
   id: string;
   slug: string;
   tier: string;
@@ -63,25 +63,25 @@ interface SearchPrecomputeCandidate {
   algo_version: string | null;
 }
 
-function isRelatedPrecomputeEnabled(env: SearchPrecomputeEnv): boolean {
-  return (env.RELATED_PRECOMPUTE_ENABLED || '1').trim() !== '0';
+function isRecommendPrecomputeEnabled(env: SearchPrecomputeEnv): boolean {
+  return (env.RECOMMEND_PRECOMPUTE_ENABLED || '1').trim() !== '0';
 }
 
-function getRelatedPrecomputeMaxPerRun(env: SearchPrecomputeEnv): number {
-  const parsed = Number.parseInt(env.RELATED_PRECOMPUTE_MAX_PER_RUN || '', 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_RELATED_PRECOMPUTE_MAX_PER_RUN;
+function getRecommendPrecomputeMaxPerRun(env: SearchPrecomputeEnv): number {
+  const parsed = Number.parseInt(env.RECOMMEND_PRECOMPUTE_MAX_PER_RUN || '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_RECOMMEND_PRECOMPUTE_MAX_PER_RUN;
   return Math.min(parsed, 2000);
 }
 
-function getRelatedPrecomputeTimeBudgetMs(env: SearchPrecomputeEnv): number {
-  const parsed = Number.parseInt(env.RELATED_PRECOMPUTE_TIME_BUDGET_MS || '', 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_RELATED_PRECOMPUTE_TIME_BUDGET_MS;
+function getRecommendPrecomputeTimeBudgetMs(env: SearchPrecomputeEnv): number {
+  const parsed = Number.parseInt(env.RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS || '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS;
   return Math.min(parsed, 120_000);
 }
 
-function getRelatedPrecomputeRequestTimeoutMs(env: SearchPrecomputeEnv): number {
-  const parsed = Number.parseInt(env.RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS || '', 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS;
+function getRecommendPrecomputeRequestTimeoutMs(env: SearchPrecomputeEnv): number {
+  const parsed = Number.parseInt(env.RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS || '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS;
   return Math.min(Math.max(parsed, 300), 10_000);
 }
 
@@ -91,54 +91,54 @@ function getAppOrigin(env: SearchPrecomputeEnv): string | null {
   return origin.replace(/\/+$/, '');
 }
 
-function buildRelatedRefreshUrl(appOrigin: string, slug: string): string | null {
+function buildRecommendRefreshUrl(appOrigin: string, slug: string): string | null {
   const parts = slug.split('/').filter(Boolean);
   if (parts.length < 2) return null;
   const [owner, ...nameParts] = parts;
   const encodedOwner = encodeURIComponent(owner);
   const encodedName = nameParts.map((part) => encodeURIComponent(part)).join('/');
-  return `${appOrigin}/api/skills/${encodedOwner}/${encodedName}/related?refresh=1`;
+  return `${appOrigin}/api/skills/${encodedOwner}/${encodedName}/recommend?refresh=1`;
 }
 
-async function processRelatedPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{ attempted: number; succeeded: number; failed: number; skipped: number }> {
-  if (!isRelatedPrecomputeEnabled(env)) {
+async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{ attempted: number; succeeded: number; failed: number; skipped: number }> {
+  if (!isRecommendPrecomputeEnabled(env)) {
     return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
   }
 
   const appOrigin = getAppOrigin(env);
   if (!appOrigin) {
-    console.warn('Related precompute enabled but APP_ORIGIN is not configured');
+    console.warn('Recommend precompute enabled but APP_ORIGIN is not configured');
     return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
   }
 
   const now = Date.now();
-  const algoVersion = normalizeRelatedAlgoVersion(env.RELATED_ALGO_VERSION);
-  const limit = getRelatedPrecomputeMaxPerRun(env);
-  const timeBudgetMs = getRelatedPrecomputeTimeBudgetMs(env);
-  const requestTimeoutMs = getRelatedPrecomputeRequestTimeoutMs(env);
-  const relatedMissingScanHour = parseMissingStateScanHour(env.RELATED_MISSING_STATE_SCAN_HOUR_UTC);
-  const relatedMissingScanLimit = parseMissingStateScanLimit(env.RELATED_MISSING_STATE_SCAN_LIMIT);
-  const includeRelatedMissingStateScan = shouldRunMissingStateScan(now, relatedMissingScanHour);
+  const algoVersion = normalizeRecommendAlgoVersion(env.RECOMMEND_ALGO_VERSION);
+  const limit = getRecommendPrecomputeMaxPerRun(env);
+  const timeBudgetMs = getRecommendPrecomputeTimeBudgetMs(env);
+  const requestTimeoutMs = getRecommendPrecomputeRequestTimeoutMs(env);
+  const recommendMissingScanHour = parseMissingStateScanHour(env.RECOMMEND_MISSING_STATE_SCAN_HOUR_UTC);
+  const recommendMissingScanLimit = parseMissingStateScanLimit(env.RECOMMEND_MISSING_STATE_SCAN_LIMIT);
+  const includeRecommendMissingStateScan = shouldRunMissingStateScan(now, recommendMissingScanHour);
 
   let candidatesResult;
   try {
-    if (includeRelatedMissingStateScan) {
+    if (includeRecommendMissingStateScan) {
       candidatesResult = await env.DB.prepare(`
         WITH state_candidates AS (
-          SELECT skill_id FROM skill_related_state WHERE dirty = 1
+          SELECT skill_id FROM skill_recommend_state WHERE dirty = 1
           UNION
-          SELECT skill_id FROM skill_related_state WHERE precomputed_at IS NULL
+          SELECT skill_id FROM skill_recommend_state WHERE precomputed_at IS NULL
           UNION
-          SELECT skill_id FROM skill_related_state WHERE next_update_at <= ?
+          SELECT skill_id FROM skill_recommend_state WHERE next_update_at <= ?
           UNION
-          SELECT skill_id FROM skill_related_state WHERE algo_version IS NULL
+          SELECT skill_id FROM skill_recommend_state WHERE algo_version IS NULL
           UNION
-          SELECT skill_id FROM skill_related_state WHERE algo_version != ?
+          SELECT skill_id FROM skill_recommend_state WHERE algo_version != ?
         ),
         missing_state AS (
           SELECT s.id as skill_id
           FROM skills s
-          LEFT JOIN skill_related_state rs ON rs.skill_id = s.id
+          LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
           WHERE rs.skill_id IS NULL
             AND s.visibility = 'public'
             AND s.tier != 'archived'
@@ -162,7 +162,7 @@ async function processRelatedPrecomputeBatch(env: SearchPrecomputeEnv): Promise<
           rs.algo_version
         FROM candidate_ids c
         CROSS JOIN skills s
-        LEFT JOIN skill_related_state rs ON rs.skill_id = s.id
+        LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
         WHERE s.id = c.skill_id
           AND s.visibility = 'public'
           AND s.tier != 'archived'
@@ -181,20 +181,20 @@ async function processRelatedPrecomputeBatch(env: SearchPrecomputeEnv): Promise<
           COALESCE(rs.next_update_at, 0) ASC
         LIMIT ?
       `)
-        .bind(now, algoVersion, relatedMissingScanLimit, limit)
-        .all<RelatedPrecomputeCandidate>();
+        .bind(now, algoVersion, recommendMissingScanLimit, limit)
+        .all<RecommendPrecomputeCandidate>();
     } else {
       candidatesResult = await env.DB.prepare(`
         WITH state_candidates AS (
-          SELECT skill_id FROM skill_related_state WHERE dirty = 1
+          SELECT skill_id FROM skill_recommend_state WHERE dirty = 1
           UNION
-          SELECT skill_id FROM skill_related_state WHERE precomputed_at IS NULL
+          SELECT skill_id FROM skill_recommend_state WHERE precomputed_at IS NULL
           UNION
-          SELECT skill_id FROM skill_related_state WHERE next_update_at <= ?
+          SELECT skill_id FROM skill_recommend_state WHERE next_update_at <= ?
           UNION
-          SELECT skill_id FROM skill_related_state WHERE algo_version IS NULL
+          SELECT skill_id FROM skill_recommend_state WHERE algo_version IS NULL
           UNION
-          SELECT skill_id FROM skill_related_state WHERE algo_version != ?
+          SELECT skill_id FROM skill_recommend_state WHERE algo_version != ?
         ),
         candidate_ids AS (
           SELECT skill_id FROM state_candidates
@@ -211,7 +211,7 @@ async function processRelatedPrecomputeBatch(env: SearchPrecomputeEnv): Promise<
           rs.algo_version
         FROM candidate_ids c
         CROSS JOIN skills s
-        LEFT JOIN skill_related_state rs ON rs.skill_id = s.id
+        LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
         WHERE s.id = c.skill_id
           AND s.visibility = 'public'
           AND s.tier != 'archived'
@@ -231,10 +231,10 @@ async function processRelatedPrecomputeBatch(env: SearchPrecomputeEnv): Promise<
         LIMIT ?
       `)
         .bind(now, algoVersion, limit)
-        .all<RelatedPrecomputeCandidate>();
+        .all<RecommendPrecomputeCandidate>();
     }
   } catch (err) {
-    console.warn('Related precompute query failed (migration may not be applied yet):', err);
+    console.warn('Recommend precompute query failed (migration may not be applied yet):', err);
     return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
   }
 
@@ -254,7 +254,7 @@ async function processRelatedPrecomputeBatch(env: SearchPrecomputeEnv): Promise<
       break;
     }
 
-    const refreshUrl = buildRelatedRefreshUrl(appOrigin, candidate.slug);
+    const refreshUrl = buildRecommendRefreshUrl(appOrigin, candidate.slug);
     if (!refreshUrl) {
       skipped++;
       continue;
@@ -279,14 +279,14 @@ async function processRelatedPrecomputeBatch(env: SearchPrecomputeEnv): Promise<
       if (!response.ok) {
         failed++;
         const body = await response.text();
-        console.warn(`Related precompute refresh failed for ${candidate.slug}: ${response.status} ${body.slice(0, 200)}`);
+        console.warn(`Recommend precompute refresh failed for ${candidate.slug}: ${response.status} ${body.slice(0, 200)}`);
         continue;
       }
 
       succeeded++;
     } catch (err) {
       failed++;
-      console.warn(`Related precompute request error for ${candidate.slug}:`, err);
+      console.warn(`Recommend precompute request error for ${candidate.slug}:`, err);
     }
   }
 
@@ -604,16 +604,16 @@ export default {
     env: SearchPrecomputeEnv,
     _ctx: ExecutionContext
   ): Promise<void> {
-    console.log('Search/Related precompute worker triggered at:', new Date().toISOString());
+    console.log('Search/Recommend precompute worker triggered at:', new Date().toISOString());
 
     const search = await processSearchPrecomputeBatch(env);
     if (search.attempted > 0 || search.skipped > 0) {
       console.log(`Search precompute: attempted=${search.attempted}, succeeded=${search.succeeded}, failed=${search.failed}, skipped=${search.skipped}`);
     }
 
-    const related = await processRelatedPrecomputeBatch(env);
-    if (related.attempted > 0 || related.skipped > 0) {
-      console.log(`Related precompute: attempted=${related.attempted}, succeeded=${related.succeeded}, failed=${related.failed}, skipped=${related.skipped}`);
+    const recommend = await processRecommendPrecomputeBatch(env);
+    if (recommend.attempted > 0 || recommend.skipped > 0) {
+      console.log(`Recommend precompute: attempted=${recommend.attempted}, succeeded=${recommend.succeeded}, failed=${recommend.failed}, skipped=${recommend.skipped}`);
     }
   },
 };

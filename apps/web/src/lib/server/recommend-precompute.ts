@@ -1,6 +1,6 @@
-export type RelatedSkillTier = 'hot' | 'warm' | 'cool' | 'cold' | 'archived';
+export type RecommendSkillTier = 'hot' | 'warm' | 'cool' | 'cold' | 'archived';
 
-export interface RelatedSkillPayloadItem {
+export interface RecommendSkillPayloadItem {
   id: string;
   name: string;
   slug: string;
@@ -15,15 +15,15 @@ export interface RelatedSkillPayloadItem {
   categories?: string[];
 }
 
-export interface RelatedPrecomputedPayload {
+export interface RecommendPrecomputedPayload {
   version: 'v1';
   algoVersion: string;
   skillId: string;
   computedAt: number;
-  relatedSkills: RelatedSkillPayloadItem[];
+  recommendSkills: RecommendSkillPayloadItem[];
 }
 
-export interface RelatedStateRow {
+export interface RecommendStateRow {
   skill_id: string;
   dirty: number;
   next_update_at: number | null;
@@ -36,22 +36,22 @@ export interface RelatedStateRow {
   updated_at: number;
 }
 
-export const DEFAULT_RELATED_ALGO_VERSION = 'v1';
-const RELATED_PRECOMPUTE_R2_PREFIX = 'cache/related';
+export const DEFAULT_RECOMMEND_ALGO_VERSION = 'v1';
+const RECOMMEND_PRECOMPUTE_R2_PREFIX = 'cache/recommend';
 
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 
-export function normalizeRelatedAlgoVersion(value: string | undefined | null): string {
+export function normalizeRecommendAlgoVersion(value: string | undefined | null): string {
   const normalized = (value || '').trim();
-  if (!normalized) return DEFAULT_RELATED_ALGO_VERSION;
-  return CACHE_VERSION_PATTERN.test(normalized) ? normalized : DEFAULT_RELATED_ALGO_VERSION;
+  if (!normalized) return DEFAULT_RECOMMEND_ALGO_VERSION;
+  return CACHE_VERSION_PATTERN.test(normalized) ? normalized : DEFAULT_RECOMMEND_ALGO_VERSION;
 }
 
-export function buildRelatedPrecomputeR2Key(skillId: string, algoVersion: string): string {
-  return `${RELATED_PRECOMPUTE_R2_PREFIX}/${algoVersion}/${skillId}.json`;
+export function buildRecommendPrecomputeR2Key(skillId: string, algoVersion: string): string {
+  return `${RECOMMEND_PRECOMPUTE_R2_PREFIX}/${algoVersion}/${skillId}.json`;
 }
 
-export function getNextRelatedUpdateAt(
+export function getNextRecommendUpdateAt(
   tier: string | null | undefined,
   now: number = Date.now()
 ): number | null {
@@ -69,7 +69,7 @@ export function getNextRelatedUpdateAt(
   }
 }
 
-function isRelatedSkillPayloadItem(value: unknown): value is RelatedSkillPayloadItem {
+function isRecommendSkillPayloadItem(value: unknown): value is RecommendSkillPayloadItem {
   if (!value || typeof value !== 'object') return false;
   const item = value as Record<string, unknown>;
   return typeof item.id === 'string'
@@ -79,54 +79,54 @@ function isRelatedSkillPayloadItem(value: unknown): value is RelatedSkillPayload
     && typeof item.repoName === 'string';
 }
 
-export function isRelatedPrecomputedPayload(value: unknown): value is RelatedPrecomputedPayload {
+export function isRecommendPrecomputedPayload(value: unknown): value is RecommendPrecomputedPayload {
   if (!value || typeof value !== 'object') return false;
   const payload = value as Record<string, unknown>;
   return payload.version === 'v1'
     && typeof payload.algoVersion === 'string'
     && typeof payload.skillId === 'string'
     && typeof payload.computedAt === 'number'
-    && Array.isArray(payload.relatedSkills)
-    && payload.relatedSkills.every(isRelatedSkillPayloadItem);
+    && Array.isArray(payload.recommendSkills)
+    && payload.recommendSkills.every(isRecommendSkillPayloadItem);
 }
 
-export async function readRelatedPrecomputedPayload(
+export async function readRecommendPrecomputedPayload(
   r2: R2Bucket | undefined,
   skillId: string,
   algoVersion: string
-): Promise<RelatedPrecomputedPayload | null> {
+): Promise<RecommendPrecomputedPayload | null> {
   if (!r2) return null;
-  const object = await r2.get(buildRelatedPrecomputeR2Key(skillId, algoVersion));
+  const object = await r2.get(buildRecommendPrecomputeR2Key(skillId, algoVersion));
   if (!object) return null;
 
   try {
     const json = await object.json<unknown>();
-    return isRelatedPrecomputedPayload(json) ? json : null;
+    return isRecommendPrecomputedPayload(json) ? json : null;
   } catch {
     return null;
   }
 }
 
-export async function writeRelatedPrecomputedPayload(
+export async function writeRecommendPrecomputedPayload(
   r2: R2Bucket | undefined,
-  payload: RelatedPrecomputedPayload
+  payload: RecommendPrecomputedPayload
 ): Promise<void> {
   if (!r2) return;
   await r2.put(
-    buildRelatedPrecomputeR2Key(payload.skillId, payload.algoVersion),
+    buildRecommendPrecomputeR2Key(payload.skillId, payload.algoVersion),
     JSON.stringify(payload),
     { httpMetadata: { contentType: 'application/json' } }
   );
 }
 
-export async function markRelatedDirty(
+export async function markRecommendDirty(
   db: D1Database | undefined,
   skillId: string,
   now: number = Date.now()
 ): Promise<void> {
   if (!db) return;
   await db.prepare(`
-    INSERT INTO skill_related_state (
+    INSERT INTO skill_recommend_state (
       skill_id, dirty, next_update_at, precomputed_at, algo_version,
       fail_count, last_error_at, last_fallback_at, created_at, updated_at
     )
@@ -140,7 +140,7 @@ export async function markRelatedDirty(
     .run();
 }
 
-export async function upsertRelatedStateSuccess(
+export async function upsertRecommendStateSuccess(
   db: D1Database | undefined,
   params: {
     skillId: string;
@@ -151,9 +151,9 @@ export async function upsertRelatedStateSuccess(
 ): Promise<void> {
   if (!db) return;
   const now = params.now ?? Date.now();
-  const nextUpdateAt = getNextRelatedUpdateAt(params.tier, now);
+  const nextUpdateAt = getNextRecommendUpdateAt(params.tier, now);
   await db.prepare(`
-    INSERT INTO skill_related_state (
+    INSERT INTO skill_recommend_state (
       skill_id, dirty, next_update_at, precomputed_at, algo_version,
       fail_count, last_error_at, last_fallback_at, created_at, updated_at
     )
@@ -171,7 +171,7 @@ export async function upsertRelatedStateSuccess(
     .run();
 }
 
-export async function upsertRelatedStateFailure(
+export async function upsertRecommendStateFailure(
   db: D1Database | undefined,
   params: {
     skillId: string;
@@ -183,7 +183,7 @@ export async function upsertRelatedStateFailure(
   const now = params.now ?? Date.now();
   const nextUpdateAt = now + (params.retryAfterMs ?? 60 * 60 * 1000);
   await db.prepare(`
-    INSERT INTO skill_related_state (
+    INSERT INTO skill_recommend_state (
       skill_id, dirty, next_update_at, precomputed_at, algo_version,
       fail_count, last_error_at, last_fallback_at, created_at, updated_at
     )
@@ -191,7 +191,7 @@ export async function upsertRelatedStateFailure(
     ON CONFLICT(skill_id) DO UPDATE SET
       dirty = 1,
       next_update_at = excluded.next_update_at,
-      fail_count = COALESCE(skill_related_state.fail_count, 0) + 1,
+      fail_count = COALESCE(skill_recommend_state.fail_count, 0) + 1,
       last_error_at = excluded.last_error_at,
       updated_at = excluded.updated_at
   `)
@@ -199,7 +199,7 @@ export async function upsertRelatedStateFailure(
     .run();
 }
 
-export async function updateRelatedStateNextUpdateAt(
+export async function updateRecommendStateNextUpdateAt(
   db: D1Database | undefined,
   params: {
     skillId: string;
@@ -209,9 +209,9 @@ export async function updateRelatedStateNextUpdateAt(
 ): Promise<void> {
   if (!db) return;
   const now = params.now ?? Date.now();
-  const nextUpdateAt = getNextRelatedUpdateAt(params.tier, now);
+  const nextUpdateAt = getNextRecommendUpdateAt(params.tier, now);
   await db.prepare(`
-    INSERT INTO skill_related_state (
+    INSERT INTO skill_recommend_state (
       skill_id, dirty, next_update_at, precomputed_at, algo_version,
       fail_count, last_error_at, last_fallback_at, created_at, updated_at
     )
@@ -224,14 +224,14 @@ export async function updateRelatedStateNextUpdateAt(
     .run();
 }
 
-export async function markRelatedFallbackServed(
+export async function markRecommendFallbackServed(
   db: D1Database | undefined,
   skillId: string,
   now: number = Date.now()
 ): Promise<void> {
   if (!db) return;
   await db.prepare(`
-    INSERT INTO skill_related_state (
+    INSERT INTO skill_recommend_state (
       skill_id, dirty, next_update_at, precomputed_at, algo_version,
       fail_count, last_error_at, last_fallback_at, created_at, updated_at
     )

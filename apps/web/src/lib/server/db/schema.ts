@@ -189,8 +189,8 @@ export const skills = sqliteTable('skills', {
   )
 ]);
 
-// ========== Related Precompute State (one row per skill) ==========
-export const skillRelatedState = sqliteTable('skill_related_state', {
+// ========== Recommend Precompute State (one row per skill) ==========
+export const skillRecommendState = sqliteTable('skill_recommend_state', {
   skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
   dirty: integer('dirty').notNull().default(1),
   nextUpdateAt: integer('next_update_at', { mode: 'timestamp_ms' }),
@@ -203,16 +203,16 @@ export const skillRelatedState = sqliteTable('skill_related_state', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
   primaryKey({ columns: [table.skillId] }),
-  index('skill_related_state_dirty_due_idx').on(table.dirty, table.nextUpdateAt),
-  index('skill_related_state_due_idx').on(table.nextUpdateAt),
-  index('skill_related_state_algo_dirty_idx').on(table.algoVersion, table.dirty),
-  index('skill_related_state_precomputed_null_idx')
+  index('skill_recommend_state_dirty_due_idx').on(table.dirty, table.nextUpdateAt),
+  index('skill_recommend_state_due_idx').on(table.nextUpdateAt),
+  index('skill_recommend_state_algo_dirty_idx').on(table.algoVersion, table.dirty),
+  index('skill_recommend_state_precomputed_null_idx')
     .on(table.skillId)
     .where(sql`${table.precomputedAt} IS NULL`),
-  index('skill_related_state_next_update_null_idx')
+  index('skill_recommend_state_next_update_null_idx')
     .on(table.skillId)
     .where(sql`${table.nextUpdateAt} IS NULL`),
-  index('skill_related_state_algo_null_idx')
+  index('skill_recommend_state_algo_null_idx')
     .on(table.skillId)
     .where(sql`${table.algoVersion} IS NULL`)
 ]);

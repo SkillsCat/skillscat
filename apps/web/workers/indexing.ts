@@ -37,7 +37,7 @@ import {
   buildFileTree,
 } from './shared/utils';
 import { githubRequest } from '../src/lib/server/github-request';
-import { markRelatedDirty } from '../src/lib/server/related-precompute';
+import { markRecommendDirty } from '../src/lib/server/recommend-precompute';
 
 const log = createLogger('Indexing');
 
@@ -1410,8 +1410,8 @@ async function processMessage(
 
   await updateSkillMetadata(skillId, latestCommit.sha, fileStructure, lastCommitAt, env);
 
-  // Mark related recommendations dirty after content/tags/metadata updates.
-  await markRelatedDirty(env.DB, skillId);
+  // Mark recommend candidates dirty after content/tags/metadata updates.
+  await markRecommendDirty(env.DB, skillId);
 
   // Step 12: Send to classification queue
   const classificationMessage: ClassificationMessage & { tags?: string[] } = {

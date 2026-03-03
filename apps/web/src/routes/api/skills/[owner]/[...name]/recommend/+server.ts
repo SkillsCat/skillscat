@@ -4,33 +4,33 @@ import type { ApiResponse, SkillCardData } from '$lib/types';
 import { getCached, invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
 import { checkSkillAccess } from '$lib/server/permissions';
-import { getRelatedSkills } from '$lib/server/db/utils';
+import { getRecommendedSkills } from '$lib/server/db/utils';
 import { buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
 import {
-  markRelatedFallbackServed,
-  normalizeRelatedAlgoVersion,
-  readRelatedPrecomputedPayload,
-  upsertRelatedStateFailure,
-  upsertRelatedStateSuccess,
-  writeRelatedPrecomputedPayload,
-} from '$lib/server/related-precompute';
+  markRecommendFallbackServed,
+  normalizeRecommendAlgoVersion,
+  readRecommendPrecomputedPayload,
+  upsertRecommendStateFailure,
+  upsertRecommendStateSuccess,
+  writeRecommendPrecomputedPayload,
+} from '$lib/server/recommend-precompute';
 
-const RELATED_RESPONSE_LIMIT = 6;
-const RELATED_CACHE_LIMIT = 10;
-const RELATED_CACHE_TTL = 3600;
+const RECOMMEND_RESPONSE_LIMIT = 6;
+const RECOMMEND_CACHE_LIMIT = 10;
+const RECOMMEND_CACHE_TTL = 3600;
 const PRECOMPUTED_READ_CACHE_TTL = 120;
-const PUBLIC_RELATED_MAX_AGE_SECONDS = 1800; // 30 minutes
-const PUBLIC_RELATED_STALE_WHILE_REVALIDATE_SECONDS = 86400; // 1 day
+const PUBLIC_RECOMMEND_MAX_AGE_SECONDS = 1800; // 30 minutes
+const PUBLIC_RECOMMEND_STALE_WHILE_REVALIDATE_SECONDS = 86400; // 1 day
 
-function buildPublicRelatedCacheControl(): string {
-  return `public, max-age=${PUBLIC_RELATED_MAX_AGE_SECONDS}, stale-while-revalidate=${PUBLIC_RELATED_STALE_WHILE_REVALIDATE_SECONDS}`;
+function buildPublicRecommendCacheControl(): string {
+  return `public, max-age=${PUBLIC_RECOMMEND_MAX_AGE_SECONDS}, stale-while-revalidate=${PUBLIC_RECOMMEND_STALE_WHILE_REVALIDATE_SECONDS}`;
 }
 
 interface RuntimeEnv {
   DB?: D1Database;
   R2?: R2Bucket;
   WORKER_SECRET?: string;
-  RELATED_ALGO_VERSION?: string;
+  RECOMMEND_ALGO_VERSION?: string;
 }
 
 interface SkillContextRow {
@@ -39,10 +39,10 @@ interface SkillContextRow {
   repoOwner: string | null;
   visibility: 'public' | 'private' | 'unlisted' | null;
   tier: string | null;
-  relatedDirty: number | null;
-  relatedNextUpdateAt: number | null;
-  relatedPrecomputedAt: number | null;
-  relatedAlgoVersion: string | null;
+  recommendDirty: number | null;
+  recommendNextUpdateAt: number | null;
+  recommendPrecomputedAt: number | null;
+  recommendAlgoVersion: string | null;
 }
 
 function hasStatus(errorValue: unknown): errorValue is { status: number } {
@@ -65,14 +65,14 @@ function shouldRefreshPrecomputed(
   algoVersion: string,
   now: number
 ): boolean {
-  if ((skill.relatedDirty ?? 0) === 1) return true;
-  if (skill.relatedAlgoVersion && skill.relatedAlgoVersion !== algoVersion) return true;
-  if (skill.relatedNextUpdateAt !== null && skill.relatedNextUpdateAt <= now) return true;
+  if ((skill.recommendDirty ?? 0) === 1) return true;
+  if (skill.recommendAlgoVersion && skill.recommendAlgoVersion !== algoVersion) return true;
+  if (skill.recommendNextUpdateAt !== null && skill.recommendNextUpdateAt <= now) return true;
 
-  const hasState = skill.relatedDirty !== null
-    || skill.relatedNextUpdateAt !== null
-    || skill.relatedPrecomputedAt !== null
-    || skill.relatedAlgoVersion !== null;
+  const hasState = skill.recommendDirty !== null
+    || skill.recommendNextUpdateAt !== null
+    || skill.recommendPrecomputedAt !== null
+    || skill.recommendAlgoVersion !== null;
   if (!hasState) return true;
 
   return false;
@@ -101,7 +101,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
   const buildServerTimingHeader = () => {
     const entries = [
       ...serverTimings,
-      { name: 'total', dur: Math.max(0, performance.now() - perfStart), desc: 'related api' }
+      { name: 'total', dur: Math.max(0, performance.now() - perfStart), desc: 'recommend api' }
     ];
     return entries
       .map((entry) => {
@@ -129,7 +129,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
 
   const slug = buildSkillSlug(owner, name);
   const forceRefresh = url.searchParams.get('refresh') === '1';
-  const algoVersion = normalizeRelatedAlgoVersion(env?.RELATED_ALGO_VERSION);
+  const algoVersion = normalizeRecommendAlgoVersion(env?.RECOMMEND_ALGO_VERSION);
   const now = Date.now();
 
   if (forceRefresh && !isAuthorizedWorkerRefresh(request, env)) {
@@ -149,18 +149,18 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
         s.repo_owner as repoOwner,
         s.visibility,
         s.tier,
-        rs.dirty as relatedDirty,
-        rs.next_update_at as relatedNextUpdateAt,
-        rs.precomputed_at as relatedPrecomputedAt,
-        rs.algo_version as relatedAlgoVersion
+        rs.dirty as recommendDirty,
+        rs.next_update_at as recommendNextUpdateAt,
+        rs.precomputed_at as recommendPrecomputedAt,
+        rs.algo_version as recommendAlgoVersion
       FROM skills s
-      LEFT JOIN skill_related_state rs ON rs.skill_id = s.id
+      LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
       WHERE s.slug = ?
       LIMIT 1
     `)
         .bind(slug)
         .first<SkillContextRow>(),
-      'skill context + related state'
+      'skill context + recommend state'
     );
 
     if (!skill) {
@@ -220,17 +220,17 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       return { categories: skillCategories, tags: skillTags };
     };
 
-    const precomputedCacheKey = `related:precomputed:${skill.id}:${algoVersion}`;
+    const precomputedCacheKey = `recommend:precomputed:${skill.id}:${algoVersion}`;
 
-    const computeRelatedOnline = async (useOnlineCache: boolean): Promise<SkillCardData[]> => {
+    const computeRecommendOnline = async (useOnlineCache: boolean): Promise<SkillCardData[]> => {
       const runCompute = async () => {
         const signals = await loadSkillSignals();
-        return getRelatedSkills(
+        return getRecommendedSkills(
           { DB: db },
           skill.id,
           signals.categories,
           skill.repoOwner || '',
-          RELATED_CACHE_LIMIT,
+          RECOMMEND_CACHE_LIMIT,
           (name, dur, desc) => {
             serverTimings.push({ name, dur, desc });
           },
@@ -244,24 +244,24 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       }
 
       const { data } = await getCached(
-        `related:${skill.id}`,
+        `recommend:${skill.id}`,
         runCompute,
-        RELATED_CACHE_TTL
+        RECOMMEND_CACHE_TTL
       );
       return data;
     };
 
-    const persistPrecomputed = async (relatedSkills: SkillCardData[]): Promise<void> => {
+    const persistPrecomputed = async (recommendSkills: SkillCardData[]): Promise<void> => {
       if (skill.visibility !== 'public') return;
       const computedAt = Date.now();
 
       try {
-        await writeRelatedPrecomputedPayload(env?.R2, {
+        await writeRecommendPrecomputedPayload(env?.R2, {
           version: 'v1',
           algoVersion,
           skillId: skill.id,
           computedAt,
-          relatedSkills: relatedSkills.slice(0, RELATED_RESPONSE_LIMIT).map((item) => ({
+          recommendSkills: recommendSkills.slice(0, RECOMMEND_RESPONSE_LIMIT).map((item) => ({
             id: item.id,
             name: item.name,
             slug: item.slug,
@@ -277,30 +277,30 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
           })),
         });
       } catch (persistError) {
-        console.error('Failed to persist related precompute:', persistError);
+        console.error('Failed to persist recommend precompute:', persistError);
         try {
-          await upsertRelatedStateFailure(db, { skillId: skill.id, now: computedAt });
+          await upsertRecommendStateFailure(db, { skillId: skill.id, now: computedAt });
         } catch (stateFailureError) {
-          console.warn('Failed to record related precompute failure state:', stateFailureError);
+          console.warn('Failed to record recommend precompute failure state:', stateFailureError);
         }
         throw persistError;
       }
 
       try {
-        await upsertRelatedStateSuccess(db, {
+        await upsertRecommendStateSuccess(db, {
           skillId: skill.id,
           tier: skill.tier,
           algoVersion,
           now: computedAt,
         });
       } catch (stateError) {
-        console.warn('Failed to update related precompute success state:', stateError);
+        console.warn('Failed to update recommend precompute success state:', stateError);
       }
 
       try {
         await invalidateCache(precomputedCacheKey);
       } catch (cacheError) {
-        console.warn('Failed to invalidate precomputed related cache:', cacheError);
+        console.warn('Failed to invalidate precomputed recommend cache:', cacheError);
       }
     };
 
@@ -310,10 +310,10 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       platform.context.waitUntil(
         (async () => {
           try {
-            const refreshed = await computeRelatedOnline(false);
+            const refreshed = await computeRecommendOnline(false);
             await persistPrecomputed(refreshed);
           } catch (refreshError) {
-            console.error('Failed background refresh for related precompute:', refreshError);
+            console.error('Failed background refresh for recommend precompute:', refreshError);
           }
         })()
       );
@@ -324,13 +324,13 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
         'precomputed_read',
         () => getCached(
           precomputedCacheKey,
-          () => readRelatedPrecomputedPayload(env?.R2, skill.id, algoVersion),
+          () => readRecommendPrecomputedPayload(env?.R2, skill.id, algoVersion),
           PRECOMPUTED_READ_CACHE_TTL
         ),
         'cache+r2'
       );
 
-      if (precomputedPayload?.relatedSkills?.length) {
+      if (precomputedPayload?.recommendSkills?.length) {
         if (shouldRefreshPrecomputed(skill, algoVersion, now)) {
           refreshInBackground();
         }
@@ -338,14 +338,14 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
         return json({
           success: true,
           data: {
-            relatedSkills: precomputedPayload.relatedSkills.slice(0, RELATED_RESPONSE_LIMIT).map((item) => ({
+            recommendSkills: precomputedPayload.recommendSkills.slice(0, RECOMMEND_RESPONSE_LIMIT).map((item) => ({
               ...item,
               categories: item.categories ?? [],
             })) as SkillCardData[],
           },
-        } satisfies ApiResponse<{ relatedSkills: SkillCardData[] }>, {
+        } satisfies ApiResponse<{ recommendSkills: SkillCardData[] }>, {
           headers: {
-            'Cache-Control': buildPublicRelatedCacheControl(),
+            'Cache-Control': buildPublicRecommendCacheControl(),
             'X-Cache': precomputedCacheHit ? 'HIT' : 'MISS',
             'Server-Timing': buildServerTimingHeader(),
           },
@@ -353,59 +353,59 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       }
     }
 
-    const relatedSkills = await timed(
+    const recommendSkills = await timed(
       'fallback_online',
-      () => computeRelatedOnline(!forceRefresh),
+      () => computeRecommendOnline(!forceRefresh),
       forceRefresh ? 'force refresh' : 'online fallback'
     );
 
     if (forceRefresh) {
-      await persistPrecomputed(relatedSkills);
+      await persistPrecomputed(recommendSkills);
     } else if (platform?.context?.waitUntil) {
       serverTimings.push({ name: 'backfill_scheduled', dur: 0, desc: 'fallback' });
       platform.context.waitUntil(
         (async () => {
           try {
             await Promise.all([
-              persistPrecomputed(relatedSkills),
-              markRelatedFallbackServed(db, skill.id),
+              persistPrecomputed(recommendSkills),
+              markRecommendFallbackServed(db, skill.id),
             ]);
           } catch (backfillError) {
-            console.error('Failed fallback backfill for related precompute:', backfillError);
+            console.error('Failed fallback backfill for recommend precompute:', backfillError);
           }
         })()
       );
     } else {
       try {
         await Promise.all([
-          persistPrecomputed(relatedSkills),
-          markRelatedFallbackServed(db, skill.id),
+          persistPrecomputed(recommendSkills),
+          markRecommendFallbackServed(db, skill.id),
         ]);
       } catch (backfillError) {
-        console.error('Failed synchronous fallback backfill for related precompute:', backfillError);
+        console.error('Failed synchronous fallback backfill for recommend precompute:', backfillError);
       }
     }
 
     return json({
       success: true,
       data: {
-        relatedSkills: relatedSkills.slice(0, RELATED_RESPONSE_LIMIT),
+        recommendSkills: recommendSkills.slice(0, RECOMMEND_RESPONSE_LIMIT),
       },
-    } satisfies ApiResponse<{ relatedSkills: SkillCardData[] }>, {
+    } satisfies ApiResponse<{ recommendSkills: SkillCardData[] }>, {
       headers: {
         'Cache-Control': skill.visibility === 'private'
           ? 'private, max-age=30, stale-while-revalidate=60'
-          : buildPublicRelatedCacheControl(),
+          : buildPublicRecommendCacheControl(),
         'X-Cache': 'MISS',
         'Server-Timing': buildServerTimingHeader(),
       },
     });
   } catch (err) {
-    console.error('Error fetching related skills:', err);
+    console.error('Error fetching recommend skills:', err);
     if (hasStatus(err)) throw err;
     return json({
       success: false,
-      error: 'Failed to fetch related skills',
+      error: 'Failed to fetch recommend skills',
     } satisfies ApiResponse<never>, {
       status: 500,
       headers: {

@@ -532,7 +532,7 @@ queue = "skillscat-classification"
 [env.production.vars]
 PUBLIC_APP_URL = "https://your-domain.com"
 CACHE_VERSION = "v1"
-RELATED_ALGO_VERSION = "v1"
+RECOMMEND_ALGO_VERSION = "v1"
 `.trim(),
   'wrangler.github-events.toml': `
 [env.production]
@@ -657,11 +657,11 @@ database_id = "<your-production-database-id>"
 
 [env.production.vars]
 APP_ORIGIN = "https://your-domain.com"
-RELATED_PRECOMPUTE_ENABLED = "1"
-RELATED_PRECOMPUTE_MAX_PER_RUN = "200"
-RELATED_PRECOMPUTE_TIME_BUDGET_MS = "15000"
-RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS = "2500"
-RELATED_ALGO_VERSION = "v1"
+RECOMMEND_PRECOMPUTE_ENABLED = "1"
+RECOMMEND_PRECOMPUTE_MAX_PER_RUN = "200"
+RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = "15000"
+RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS = "2500"
+RECOMMEND_ALGO_VERSION = "v1"
 SEARCH_PRECOMPUTE_ENABLED = "1"
 SEARCH_PRECOMPUTE_MAX_PER_RUN = "500"
 SEARCH_PRECOMPUTE_TIME_BUDGET_MS = "10000"
@@ -1029,7 +1029,7 @@ function ensurePrecomputeWorkerEnvVars({
   if (includePreview) {
     results.push(
       upsertTomlVarsEntries('wrangler.preview.toml', '[vars]', {
-        RELATED_ALGO_VERSION: 'v1',
+        RECOMMEND_ALGO_VERSION: 'v1',
       }),
     );
 
@@ -1037,7 +1037,7 @@ function ensurePrecomputeWorkerEnvVars({
       results.push(
         upsertTomlVarsEntries('wrangler.preview.toml', '[env.production.vars]', {
           CACHE_VERSION: 'v1',
-          RELATED_ALGO_VERSION: 'v1',
+          RECOMMEND_ALGO_VERSION: 'v1',
         }),
       );
     }
@@ -1047,11 +1047,11 @@ function ensurePrecomputeWorkerEnvVars({
     results.push(
       upsertTomlVarsEntries('wrangler.search-precompute.toml', '[vars]', {
         APP_ORIGIN: 'http://localhost:3000',
-        RELATED_PRECOMPUTE_ENABLED: '1',
-        RELATED_PRECOMPUTE_MAX_PER_RUN: '200',
-        RELATED_PRECOMPUTE_TIME_BUDGET_MS: '15000',
-        RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS: '2500',
-        RELATED_ALGO_VERSION: 'v1',
+        RECOMMEND_PRECOMPUTE_ENABLED: '1',
+        RECOMMEND_PRECOMPUTE_MAX_PER_RUN: '200',
+        RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS: '15000',
+        RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS: '2500',
+        RECOMMEND_ALGO_VERSION: 'v1',
         SEARCH_PRECOMPUTE_ENABLED: '1',
         SEARCH_PRECOMPUTE_MAX_PER_RUN: '500',
         SEARCH_PRECOMPUTE_TIME_BUDGET_MS: '10000',
@@ -1063,11 +1063,11 @@ function ensurePrecomputeWorkerEnvVars({
   if (includeProductionVars && includeSearchPrecompute) {
     const precomputeProductionVars = {
       APP_ORIGIN: productionAppUrl || 'https://your-domain.com',
-      RELATED_PRECOMPUTE_ENABLED: '1',
-      RELATED_PRECOMPUTE_MAX_PER_RUN: '200',
-      RELATED_PRECOMPUTE_TIME_BUDGET_MS: '15000',
-      RELATED_PRECOMPUTE_REQUEST_TIMEOUT_MS: '2500',
-      RELATED_ALGO_VERSION: 'v1',
+      RECOMMEND_PRECOMPUTE_ENABLED: '1',
+      RECOMMEND_PRECOMPUTE_MAX_PER_RUN: '200',
+      RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS: '15000',
+      RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS: '2500',
+      RECOMMEND_ALGO_VERSION: 'v1',
       SEARCH_PRECOMPUTE_ENABLED: '1',
       SEARCH_PRECOMPUTE_MAX_PER_RUN: '500',
       SEARCH_PRECOMPUTE_TIME_BUDGET_MS: '10000',
@@ -1683,7 +1683,7 @@ ${colors.cyan}╔═════════════════════
     });
     const localPrecomputeVarsUpdated = localPrecomputeEnvUpdates.some((result) => result.exists && result.updated);
     if (localPrecomputeVarsUpdated) {
-      logSuccess('Updated local wrangler vars for search/related precompute defaults');
+      logSuccess('Updated local wrangler vars for search/recommend precompute defaults');
     }
 
     if (isProduction) {
@@ -1845,10 +1845,10 @@ ${colors.cyan}╔═════════════════════
           includePreview: false,
           includeSearchPrecompute: includeSearchPrecomputeWorker,
         });
-        const previewRelatedVarsUpdated = previewEnvUpdates.some((result) => result.exists && result.updated);
+        const previewRecommendVarsUpdated = previewEnvUpdates.some((result) => result.exists && result.updated);
         const precomputeWorkerVarsUpdated = precomputeWorkerEnvUpdates.some((result) => result.exists && result.updated);
-        if (previewRelatedVarsUpdated) {
-          logSuccess('Updated preview worker related env vars');
+        if (previewRecommendVarsUpdated) {
+          logSuccess('Updated preview worker recommend env vars');
         }
         if (precomputeWorkerVarsUpdated) {
           logSuccess('Updated search-precompute worker env vars');
