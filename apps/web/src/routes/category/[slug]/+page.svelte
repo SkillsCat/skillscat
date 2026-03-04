@@ -152,6 +152,18 @@
       : data.skills
   );
 
+  const categorySkillSuggestions = $derived(
+    data.skills.map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      slug: skill.slug,
+      repoOwner: skill.repoOwner,
+      repoName: skill.repoName,
+      stars: skill.stars,
+      authorAvatar: skill.authorAvatar
+    }))
+  );
+
   // Calculate display counts
   const startItem = $derived(data.pagination ? (data.pagination.currentPage - 1) * data.pagination.itemsPerPage + 1 : 1);
   const endItem = $derived(data.pagination ? Math.min(data.pagination.currentPage * data.pagination.itemsPerPage, data.pagination.totalItems) : data.skills.length);
@@ -218,7 +230,7 @@
 {/if}
 
 {#if data.category}
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4 sm:pb-8 category-page-container">
     <!-- Breadcrumb -->
     <nav class="mb-6 text-sm">
       <ol class="flex items-center gap-2 text-fg-muted">
@@ -258,6 +270,9 @@
         <SearchBox
           placeholder="Filter skills in {data.category.name}..."
           bind:value={searchQuery}
+          suggestionMode="skills"
+          showHistory={false}
+          skillSuggestionSource={categorySkillSuggestions}
         />
       </div>
 
@@ -315,7 +330,7 @@
   </div>
 {:else}
   <!-- Not Found -->
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4 sm:pb-8 category-page-container">
     <EmptyState
       title="Category Not Found"
       description="The category you're looking for doesn't exist."
@@ -330,6 +345,10 @@
 {/if}
 
 <style>
+  .category-page-container {
+    padding-top: 0.25rem;
+  }
+
   .category-header {
     margin-bottom: 1.5rem;
   }
@@ -398,6 +417,18 @@
     color: var(--primary);
     border-radius: var(--radius-full);
     margin-top: 0.25rem;
+  }
+
+  @media (min-width: 640px) and (max-width: 1023px) {
+    .category-page-container {
+      padding-top: 0.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .category-page-container {
+      padding-top: 1.25rem;
+    }
   }
 
   @media (min-width: 640px) {
