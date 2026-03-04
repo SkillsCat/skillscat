@@ -45,6 +45,8 @@
     class?: string;
     showSuggestions?: boolean;
     suggestionMode?: 'categories' | 'skills';
+    showHistory?: boolean;
+    suggestionCategory?: string;
   }
 
   interface SkillSuggestion {
@@ -79,7 +81,9 @@
     onSelectSkill,
     class: className = '',
     showSuggestions = true,
-    suggestionMode = 'categories'
+    suggestionMode = 'categories',
+    showHistory = true,
+    suggestionCategory = ''
   }: Props = $props();
 
   let isFocused = $state(false);
@@ -115,6 +119,8 @@
   let showClearHistoryDialog = $state(false);
 
   function addQueryToHistory(query: string) {
+    if (!showHistory) return;
+
     const nextEntries = addSearchHistoryEntry(queryHistory, query);
     if (nextEntries === queryHistory) return;
 
@@ -123,7 +129,7 @@
   }
 
   const visibleQueryHistory = $derived(() => {
-    if (!isFocused || !showSuggestions) return [];
+    if (!showHistory || !isFocused || !showSuggestions) return [];
     return filterSearchHistory(queryHistory, value);
   });
 
@@ -148,7 +154,9 @@
     };
 
     updateSuggestionLimit();
-    queryHistory = loadSearchHistory();
+    if (showHistory) {
+      queryHistory = loadSearchHistory();
+    }
     window.addEventListener('resize', updateSuggestionLimit);
 
     return () => {
@@ -218,7 +226,8 @@
     }
 
     const requestQuery = query.toLowerCase();
-    const cacheKey = `${requestQuery}:${suggestionLimit}`;
+    const categoryScope = suggestionCategory.trim().toLowerCase();
+    const cacheKey = `${requestQuery}:${suggestionLimit}:${categoryScope || '_'}`;
     const cached = suggestionCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       skillSuggestions = cached.skills;
@@ -234,7 +243,15 @@
 
     const timer = setTimeout(async () => {
       try {
-        const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=${suggestionLimit}`, {
+        const params = new URLSearchParams({
+          q: query,
+          limit: String(suggestionLimit)
+        });
+        if (categoryScope) {
+          params.set('category', categoryScope);
+        }
+
+        const response = await fetch(`/api/search?${params.toString()}`, {
           signal: controller.signal
         });
         if (!response.ok) return;
@@ -304,29 +321,28 @@
   function selectCategorySuggestion(categoryName: string) {
     isFocused = false;
     addQueryToHistory(categoryName);
+    value = categoryName;
     onSearch?.(categoryName);
-    value = '';
   }
 
   function selectSkillSuggestion(skill: SkillSuggestion) {
     isFocused = false;
     addQueryToHistory(skill.name);
+    value = skill.name;
 
     if (onSelectSkill) {
       onSelectSkill(skill);
-      value = '';
       return;
     }
 
     onSearch?.(skill.name);
-    value = '';
   }
 
   function selectHistoryQuery(query: string) {
     isFocused = false;
     addQueryToHistory(query);
+    value = query;
     onSearch?.(query);
-    value = '';
   }
 
   function clearQueryHistory() {

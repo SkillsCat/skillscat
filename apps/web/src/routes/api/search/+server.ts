@@ -7,10 +7,11 @@ import { computeSearchScore, normalizeSearchText } from '$lib/server/search-prec
 
 const MIN_QUERY_LENGTH = 2;
 const MAX_QUERY_LENGTH = 120;
+const MAX_CATEGORY_LENGTH = 64;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 20;
 const SEARCH_CACHE_TTL_SECONDS = 45;
-const SEARCH_CACHE_KEY_VERSION = 'v5';
+const SEARCH_CACHE_KEY_VERSION = 'v7';
 const TERM_CANDIDATE_LIMIT_MULTIPLIER = 4;
 const PREFIX_CANDIDATE_LIMIT_MULTIPLIER = 3;
 const CATEGORY_CANDIDATE_LIMIT_MULTIPLIER = 2;
@@ -82,6 +83,14 @@ function parseLimit(rawLimit: string | null): number {
     return DEFAULT_LIMIT;
   }
   return Math.min(Math.max(parsed, 1), MAX_LIMIT);
+}
+
+function normalizeCategory(value: string | null): string {
+  const normalized = (value || '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized.length > MAX_CATEGORY_LENGTH) return '';
+  if (!/^[a-z0-9-]+$/.test(normalized)) return '';
+  return normalized;
 }
 
 function normalizeText(value: string | null | undefined): string {
@@ -291,7 +300,8 @@ async function fetchTermCandidates(
   db: D1Database,
   queryTokens: string[],
   limit: number,
-  useSearchState: boolean
+  useSearchState: boolean,
+  category: string
 ): Promise<SearchCandidateRow[]> {
   if (queryTokens.length === 0) return [];
 
@@ -301,6 +311,14 @@ async function fetchTermCandidates(
   const searchStateJoinSql = useSearchState ? 'LEFT JOIN skill_search_state ss ON ss.skill_id = s.id' : '';
   const searchScoreSelectSql = useSearchState ? 'ss.score as precomputedScore' : 'NULL as precomputedScore';
   const searchScoreOrderSql = useSearchState ? 'COALESCE(ss.score, 0) DESC,' : '';
+  const categoryJoinSql = category
+    ? `
+      INNER JOIN skill_categories sc INDEXED BY skill_categories_category_skill_idx
+        ON sc.skill_id = st.skill_id
+       AND sc.category_slug = ?
+    `
+    : '';
+  const categoryParams = category ? [category] : [];
 
   const tokenPlaceholders = queryTokens.map(() => '?').join(',');
 
@@ -311,6 +329,7 @@ async function fetchTermCandidates(
         COUNT(*) as matchedTermCount,
         MAX(st.weight) as matchedTermWeight
       FROM skill_search_terms st
+      ${categoryJoinSql}
       WHERE st.term IN (${tokenPlaceholders})
       GROUP BY st.skill_id
     )
@@ -345,7 +364,7 @@ async function fetchTermCandidates(
       s.trending_score DESC
     LIMIT ?
   `)
-    .bind(...queryTokens, exactLimit)
+    .bind(...queryTokens, ...categoryParams, exactLimit)
     .all<SearchCandidateRow>();
 
   const merged = new Map<string, SearchCandidateRow>();
@@ -368,6 +387,7 @@ async function fetchTermCandidates(
         COUNT(*) as matchedTermCount,
         MAX(st.weight) as matchedTermWeight
       FROM skill_search_terms st
+      ${categoryJoinSql}
       WHERE (${prefixPredicates})
       GROUP BY st.skill_id
     )
@@ -403,7 +423,7 @@ async function fetchTermCandidates(
       s.trending_score DESC
     LIMIT ?
   `)
-    .bind(...queryTokens.map((token) => `${token}%`), ...exclusion.params, remaining)
+    .bind(...queryTokens.map((token) => `${token}%`), ...categoryParams, ...exclusion.params, remaining)
     .all<SearchCandidateRow>();
 
   for (const row of prefixRows.results || []) {
@@ -420,7 +440,8 @@ async function fetchTextCandidates(
   query: string,
   limit: number,
   useSearchState: boolean,
-  excludedIds: string[]
+  excludedIds: string[],
+  category: string
 ): Promise<SearchCandidateRow[]> {
   const prefixQuery = `${query}%`;
   const fuzzyQuery = `%${query}%`;
@@ -433,34 +454,53 @@ async function fetchTextCandidates(
   const searchScoreSelectSql = useSearchState ? 'ss.score as precomputedScore' : 'NULL as precomputedScore';
   const searchScoreOrderSql = useSearchState ? 'COALESCE(ss.score, 0) DESC,' : '';
   const prefixExclusion = buildExclusionClause(excludedIds, 's.id');
+  const categorySql = category
+    ? `
+          AND EXISTS (
+            SELECT 1
+            FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+            WHERE sc.category_slug = ?
+              AND sc.skill_id = s.id
+          )
+    `
+    : '';
+  const categoryParams = category ? [category] : [];
 
   const prefixRows = await db.prepare(`
     WITH prefix_ids AS (
       SELECT id FROM (
         SELECT id
-        FROM skills INDEXED BY skills_visibility_name_idx
-        WHERE visibility = 'public' AND name LIKE ?
+        FROM skills s INDEXED BY skills_visibility_name_idx
+        WHERE s.visibility = 'public'
+          AND s.name LIKE ?
+          ${categorySql}
         LIMIT ?
       )
       UNION ALL
       SELECT id FROM (
         SELECT id
-        FROM skills INDEXED BY skills_visibility_slug_idx
-        WHERE visibility = 'public' AND slug LIKE ?
+        FROM skills s INDEXED BY skills_visibility_slug_idx
+        WHERE s.visibility = 'public'
+          AND s.slug LIKE ?
+          ${categorySql}
         LIMIT ?
       )
       UNION ALL
       SELECT id FROM (
         SELECT id
-        FROM skills INDEXED BY skills_visibility_repo_owner_idx
-        WHERE visibility = 'public' AND repo_owner LIKE ?
+        FROM skills s INDEXED BY skills_visibility_repo_owner_idx
+        WHERE s.visibility = 'public'
+          AND s.repo_owner LIKE ?
+          ${categorySql}
         LIMIT ?
       )
       UNION ALL
       SELECT id FROM (
         SELECT id
-        FROM skills INDEXED BY skills_visibility_repo_name_idx
-        WHERE visibility = 'public' AND repo_name LIKE ?
+        FROM skills s INDEXED BY skills_visibility_repo_name_idx
+        WHERE s.visibility = 'public'
+          AND s.repo_name LIKE ?
+          ${categorySql}
         LIMIT ?
       )
     ),
@@ -509,12 +549,16 @@ async function fetchTextCandidates(
     LIMIT ?
   `).bind(
     prefixQuery,
+    ...categoryParams,
     prefixPerColumnLimit,
     prefixQuery,
+    ...categoryParams,
     prefixPerColumnLimit,
     prefixQuery,
+    ...categoryParams,
     prefixPerColumnLimit,
     prefixQuery,
+    ...categoryParams,
     prefixPerColumnLimit,
     prefixLimit,
     ...prefixExclusion.params,
@@ -568,6 +612,7 @@ async function fetchTextCandidates(
     LEFT JOIN authors a ON s.repo_owner = a.username
     ${searchStateJoinSql}
     WHERE s.visibility = 'public'
+      ${categorySql}
       AND (
         s.name LIKE ?
         OR s.slug LIKE ?
@@ -580,6 +625,7 @@ async function fetchTextCandidates(
       s.trending_score DESC
     LIMIT ?
   `).bind(
+    ...categoryParams,
     fuzzyQuery,
     fuzzyQuery,
     fuzzyQuery,
@@ -690,11 +736,16 @@ async function resolveSearchTableSupport(db: D1Database): Promise<{ searchState:
   };
 }
 
-async function fetchSuggestions(db: D1Database, query: string, limit: number): Promise<SearchSuggestionsResult> {
+async function fetchSuggestions(
+  db: D1Database,
+  query: string,
+  limit: number,
+  category: string
+): Promise<SearchSuggestionsResult> {
   const tableSupport = await resolveSearchTableSupport(db);
   const queryTokens = splitQueryTokens(query);
 
-  const matchedCategories = matchCategories(query);
+  const matchedCategories = category ? [] : matchCategories(query);
   const matchedCategorySlugs = matchedCategories.map((item) => item.slug);
   const matchedCategoryMap = new Map(matchedCategorySlugs.map((slug, index) => [slug, index]));
   const matchedCategoryItems = CATEGORIES
@@ -704,19 +755,21 @@ async function fetchSuggestions(db: D1Database, query: string, limit: number): P
   const textCandidates = new Map<string, SearchCandidateRow>();
 
   if (tableSupport.searchTerms && queryTokens.length > 0) {
-    const termCandidates = await fetchTermCandidates(db, queryTokens, limit, tableSupport.searchState);
+    const termCandidates = await fetchTermCandidates(db, queryTokens, limit, tableSupport.searchState, category);
     for (const row of termCandidates) {
       textCandidates.set(row.id, row);
     }
   }
 
-  if (textCandidates.size < limit) {
+  const shouldUseTextFallback = !category || !tableSupport.searchTerms;
+  if (textCandidates.size < limit && shouldUseTextFallback) {
     const fallbackRows = await fetchTextCandidates(
       db,
       query,
       limit,
       tableSupport.searchState,
-      Array.from(textCandidates.keys())
+      Array.from(textCandidates.keys()),
+      category
     );
 
     for (const row of fallbackRows) {
@@ -727,13 +780,15 @@ async function fetchSuggestions(db: D1Database, query: string, limit: number): P
   }
 
   const mergedTextCandidates = Array.from(textCandidates.values());
-  const categoryCandidates = await fetchCategoryCandidates(
-    db,
-    matchedCategorySlugs,
-    limit,
-    mergedTextCandidates.map((row) => row.id),
-    tableSupport.searchState
-  );
+  const categoryCandidates = category
+    ? []
+    : await fetchCategoryCandidates(
+      db,
+      matchedCategorySlugs,
+      limit,
+      mergedTextCandidates.map((row) => row.id),
+      tableSupport.searchState
+    );
 
   const rankedSkills = rankCandidates(query, queryTokens, mergedTextCandidates, categoryCandidates, limit);
   return {
@@ -746,6 +801,7 @@ async function fetchSuggestions(db: D1Database, query: string, limit: number): P
 export const GET: RequestHandler = async ({ url, platform }) => {
   try {
     const query = normalizeText((url.searchParams.get('q') || '').slice(0, MAX_QUERY_LENGTH));
+    const category = normalizeCategory(url.searchParams.get('category'));
     const limit = parseLimit(url.searchParams.get('pageSize') ?? url.searchParams.get('limit'));
 
     if (!query || query.length < MIN_QUERY_LENGTH) {
@@ -761,14 +817,14 @@ export const GET: RequestHandler = async ({ url, platform }) => {
 
     const db = platform?.env?.DB;
     const { data, hit } = await getCached(
-      `api:search:${SEARCH_CACHE_KEY_VERSION}:${query}:${limit}`,
+      `api:search:${SEARCH_CACHE_KEY_VERSION}:${query}:${category || '_'}:${limit}`,
       async () => {
         if (!db) {
           return { skills: [], categories: [], total: 0 } satisfies SearchSuggestionsResult;
         }
 
         try {
-          return await fetchSuggestions(db, query, limit);
+          return await fetchSuggestions(db, query, limit, category);
         } catch {
           return { skills: [], categories: [], total: 0 } satisfies SearchSuggestionsResult;
         }

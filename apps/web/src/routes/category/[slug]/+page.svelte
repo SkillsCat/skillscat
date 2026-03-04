@@ -152,18 +152,6 @@
       : data.skills
   );
 
-  const categorySkillSuggestions = $derived(
-    data.skills.map((skill) => ({
-      id: skill.id,
-      name: skill.name,
-      slug: skill.slug,
-      repoOwner: skill.repoOwner,
-      repoName: skill.repoName,
-      stars: skill.stars,
-      authorAvatar: skill.authorAvatar
-    }))
-  );
-
   // Calculate display counts
   const startItem = $derived(data.pagination ? (data.pagination.currentPage - 1) * data.pagination.itemsPerPage + 1 : 1);
   const endItem = $derived(data.pagination ? Math.min(data.pagination.currentPage * data.pagination.itemsPerPage, data.pagination.totalItems) : data.skills.length);
@@ -272,7 +260,7 @@
           bind:value={searchQuery}
           suggestionMode="skills"
           showHistory={false}
-          skillSuggestionSource={categorySkillSuggestions}
+          suggestionCategory={data.category.slug}
         />
       </div>
 
