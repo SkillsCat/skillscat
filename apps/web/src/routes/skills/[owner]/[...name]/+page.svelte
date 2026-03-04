@@ -1214,7 +1214,7 @@
 {/if}
 
 {#if data.skill}
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4 sm:pb-8 skill-detail-container">
     <!-- Breadcrumb -->
     <nav class="breadcrumb">
       <ol>
@@ -1234,13 +1234,79 @@
       </ol>
     </nav>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    {#snippet renderActionButtons()}
+      {@const githubUrl = data.skill?.githubUrl}
+      <div class="action-buttons">
+        <button onclick={handleDownload} class="download-btn action-btn" disabled={isDownloading}>
+          {#if downloadSuccess}
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+            Installed
+          {:else if isDownloading}
+            <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Installing
+          {:else}
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download
+          {/if}
+        </button>
+        {#if githubUrl}
+          <a href={githubUrl} target="_blank" rel="noopener noreferrer" class="github-btn action-btn">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+            </svg>
+            GitHub
+          </a>
+        {/if}
+      </div>
+    {/snippet}
+
+    {#snippet renderCliInstallCard()}
+      <h3 class="font-semibold text-fg mb-4">CLI Install</h3>
+
+      <!-- CLI Switcher -->
+      <div class="cli-switcher">
+        {#each installCommands as installer (installer.name)}
+          <button
+            class="cli-switcher-btn"
+            class:active={selectedInstaller === installer.name}
+            onclick={() => selectedInstaller = installer.name}
+          >
+            {installer.label}
+          </button>
+        {/each}
+        <div
+          class="cli-switcher-indicator"
+          style:width={`calc((100% - (var(--switcher-padding) * 2)) / ${Math.max(installCommands.length, 1)})`}
+          style:transform={`translateX(${selectedInstallerIndex * 100}%)`}
+        ></div>
+      </div>
+
+      <!-- Command -->
+      <div class="command-box">
+        <code class="command-text">{@html highlightedCommand}</code>
+        <CopyButton text={currentCommand} size="sm" />
+      </div>
+
+      <!-- Description -->
+      <p class="command-description">
+        {currentInstaller?.description}
+      </p>
+    {/snippet}
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 skill-detail-layout">
       <!-- Main Content -->
-      <div class="lg:col-span-2 space-y-8">
+      <div class="lg:col-span-2 space-y-8 main-content-column">
         <!-- Header -->
         <div class="card skill-header">
           <!-- Top row: Avatar + Title -->
-          <div class="flex items-center gap-3 mb-3">
+          <div class="flex items-center mb-3 avatar-title-row">
             <!-- Avatar: clickable, links to author profile -->
             <a
               href={getAuthorProfileUrl()}
@@ -1519,6 +1585,17 @@
           </div>
         {/if}
 
+        <!-- Mobile: primary actions above SKILL.md -->
+        <div class="mobile-primary-cards">
+          <div class="card">
+            {@render renderActionButtons()}
+          </div>
+
+          <div class="card">
+            {@render renderCliInstallCard()}
+          </div>
+        </div>
+
         <!-- SKILL.md Content -->
         {#if data.hasReadme ?? Boolean(data.skill.readme)}
           <div class="card skill-content-card">
@@ -1537,7 +1614,7 @@
 
         <!-- Categories -->
         {#if data.skill.categories?.length}
-          <div class="card">
+          <div class="card categories-card">
             <h2 class="text-lg font-semibold text-fg mb-4">Categories</h2>
             <div class="flex flex-wrap gap-2">
               {#each data.skill.categories as categorySlug}
@@ -1560,72 +1637,15 @@
       </div>
 
       <!-- Sidebar -->
-      <div class="space-y-6">
+      <div class="space-y-6 sidebar-column">
         <!-- Actions -->
-        <div class="card">
-          <div class="space-y-3">
-            <button onclick={handleDownload} class="download-btn" disabled={isDownloading}>
-              {#if downloadSuccess}
-                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                </svg>
-                Installed!
-              {:else if isDownloading}
-                <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Installing...
-              {:else}
-                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Download Skill
-              {/if}
-            </button>
-            {#if data.skill.githubUrl}
-              <a href={data.skill.githubUrl} target="_blank" rel="noopener noreferrer" class="github-btn">
-                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                </svg>
-                View on GitHub
-              </a>
-            {/if}
-          </div>
+        <div class="card desktop-primary-card">
+          {@render renderActionButtons()}
         </div>
 
-        <!-- Install by CLI -->
-        <div class="card">
-          <h3 class="font-semibold text-fg mb-4">Install by CLI</h3>
-
-          <!-- CLI Switcher -->
-          <div class="cli-switcher">
-            {#each installCommands as installer (installer.name)}
-              <button
-                class="cli-switcher-btn"
-                class:active={selectedInstaller === installer.name}
-                onclick={() => selectedInstaller = installer.name}
-              >
-                {installer.label}
-              </button>
-            {/each}
-            <div
-              class="cli-switcher-indicator"
-              style:width={`calc((100% - (var(--switcher-padding) * 2)) / ${Math.max(installCommands.length, 1)})`}
-              style:transform={`translateX(${selectedInstallerIndex * 100}%)`}
-            ></div>
-          </div>
-
-          <!-- Command -->
-          <div class="command-box">
-            <code class="command-text">{@html highlightedCommand}</code>
-            <CopyButton text={currentCommand} size="sm" />
-          </div>
-
-          <!-- Description -->
-          <p class="command-description">
-            {currentInstaller?.description}
-          </p>
+        <!-- CLI Install -->
+        <div class="card desktop-primary-card">
+          {@render renderCliInstallCard()}
         </div>
 
         <!-- Private Skill Notice -->
@@ -1672,7 +1692,7 @@
 
         <!-- Recommend Skills -->
         {#if showRecommendSkillsCard}
-          <div class="card">
+          <div class="card recommend-skills-card">
             <h3 class="font-semibold text-fg mb-4">Recommend Skills</h3>
             {#if displayRecommendSkills.length > 0}
               <div class="space-y-3">
@@ -1788,6 +1808,10 @@
     color: var(--fg);
     line-height: 1.2;
     letter-spacing: -0.02em;
+  }
+
+  .avatar-title-row {
+    gap: 0.75rem;
   }
 
   .skill-header-actions {
@@ -2117,10 +2141,10 @@
     --btn-shadow-color: oklch(50% 0.22 55);
 
     display: flex;
+    box-sizing: border-box;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    width: 100%;
     padding: 0.875rem 1.25rem;
     font-size: 0.9375rem;
     font-weight: 600;
@@ -2163,6 +2187,35 @@
     --btn-shadow-offset: 4px;
   }
 
+  .mobile-primary-cards {
+    display: none;
+    gap: 1rem;
+  }
+
+  .desktop-primary-card {
+    display: block;
+  }
+
+  .action-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .action-buttons > * {
+    min-width: 0;
+  }
+
+  .action-btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
   /* Category Tags */
   .category-tag {
     display: inline-flex;
@@ -2194,10 +2247,10 @@
     --gh-shadow: #1b1f23;
 
     display: flex;
+    box-sizing: border-box;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    width: 100%;
     padding: 0.75rem 1.25rem;
     font-size: 0.9375rem;
     font-weight: 600;
@@ -2232,6 +2285,10 @@
     --switcher-shadow: 2px;
     position: relative;
     display: flex;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     padding: var(--switcher-padding);
     background: var(--bg-subtle);
     border: 2px solid var(--border);
@@ -2244,6 +2301,7 @@
     position: relative;
     z-index: 1;
     flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2257,6 +2315,8 @@
     cursor: pointer;
     transition: color 0.2s ease;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .cli-switcher-btn:hover {
@@ -2286,6 +2346,7 @@
   /* Command Box Styles */
   .command-box {
     display: flex;
+    box-sizing: border-box;
     align-items: center;
     gap: 0.75rem;
     padding: 0.75rem 1rem;
@@ -2293,6 +2354,10 @@
     border-radius: var(--radius-lg);
     border: 2px solid var(--border);
     font-family: var(--font-mono);
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
   }
 
   :root:not(.dark) .command-box {
@@ -2301,7 +2366,10 @@
   }
 
   .command-text {
+    display: block;
     flex: 1;
+    min-width: 0;
+    max-width: 100%;
     color: var(--fg);
     font-size: 0.8125rem;
     overflow-x: auto;
@@ -2567,9 +2635,14 @@
   }
 
   .prose-readme :global(table) {
+    display: block;
     width: 100%;
+    max-width: 100%;
     border-collapse: collapse;
     margin: 1em 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
   }
 
   .prose-readme :global(th),
@@ -2577,6 +2650,7 @@
     border: 1px solid var(--border);
     padding: 0.5rem 0.75rem;
     text-align: left;
+    vertical-align: top;
   }
 
   .prose-readme :global(th) {
@@ -2617,6 +2691,63 @@
     border-radius: 1px;
   }
 
+  .skill-detail-container {
+    padding-top: 0.25rem;
+  }
+
+  /* Single-column spacing for tablet/mobile (iPad portrait included) */
+  @media (max-width: 1023px) {
+    .mobile-primary-cards {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .desktop-primary-card {
+      display: none;
+    }
+
+    .main-content-column,
+    .sidebar-column,
+    .mobile-primary-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .main-content-column > *,
+    .sidebar-column > * {
+      margin-top: 0 !important;
+    }
+
+    .skill-detail-layout {
+      row-gap: 1rem;
+    }
+  }
+
+  @media (min-width: 640px) and (max-width: 1023px) {
+    .skill-detail-container {
+      padding-top: 0.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .skill-detail-container {
+      padding-top: 1.25rem;
+    }
+
+    .avatar-title-row {
+      gap: 0.9375rem;
+    }
+
+    .mobile-primary-cards {
+      display: none;
+    }
+
+    .desktop-primary-card {
+      display: block;
+    }
+  }
+
   /* Mobile Responsive Styles */
   @media (max-width: 640px) {
     .skill-header {
@@ -2645,6 +2776,78 @@
 
     .command-text {
       font-size: 0.75rem;
+    }
+
+    .main-content-column,
+    .sidebar-column {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .main-content-column > *,
+    .sidebar-column > * {
+      margin-top: 0 !important;
+    }
+
+    .skill-detail-layout {
+      row-gap: 0.75rem;
+    }
+
+    .main-content-column > .categories-card > h2,
+    .sidebar-column > .recommend-skills-card > h3 {
+      font-size: 1rem;
+      line-height: 1.4;
+    }
+
+    .skill-content-title {
+      font-size: 0.9375rem;
+      line-height: 1.4;
+    }
+
+    .action-buttons {
+      flex-direction: row;
+      flex-wrap: nowrap;
+      gap: 0.625rem;
+    }
+
+    .download-btn,
+    .github-btn {
+      padding: 0.6875rem 0.5rem;
+      font-size: 0.75rem;
+      gap: 0.375rem;
+    }
+
+    .action-btn svg {
+      width: 1rem;
+      height: 1rem;
+      flex-shrink: 0;
+    }
+
+    .cli-switcher-btn {
+      padding: 0.25rem 0.375rem;
+      font-size: 0.6875rem;
+    }
+
+    .command-box {
+      padding: 0.625rem 0.75rem;
+    }
+
+    .prose-readme :global(th),
+    .prose-readme :global(td) {
+      padding: 0.375rem 0.5rem;
+      font-size: 0.8125rem;
+    }
+
+    .category-tag {
+      padding: 0.3125rem 0.625rem;
+      font-size: 0.75rem;
+      gap: 0.25rem;
+      border-width: 1px;
+    }
+
+    .category-tag svg {
+      display: none;
     }
 
     .skill-content-card {
