@@ -60,6 +60,17 @@ export interface BaseEnv {
 export interface GithubEventsEnv extends BaseEnv {
   INDEXING_QUEUE: Queue<IndexingMessage>;
   GITHUB_EVENTS_PER_PAGE?: string;
+  GITHUB_EVENTS_PAGES?: string;
+  GITHUB_EVENTS_MIN_REST_REMAINING?: string;
+  GITHUB_EVENTS_REST_RESERVE?: string;
+  GITHUB_SEARCH_DISCOVERY_ENABLED?: string;
+  GITHUB_SEARCH_DISCOVERY_QUERY?: string;
+  GITHUB_SEARCH_DISCOVERY_PAGES?: string;
+  GITHUB_SEARCH_DISCOVERY_PER_PAGE?: string;
+  GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS?: string;
+  GITHUB_DISCOVERY_MIN_REST_REMAINING?: string;
+  GITHUB_DISCOVERY_REST_RESERVE?: string;
+  GITHUB_DISCOVERY_LOCK_TTL_SECONDS?: string;
 }
 
 export interface IndexingEnv extends BaseEnv {
@@ -119,6 +130,9 @@ export interface IndexingMessage {
   submittedAt?: string;
   // Force reindex flag
   forceReindex?: boolean;
+  // Discovery metadata
+  discoverySource?: 'github-events' | 'github-code-search';
+  discoveryFingerprint?: string;
 }
 
 // ============================================

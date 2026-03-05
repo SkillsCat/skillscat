@@ -85,6 +85,7 @@ async function batchFetchGitHubRepos(
     const batch = await graphqlBatchRepoMetadata(repos, {
       token: env.GITHUB_TOKEN,
       userAgent: 'SkillsCat-Resurrection-Worker/1.0',
+      rateLimitKV: env.KV,
     });
     batch.forEach((value, key) => {
       results.set(key, value as GitHubGraphQLRepoData);

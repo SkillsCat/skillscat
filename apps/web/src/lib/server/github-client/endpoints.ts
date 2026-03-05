@@ -4,6 +4,7 @@ import { GitHubGraphqlError, GitHubRateLimitError, githubGraphqlRequest } from '
 export type GitHubEndpointId =
   | 'unknown'
   | 'graphql'
+  | 'rate_limit'
   | 'events'
   | 'search_code'
   | 'user_viewer_membership'
@@ -130,6 +131,16 @@ export function classifyGitHubEndpoint(url: URL, methodInput?: string): GitHubEn
       supportsGraphqlFallback: false,
       viewerScoped: false,
       cacheTtlSeconds: 60,
+    };
+  }
+
+  if (parts.length === 1 && parts[0] === 'rate_limit') {
+    return {
+      id: 'rate_limit',
+      cachePolicy: 'none',
+      supportsConditionalGet: false,
+      supportsGraphqlFallback: false,
+      viewerScoped: false,
     };
   }
 
@@ -350,6 +361,8 @@ async function fallbackRepoGet(ctx: GitHubRestFallbackContext): Promise<Response
     token: ctx.options.token,
     userAgent: ctx.options.userAgent,
     apiVersion: ctx.options.apiVersion,
+    rateLimitKV: ctx.options.rateLimitKV,
+    rateLimitKeyPrefix: ctx.options.rateLimitKeyPrefix,
   });
 
   if (!data.repository) return jsonResponse({ message: 'Not Found' }, 404);
@@ -382,6 +395,8 @@ async function fallbackUserGet(ctx: GitHubRestFallbackContext): Promise<Response
     token: ctx.options.token,
     userAgent: ctx.options.userAgent,
     apiVersion: ctx.options.apiVersion,
+    rateLimitKV: ctx.options.rateLimitKV,
+    rateLimitKeyPrefix: ctx.options.rateLimitKeyPrefix,
   });
   if (!data.repositoryOwner || data.repositoryOwner.databaseId == null) return jsonResponse({ message: 'Not Found' }, 404);
   return jsonResponse({
@@ -401,6 +416,8 @@ async function fallbackOrgGet(ctx: GitHubRestFallbackContext): Promise<Response 
     token: ctx.options.token,
     userAgent: ctx.options.userAgent,
     apiVersion: ctx.options.apiVersion,
+    rateLimitKV: ctx.options.rateLimitKV,
+    rateLimitKeyPrefix: ctx.options.rateLimitKeyPrefix,
   });
   if (!data.organization || data.organization.databaseId == null) return jsonResponse({ message: 'Not Found' }, 404);
   return jsonResponse({
@@ -484,6 +501,8 @@ async function fetchRepositoryObject(
       token: options.token,
       userAgent: options.userAgent,
       apiVersion: options.apiVersion,
+      rateLimitKV: options.rateLimitKV,
+      rateLimitKeyPrefix: options.rateLimitKeyPrefix,
     }
   );
 
@@ -578,6 +597,8 @@ async function fallbackCommitGet(ctx: GitHubRestFallbackContext): Promise<Respon
     token: ctx.options.token,
     userAgent: ctx.options.userAgent,
     apiVersion: ctx.options.apiVersion,
+    rateLimitKV: ctx.options.rateLimitKV,
+    rateLimitKeyPrefix: ctx.options.rateLimitKeyPrefix,
   });
 
   const object = data.repository?.object;
@@ -638,6 +659,8 @@ async function fallbackCommitsList(ctx: GitHubRestFallbackContext): Promise<Resp
     token: ctx.options.token,
     userAgent: ctx.options.userAgent,
     apiVersion: ctx.options.apiVersion,
+    rateLimitKV: ctx.options.rateLimitKV,
+    rateLimitKeyPrefix: ctx.options.rateLimitKeyPrefix,
   });
 
   const nodes = data.repository?.defaultBranchRef?.target && data.repository.defaultBranchRef.target.__typename === 'Commit'

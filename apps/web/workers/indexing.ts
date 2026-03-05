@@ -1170,7 +1170,7 @@ async function processMessage(
   env: IndexingEnv
 ): Promise<void> {
   const { repoOwner, repoName, skillPath, forceReindex } = message;
-  const source = message.submittedBy ? 'user-submit' : 'github-events';
+  const source = message.submittedBy ? 'user-submit' : (message.discoverySource || 'github-events');
 
   log.log(`Processing repo: ${repoOwner}/${repoName} (source: ${source}, skillPath: ${skillPath || 'root'})`, JSON.stringify(message));
 

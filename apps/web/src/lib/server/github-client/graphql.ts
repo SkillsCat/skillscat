@@ -1,4 +1,5 @@
 import { DEFAULT_API_VERSION, DEFAULT_USER_AGENT, isGitHubRateLimitResponse, parseRetryAfterSeconds, rawGitHubRequest } from './core';
+import { recordRateLimitFromHeaders } from './rate-limit-kv';
 
 export const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql';
 
@@ -51,6 +52,9 @@ export interface GitHubGraphqlRequestOptions {
   headers?: HeadersInit;
   maxRetries?: number;
   maxDelayMs?: number;
+  rateLimitKV?: KVNamespace;
+  rateLimitKeyPrefix?: string;
+  endpointId?: string;
 }
 
 function graphQLErrorLooksRateLimited(error: GraphQLErrorItem): boolean {
@@ -86,6 +90,12 @@ export async function githubGraphqlRequest<TData, TVariables = Record<string, un
     retryRateLimit: false,
     cache: 'off',
     graphqlFallback: 'off',
+  });
+
+  await recordRateLimitFromHeaders(response.headers, 'graphql', {
+    kv: options.rateLimitKV,
+    keyPrefix: options.rateLimitKeyPrefix,
+    endpointId: options.endpointId ?? 'graphql',
   });
 
   if (isGitHubRateLimitResponse(response)) {

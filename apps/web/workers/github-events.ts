@@ -1,32 +1,231 @@
 /**
  * GitHub Events Worker
  *
- * 轮询 GitHub Events API，发现新的 SKILL.md 文件
- * 通过 Cron Trigger 每 5 分钟执行一次
+ * 轮询 GitHub Events API，并在预算允许时使用 Code Search 增强发现
+ * 通过 Cron Trigger 默认每 5 分钟执行一次
  */
 
 import type { GithubEventsEnv, GitHubEvent, IndexingMessage } from './shared/types';
-import { listPublicEvents } from '../src/lib/server/github-client/rest';
-const EVENTS_PER_PAGE = 100;
+import { getRateLimit, listPublicEvents, searchCode } from '../src/lib/server/github-client/rest';
+import {
+  isRateLimitSnapshotStale,
+  readRateLimitSnapshot,
+  type GitHubRateLimitSnapshot,
+} from '../src/lib/server/github-client/rate-limit-kv';
+
+const DEFAULT_EVENTS_PER_PAGE = 100;
+const DEFAULT_EVENTS_PAGES = 1;
+const DEFAULT_EVENTS_MIN_REST_REMAINING = 1000;
+const DEFAULT_EVENTS_REST_RESERVE = 300;
+const DEFAULT_SEARCH_DISCOVERY_QUERY = 'filename:SKILL.md';
+const DEFAULT_SEARCH_DISCOVERY_PAGES = 1;
+const DEFAULT_SEARCH_DISCOVERY_PER_PAGE = 100;
+const DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS = 5 * 60;
+const DEFAULT_MIN_REST_REMAINING = 1000;
+const DEFAULT_REST_RESERVE = 300;
+const DEFAULT_DISCOVERY_LOCK_TTL_SECONDS = 240;
+
 const REPO_QUEUE_DEDUP_TTL_SECONDS = 5 * 60;
+const SEARCH_PROCESSED_TTL_SECONDS = 7 * 24 * 60 * 60;
+const RATE_LIMIT_SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
+
+const RUN_LOCK_KEY = 'github-discovery:run-lock';
+const CODE_SEARCH_CURSOR_KEY = 'github-events:code-search:last-head';
+
+interface SearchDiscoveryResult {
+  scanned: number;
+  queued: number;
+  pagesFetched: number;
+  allowedPages: number;
+  stoppedByCursor: boolean;
+  skippedReason?: string;
+}
+
+interface EventsDiscoveryResult {
+  processed: number;
+  queued: number;
+  pagesFetched: number;
+  allowedPages: number;
+  skippedReason?: string;
+}
+
+interface RepoIdentity {
+  owner: string;
+  name: string;
+}
+
+interface GitHubEventsFetchResult {
+  events: GitHubEvent[];
+  rateLimited: boolean;
+}
+
+interface GitHubCodeSearchItem {
+  sha: string;
+  path: string;
+  repository?: {
+    full_name?: string;
+  };
+}
+
+interface GitHubCodeSearchResponse {
+  items?: GitHubCodeSearchItem[];
+}
+
+interface DiscoveryRunLockPayload {
+  token: string;
+  acquiredAtEpochMs: number;
+  expiresAtEpochMs: number;
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return Math.floor(value);
+}
+
+function parseEnabled(raw: string | undefined, fallback: boolean = true): boolean {
+  if (raw === undefined) return fallback;
+  const normalized = raw.trim().toLowerCase();
+  return normalized !== '0' && normalized !== 'false' && normalized !== 'off' && normalized !== 'no';
+}
+
+function normalizeSkillPath(skillPath?: string): string {
+  return (skillPath || '').replace(/^\/+|\/+$/g, '');
+}
+
+function parseRepoFullName(fullName: string | undefined): RepoIdentity | null {
+  if (!fullName) return null;
+  const [owner, name] = fullName.split('/');
+  if (!owner || !name) return null;
+  return { owner, name };
+}
+
+function getSkillPathFromSkillMdPath(path: string): string | undefined {
+  const normalized = path.replace(/^\/+/, '');
+  const idx = normalized.lastIndexOf('/');
+  if (idx < 0) return undefined;
+  const parent = normalized.slice(0, idx);
+  return parent || undefined;
+}
+
+function isSkillMdPath(path: string): boolean {
+  const name = path.split('/').pop()?.toLowerCase();
+  return name === 'skill.md';
+}
+
+function buildSearchFingerprint(item: GitHubCodeSearchItem): string | null {
+  const repoFullName = item.repository?.full_name?.toLowerCase();
+  const path = item.path?.toLowerCase();
+  const sha = item.sha?.toLowerCase();
+  if (!repoFullName || !path || !sha) return null;
+  return `${repoFullName}#${path}#${sha}`;
+}
+
+function isGitHubRateLimited(response: Response): boolean {
+  if (response.status === 429) return true;
+  if (response.status !== 403) return false;
+  return response.headers.get('x-ratelimit-remaining') === '0' || response.headers.has('retry-after');
+}
+
+function getEventsPerPage(env: GithubEventsEnv): number {
+  return parsePositiveInt(env.GITHUB_EVENTS_PER_PAGE, DEFAULT_EVENTS_PER_PAGE);
+}
+
+function getEventsDiscoveryConfig(env: GithubEventsEnv): {
+  pages: number;
+  perPage: number;
+  cronIntervalSeconds: number;
+  minRestRemaining: number;
+  restReserve: number;
+} {
+  return {
+    pages: parsePositiveInt(env.GITHUB_EVENTS_PAGES, DEFAULT_EVENTS_PAGES),
+    perPage: getEventsPerPage(env),
+    cronIntervalSeconds: parsePositiveInt(
+      env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
+      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS
+    ),
+    minRestRemaining: parsePositiveInt(
+      env.GITHUB_EVENTS_MIN_REST_REMAINING,
+      DEFAULT_EVENTS_MIN_REST_REMAINING
+    ),
+    restReserve: parsePositiveInt(env.GITHUB_EVENTS_REST_RESERVE, DEFAULT_EVENTS_REST_RESERVE),
+  };
+}
+
+function getSearchDiscoveryConfig(env: GithubEventsEnv): {
+  enabled: boolean;
+  query: string;
+  pages: number;
+  perPage: number;
+  cronIntervalSeconds: number;
+  minRestRemaining: number;
+  restReserve: number;
+} {
+  return {
+    enabled: parseEnabled(env.GITHUB_SEARCH_DISCOVERY_ENABLED, true),
+    query: (env.GITHUB_SEARCH_DISCOVERY_QUERY || DEFAULT_SEARCH_DISCOVERY_QUERY).trim() || DEFAULT_SEARCH_DISCOVERY_QUERY,
+    pages: parsePositiveInt(env.GITHUB_SEARCH_DISCOVERY_PAGES, DEFAULT_SEARCH_DISCOVERY_PAGES),
+    perPage: parsePositiveInt(env.GITHUB_SEARCH_DISCOVERY_PER_PAGE, DEFAULT_SEARCH_DISCOVERY_PER_PAGE),
+    cronIntervalSeconds: parsePositiveInt(
+      env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
+      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS
+    ),
+    minRestRemaining: parsePositiveInt(env.GITHUB_DISCOVERY_MIN_REST_REMAINING, DEFAULT_MIN_REST_REMAINING),
+    restReserve: parsePositiveInt(env.GITHUB_DISCOVERY_REST_RESERVE, DEFAULT_REST_RESERVE),
+  };
+}
+
+function getDiscoveryLockTtlSeconds(env: GithubEventsEnv): number {
+  return parsePositiveInt(env.GITHUB_DISCOVERY_LOCK_TTL_SECONDS, DEFAULT_DISCOVERY_LOCK_TTL_SECONDS);
+}
+
+export function computeAllowedSearchPages(
+  configuredPages: number,
+  remaining: number,
+  resetAtEpochSec: number,
+  cronIntervalSeconds: number,
+  reserve: number,
+  nowMs: number = Date.now()
+): number {
+  if (configuredPages <= 0) return 0;
+
+  const safeRemaining = Math.max(0, remaining - reserve);
+  if (safeRemaining <= 0) return 0;
+
+  const nowSec = Math.floor(nowMs / 1000);
+  const secondsUntilReset = Math.max(0, resetAtEpochSec - nowSec);
+  const runsUntilReset = Math.max(1, Math.ceil(secondsUntilReset / Math.max(1, cronIntervalSeconds)));
+  const safeBudget = Math.floor(safeRemaining / runsUntilReset);
+
+  return Math.min(configuredPages, Math.max(0, safeBudget));
+}
 
 /**
  * 获取 GitHub Events
  */
 async function fetchGitHubEvents(
   env: GithubEventsEnv,
-  page: number = 1
-): Promise<GitHubEvent[]> {
+  page: number,
+  perPage: number
+): Promise<GitHubEventsFetchResult> {
   const response = await listPublicEvents({
     page,
-    perPage: EVENTS_PER_PAGE,
+    perPage,
     token: env.GITHUB_TOKEN,
     userAgent: 'SkillsCat-Worker/1.0',
+    rateLimitKV: env.KV,
   });
   if (!response.ok) {
+    if (isGitHubRateLimited(response)) {
+      return { events: [], rateLimited: true };
+    }
     throw new Error(`Failed to fetch GitHub events: ${response.status}`);
   }
-  return await response.json() as GitHubEvent[];
+  return {
+    events: await response.json() as GitHubEvent[],
+    rateLimited: false,
+  };
 }
 
 /**
@@ -45,6 +244,7 @@ function extractRepoInfo(event: GitHubEvent): IndexingMessage | null {
     eventId: event.id,
     eventType: event.type,
     createdAt: event.created_at,
+    discoverySource: 'github-events',
   };
 }
 
@@ -83,89 +283,472 @@ async function markEventProcessed(env: GithubEventsEnv, eventId: string): Promis
   });
 }
 
+function getRepoQueuedKey(owner: string, name: string, skillPath?: string): string {
+  const normalizedPath = normalizeSkillPath(skillPath).toLowerCase();
+  return `github-events:repo-queued:${owner.toLowerCase()}/${name.toLowerCase()}:${normalizedPath}`;
+}
+
 /**
- * Check if a repository has been queued recently.
- * This suppresses bursts of duplicate queue messages for hot repos.
+ * Check if a repository path has been queued recently.
+ * This suppresses bursts of duplicate queue messages.
  */
 async function wasRepoQueuedRecently(
   env: GithubEventsEnv,
   owner: string,
-  name: string
+  name: string,
+  skillPath?: string
 ): Promise<boolean> {
-  const key = `github-events:repo-queued:${owner.toLowerCase()}/${name.toLowerCase()}`;
-  return (await env.KV.get(key)) !== null;
+  return (await env.KV.get(getRepoQueuedKey(owner, name, skillPath))) !== null;
 }
 
 /**
- * Mark a repository as recently queued.
+ * Mark a repository path as recently queued.
  */
 async function markRepoQueued(
   env: GithubEventsEnv,
   owner: string,
-  name: string
+  name: string,
+  skillPath?: string
 ): Promise<void> {
-  const key = `github-events:repo-queued:${owner.toLowerCase()}/${name.toLowerCase()}`;
-  await env.KV.put(key, '1', {
+  await env.KV.put(getRepoQueuedKey(owner, name, skillPath), '1', {
     expirationTtl: REPO_QUEUE_DEDUP_TTL_SECONDS,
   });
+}
+
+function getSearchProcessedKey(fingerprint: string): string {
+  return `github-events:search-processed:${fingerprint}`;
+}
+
+async function isSearchFingerprintProcessed(env: GithubEventsEnv, fingerprint: string): Promise<boolean> {
+  return (await env.KV.get(getSearchProcessedKey(fingerprint))) !== null;
+}
+
+async function markSearchFingerprintProcessed(env: GithubEventsEnv, fingerprint: string): Promise<void> {
+  await env.KV.put(getSearchProcessedKey(fingerprint), '1', {
+    expirationTtl: SEARCH_PROCESSED_TTL_SECONDS,
+  });
+}
+
+async function getCodeSearchHeadCursor(env: GithubEventsEnv): Promise<string | null> {
+  return env.KV.get(CODE_SEARCH_CURSOR_KEY);
+}
+
+async function setCodeSearchHeadCursor(env: GithubEventsEnv, fingerprint: string): Promise<void> {
+  await env.KV.put(CODE_SEARCH_CURSOR_KEY, fingerprint, {
+    expirationTtl: 86400 * 30,
+  });
+}
+
+async function readOrRefreshRestRateLimitSnapshot(env: GithubEventsEnv): Promise<GitHubRateLimitSnapshot | null> {
+  let snapshot = await readRateLimitSnapshot('rest', { kv: env.KV });
+
+  if (!isRateLimitSnapshotStale(snapshot, RATE_LIMIT_SNAPSHOT_MAX_AGE_MS)) {
+    return snapshot;
+  }
+
+  try {
+    const response = await getRateLimit({
+      token: env.GITHUB_TOKEN,
+      userAgent: 'SkillsCat-Worker/1.0',
+      rateLimitKV: env.KV,
+    });
+
+    if (!response.ok) {
+      console.warn(`Failed to refresh GitHub rate limit snapshot: ${response.status}`);
+    }
+  } catch (error) {
+    console.warn('Failed to refresh GitHub rate limit snapshot due to network error:', error);
+  }
+
+  snapshot = await readRateLimitSnapshot('rest', { kv: env.KV });
+  return snapshot;
 }
 
 /**
  * 处理 GitHub Events
  */
-async function processEvents(env: GithubEventsEnv): Promise<{ processed: number; queued: number }> {
+async function processEvents(
+  env: GithubEventsEnv,
+  restSnapshot: GitHubRateLimitSnapshot | null
+): Promise<EventsDiscoveryResult> {
   let processed = 0;
   let queued = 0;
+  let pagesFetched = 0;
+
+  const config = getEventsDiscoveryConfig(env);
+
+  if (!restSnapshot) {
+    return {
+      processed,
+      queued,
+      pagesFetched,
+      allowedPages: 0,
+      skippedReason: 'missing_rate_limit',
+    };
+  }
+
+  if (restSnapshot.remaining < config.minRestRemaining) {
+    return {
+      processed,
+      queued,
+      pagesFetched,
+      allowedPages: 0,
+      skippedReason: 'insufficient_rest_remaining',
+    };
+  }
+
+  const allowedPages = computeAllowedSearchPages(
+    config.pages,
+    restSnapshot.remaining,
+    restSnapshot.resetAtEpochSec,
+    config.cronIntervalSeconds,
+    config.restReserve
+  );
+
+  if (allowedPages <= 0) {
+    return {
+      processed,
+      queued,
+      pagesFetched,
+      allowedPages: 0,
+      skippedReason: 'budget_exhausted',
+    };
+  }
 
   try {
-    const events = await fetchGitHubEvents(env);
     const lastEventId = await getLastProcessedEventId(env);
+    let newestEventId: string | null = null;
+    let reachedLastProcessed = false;
 
-    const sortedEvents = events.sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
+    for (let page = 1; page <= allowedPages; page++) {
+      const fetchResult = await fetchGitHubEvents(env, page, config.perPage);
+      if (fetchResult.rateLimited) {
+        return {
+          processed,
+          queued,
+          pagesFetched,
+          allowedPages,
+          skippedReason: 'events_rate_limited',
+        };
+      }
 
-    if (sortedEvents.length > 0) {
-      await setLastProcessedEventId(env, sortedEvents[0].id);
-    }
+      const events = fetchResult.events;
+      pagesFetched++;
 
-    for (const event of sortedEvents) {
-      if (event.id === lastEventId) {
+      if (events.length === 0) {
         break;
       }
 
-      if (await isEventProcessed(env, event.id)) {
-        continue;
+      const sortedEvents = events.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+
+      if (!newestEventId && sortedEvents.length > 0) {
+        newestEventId = sortedEvents[0].id;
       }
 
-      processed++;
+      for (const event of sortedEvents) {
+        if (event.id === lastEventId) {
+          reachedLastProcessed = true;
+          break;
+        }
 
-      if (event.type !== 'PushEvent') {
-        await markEventProcessed(env, event.id);
-        continue;
-      }
+        if (await isEventProcessed(env, event.id)) {
+          continue;
+        }
 
-      const message = extractRepoInfo(event);
-      if (message) {
-        if (await wasRepoQueuedRecently(env, message.repoOwner, message.repoName)) {
+        processed++;
+
+        if (event.type !== 'PushEvent') {
           await markEventProcessed(env, event.id);
           continue;
         }
 
-        await env.INDEXING_QUEUE.send(message);
-        await markRepoQueued(env, message.repoOwner, message.repoName);
-        queued++;
-        console.log(`Queued repo for indexing: ${message.repoOwner}/${message.repoName}`);
+        const message = extractRepoInfo(event);
+        if (message) {
+          if (await wasRepoQueuedRecently(env, message.repoOwner, message.repoName)) {
+            await markEventProcessed(env, event.id);
+            continue;
+          }
+
+          await env.INDEXING_QUEUE.send(message);
+          await markRepoQueued(env, message.repoOwner, message.repoName);
+          queued++;
+          console.log(`Queued repo for indexing: ${message.repoOwner}/${message.repoName}`);
+        }
+
+        await markEventProcessed(env, event.id);
       }
 
-      await markEventProcessed(env, event.id);
+      if (reachedLastProcessed || events.length < config.perPage) {
+        break;
+      }
+    }
+
+    if (newestEventId) {
+      await setLastProcessedEventId(env, newestEventId);
     }
   } catch (error) {
     console.error('Error processing GitHub events:', error);
     throw error;
   }
 
-  return { processed, queued };
+  return {
+    processed,
+    queued,
+    pagesFetched,
+    allowedPages,
+  };
+}
+
+async function processCodeSearchDiscovery(
+  env: GithubEventsEnv,
+  initialRestSnapshot?: GitHubRateLimitSnapshot | null
+): Promise<SearchDiscoveryResult> {
+  const config = getSearchDiscoveryConfig(env);
+  const baseResult: SearchDiscoveryResult = {
+    scanned: 0,
+    queued: 0,
+    pagesFetched: 0,
+    allowedPages: 0,
+    stoppedByCursor: false,
+  };
+
+  if (!config.enabled) {
+    return {
+      ...baseResult,
+      skippedReason: 'disabled',
+    };
+  }
+
+  const restSnapshot = (!initialRestSnapshot || isRateLimitSnapshotStale(initialRestSnapshot, RATE_LIMIT_SNAPSHOT_MAX_AGE_MS))
+    ? await readOrRefreshRestRateLimitSnapshot(env)
+    : initialRestSnapshot;
+  if (!restSnapshot) {
+    return {
+      ...baseResult,
+      skippedReason: 'missing_rate_limit',
+    };
+  }
+
+  if (restSnapshot.remaining < config.minRestRemaining) {
+    return {
+      ...baseResult,
+      skippedReason: 'insufficient_rest_remaining',
+    };
+  }
+
+  const allowedPages = computeAllowedSearchPages(
+    config.pages,
+    restSnapshot.remaining,
+    restSnapshot.resetAtEpochSec,
+    config.cronIntervalSeconds,
+    config.restReserve
+  );
+
+  if (allowedPages <= 0) {
+    return {
+      ...baseResult,
+      allowedPages,
+      skippedReason: 'budget_exhausted',
+    };
+  }
+
+  const previousHeadCursor = await getCodeSearchHeadCursor(env);
+  const seenFingerprints = new Set<string>();
+  let stoppedByCursor = false;
+  let queued = 0;
+  let scanned = 0;
+  let pagesFetched = 0;
+  let nextHeadCursor: string | null = null;
+
+  for (let page = 1; page <= allowedPages; page++) {
+    const response = await searchCode(config.query, {
+      page,
+      perPage: config.perPage,
+      sort: 'indexed',
+      order: 'desc',
+      token: env.GITHUB_TOKEN,
+      userAgent: 'SkillsCat-Worker/1.0',
+      rateLimitKV: env.KV,
+    });
+
+    if (!response.ok) {
+      if (isGitHubRateLimited(response)) {
+        return {
+          scanned,
+          queued,
+          pagesFetched,
+          allowedPages,
+          stoppedByCursor,
+          skippedReason: 'search_rate_limited',
+        };
+      }
+      throw new Error(`Failed to fetch GitHub code search: ${response.status}`);
+    }
+
+    const payload = await response.json() as GitHubCodeSearchResponse;
+    const items = Array.isArray(payload.items) ? payload.items : [];
+
+    pagesFetched++;
+    if (page === 1 && items.length > 0) {
+      nextHeadCursor = buildSearchFingerprint(items[0]);
+    }
+
+    for (const item of items) {
+      scanned++;
+
+      if (!isSkillMdPath(item.path)) {
+        continue;
+      }
+
+      const fingerprint = buildSearchFingerprint(item);
+      if (!fingerprint) {
+        continue;
+      }
+
+      if (previousHeadCursor && fingerprint === previousHeadCursor) {
+        stoppedByCursor = true;
+        break;
+      }
+
+      if (seenFingerprints.has(fingerprint)) {
+        continue;
+      }
+      seenFingerprints.add(fingerprint);
+
+      if (await isSearchFingerprintProcessed(env, fingerprint)) {
+        continue;
+      }
+
+      const repo = parseRepoFullName(item.repository?.full_name);
+      if (!repo) {
+        await markSearchFingerprintProcessed(env, fingerprint);
+        continue;
+      }
+
+      const skillPath = getSkillPathFromSkillMdPath(item.path);
+      if (await wasRepoQueuedRecently(env, repo.owner, repo.name, skillPath)) {
+        await markSearchFingerprintProcessed(env, fingerprint);
+        continue;
+      }
+
+      const message: IndexingMessage = {
+        type: 'check_skill',
+        repoOwner: repo.owner,
+        repoName: repo.name,
+        skillPath,
+        discoverySource: 'github-code-search',
+        discoveryFingerprint: fingerprint,
+      };
+
+      await env.INDEXING_QUEUE.send(message);
+      await markRepoQueued(env, repo.owner, repo.name, skillPath);
+      await markSearchFingerprintProcessed(env, fingerprint);
+      queued++;
+    }
+
+    if (stoppedByCursor) {
+      break;
+    }
+
+    if (items.length < config.perPage) {
+      break;
+    }
+  }
+
+  if (nextHeadCursor) {
+    await setCodeSearchHeadCursor(env, nextHeadCursor);
+  }
+
+  return {
+    scanned,
+    queued,
+    pagesFetched,
+    allowedPages,
+    stoppedByCursor,
+  };
+}
+
+function parseDiscoveryRunLockPayload(
+  raw: string | null,
+  ttlSeconds: number
+): DiscoveryRunLockPayload | null {
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<DiscoveryRunLockPayload>;
+    const token = typeof parsed.token === 'string' ? parsed.token : null;
+    const acquiredAtEpochMs = Number(parsed.acquiredAtEpochMs);
+    const expiresAtEpochMs = Number(parsed.expiresAtEpochMs);
+
+    if (
+      token
+      && Number.isFinite(acquiredAtEpochMs)
+      && Number.isFinite(expiresAtEpochMs)
+    ) {
+      return { token, acquiredAtEpochMs, expiresAtEpochMs };
+    }
+  } catch {
+    const legacyAcquiredAtEpochMs = Number(raw);
+    if (Number.isFinite(legacyAcquiredAtEpochMs) && legacyAcquiredAtEpochMs > 0) {
+      return {
+        token: 'legacy',
+        acquiredAtEpochMs: legacyAcquiredAtEpochMs,
+        expiresAtEpochMs: legacyAcquiredAtEpochMs + ttlSeconds * 1000,
+      };
+    }
+  }
+
+  return null;
+}
+
+async function readDiscoveryRunLock(env: GithubEventsEnv): Promise<DiscoveryRunLockPayload | null> {
+  const ttlSeconds = getDiscoveryLockTtlSeconds(env);
+  const raw = await env.KV.get(RUN_LOCK_KEY);
+  return parseDiscoveryRunLockPayload(raw, ttlSeconds);
+}
+
+async function acquireDiscoveryRunLock(env: GithubEventsEnv): Promise<string | null> {
+  const existing = await readDiscoveryRunLock(env);
+  if (existing && existing.expiresAtEpochMs > Date.now()) {
+    return null;
+  }
+
+  const ttlSeconds = getDiscoveryLockTtlSeconds(env);
+  const acquiredAtEpochMs = Date.now();
+  const token = crypto.randomUUID();
+  const payload: DiscoveryRunLockPayload = {
+    token,
+    acquiredAtEpochMs,
+    expiresAtEpochMs: acquiredAtEpochMs + ttlSeconds * 1000,
+  };
+
+  await env.KV.put(RUN_LOCK_KEY, JSON.stringify(payload), {
+    expirationTtl: ttlSeconds,
+  });
+
+  const confirmed = await readDiscoveryRunLock(env);
+  if (!confirmed || confirmed.token !== token) {
+    return null;
+  }
+
+  return token;
+}
+
+async function hasDiscoveryRunLockOwnership(env: GithubEventsEnv, token: string): Promise<boolean> {
+  const current = await readDiscoveryRunLock(env);
+  if (!current) return false;
+  if (current.token !== token) return false;
+  return current.expiresAtEpochMs > Date.now();
+}
+
+async function releaseDiscoveryRunLock(env: GithubEventsEnv, token: string): Promise<void> {
+  const current = await readDiscoveryRunLock(env);
+  if (!current || current.token !== token) {
+    return;
+  }
+  await env.KV.delete(RUN_LOCK_KEY);
 }
 
 export default {
@@ -174,12 +757,44 @@ export default {
     env: GithubEventsEnv,
     _ctx: ExecutionContext
   ): Promise<void> {
+    const lockToken = await acquireDiscoveryRunLock(env);
+    if (!lockToken) {
+      console.log('GitHub Events Worker skipped due to active discovery lock');
+      return;
+    }
+
     console.log('GitHub Events Worker triggered at:', new Date().toISOString());
 
-    const result = await processEvents(env);
+    try {
+      if (!await hasDiscoveryRunLockOwnership(env, lockToken)) {
+        console.log('GitHub Events Worker lock ownership lost before discovery start');
+        return;
+      }
 
-    console.log(
-      `Processed ${result.processed} events, queued ${result.queued} repos for indexing`
-    );
+      const restBeforeEvents = await readOrRefreshRestRateLimitSnapshot(env);
+
+      if (!await hasDiscoveryRunLockOwnership(env, lockToken)) {
+        console.log('GitHub Events Worker lock ownership lost before events processing');
+        return;
+      }
+
+      const eventsResult = await processEvents(env, restBeforeEvents);
+      const restAfterEvents = await readRateLimitSnapshot('rest', { kv: env.KV });
+
+      if (!await hasDiscoveryRunLockOwnership(env, lockToken)) {
+        console.log('GitHub Events Worker lock ownership lost before code search processing');
+        return;
+      }
+
+      const searchResult = await processCodeSearchDiscovery(env, restAfterEvents);
+      const restSnapshot = await readRateLimitSnapshot('rest', { kv: env.KV });
+      const graphqlSnapshot = await readRateLimitSnapshot('graphql', { kv: env.KV });
+
+      console.log(
+        `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, rest_remaining=${restSnapshot?.remaining ?? 'unknown'}, graphql_remaining=${graphqlSnapshot?.remaining ?? 'unknown'}`
+      );
+    } finally {
+      await releaseDiscoveryRunLock(env, lockToken);
+    }
   },
 };

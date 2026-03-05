@@ -36,6 +36,7 @@
 ```mermaid
 flowchart LR
   A["GitHub Events Worker"] --> B["Indexing Queue"]
+  K["GitHub Code Search Discovery"] --> B
   B --> C["Indexing Worker"]
   C --> D["Classification Queue"]
   D --> E["Classification Worker"]

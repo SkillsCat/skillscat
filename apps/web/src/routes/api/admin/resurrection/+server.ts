@@ -26,12 +26,14 @@ function isRecentlyActive(pushedAt: string, days: number): boolean {
 async function fetchGitHubRepoData(
   owner: string,
   name: string,
-  token: string
+  token: string,
+  kv?: KVNamespace
 ): Promise<{ stargazerCount: number; pushedAt: string } | null> {
   try {
     return await graphqlRepoResurrectionMetadata(owner, name, {
       token,
       userAgent: 'SkillsCat/1.0',
+      rateLimitKV: kv,
     });
   } catch {
     return null;
@@ -94,7 +96,8 @@ export const POST: RequestHandler = async ({ request, platform }) => {
     const githubData = await fetchGitHubRepoData(
       skill.repo_owner,
       skill.repo_name,
-      githubToken
+      githubToken,
+      platform?.env?.KV
     );
 
     if (!githubData) {

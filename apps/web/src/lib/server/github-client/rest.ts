@@ -48,11 +48,35 @@ export function buildSearchCodeUrl(query: string, perPage: number = 100): string
   return url.toString();
 }
 
+export function buildSearchCodeUrlWithParams(
+  query: string,
+  options?: {
+    perPage?: number;
+    page?: number;
+    sort?: 'indexed';
+    order?: 'asc' | 'desc';
+  }
+): string {
+  const url = new URL('https://api.github.com/search/code');
+  url.searchParams.set('q', query);
+  url.searchParams.set('per_page', String(options?.perPage ?? 100));
+  url.searchParams.set('page', String(options?.page ?? 1));
+  if (options?.sort) {
+    url.searchParams.set('sort', options.sort);
+    url.searchParams.set('order', options.order ?? 'desc');
+  }
+  return url.toString();
+}
+
 export function buildPublicEventsUrl(page: number = 1, perPage: number = 100): string {
   const url = new URL('https://api.github.com/events');
   url.searchParams.set('per_page', String(perPage));
   url.searchParams.set('page', String(page));
   return url.toString();
+}
+
+export function buildRateLimitUrl(): string {
+  return 'https://api.github.com/rate_limit';
 }
 
 export function buildGitHubUserUrl(login: string): string {
@@ -92,14 +116,39 @@ export async function getTreeRecursive(owner: string, repo: string, ref: string,
   return githubRequest(buildRepoTreeUrl(owner, repo, ref, true), withOptions(options, { endpointId: 'repos_git_tree_get' }));
 }
 
-export async function searchCode(query: string, options?: GitHubClientRequestOptions & { perPage?: number }): Promise<Response> {
-  const { perPage = 100, ...rest } = options || {};
-  return githubRequest(buildSearchCodeUrl(query, perPage), withOptions(rest, { endpointId: 'search_code' }));
+export async function searchCode(
+  query: string,
+  options?: GitHubClientRequestOptions & {
+    perPage?: number;
+    page?: number;
+    sort?: 'indexed';
+    order?: 'asc' | 'desc';
+  }
+): Promise<Response> {
+  const {
+    perPage = 100,
+    page = 1,
+    sort,
+    order,
+    ...rest
+  } = options || {};
+  return githubRequest(
+    buildSearchCodeUrlWithParams(query, { perPage, page, sort, order }),
+    withOptions(rest, { endpointId: 'search_code' })
+  );
 }
 
 export async function listPublicEvents(options?: GitHubClientRequestOptions & { page?: number; perPage?: number }): Promise<Response> {
   const { page = 1, perPage = 100, ...rest } = options || {};
   return githubRequest(buildPublicEventsUrl(page, perPage), withOptions(rest, { endpointId: 'events' }));
+}
+
+export async function getRateLimit(options?: GitHubClientRequestOptions): Promise<Response> {
+  return githubRequest(buildRateLimitUrl(), withOptions(options, {
+    endpointId: 'rate_limit',
+    cache: 'off',
+    graphqlFallback: 'off',
+  }));
 }
 
 export async function getUserByLogin(login: string, options?: GitHubClientRequestOptions): Promise<Response> {
