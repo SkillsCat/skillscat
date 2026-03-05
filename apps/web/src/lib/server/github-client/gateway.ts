@@ -8,10 +8,9 @@ import {
 } from './core';
 import { classifyGitHubEndpoint, tryGraphqlFallbackForRestRateLimit } from './endpoints';
 import { GitHubRateLimitError } from './graphql';
+import { recordRateLimitFromHeaders, recordRateLimitFromRateLimitBody } from './rate-limit-kv';
 
 // Cloudflare Workers extends CacheStorage with a 'default' property
-// eslint-disable-next-line no-var
-
 declare const caches: CacheStorage & { default: Cache };
 
 const CACHE_NAMESPACE = 'https://skills.cat/github-rest-cache';
@@ -150,6 +149,35 @@ async function sendRaw(url: string, options: GitHubRequestOptions): Promise<Resp
   });
 }
 
+async function maybeRecordRestRateLimitFromResponse(
+  response: Response,
+  options: GitHubRequestOptions
+): Promise<void> {
+  if (!options.rateLimitKV) return;
+
+  await recordRateLimitFromHeaders(response.headers, 'rest', {
+    kv: options.rateLimitKV,
+    keyPrefix: options.rateLimitKeyPrefix,
+    endpointId: options.endpointId,
+  });
+
+  if (options.endpointId !== 'rate_limit' || !response.ok) return;
+
+  const isJson = (response.headers.get('content-type') || '').toLowerCase().includes('application/json');
+  if (!isJson) return;
+
+  try {
+    const body = await response.clone().json() as unknown;
+    await recordRateLimitFromRateLimitBody(body, {
+      kv: options.rateLimitKV,
+      keyPrefix: options.rateLimitKeyPrefix,
+      endpointId: options.endpointId,
+    });
+  } catch {
+    // Ignore invalid rate_limit payloads; headers-based snapshot is already recorded.
+  }
+}
+
 /**
  * Centralized GitHub transport gateway.
  * Applies shared conditional REST caching and REST->GraphQL fallback on rate limit.
@@ -194,6 +222,7 @@ export async function sendGitHubRequestThroughGateway(
 
     const conditionalOptions = withConditionalHeaders(options, validators);
     const conditionalResponse = await sendRaw(urlString, conditionalOptions);
+    await maybeRecordRestRateLimitFromResponse(conditionalResponse, conditionalOptions);
 
     if (conditionalResponse.status === 304) {
       return cachedResponse;
@@ -216,6 +245,7 @@ export async function sendGitHubRequestThroughGateway(
   }
 
   const response = await sendRaw(urlString, options);
+  await maybeRecordRestRateLimitFromResponse(response, options);
 
   if (isGitHubRateLimitResponse(response)) {
     const fallback = await maybeGraphqlFallback(url, method, options, endpoint, response.clone());

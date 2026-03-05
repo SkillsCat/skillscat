@@ -135,6 +135,8 @@ export async function rawGitHubRequest(
     endpointId: _endpointId,
     cacheTtlSeconds: _cacheTtlSeconds,
     viewerScoped: _viewerScoped,
+    rateLimitKV: _rateLimitKV,
+    rateLimitKeyPrefix: _rateLimitKeyPrefix,
     ...requestInit
   } = options;
 

@@ -84,6 +84,8 @@ export interface GitHubFetchOptions {
   body?: BodyInit | null;
   maxRetries?: number;
   notFoundAsNull?: boolean;
+  rateLimitKV?: KVNamespace;
+  rateLimitKeyPrefix?: string;
 }
 
 /**
@@ -102,6 +104,8 @@ export async function githubFetch<T>(
     body,
     maxRetries,
     notFoundAsNull = true,
+    rateLimitKV,
+    rateLimitKeyPrefix,
   } = options;
 
   const response = await githubRequest(url, {
@@ -112,6 +116,8 @@ export async function githubFetch<T>(
     headers,
     body,
     maxRetries,
+    rateLimitKV,
+    rateLimitKeyPrefix,
   });
 
   if (response.status === 404 && notFoundAsNull) {

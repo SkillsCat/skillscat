@@ -13,6 +13,8 @@ export interface GitHubRequestOptions extends Omit<RequestInit, 'headers' | 'cac
   endpointId?: string;
   cacheTtlSeconds?: number;
   viewerScoped?: boolean;
+  rateLimitKV?: KVNamespace;
+  rateLimitKeyPrefix?: string;
 }
 
 /**
