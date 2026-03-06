@@ -1,20 +1,21 @@
 <script lang="ts">
-  import { NavigationMenu } from 'bits-ui';
-  import Logo from '$lib/components/common/Logo.svelte';
-  import ThemeToggle from '$lib/components/ui/ThemeToggle.svelte';
+  import { signOut } from '$lib/auth-client';
   import SearchBox from '$lib/components/common/SearchBox.svelte';
-  import UserMenu from '$lib/components/common/UserMenu.svelte';
-  import Button from '$lib/components/ui/Button.svelte';
+  import Logo from '$lib/components/common/Logo.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
+  import LoginDialog from '$lib/components/dialog/LoginDialog.svelte';
+  import SubmitDialog from '$lib/components/dialog/SubmitDialog.svelte';
+  import NavbarCategoriesMenu from '$lib/components/layout/NavbarCategoriesMenu.svelte';
+  import ThemeToggle from '$lib/components/ui/ThemeToggle.svelte';
+  import UserMenu from '$lib/components/common/UserMenu.svelte';
   import { buildSkillPath } from '$lib/skill-path';
   import { useI18n } from '$lib/i18n/runtime';
+  import type { CurrentUser } from '$lib/types';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
-  import { useSession, signOut } from '$lib/auth-client';
   import { slide } from 'svelte/transition';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
-    ArrowDown01Icon,
     Menu01Icon,
     Cancel01Icon,
     Add01Icon,
@@ -29,27 +30,18 @@
   } from '@hugeicons/core-free-icons';
 
   interface Props {
+    currentUser?: CurrentUser | null;
     unreadCount?: number;
   }
 
-  type CategoriesMenuContentComponentType = typeof import('$lib/components/layout/NavbarCategoriesContent.svelte').default;
-  type SubmitDialogComponentType = typeof import('$lib/components/dialog/SubmitDialog.svelte').default;
-  type LoginDialogComponentType = typeof import('$lib/components/dialog/LoginDialog.svelte').default;
-
-  let { unreadCount = 0 }: Props = $props();
+  let { currentUser = null, unreadCount = 0 }: Props = $props();
 
   let mobileMenuOpen = $state(false);
   let searchQuery = $state('');
+  let categoriesMenuValue = $state('');
   let showSubmitDialog = $state(false);
   let showLoginDialog = $state(false);
-  let CategoriesMenuContentComponent = $state<CategoriesMenuContentComponentType | null>(null);
-  let SubmitDialogComponent = $state<SubmitDialogComponentType | null>(null);
-  let LoginDialogComponent = $state<LoginDialogComponentType | null>(null);
-  let isLoadingCategoriesMenu = $state(false);
-  let isLoadingSubmitDialog = $state(false);
-  let isLoadingLoginDialog = $state(false);
 
-  const session = useSession();
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
 
@@ -59,9 +51,10 @@
     mobileMenuOpen = false;
   });
 
-  function handleSignOut() {
+  async function handleSignOut() {
     mobileMenuOpen = false;
-    signOut();
+    await signOut();
+    await goto('/', { invalidateAll: true });
   }
 
   function handleSearch(query: string) {
@@ -75,78 +68,17 @@
     goto(buildSkillPath(skill.slug));
   }
 
-  async function ensureCategoriesMenuLoaded() {
-    if (CategoriesMenuContentComponent || isLoadingCategoriesMenu) return;
-    isLoadingCategoriesMenu = true;
-    try {
-      const module = await import('$lib/components/layout/NavbarCategoriesContent.svelte');
-      CategoriesMenuContentComponent = module.default;
-    } finally {
-      isLoadingCategoriesMenu = false;
-    }
-  }
-
-  async function ensureSubmitDialogLoaded() {
-    if (SubmitDialogComponent || isLoadingSubmitDialog) return;
-    isLoadingSubmitDialog = true;
-    try {
-      const module = await import('$lib/components/dialog/SubmitDialog.svelte');
-      SubmitDialogComponent = module.default;
-    } finally {
-      isLoadingSubmitDialog = false;
-    }
-  }
-
-  async function ensureLoginDialogLoaded() {
-    if (LoginDialogComponent || isLoadingLoginDialog) return;
-    isLoadingLoginDialog = true;
-    try {
-      const module = await import('$lib/components/dialog/LoginDialog.svelte');
-      LoginDialogComponent = module.default;
-    } finally {
-      isLoadingLoginDialog = false;
-    }
-  }
-
-  async function openSubmitDialog() {
-    await ensureSubmitDialogLoaded();
+  function openSubmitDialog() {
     showSubmitDialog = true;
   }
 
-  async function openLoginDialog() {
-    await ensureLoginDialogLoaded();
+  function openLoginDialog() {
     showLoginDialog = true;
   }
 
   function toggleMobileMenu() {
     mobileMenuOpen = !mobileMenuOpen;
   }
-
-  // Preload categories dropdown content in idle time.
-  $effect(() => {
-    if (typeof window === 'undefined' || CategoriesMenuContentComponent) return;
-
-    const run = () => {
-      void ensureCategoriesMenuLoaded();
-    };
-
-    if ('requestIdleCallback' in window) {
-      const callbackId = (
-        window as Window & {
-          requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
-          cancelIdleCallback: (id: number) => void;
-        }
-      ).requestIdleCallback(run, { timeout: 1200 });
-      return () => (
-        window as Window & {
-          cancelIdleCallback: (id: number) => void;
-        }
-      ).cancelIdleCallback(callbackId);
-    }
-
-    const timer = setTimeout(run, 250);
-    return () => clearTimeout(timer);
-  });
 
 </script>
 
@@ -168,66 +100,33 @@
         />
       </div>
 
-      <!-- Nav Links (Desktop) with NavigationMenu -->
+      <!-- Nav Links (Desktop) -->
       <div class="nav-links">
-        <NavigationMenu.Root class="nav-menu-root">
-          <NavigationMenu.List class="nav-menu-list">
-            <!-- Trending Link -->
-            <NavigationMenu.Item>
-              <NavigationMenu.Link
-                href="/trending"
-                class="nav-link"
-              >
-                {messages.nav.trending}
-              </NavigationMenu.Link>
-            </NavigationMenu.Item>
+        <a href="/trending" class="nav-link">
+          {messages.nav.trending}
+        </a>
 
-            <!-- Categories Dropdown -->
-            <NavigationMenu.Item value="categories">
-              <NavigationMenu.Trigger
-                class="nav-link nav-trigger"
-                onpointerenter={() => void ensureCategoriesMenuLoaded()}
-                onfocus={() => void ensureCategoriesMenuLoaded()}
-              >
-                {messages.nav.categories}
-                <span class="chevron-icon">
-                  <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2} />
-                </span>
-              </NavigationMenu.Trigger>
-
-              <NavigationMenu.Content class="nav-content" forceMount>
-                {#if CategoriesMenuContentComponent}
-                  <CategoriesMenuContentComponent />
-                {/if}
-              </NavigationMenu.Content>
-            </NavigationMenu.Item>
-
-            <!-- Indicator -->
-            <NavigationMenu.Indicator class="nav-indicator">
-              <div class="nav-indicator-arrow"></div>
-            </NavigationMenu.Indicator>
-          </NavigationMenu.List>
-
-          <!-- Viewport - Required for content rendering -->
-          <NavigationMenu.Viewport class="nav-viewport" forceMount />
-        </NavigationMenu.Root>
+        <NavbarCategoriesMenu
+          label={messages.nav.categories}
+          bind:value={categoriesMenuValue}
+        />
       </div>
 
       <!-- Right Side -->
       <div class="navbar-right">
         <div class="desktop-controls">
-          {#if $session.data?.user}
-            <Button
-              variant="cute"
-              size="sm"
+          {#if currentUser}
+            <button
+              type="button"
+              class="nav-submit-btn"
               onclick={openSubmitDialog}
             >
               <HugeiconsIcon icon={Add01Icon} size={16} strokeWidth={2} />
               <span class="submit-btn-text">{messages.nav.submit}</span>
-            </Button>
+            </button>
           {/if}
           <ThemeToggle />
-          <UserMenu {unreadCount} />
+          <UserMenu {currentUser} {unreadCount} />
         </div>
 
         <!-- Mobile Menu Button -->
@@ -261,19 +160,19 @@
         </div>
 
         <!-- User Profile Section (logged in only) -->
-        {#if $session.data?.user}
+        {#if currentUser}
           <div class="mobile-user-section">
             <div class="mobile-user-info">
               <Avatar
-                src={$session.data.user.image}
-                alt={$session.data.user.name}
-                fallback={$session.data.user.name}
+                src={currentUser.image}
+                alt={currentUser.name || messages.userMenu.userAlt}
+                fallback={currentUser.name}
                 size="sm"
                 useGithubFallback
               />
               <div>
-                <div class="mobile-user-name">{$session.data.user.name}</div>
-                <div class="mobile-user-email">{$session.data.user.email}</div>
+                <div class="mobile-user-name">{currentUser.name}</div>
+                <div class="mobile-user-email">{currentUser.email}</div>
               </div>
             </div>
           </div>
@@ -281,7 +180,7 @@
 
         <!-- Submit (logged in only) + Nav Links -->
         <div class="mobile-links">
-          {#if $session.data?.user}
+          {#if currentUser}
             <button
               class="mobile-link"
               onclick={async () => {
@@ -304,7 +203,7 @@
         </div>
 
         <!-- User Links (logged in only) -->
-        {#if $session.data?.user}
+        {#if currentUser}
           <div class="mobile-separator"></div>
           <div class="mobile-links">
             <a href="/user/skills" class="mobile-link" onclick={() => mobileMenuOpen = false}>
@@ -339,9 +238,9 @@
           <div class="mobile-sign-in-wrap">
             <button
               class="mobile-sign-in-btn"
-              onclick={async () => {
+              onclick={() => {
                 mobileMenuOpen = false;
-                await openLoginDialog();
+                openLoginDialog();
               }}
             >
               <HugeiconsIcon icon={Login03Icon} size={16} strokeWidth={2} />
@@ -354,19 +253,15 @@
   </div>
 </nav>
 
-{#if SubmitDialogComponent}
-  <SubmitDialogComponent
-    isOpen={showSubmitDialog}
-    onClose={() => showSubmitDialog = false}
-  />
-{/if}
+<SubmitDialog
+  isOpen={showSubmitDialog}
+  onClose={() => showSubmitDialog = false}
+/>
 
-{#if LoginDialogComponent}
-  <LoginDialogComponent
-    isOpen={showLoginDialog}
-    onClose={() => showLoginDialog = false}
-  />
-{/if}
+<LoginDialog
+  isOpen={showLoginDialog}
+  onClose={() => showLoginDialog = false}
+/>
 
 <style>
   .navbar {
@@ -421,7 +316,9 @@
 
   @media (min-width: 768px) {
     .nav-links {
-      display: block;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
   }
 
@@ -472,11 +369,11 @@
     background-color: var(--primary-subtle);
   }
 
-  :global(.nav-trigger[data-state="open"]) .chevron-icon {
+  :global(.nav-trigger[data-state="open"] .nav-link-chevron) {
     transform: rotate(180deg);
   }
 
-  .chevron-icon {
+  :global(.nav-link-chevron) {
     width: 0.875rem;
     height: 0.875rem;
     margin-left: 0.375rem;
@@ -532,7 +429,7 @@
     opacity: 0;
   }
 
-  .nav-indicator-arrow {
+  :global(.nav-indicator-arrow) {
     position: relative;
     top: 70%;
     width: 0.75rem;
@@ -569,6 +466,44 @@
     .submit-btn-text {
       display: inline;
     }
+  }
+
+  .nav-submit-btn {
+    --btn-shadow-offset: 3px;
+    --btn-shadow-color: oklch(50% 0.22 55);
+
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.875rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #ffffff;
+    background-color: var(--primary);
+    border: none;
+    border-radius: var(--radius-full);
+    box-shadow: 0 var(--btn-shadow-offset) 0 0 var(--btn-shadow-color);
+    cursor: pointer;
+    transform: translateY(0);
+    transition:
+      transform 0.1s ease,
+      box-shadow 0.1s ease,
+      background-color 0.15s ease;
+  }
+
+  .nav-submit-btn:hover {
+    --btn-shadow-offset: 5px;
+    background-color: var(--primary-hover);
+    transform: translateY(-2px);
+  }
+
+  .nav-submit-btn:active {
+    --btn-shadow-offset: 1px;
+    transform: translateY(2px);
+  }
+
+  :global(.dark) .nav-submit-btn {
+    --btn-shadow-color: oklch(40% 0.20 55);
   }
 
   .mobile-menu-btn {

@@ -12,6 +12,13 @@ export interface ApiResponse<T> {
   };
 }
 
+export interface CurrentUser {
+  id: string;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+}
+
 // ========== Skill Types ==========
 export interface SkillCardData {
   id: string;

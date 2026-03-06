@@ -37,11 +37,34 @@
     xl: { px: 120, github: 240 },
   };
 
+  function normalizeGithubAvatarUrl(url: string | null, requestedSize: number): string | null {
+    if (!url) return null;
+
+    try {
+      const normalized = new URL(url);
+      if (normalized.hostname !== 'avatars.githubusercontent.com') {
+        return url;
+      }
+
+      const currentSize = Number(normalized.searchParams.get('s'));
+      if (!Number.isFinite(currentSize) || currentSize > requestedSize) {
+        normalized.searchParams.set('s', String(requestedSize));
+      }
+
+      return normalized.toString();
+    } catch {
+      return url;
+    }
+  }
+
   const imageUrl = $derived(
-    src ||
-      (useGithubFallback && fallback
-        ? `https://avatars.githubusercontent.com/${fallback}?s=${sizeMap[size].github}`
-        : null),
+    normalizeGithubAvatarUrl(
+      src ||
+        (useGithubFallback && fallback
+          ? `https://avatars.githubusercontent.com/${fallback}?s=${sizeMap[size].github}`
+          : null),
+      sizeMap[size].github,
+    ),
   );
 
   const placeholder = $derived(
@@ -66,6 +89,9 @@
       src={imageUrl}
       {alt}
       loading="lazy"
+      decoding="async"
+      width={sizeMap[size].px}
+      height={sizeMap[size].px}
       class="avatar-image"
       onerror={() => {
         imageError = true;

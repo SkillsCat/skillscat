@@ -50,6 +50,7 @@
     suggestionMode?: 'categories' | 'skills';
     showHistory?: boolean;
     suggestionCategory?: string;
+    autofocus?: boolean;
   }
 
   interface SkillSuggestion {
@@ -87,7 +88,8 @@
     showSuggestions = true,
     suggestionMode = 'categories',
     showHistory = true,
-    suggestionCategory = ''
+    suggestionCategory = '',
+    autofocus = false
   }: Props = $props();
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
@@ -164,6 +166,18 @@
     if (showHistory) {
       queryHistory = loadSearchHistory();
     }
+
+    if (autofocus) {
+      requestAnimationFrame(() => {
+        inputElement?.focus();
+        if (inputElement) {
+          const end = inputElement.value.length;
+          inputElement.setSelectionRange(end, end);
+        }
+        isFocused = true;
+      });
+    }
+
     window.addEventListener('resize', updateSuggestionLimit);
 
     return () => {
