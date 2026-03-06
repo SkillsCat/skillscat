@@ -3,6 +3,8 @@
   import Avatar from '$lib/components/common/Avatar.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import { toast } from '$lib/components/ui/Toast.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getSettingsCopy } from '$lib/i18n/settings';
 
   interface Props {
     data: {
@@ -19,6 +21,9 @@
   }
 
   let { data }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  const copy = $derived(getSettingsCopy(i18n.locale()));
 
   let loading = $state(false);
   let success = $state(false);
@@ -60,10 +65,10 @@
           denied = true;
         }
       } else {
-        toast(result.error || 'Authorization failed', 'error');
+        toast(result.error || messages.device.authorizationFailed, 'error');
       }
     } catch {
-      toast('Failed to authorize', 'error');
+      toast(messages.device.authorizeFailed, 'error');
     } finally {
       loading = false;
     }
@@ -81,9 +86,9 @@
 
   function getScopeDescription(scope: string): string {
     switch (scope) {
-      case 'read': return 'View your skills and favorites';
-      case 'write': return 'Manage your skills';
-      case 'publish': return 'Publish new skills';
+      case 'read': return messages.device.scopeRead;
+      case 'write': return messages.device.scopeWrite;
+      case 'publish': return messages.device.scopePublish;
       default: return scope;
     }
   }
@@ -91,14 +96,16 @@
   function getTimeRemaining(): string {
     if (!data.cliSession?.expiresAt) return '';
     const remaining = data.cliSession.expiresAt - Date.now();
-    if (remaining <= 0) return 'Expired';
+    if (remaining <= 0) return messages.common.expired;
     const minutes = Math.floor(remaining / 60000);
-    return `${minutes} minute${minutes !== 1 ? 's' : ''} remaining`;
+    return minutes === 1
+      ? i18n.t(messages.common.minuteRemaining, { count: minutes })
+      : i18n.t(messages.common.minutesRemaining, { count: minutes });
   }
 </script>
 
 <svelte:head>
-  <title>Authorize CLI - SkillsCat</title>
+  <title>{copy.registryAuth.title}</title>
   <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
@@ -108,7 +115,7 @@
       <img src="/favicon-256x256.png" alt="SkillsCat" width="88" height="88" />
     </div>
 
-    <h1>Authorize CLI</h1>
+    <h1>{copy.registryAuth.heading}</h1>
 
     {#if success}
       <div class="success-state">
@@ -118,8 +125,8 @@
             <path d="M9 12l2 2 4-4"/>
           </svg>
         </div>
-        <h2>Authorization Successful</h2>
-        <p>You can close this tab and return to your terminal.</p>
+        <h2>{copy.registryAuth.successTitle}</h2>
+        <p>{copy.registryAuth.successDescription}</p>
       </div>
     {:else if denied}
       <div class="denied-state">
@@ -129,29 +136,29 @@
             <path d="M15 9l-6 6M9 9l6 6"/>
           </svg>
         </div>
-        <h2>Authorization Denied</h2>
-        <p>You can close this tab and return to your terminal.</p>
+        <h2>{copy.registryAuth.deniedTitle}</h2>
+        <p>{copy.registryAuth.deniedDescription}</p>
       </div>
     {:else if !data.user}
       <!-- Not logged in -->
       <p class="description">
-        Sign in to authorize the SkillsCat CLI on your device.
+        {copy.registryAuth.signInDescription}
       </p>
 
       <button type="button" onclick={handleSignIn} class="login-button">
         <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
           <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
         </svg>
-        <span>Sign in with GitHub</span>
+        <span>{messages.device.signInWithGithub}</span>
       </button>
     {:else if data.cliSession}
       <!-- Logged in with valid session -->
       <p class="description">
-        The SkillsCat CLI is requesting access to your account.
+        {copy.registryAuth.requestDescription}
       </p>
 
       <div class="permissions">
-        <h3>Permissions Requested</h3>
+        <h3>{copy.registryAuth.permissionsRequested}</h3>
         <ul>
           {#each data.cliSession.scopes as scope}
             <li>
@@ -169,7 +176,7 @@
       </div>
 
       <div class="user-info">
-        <span>Authorizing as</span>
+        <span>{messages.device.authorizingAs}</span>
         <Avatar
           src={data.user.image}
           alt={data.user.name || ''}
@@ -183,24 +190,24 @@
 
       <div class="actions">
         <Button variant="cute" onclick={() => authorize('approve')} disabled={loading}>
-          {loading ? 'Authorizing...' : 'Authorize'}
+          {loading ? messages.common.authorizing : messages.common.authorize}
         </Button>
         <Button variant="outline" onclick={() => authorize('deny')} disabled={loading}>
-          Deny
+          {messages.common.deny}
         </Button>
       </div>
     {:else}
       <!-- Logged in but no valid session -->
       <p class="description">
-        No valid authorization session found.
+        {copy.registryAuth.noValidSession}
       </p>
 
       <p class="hint">
-        Please run <code>skillscat login</code> in your terminal to start a new authorization.
+        {copy.registryAuth.runLoginHint}
       </p>
 
       <div class="user-info">
-        <span>Signed in as</span>
+        <span>{messages.device.signedInAs}</span>
         <Avatar
           src={data.user.image}
           alt={data.user.name || ''}
@@ -364,13 +371,6 @@
   .hint {
     color: var(--muted-foreground);
     font-size: 0.875rem;
-  }
-
-  .hint code {
-    background: var(--background);
-    padding: 0.125rem 0.375rem;
-    border-radius: 0.25rem;
-    font-family: monospace;
   }
 
   .success-state, .denied-state {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { SparklesIcon } from '@hugeicons/core-free-icons';
 
@@ -7,6 +8,8 @@
   }
 
   let { count }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 </script>
 
 <div class="stats-capsule">
@@ -14,8 +17,8 @@
     <HugeiconsIcon icon={SparklesIcon} size={14} strokeWidth={2.5} />
   </span>
   <span class="stats-text">
-    <span class="stats-count">{count.toLocaleString()}</span>
-    agent skills indexed
+    <span class="stats-count">{i18n.formatNumber(count)}</span>
+    {messages.common.skillsIndexedSuffix}
   </span>
 </div>
 

@@ -4,6 +4,9 @@
   import Button from '$lib/components/ui/Button.svelte';
   import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getSettingsCopy } from '$lib/i18n/settings';
+  import { getUiCopy } from '$lib/i18n/ui';
 
   interface Org {
     id: string;
@@ -25,6 +28,10 @@
   let deleting = $state(false);
   let connecting = $state(false);
   let connectError = $state<string | null>(null);
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  const copy = $derived(getSettingsCopy(i18n.locale()));
+  const ui = $derived(getUiCopy(i18n.locale()));
 
   const slug = $derived($page.params.slug);
   const isOwner = $derived(org?.userRole === 'owner');
@@ -44,13 +51,13 @@
         const data = await res.json() as { organization?: Org };
         org = data.organization ?? null;
         if (!org) {
-          error = 'Organization not found';
+          error = messages.orgSettings.orgNotFound;
         }
       } else {
-        error = 'Failed to load organization';
+        error = messages.orgSettings.failedToLoadOrganization;
       }
     } catch {
-      error = 'Failed to load organization';
+      error = messages.orgSettings.failedToLoadOrganization;
     } finally {
       loading = false;
     }
@@ -67,10 +74,10 @@
       if (res.ok) {
         await loadOrg();
       } else {
-        connectError = data.message || 'Failed to connect GitHub organization';
+        connectError = data.message || copy.orgProfile.connectFailed;
       }
     } catch {
-      connectError = 'Failed to connect GitHub organization';
+      connectError = copy.orgProfile.connectFailed;
     } finally {
       connecting = false;
     }
@@ -95,8 +102,8 @@
 
 <div class="profile-page">
   <div class="page-header">
-    <h1>Profile</h1>
-    <p class="description">Manage your organization's profile and settings.</p>
+    <h1>{copy.orgProfile.title}</h1>
+    <p class="description">{copy.orgProfile.description}</p>
   </div>
 
   {#if loading}
@@ -105,16 +112,16 @@
     </div>
   {:else if error}
     <ErrorState
-      title="Failed to Load"
+      title={messages.orgSettings.failedToLoadOrganization}
       message={error}
-      primaryActionText="Try Again"
+      primaryActionText={messages.common.tryAgain}
       primaryActionClick={loadOrg}
-      secondaryActionText="Go Back"
+      secondaryActionText={messages.common.goBack}
       secondaryActionClick={() => history.back()}
     />
   {:else if org}
     <!-- Profile Section -->
-    <SettingsSection title="Organization Profile" description="Your organization's public information.">
+    <SettingsSection title={copy.orgProfile.sectionTitle} description={copy.orgProfile.sectionDescription}>
       <div class="profile-card">
         <Avatar
           src={org.avatarUrl}
@@ -133,12 +140,12 @@
               <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
               </svg>
-              Verified
+              {ui.badges.verified}
             </span>
           {/if}
         </div>
         <Button variant="cute" size="sm" href="/org/{slug}">
-          View Public Profile
+          {copy.orgProfile.viewPublicProfile}
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
           </svg>
@@ -147,7 +154,7 @@
     </SettingsSection>
 
     <!-- GitHub Connection -->
-    <SettingsSection title="GitHub Connection" description="Your organization's GitHub integration.">
+    <SettingsSection title={copy.orgProfile.githubConnection} description={copy.orgProfile.githubConnectionDescription}>
       {#if org.githubConnected}
         <div class="github-card">
           <div class="github-icon">
@@ -156,10 +163,10 @@
             </svg>
           </div>
           <div class="github-info">
-            <h4>GitHub Organization</h4>
-            <p>Connected as @{org.slug}</p>
+            <h4>{copy.orgProfile.githubOrganization}</h4>
+            <p>{i18n.t(copy.orgProfile.connectedAs, { slug: org.slug })}</p>
           </div>
-          <span class="connection-status connected">Connected</span>
+          <span class="connection-status connected">{ui.badges.connected}</span>
         </div>
       {:else}
         <div class="github-card not-connected">
@@ -169,8 +176,8 @@
             </svg>
           </div>
           <div class="github-info">
-            <h4>Connect to GitHub</h4>
-            <p>Link a GitHub organization to sync skills and enable verification.</p>
+            <h4>{copy.orgProfile.connectTitle}</h4>
+            <p>{copy.orgProfile.connectDescription}</p>
             {#if connectError}
               <p class="connect-error">{connectError}</p>
             {/if}
@@ -179,7 +186,7 @@
             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
             </svg>
-            {connecting ? 'Connecting...' : 'Connect GitHub'}
+            {connecting ? messages.common.processing : copy.orgProfile.connectAction}
           </Button>
         </div>
       {/if}
@@ -187,14 +194,14 @@
 
     <!-- Danger Zone (owners only) -->
     {#if isOwner}
-      <SettingsSection title="Danger Zone" danger>
+      <SettingsSection title={copy.orgProfile.dangerZone} danger>
         <div class="danger-card">
           <div class="danger-info">
-            <h4>Delete Organization</h4>
-            <p>Permanently delete this organization and all associated data.</p>
+            <h4>{copy.orgProfile.deleteOrganization}</h4>
+            <p>{copy.orgProfile.deleteOrganizationDescription}</p>
           </div>
           <Button variant="danger" size="sm" onclick={() => showDeleteConfirm = true}>
-            Delete
+            {messages.common.delete}
           </Button>
         </div>
       </SettingsSection>
@@ -207,17 +214,17 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="dialog-overlay" role="presentation" onclick={() => showDeleteConfirm = false}>
     <div class="dialog danger-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" tabindex="-1" onclick={(e) => e.stopPropagation()}>
-      <h2 id="delete-dialog-title">Delete Organization</h2>
+      <h2 id="delete-dialog-title">{copy.orgProfile.deleteDialogTitle}</h2>
       <p class="dialog-warning">
-        This will permanently delete:
+        {copy.orgProfile.deleteDialogWarning}
       </p>
       <ul class="delete-list">
-        <li>All organization skills</li>
-        <li>All API tokens</li>
-        <li>All member associations</li>
+        <li>{copy.orgProfile.deleteSkills}</li>
+        <li>{copy.orgProfile.deleteTokens}</li>
+        <li>{copy.orgProfile.deleteMembers}</li>
       </ul>
       <p class="dialog-confirm-text">
-        Type the organization slug <strong>{org.slug}</strong> to confirm:
+        {i18n.t(copy.orgProfile.typeSlugToConfirm, { slug: org.slug })}
       </p>
       <input
         type="text"
@@ -228,14 +235,14 @@
       />
       <div class="dialog-actions">
         <Button variant="ghost" onclick={() => { showDeleteConfirm = false; deleteConfirmText = ''; }} disabled={deleting}>
-          Cancel
+          {messages.common.cancel}
         </Button>
         <button
           class="delete-btn"
           onclick={handleDeleteOrg}
           disabled={deleting || deleteConfirmText !== org.slug}
         >
-          {deleting ? 'Deleting...' : 'Delete Organization'}
+          {deleting ? messages.common.deleting : copy.orgProfile.deleteOrganization}
         </button>
       </div>
     </div>

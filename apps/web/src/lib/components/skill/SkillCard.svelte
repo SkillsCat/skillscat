@@ -2,7 +2,8 @@
   import { onMount } from 'svelte';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { StarIcon, Clock01Icon } from '@hugeicons/core-free-icons';
-  import { getCategoryBySlug } from '$lib/constants/categories';
+  import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
+  import { useI18n } from '$lib/i18n/runtime';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import { buildSkillPath } from '$lib/skill-path';
 
@@ -30,14 +31,13 @@
   let showTimeBadge = $state(true);
   let resizeObserver: ResizeObserver | null = null;
   let measureFrame = 0;
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
   let primaryCategoryLabel = $derived(getPrimaryCategoryLabel());
   let relativeTimeLabel = $derived(formatRelativeTime(skill.updatedAt));
 
   function formatNumber(num: number): string {
-    if (num >= 1000) {
-      return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
-    }
-    return num.toString();
+    return i18n.formatCompactNumber(num);
   }
 
   function formatRelativeTime(timestamp: number): string {
@@ -46,15 +46,15 @@
     const days = Math.floor(diff / 86400000);
     const months = Math.floor(days / 30);
 
-    if (months > 0) return `${months}mo ago`;
-    if (days > 0) return `${days}d ago`;
-    return 'today';
+    if (months > 0) return i18n.t(messages.common.relativeMonthsAgo, { count: months });
+    if (days > 0) return i18n.t(messages.common.relativeDaysAgo, { count: days });
+    return messages.common.relativeToday;
   }
 
   function getPrimaryCategoryLabel(): string | null {
     const category = skill.categories?.[0];
     if (!category) return null;
-    return getCategoryBySlug(category)?.name || category;
+    return getLocalizedCategoryBySlug(category, i18n.locale())?.name || category;
   }
 
   function shouldMeasureTimeBadge(): boolean {
@@ -181,7 +181,7 @@
 
       <!-- Author -->
       <p class="text-sm text-fg-muted font-medium truncate">
-        by {skill.repoOwner}
+        {i18n.t(messages.common.byAuthor, { author: skill.repoOwner })}
       </p>
 
       <!-- Description -->

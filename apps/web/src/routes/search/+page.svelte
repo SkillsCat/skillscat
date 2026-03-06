@@ -5,8 +5,9 @@
   import Section from '$lib/components/layout/Section.svelte';
   import EmptyState from '$lib/components/feedback/EmptyState.svelte';
   import { CATEGORIES } from '$lib/constants';
+  import { localizeCategory } from '$lib/i18n/categories';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
-  import { SITE_DESCRIPTION } from '$lib/seo/constants';
   import {
     Search01Icon,
     GitBranchIcon,
@@ -59,8 +60,13 @@
   }
 
   let { data }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 
   let searchValue = $state('');
+  const localizedMatchedCategories = $derived(
+    data.matchedCategories.map((category) => localizeCategory(category, i18n.locale()))
+  );
 
   // Icon mapping for categories
   const categoryIcons: Record<string, typeof GitBranchIcon> = {
@@ -126,11 +132,15 @@
       window.location.href = `/search?q=${encodeURIComponent(newQuery.trim())}`;
     }
   }
+
+  function handleCategorySelect(category: { slug: string }) {
+    window.location.href = `/category/${encodeURIComponent(category.slug)}`;
+  }
 </script>
 
 <svelte:head>
-  <title>{data.query ? `Search: ${data.query}` : 'Search'} - SkillsCat</title>
-  <meta name="description" content={SITE_DESCRIPTION} />
+  <title>{data.query ? `${i18n.t(messages.searchPage.titleWithQuery, { query: data.query })} - SkillsCat` : `${messages.searchPage.title} - SkillsCat`}</title>
+  <meta name="description" content={messages.searchPage.startDescription} />
   <link rel="canonical" href="https://skills.cat/search" />
   <meta name="robots" content="noindex, follow" />
 </svelte:head>
@@ -142,13 +152,14 @@
       <span class="page-title-icon">
         <HugeiconsIcon icon={Search01Icon} strokeWidth={2} />
       </span>
-      Search
+      {messages.searchPage.title}
     </h1>
     <div class="max-w-xl mt-4">
       <SearchBox
         bind:value={searchValue}
         onSearch={handleSearch}
-        placeholder="Search skills, categories..."
+        onSelectCategory={handleCategorySelect}
+        placeholder={messages.searchPage.placeholder}
       />
     </div>
   </div>
@@ -156,14 +167,18 @@
   {#if data.query}
     <!-- Results Summary -->
     <div class="mb-8 text-fg-muted">
-      Found {data.skills.length} skills and {data.matchedCategories.length} categories for "{data.query}"
+      {i18n.t(messages.searchPage.summary, {
+        skills: data.skills.length,
+        categories: localizedMatchedCategories.length,
+        query: data.query,
+      })}
     </div>
 
     <!-- Categories -->
-    {#if data.matchedCategories.length > 0}
-      <Section title="Categories" class="mb-8">
+    {#if localizedMatchedCategories.length > 0}
+      <Section title={messages.searchPage.categoriesSection} class="mb-8">
         <div class="category-chips">
-          {#each data.matchedCategories as category (category.slug)}
+          {#each localizedMatchedCategories as category (category.slug)}
             <a
               href="/category/{category.slug}"
               class="category-chip"
@@ -180,7 +195,7 @@
 
     <!-- Skills -->
     {#if data.skills.length > 0}
-      <Section title="Skills">
+      <Section title={messages.searchPage.skillsSection}>
         <Grid cols={3}>
           {#each data.skills as skill (skill.id)}
             <SkillCard {skill} />
@@ -192,9 +207,9 @@
     <!-- No Results -->
     {#if data.skills.length === 0 && data.matchedCategories.length === 0}
       <EmptyState
-        title="No results found"
-        description={`We couldn't find anything matching "${data.query}". Try a different search term.`}
-        actionText="Browse Trending Skills"
+        title={messages.searchPage.noResultsTitle}
+        description={i18n.t(messages.searchPage.noResultsDescription, { query: data.query })}
+        actionText={messages.common.browseTrendingSkills}
         actionHref="/trending"
       >
         {#snippet icon()}
@@ -205,8 +220,8 @@
   {:else}
     <!-- Empty State -->
     <EmptyState
-      title="Start searching"
-      description="Enter a search term to find skills and categories."
+      title={messages.searchPage.startTitle}
+      description={messages.searchPage.startDescription}
     >
       {#snippet icon()}
         <HugeiconsIcon icon={Search01Icon} size={40} strokeWidth={1.5} />

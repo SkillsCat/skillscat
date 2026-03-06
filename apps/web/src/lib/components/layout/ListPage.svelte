@@ -4,6 +4,7 @@
   import SkillCard from '$lib/components/skill/SkillCard.svelte';
   import EmptyState from '$lib/components/feedback/EmptyState.svelte';
   import Pagination from '$lib/components/ui/Pagination.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Search01Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
@@ -28,6 +29,8 @@
 
   let { title, icon: titleIcon, description, skills, emptyMessage = 'No skills found', pagination }: Props = $props();
   let searchQuery = $state('');
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 
   const filteredSkills = $derived(
     searchQuery
@@ -62,7 +65,7 @@
     <!-- Search -->
     <div class="mb-8 max-w-md">
       <SearchBox
-        placeholder="Filter skills..."
+        placeholder={messages.lists.filterSkills}
         bind:value={searchQuery}
       />
     </div>
@@ -70,11 +73,11 @@
     <!-- Results count -->
     <div class="mb-6 text-sm text-fg-muted">
       {#if searchQuery}
-        Showing {showingCount} of {skills.length} skills on this page
+        {i18n.t(messages.lists.showingFilteredOnPage, { count: showingCount, pageCount: skills.length })}
       {:else if pagination}
-        Showing {startItem}-{endItem} of {totalCount} skills
+        {i18n.t(messages.lists.showingRange, { start: startItem, end: endItem, total: totalCount })}
       {:else}
-        Showing {showingCount} of {totalCount} skills
+        {i18n.t(messages.lists.showingFiltered, { count: showingCount, total: totalCount })}
       {/if}
     </div>
 
@@ -87,8 +90,8 @@
 
     {#if filteredSkills.length === 0}
       <EmptyState
-        title="No matches"
-        description={`No skills found matching "${searchQuery}"`}
+        title={messages.common.noMatches}
+        description={i18n.t(messages.common.noMatchesFor, { query: searchQuery })}
       >
         {#snippet icon()}
           <HugeiconsIcon icon={Search01Icon} size={40} strokeWidth={1.5} />
@@ -109,8 +112,8 @@
   {:else}
     <EmptyState
       title={emptyMessage}
-      description="Skills will appear here once they're indexed."
-      actionText="Browse Categories"
+      description={messages.lists.skillsWillAppear}
+      actionText={messages.common.browseCategories}
       actionHref="/categories"
     >
       {#snippet icon()}

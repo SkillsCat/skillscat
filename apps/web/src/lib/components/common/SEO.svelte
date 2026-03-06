@@ -1,6 +1,8 @@
 <script lang="ts">
   import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
-  import { SITE_DESCRIPTION, SITE_LOCALE, SITE_NAME, SITE_URL } from '$lib/seo/constants';
+  import { SITE_NAME, SITE_URL } from '$lib/seo/constants';
+  import { getSeoLocaleMetadata } from '$lib/i18n/seo';
+  import { useI18n } from '$lib/i18n/runtime';
 
   /**
    * SEO Component - 结构化数据和 Meta 标签
@@ -40,9 +42,10 @@
     structuredData,
   }: Props = $props();
 
+  const i18n = useI18n();
   const siteName = SITE_NAME;
   const siteUrl = SITE_URL;
-  const locale = SITE_LOCALE;
+  const localeMeta = $derived(getSeoLocaleMetadata(i18n.locale()));
 
   const fullUrl = $derived(
     url
@@ -60,12 +63,12 @@
   );
 
   // Default structured data for the website
-  const defaultStructuredData = {
+  const defaultStructuredData = $derived({
     '@context': 'https://schema.org',
     '@type': 'WebSite',
     name: siteName,
     url: siteUrl,
-    description: SITE_DESCRIPTION,
+    description,
     potentialAction: {
       '@type': 'SearchAction',
       target: {
@@ -74,7 +77,7 @@
       },
       'query-input': 'required name=search_term_string',
     },
-  };
+  });
 
   const jsonLd = $derived(
     structuredData === undefined ? (noindex ? null : defaultStructuredData) : structuredData
@@ -103,7 +106,7 @@
   <meta property="og:title" content={title} />
   <meta property="og:description" content={description} />
   <meta property="og:site_name" content={siteName} />
-  <meta property="og:locale" content={locale} />
+  <meta property="og:locale" content={localeMeta.ogLocale} />
   <meta property="og:image" content={fullImage} />
   <meta property="og:image:secure_url" content={fullImage} />
   <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
@@ -138,8 +141,6 @@
   <!-- Canonical URL -->
   {#if hasCanonical}
     <link rel="canonical" href={fullUrl} />
-    <link rel="alternate" hreflang="en" href={fullUrl} />
-    <link rel="alternate" hreflang="x-default" href={fullUrl} />
   {/if}
 
   <!-- Structured Data -->

@@ -1,15 +1,33 @@
 import { createAuth, linkAuthorToUser, type AuthEnv } from '$lib/server/auth';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { building } from '$app/environment';
-import type { Handle } from '@sveltejs/kit';
+import type { Handle, ResolveOptions } from '@sveltejs/kit';
 import { runRequestSecurity, shouldNoIndexPath } from '$lib/server/request-security';
 import { setCacheVersion } from '$lib/server/cache';
 import { getCanonicalSkillPathFromPathname, normalizeSkillOwner } from '$lib/skill-path';
+import { getHtmlLang, resolveRequestLocale } from '$lib/i18n/resolve';
+import { LOCALE_COOKIE_NAME } from '$lib/i18n/config';
 
 const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
 const STATUS_OVERRIDE_HEADER = 'X-Skillscat-Status-Override';
 const AUTHOR_LINK_COOKIE = 'sc-author-linked';
 const AUTHOR_LINK_COOKIE_TTL_SECONDS = 24 * 60 * 60;
+
+function applyHtmlLang(html: string, lang: string): string {
+  return html.replace(/<html lang="[^"]*">/, `<html lang="${lang}">`);
+}
+
+function withHtmlLangTransform(lang: string, options?: ResolveOptions): ResolveOptions {
+  const existingTransform = options?.transformPageChunk;
+
+  return {
+    ...options,
+    transformPageChunk: async ({ html, done }) => {
+      const transformed = existingTransform ? await existingTransform({ html, done }) ?? html : html;
+      return applyHtmlLang(transformed, lang);
+    },
+  };
+}
 
 function cloneResponseWithHeader(response: Response, key: string, value: string): Response {
   const headers = new Headers(response.headers);
@@ -131,6 +149,14 @@ async function resolveProfilePathForSkillOwner(db: D1Database, ownerSegment: str
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
+  const resolvedLocale = resolveRequestLocale({
+    cookieLocale: event.cookies.get(LOCALE_COOKIE_NAME),
+    acceptLanguage: event.request.headers.get('accept-language'),
+  });
+  event.locals.locale = resolvedLocale.locale;
+  event.locals.localeSource = resolvedLocale.source;
+  event.locals.htmlLang = getHtmlLang(resolvedLocale.locale);
+
   const canonicalSkillPath = getCanonicalSkillPathFromPathname(event.url.pathname);
   if (canonicalSkillPath && canonicalSkillPath !== event.url.pathname) {
     const location = `${canonicalSkillPath}${event.url.search}`;
@@ -168,7 +194,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     event.locals.auth = async () => ({ user: null });
     event.locals.session = null;
     event.locals.user = null;
-    const response = await resolve(event);
+    const response = await resolve(event, withHtmlLangTransform(event.locals.htmlLang));
     return applyResponseSecurityHeaders(event.url.pathname, response);
   }
 
@@ -240,6 +266,11 @@ export const handle: Handle = async ({ event, resolve }) => {
     event.locals.user = null;
   }
 
-  const response = await svelteKitHandler({ event, resolve, auth, building });
+  const response = await svelteKitHandler({
+    event,
+    resolve: (currentEvent) => resolve(currentEvent, withHtmlLangTransform(event.locals.htmlLang)),
+    auth,
+    building,
+  });
   return applyResponseSecurityHeaders(event.url.pathname, response);
 };

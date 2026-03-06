@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { useSession } from '$lib/auth-client';
   import Avatar from '$lib/components/common/Avatar.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     SparklesIcon,
@@ -19,6 +20,8 @@
   let { children }: Props = $props();
 
   const session = useSession();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 
   interface Org {
     id: string;
@@ -64,20 +67,20 @@
           goto(`/org/${slug}`);
         }
       } else {
-        error = 'Organization not found';
+        error = messages.orgSettings.orgNotFound;
       }
     } catch {
-      error = 'Failed to load organization';
+      error = messages.orgSettings.failedToLoadOrganization;
     } finally {
       loading = false;
     }
   }
 
   const navItems = $derived([
-    { href: `/org/${slug}/settings/skills`, label: 'Skills', icon: SparklesIcon },
-    { href: `/org/${slug}/settings/members`, label: 'Members', icon: UserMultiple02Icon },
-    { href: `/org/${slug}/settings/tokens`, label: 'API Tokens', icon: Key01Icon },
-    { href: `/org/${slug}/settings`, label: 'Profile', icon: Settings02Icon, exact: true },
+    { href: `/org/${slug}/settings/skills`, label: messages.orgSettings.skills, icon: SparklesIcon },
+    { href: `/org/${slug}/settings/members`, label: messages.orgSettings.members, icon: UserMultiple02Icon },
+    { href: `/org/${slug}/settings/tokens`, label: messages.orgSettings.apiTokens, icon: Key01Icon },
+    { href: `/org/${slug}/settings`, label: messages.orgSettings.profile, icon: Settings02Icon, exact: true },
   ]);
 
   function isActive(href: string, exact = false): boolean {
@@ -103,7 +106,7 @@
 </script>
 
 <svelte:head>
-  <title>{org?.displayName || slug} Settings - SkillsCat</title>
+  <title>{org?.displayName || slug} {messages.orgSettings.title} - SkillsCat</title>
   <meta name="robots" content="noindex, nofollow, noarchive" />
 </svelte:head>
 
@@ -132,7 +135,7 @@
         </div>
       </a>
 
-      <h2 class="sidebar-title">Settings</h2>
+      <h2 class="sidebar-title">{messages.orgSettings.title}</h2>
       <nav class="sidebar-nav" bind:this={navEl}>
         {#each navItems as item}
           <a

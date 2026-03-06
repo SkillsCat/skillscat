@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Copy01Icon, Tick01Icon } from '@hugeicons/core-free-icons';
 
@@ -10,6 +11,8 @@
 
   let { text, size = 'md', class: className = '' }: Props = $props();
   let copied = $state(false);
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 
   function copyToClipboard() {
     navigator.clipboard.writeText(text);
@@ -36,7 +39,7 @@
   </span>
   {#if size !== 'sm'}
     <span class="button-text">
-      {copied ? 'Copied!' : 'Copy'}
+      {copied ? messages.common.copied : messages.common.copy}
     </span>
   {/if}
 </button>

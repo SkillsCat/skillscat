@@ -1,13 +1,37 @@
 <script lang="ts">
   import '../app.css';
+  import { browser } from '$app/environment';
   import Navbar from '$lib/components/layout/Navbar.svelte';
   import Footer from '$lib/components/layout/Footer.svelte';
   import Toast from '$lib/components/ui/Toast.svelte';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { useSession } from '$lib/auth-client';
+  import { createI18nRuntime, setI18nContext } from '$lib/i18n/runtime';
+  import type { SupportedLocale } from '$lib/i18n/config';
 
-  let { children, data } = $props();
+  interface Props {
+    children: import('svelte').Snippet;
+    data: {
+      unreadCount: number;
+      locale: SupportedLocale;
+      localeSource: 'cookie' | 'accept-language' | 'default';
+      htmlLang: string;
+      availableLocales: ReadonlyArray<{ code: SupportedLocale; label: string }>;
+    };
+  }
+
+  let { children, data }: Props = $props();
+  let selectedLocale = $state<SupportedLocale | null>(null);
+  const locale = $derived(selectedLocale ?? data.locale);
+
+  const i18n = createI18nRuntime({
+    getLocale: () => locale,
+    setLocale: (nextLocale) => {
+      selectedLocale = nextLocale;
+    },
+  });
+  setI18nContext(i18n);
 
   let scrollY = $state(0);
   let isScrolled = $derived(scrollY > 20);
@@ -17,6 +41,12 @@
   let isLoadingUnreadCount = $state(false);
   const session = useSession();
   const UNREAD_COUNT_REFRESH_INTERVAL_MS = 15_000;
+
+  $effect(() => {
+    if (browser) {
+      document.documentElement.lang = i18n.htmlLang();
+    }
+  });
 
   async function loadUnreadCount(options?: { force?: boolean; signal?: AbortSignal }): Promise<void> {
     const force = options?.force ?? false;

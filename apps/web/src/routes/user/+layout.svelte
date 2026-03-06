@@ -3,6 +3,7 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { useSession } from '$lib/auth-client';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     SparklesIcon,
@@ -20,6 +21,8 @@
   let { children, data }: Props = $props();
 
   const session = useSession();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
   const unreadCount = $derived(data.unreadCount ?? 0);
 
   // Auth guard - redirect to home if not authenticated
@@ -29,13 +32,13 @@
     }
   });
 
-  const navItems = [
-    { href: '/user/skills', label: 'Skills', icon: SparklesIcon },
-    { href: '/user/messages', label: 'Messages', icon: Mail01Icon, badge: true },
-    { href: '/user/organizations', label: 'Organizations', icon: Building06Icon },
-    { href: '/user/tokens', label: 'API Tokens', icon: Key01Icon },
-    { href: '/user/account', label: 'Account', icon: UserCircleIcon },
-  ];
+  const navItems = $derived([
+    { href: '/user/skills', label: messages.settingsLayout.skills, icon: SparklesIcon },
+    { href: '/user/messages', label: messages.settingsLayout.messages, icon: Mail01Icon, badge: true },
+    { href: '/user/organizations', label: messages.settingsLayout.organizations, icon: Building06Icon },
+    { href: '/user/tokens', label: messages.settingsLayout.apiTokens, icon: Key01Icon },
+    { href: '/user/account', label: messages.settingsLayout.account, icon: UserCircleIcon },
+  ]);
 
   function isActive(href: string): boolean {
     return $page.url.pathname === href || $page.url.pathname.startsWith(href + '/');
@@ -57,7 +60,7 @@
 </script>
 
 <svelte:head>
-  <title>Settings - SkillsCat</title>
+  <title>{messages.settingsLayout.title} - SkillsCat</title>
   <meta name="robots" content="noindex, nofollow, noarchive" />
 </svelte:head>
 
@@ -68,7 +71,7 @@
 {:else if $session.data?.user}
   <div class="settings-layout">
     <aside class="settings-sidebar">
-      <h2 class="sidebar-title">Settings</h2>
+      <h2 class="sidebar-title">{messages.settingsLayout.title}</h2>
       <nav class="sidebar-nav" bind:this={navEl}>
         {#each navItems as item}
           <a

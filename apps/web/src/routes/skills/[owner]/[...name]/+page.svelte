@@ -7,7 +7,10 @@
   import { toast } from '$lib/components/ui/Toast.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import VisibilityBadge from '$lib/components/ui/VisibilityBadge.svelte';
-  import { getCategoryBySlug } from '$lib/constants/categories';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getSkillPageCopy } from '$lib/i18n/skill-page';
+  import { formatRelativeTimestamp } from '$lib/i18n/relative';
+  import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
   import { encodeSkillSlugForPath } from '$lib/skill-path';
   import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
   import type { Highlighter } from 'shiki';
@@ -37,6 +40,9 @@
   }
 
   let { data }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  const copy = $derived(getSkillPageCopy(i18n.locale()));
 
   // Bookmark state - use local state that syncs with server data
   let bookmarkOverride = $state<boolean | null>(null);
@@ -63,15 +69,15 @@
       if (response.ok) {
         bookmarkOverride = !currentState;
         toast(
-          !currentState ? 'Added to bookmarks' : 'Removed from bookmarks',
+          !currentState ? copy.bookmarkAdded : copy.bookmarkRemoved,
           'success'
         );
       } else {
-        toast('Failed to update bookmark', 'error');
+        toast(copy.bookmarkFailed, 'error');
       }
     } catch (err) {
       console.error('Bookmark failed:', err);
-      toast('Failed to update bookmark', 'error');
+      toast(copy.bookmarkFailed, 'error');
     } finally {
       isBookmarking = false;
     }
@@ -83,7 +89,7 @@
     try {
       await navigator.share({
         title: `${data.skill.name} - SkillsCat`,
-        text: `Check out ${data.skill.name} on SkillsCat`,
+        text: i18n.t(copy.shareText, { name: data.skill.name }),
         url: canonicalSkillUrl
       });
     } catch (err) {
@@ -96,7 +102,7 @@
         return;
       }
       console.error('Native share failed:', err);
-      toast('Failed to share skill', 'error');
+      toast(copy.shareFailed, 'error');
     }
   }
 
@@ -104,23 +110,23 @@
     if (!data.skill || typeof window === 'undefined') return;
 
     const shareUrl = new URL('https://x.com/intent/tweet');
-    shareUrl.searchParams.set('text', `Check out ${data.skill.name} on SkillsCat`);
+    shareUrl.searchParams.set('text', i18n.t(copy.shareText, { name: data.skill.name }));
     shareUrl.searchParams.set('url', canonicalSkillUrl);
     window.open(shareUrl.toString(), '_blank', 'noopener,noreferrer');
   }
 
   async function handleCopyUrl() {
     if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
-      toast('Clipboard not available', 'error');
+      toast(copy.clipboardUnavailable, 'error');
       return;
     }
 
     try {
       await navigator.clipboard.writeText(canonicalSkillUrl);
-      toast('URL copied to clipboard', 'success');
+      toast(copy.urlCopied, 'success');
     } catch (err) {
       console.error('Copy URL failed:', err);
-      toast('Failed to copy URL', 'error');
+      toast(copy.copyFailed, 'error');
     }
   }
 
@@ -170,14 +176,14 @@
         };
 
         if (!payload.success) {
-          throw new Error(payload.error || 'Failed to load recommend skills');
+          throw new Error(payload.error || copy.recommendFailed);
         }
 
         deferredRecommendSkills = payload.data?.recommendSkills || [];
       } catch (err) {
         if (controller.signal.aborted) return;
         console.error('Deferred recommend skills load failed:', err);
-        deferredRecommendSkillsError = 'Failed to load recommend skills';
+        deferredRecommendSkillsError = copy.recommendFailed;
         deferredRecommendSkills = [];
       } finally {
         if (!controller.signal.aborted) {
@@ -605,14 +611,14 @@
       label: 'SkillsCat CLI',
       command: `npx skillscat add ${skillIdentifier()}`,
       description: data.skill.visibility === 'private'
-        ? 'Requires authentication. Run `skillscat login` first.'
-        : 'SkillsCat registry CLI'
+        ? copy.privateCliDescription
+        : copy.registryCliDescription
     },
     ...(canUseVercelInstaller ? [{
       name: 'skills',
       label: 'Vercel Skills CLI',
       command: `npx skills ${data.skill.repoOwner}/${data.skill.repoName}`,
-      description: 'Works with Claude Code, Cursor, Codex, and 10+ agents'
+      description: copy.vercelCliDescription
     }] : [])
   ] : []);
 
@@ -658,10 +664,10 @@
             );
             if (!response.ok) {
               if (response.status === 429) {
-                toast('Too many requests. Please wait a moment.', 'warning');
+                toast(copy.tooManyRequests, 'warning');
                 return;
               }
-              throw new Error('Failed to fetch files');
+              throw new Error(copy.downloadFailed);
             }
             payload = await response.json() as { folderName: string; files: Array<{ path: string; content: string }> };
           }
@@ -694,7 +700,7 @@
 
           // Show success - both button state and toast
           downloadSuccess = true;
-          toast(`${data.skill.name} installed successfully!`, 'success', { celebrate: true });
+          toast(i18n.t(copy.installedSuccess, { name: data.skill.name }), 'success', { celebrate: true });
           setTimeout(() => downloadSuccess = false, 3000);
         } catch (err: unknown) {
           // User cancelled the directory picker - not an error
@@ -1026,13 +1032,7 @@
   }
 
   function formatRelativeTime(timestamp: number): string {
-    const seconds = Math.floor((Date.now() - timestamp) / 1000);
-    if (seconds < 60) return 'just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
-    if (seconds < 2592000) return `${Math.floor(seconds / 604800)}w ago`;
-    return `${Math.floor(seconds / 2592000)}mo ago`;
+    return formatRelativeTimestamp(i18n, messages, timestamp);
   }
 
   // Get author profile URL
@@ -1102,10 +1102,10 @@
   const skillDescription = $derived(
     data.seo?.description
       || data.skill?.description
-      || (data.skill ? `AI agent skill: ${data.skill.name}` : 'Skill not found on SkillsCat.')
+      || (data.skill ? i18n.t(copy.seoFallbackDescription, { name: data.skill.name }) : copy.seoNotFoundDescription)
   );
   const skillSeoTitle = $derived(
-    data.seo?.title || (data.skill ? `${data.skill.name} - SkillsCat` : 'Skill Not Found - SkillsCat')
+    data.seo?.title || (data.skill ? `${data.skill.name} - SkillsCat` : copy.seoNotFoundTitle)
   );
   const ogImageUrl = $derived(
     data.skill
@@ -1144,7 +1144,7 @@
             dateModified: modifiedTime || undefined,
             keywords: skillSeoKeywords.join(', '),
             about: (data.skill.categories || [])
-              .map((slug) => getCategoryBySlug(slug)?.name)
+              .map((slug) => getLocalizedCategoryBySlug(slug, i18n.locale())?.name)
               .filter(Boolean),
             author: {
               '@type': data.skill.orgName ? 'Organization' : 'Person',
@@ -1163,13 +1163,13 @@
               {
                 '@type': 'ListItem',
                 position: 1,
-                name: 'Home',
+                name: copy.breadcrumbHome,
                 item: SITE_URL,
               },
               {
                 '@type': 'ListItem',
                 position: 2,
-                name: 'Skills',
+                name: copy.breadcrumbSkills,
                 item: `${SITE_URL}/trending`,
               },
               {
@@ -1191,7 +1191,7 @@
     description={skillDescription}
     url={canonicalSkillUrl}
     image={ogImageUrl}
-    imageAlt={`${data.skill.name} skill social preview image`}
+    imageAlt={i18n.t(copy.seoImageAlt, { name: data.skill.name })}
     type="article"
     author={getAuthorDisplayName()}
     publishedTime={publishedTime}
@@ -1204,10 +1204,10 @@
   />
 {:else}
   <SEO
-    title="Skill Not Found - SkillsCat"
+    title={copy.seoNotFoundTitle}
     description={skillDescription}
     image={ogImageUrl}
-    imageAlt="Skill not found social preview image"
+    imageAlt={copy.seoNotFoundImageAlt}
     noindex
     structuredData={null}
   />
@@ -1218,9 +1218,9 @@
     <!-- Breadcrumb -->
     <nav class="breadcrumb">
       <ol>
-        <li class="breadcrumb-fixed hide-mobile"><a href="/">Home</a></li>
+        <li class="breadcrumb-fixed hide-mobile"><a href="/">{copy.breadcrumbHome}</a></li>
         <li class="breadcrumb-sep hide-mobile">/</li>
-        <li class="breadcrumb-fixed"><a href="/trending">Skills</a></li>
+        <li class="breadcrumb-fixed"><a href="/trending">{copy.breadcrumbSkills}</a></li>
         <li class="breadcrumb-sep">/</li>
         <li class="breadcrumb-truncate">
           <a
@@ -1242,18 +1242,18 @@
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
             </svg>
-            Installed
+            {copy.installed}
           {:else if isDownloading}
             <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            Installing
+            {copy.installing}
           {:else}
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            Download
+            {messages.common.download}
           {/if}
         </button>
         {#if githubUrl}
@@ -1268,7 +1268,7 @@
     {/snippet}
 
     {#snippet renderCliInstallCard()}
-      <h3 class="font-semibold text-fg mb-4">CLI Install</h3>
+      <h3 class="font-semibold text-fg mb-4">{copy.cliInstall}</h3>
 
       <!-- CLI Switcher -->
       <div class="cli-switcher">
@@ -1326,7 +1326,7 @@
               <h1 class="skill-title-inline flex-1">{data.skill.name}</h1>
               <div class="skill-header-actions">
                 <DropdownMenu.Root>
-                  <DropdownMenu.Trigger class="skill-action-btn share-btn" aria-label="Share skill">
+                  <DropdownMenu.Trigger class="skill-action-btn share-btn" aria-label={copy.shareSkill}>
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
                     </svg>
@@ -1348,7 +1348,7 @@
                                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
                                   </svg>
-                                  Share Skills
+                                  {copy.shareNative}
                                 </DropdownMenu.Item>
                               {/if}
 
@@ -1356,14 +1356,14 @@
                                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                                   <path d="M18.901 1.154h3.681l-8.04 9.19 9.459 12.502h-7.406l-5.8-7.584-6.633 7.584H.48l8.6-9.826L0 1.154h7.594l5.243 6.932 6.064-6.932zm-1.291 19.49h2.04L6.486 3.24H4.297z" />
                                 </svg>
-                                Share to X
+                                {copy.shareToX}
                               </DropdownMenu.Item>
 
                               <DropdownMenu.Item class="share-dropdown-item" onSelect={handleCopyUrl}>
                                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                                   <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-4 12h6a2 2 0 002-2v-8a2 2 0 00-2-2h-6a2 2 0 00-2 2v8a2 2 0 002 2z" />
                                 </svg>
-                                Copy URL
+                                {copy.copyUrl}
                               </DropdownMenu.Item>
                             </div>
                           </div>
@@ -1379,7 +1379,7 @@
                     class:bookmarked={isBookmarked}
                     onclick={handleBookmark}
                     disabled={isBookmarking}
-                    aria-label={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
+                    aria-label={isBookmarked ? copy.removeBookmark : copy.addBookmark}
                   >
                     <svg class="w-5 h-5" fill={isBookmarked ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
@@ -1391,7 +1391,7 @@
           </div>
 
           <!-- Description (full width) -->
-          <p class="skill-description-full">{data.skill.description || 'No description provided'}</p>
+          <p class="skill-description-full">{data.skill.description || copy.noDescription}</p>
 
           <!-- Meta row with badges -->
           <div class="skill-meta">
@@ -1401,7 +1401,7 @@
             {/if}
             {#if data.skill.sourceType === 'upload'}
               <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                uploaded
+                {copy.uploaded}
               </span>
             {/if}
 
@@ -1456,14 +1456,14 @@
                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 .587l3.668 7.568 8.332 1.151-6.064 5.828 1.48 8.279-7.416-3.967-7.417 3.967 1.481-8.279-6.064-5.828 8.332-1.151z"/>
                 </svg>
-                {data.skill.stars.toLocaleString()}
+                {i18n.formatNumber(data.skill.stars)}
               </span>
               {#if data.skill.forks}
                 <span class="skill-meta-item">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
                   </svg>
-                  {data.skill.forks}
+                  {i18n.formatNumber(data.skill.forks)}
                 </span>
               {/if}
             {/if}
@@ -1482,7 +1482,7 @@
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              Updated {formatRelativeTime(data.skill.updatedAt)}
+              {i18n.t(copy.updated, { time: formatRelativeTime(data.skill.updatedAt) })}
             </span>
           </div>
         </div>
@@ -1490,7 +1490,7 @@
         <!-- Resources (show above SKILL.md when non-readme files exist) -->
         {#if resourceFileStructure.length > 0}
           <div class="card">
-            <h2 class="text-lg font-semibold text-fg mb-4">Resources</h2>
+            <h2 class="text-lg font-semibold text-fg mb-4">{copy.resources}</h2>
             <div class="file-browser">
               {#snippet renderFileTree(nodes: FileNode[], depth: number = 0)}
                 {#each nodes as node (node.path)}
@@ -1553,15 +1553,15 @@
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </svg>
-                      <span>Loading...</span>
+                      <span>{copy.loadingFile}</span>
                     </div>
                   {:else if fileError === 'binary'}
                     <div class="file-unsupported">
                       <svg class="file-unsupported-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
-                      <span class="file-unsupported-text">Binary file - preview not available</span>
-                      <span class="file-unsupported-hint">Download the skill to view this file</span>
+                      <span class="file-unsupported-text">{copy.binaryFile}</span>
+                      <span class="file-unsupported-hint">{copy.binaryFileHint}</span>
                     </div>
                   {:else if fileError}
                     <div class="file-error">
@@ -1615,10 +1615,10 @@
         <!-- Categories -->
         {#if data.skill.categories?.length}
           <div class="card categories-card">
-            <h2 class="text-lg font-semibold text-fg mb-4">Categories</h2>
+            <h2 class="text-lg font-semibold text-fg mb-4">{copy.categories}</h2>
             <div class="flex flex-wrap gap-2">
               {#each data.skill.categories as categorySlug}
-                {@const category = getCategoryBySlug(categorySlug)}
+                {@const category = getLocalizedCategoryBySlug(categorySlug, i18n.locale())}
                 {#if category}
                   <a
                     href="/category/{categorySlug}"
@@ -1656,9 +1656,9 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
               </svg>
               <div>
-                <h4 class="font-medium text-yellow-800 dark:text-yellow-200">Private Skill</h4>
+                <h4 class="font-medium text-yellow-800 dark:text-yellow-200">{copy.privateSkillTitle}</h4>
                 <p class="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
-                  This skill is private. To install it, you need to authenticate with the CLI first:
+                  {copy.privateSkillDescription}
                 </p>
                 <code class="block mt-2 text-xs bg-yellow-100 dark:bg-yellow-900/40 px-2 py-1 rounded">
                   skillscat login
@@ -1676,9 +1676,9 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <div>
-                <h4 class="font-medium text-blue-800 dark:text-blue-200">Repository Stars</h4>
+                <h4 class="font-medium text-blue-800 dark:text-blue-200">{copy.repositoryStarsTitle}</h4>
                 <p class="text-sm text-blue-700 dark:text-blue-300 mt-1">
-                  The star count shown is for the parent repository ({data.skill.repoOwner}/{data.skill.repoName}), not this specific skill.
+                  {i18n.t(copy.repositoryStarsDescription, { repo: `${data.skill.repoOwner}/${data.skill.repoName}` })}
                 </p>
                 {#if data.skill.skillPath}
                   <code class="block mt-2 text-xs bg-blue-100 dark:bg-blue-900/40 px-2 py-1 rounded">
@@ -1693,7 +1693,7 @@
         <!-- Recommend Skills -->
         {#if showRecommendSkillsCard}
           <div class="card recommend-skills-card">
-            <h3 class="font-semibold text-fg mb-4">Recommend Skills</h3>
+            <h3 class="font-semibold text-fg mb-4">{copy.recommendSkills}</h3>
             {#if displayRecommendSkills.length > 0}
               <div class="space-y-3">
                 {#each displayRecommendSkills as recommendSkill (recommendSkill.id)}
@@ -1707,7 +1707,7 @@
                 <div class="h-20 rounded-lg border border-border bg-bg-muted/40 animate-pulse"></div>
               </div>
             {:else}
-              <p class="text-sm text-fg-muted">Recommend skills are temporarily unavailable.</p>
+              <p class="text-sm text-fg-muted">{copy.recommendUnavailable}</p>
             {/if}
           </div>
         {/if}
@@ -1718,10 +1718,10 @@
   <!-- Not Found -->
   <ErrorState
     code={404}
-    title="Skill Not Found"
-    message={data.error || "The skill you're looking for doesn't exist or has been removed."}
+    title={copy.notFoundTitle}
+    message={data.error || copy.notFoundMessage}
     fullPage
-    primaryActionText="Browse Skills"
+    primaryActionText={messages.common.browseSkills}
     primaryActionHref="/trending"
   />
 {/if}

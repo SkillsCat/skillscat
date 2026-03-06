@@ -1,7 +1,9 @@
 <script lang="ts">
   import SearchBox from '$lib/components/common/SearchBox.svelte';
   import SEO from '$lib/components/common/SEO.svelte';
-  import { CATEGORY_SECTIONS, type CategoryWithCount } from '$lib/constants/categories';
+  import { getLocalizedCategorySections, localizeCategoryWithCount } from '$lib/i18n/categories';
+  import type { CategoryWithCount } from '$lib/constants/categories';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     GitBranchIcon,
@@ -70,6 +72,8 @@
   }
 
   let { data }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 
   let searchQuery = $state('');
 
@@ -135,14 +139,18 @@
     'game-dev': GameboyIcon
   };
 
+  const localizedCategories = $derived(
+    data.categories.map((category) => localizeCategoryWithCount(category, i18n.locale()))
+  );
+
   const filteredCategories = $derived(
     searchQuery
-      ? data.categories.filter(
+      ? localizedCategories.filter(
           (c) =>
             c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             c.description.toLowerCase().includes(searchQuery.toLowerCase())
         )
-      : data.categories
+      : localizedCategories
   );
 
   const filteredDynamicCategories = $derived(
@@ -157,7 +165,7 @@
 
   // Group categories by section for display
   const groupedCategories = $derived(() => {
-    return CATEGORY_SECTIONS.map(section => ({
+    return getLocalizedCategorySections(i18n.locale()).map(section => ({
       ...section,
       categories: section.categories.filter(cat =>
         filteredCategories.some(fc => fc.slug === cat.slug)
@@ -170,11 +178,11 @@
 
   const totalCount = $derived(filteredCategories.length + filteredDynamicCategories.length);
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'categories' });
-  const pageDescription = 'Browse all AI agent skill categories to quickly find tools by domain, workflow, and use case.';
+  const pageDescription = $derived(messages.categories.description);
   const structuredData = $derived({
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
-    name: 'Categories - SkillsCat',
+    name: `${messages.categories.title} - SkillsCat`,
     description: pageDescription,
     url: `${SITE_URL}/categories`,
     mainEntity: {
@@ -185,11 +193,11 @@
 </script>
 
 <SEO
-  title="Categories - SkillsCat"
+  title={`${messages.categories.title} - SkillsCat`}
   description={pageDescription}
   url="/categories"
   image={ogImageUrl}
-  imageAlt="Categories page social preview image"
+  imageAlt={messages.legal.categoriesImageAlt}
   keywords={['ai skill categories', 'agent skill taxonomy', 'skillscat categories']}
   structuredData={structuredData}
 />
@@ -198,15 +206,15 @@
   <!-- Header -->
   <div class="mb-8">
     <h1 class="text-3xl md:text-4xl font-bold text-fg mb-2">
-      Categories
+      {messages.categories.title}
     </h1>
-    <p class="text-fg-muted">Browse skills by category to find exactly what you need.</p>
+    <p class="text-fg-muted">{messages.categories.description}</p>
   </div>
 
   <!-- Search -->
   <div class="mb-8 max-w-md">
     <SearchBox
-      placeholder="Search categories..."
+      placeholder={messages.categories.searchPlaceholder}
       bind:value={searchQuery}
     />
   </div>
@@ -242,7 +250,7 @@
   {#if filteredDynamicCategories.length > 0}
     <div class="section-group">
       <h2 class="section-title">
-        Community Suggested
+        {messages.common.communitySuggested}
         <span class="section-badge">AI</span>
       </h2>
       <div class="categories-grid">

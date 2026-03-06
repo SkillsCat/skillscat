@@ -6,6 +6,8 @@
   import EmptyState from '$lib/components/feedback/EmptyState.svelte';
   import Pagination from '$lib/components/ui/Pagination.svelte';
   import type { Category } from '$lib/constants/categories';
+  import { localizeCategory } from '$lib/i18n/categories';
+  import { useI18n } from '$lib/i18n/runtime';
   import type { SkillCardData } from '$lib/types';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { buildOgImageUrl } from '$lib/seo/og';
@@ -79,8 +81,13 @@
   }
 
   let { data }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 
   let searchQuery = $state('');
+  const displayCategory = $derived(
+    data.category ? (data.isDynamic ? data.category : localizeCategory(data.category, i18n.locale())) : null
+  );
 
   // Icon mapping for categories (same as Navbar and categories page)
   const categoryIcons: Record<string, typeof GitBranchIcon> = {
@@ -156,31 +163,29 @@
   const startItem = $derived(data.pagination ? (data.pagination.currentPage - 1) * data.pagination.itemsPerPage + 1 : 1);
   const endItem = $derived(data.pagination ? Math.min(data.pagination.currentPage * data.pagination.itemsPerPage, data.pagination.totalItems) : data.skills.length);
   const canonicalUrl = $derived(
-    data.category
-      ? `${SITE_URL}/category/${data.category.slug}${
+    displayCategory
+      ? `${SITE_URL}/category/${displayCategory.slug}${
           data.pagination && data.pagination.currentPage > 1 ? `?page=${data.pagination.currentPage}` : ''
         }`
       : `${SITE_URL}/categories`
   );
   const categoryDescription = $derived(
-    data.category
-      ? `${data.category.description}. Browse AI agent skills in this category.`
-      : 'Category not found on SkillsCat.'
+    displayCategory
+      ? i18n.t(messages.categories.categoryPageDescription, { description: displayCategory.description })
+      : messages.categories.notFoundDescription
   );
   const ogImageUrl = $derived(
-    data.category
-      ? buildOgImageUrl({ type: 'category', slug: data.category.slug })
+    displayCategory
+      ? buildOgImageUrl({ type: 'category', slug: displayCategory.slug })
       : buildOgImageUrl({ type: 'page', slug: '404' })
   );
   const pageTitle = $derived(
-    data.category
-      ? `${data.category.name} Skills${
-          data.pagination && data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''
-        } - SkillsCat`
-      : 'Category Not Found - SkillsCat'
+    displayCategory
+      ? `${displayCategory.name}${data.pagination && data.pagination.currentPage > 1 ? i18n.t(messages.common.pageSuffix, { page: data.pagination.currentPage }) : ''} - SkillsCat`
+      : messages.categories.notFoundTitle
   );
   const categoryStructuredData = $derived(
-    data.category
+    displayCategory
       ? {
           '@context': 'https://schema.org',
           '@type': 'CollectionPage',
@@ -196,14 +201,14 @@
   );
 </script>
 
-{#if data.category}
+{#if displayCategory}
   <SEO
     title={pageTitle}
     description={categoryDescription}
     url={canonicalUrl}
     image={ogImageUrl}
-    imageAlt={`${data.category.name} category social preview image`}
-    keywords={[`${data.category.name} skills`, 'ai agent skills', 'skillscat category']}
+    imageAlt={i18n.t(messages.legal.categoryImageAlt, { name: displayCategory.name })}
+    keywords={[`${displayCategory.name} skills`, 'ai agent skills', 'skillscat category']}
     structuredData={categoryStructuredData}
   />
 {:else}
@@ -211,22 +216,22 @@
     title={pageTitle}
     description={categoryDescription}
     image={ogImageUrl}
-    imageAlt="Category not found social preview image"
+    imageAlt={messages.legal.categoryNotFoundImageAlt}
     noindex
     structuredData={null}
   />
 {/if}
 
-{#if data.category}
+{#if displayCategory}
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4 sm:pb-8 category-page-container">
     <!-- Breadcrumb -->
     <nav class="mb-6 text-sm">
       <ol class="flex items-center gap-2 text-fg-muted">
-        <li><a href="/" class="hover:text-primary transition-colors">Home</a></li>
+        <li><a href="/" class="hover:text-primary transition-colors">{messages.categories.breadcrumbHome}</a></li>
         <li>/</li>
-        <li><a href="/categories" class="hover:text-primary transition-colors">Categories</a></li>
+        <li><a href="/categories" class="hover:text-primary transition-colors">{messages.categories.breadcrumbCategories}</a></li>
         <li>/</li>
-        <li class="text-fg font-medium">{data.category.name}</li>
+        <li class="text-fg font-medium">{displayCategory.name}</li>
       </ol>
     </nav>
 
@@ -235,43 +240,43 @@
       <div class="category-title-row">
         <div class="category-icon-large" class:category-icon-dynamic={data.isDynamic}>
           <HugeiconsIcon
-            icon={getCategoryIcon(data.category.slug, data.isDynamic)}
+            icon={getCategoryIcon(displayCategory.slug, data.isDynamic)}
             size={32}
             strokeWidth={2}
           />
         </div>
         <div class="category-heading-content">
           <h1 class="category-heading">
-            {data.category.name}
+            {displayCategory.name}
           </h1>
           {#if data.isDynamic}
-            <span class="dynamic-badge">AI Suggested</span>
+            <span class="dynamic-badge">{messages.common.aiSuggested}</span>
           {/if}
         </div>
       </div>
-      <p class="category-header-description">{data.category.description}</p>
+      <p class="category-header-description">{displayCategory.description}</p>
     </div>
 
     {#if data.skills.length > 0}
       <!-- Search -->
       <div class="mb-8 max-w-md">
         <SearchBox
-          placeholder="Filter skills in {data.category.name}..."
+          placeholder={i18n.t(messages.categories.filterPlaceholder, { name: displayCategory.name })}
           bind:value={searchQuery}
           suggestionMode="skills"
           showHistory={false}
-          suggestionCategory={data.category.slug}
+          suggestionCategory={displayCategory.slug}
         />
       </div>
 
       <!-- Results count -->
       <div class="mb-6 text-sm text-fg-muted">
         {#if searchQuery}
-          Showing {filteredSkills.length} of {data.skills.length} skills on this page
+          {i18n.t(messages.lists.showingFilteredOnPage, { count: filteredSkills.length, pageCount: data.skills.length })}
         {:else if data.pagination}
-          Showing {startItem}-{endItem} of {data.pagination.totalItems} skills
+          {i18n.t(messages.lists.showingRange, { start: startItem, end: endItem, total: data.pagination.totalItems })}
         {:else}
-          Showing {filteredSkills.length} of {data.skills.length} skills
+          {i18n.t(messages.lists.showingFiltered, { count: filteredSkills.length, total: data.skills.length })}
         {/if}
       </div>
 
@@ -284,8 +289,8 @@
 
       {#if filteredSkills.length === 0 && searchQuery}
         <EmptyState
-          title="No matches"
-          description={`No skills found matching "${searchQuery}"`}
+          title={messages.common.noMatches}
+          description={i18n.t(messages.common.noMatchesFor, { query: searchQuery })}
         >
           {#snippet icon()}
             <HugeiconsIcon icon={Search01Icon} size={40} strokeWidth={1.5} />
@@ -305,9 +310,9 @@
       {/if}
     {:else}
       <EmptyState
-        title="No skills in this category yet"
-        description="Skills will appear here once they're classified into this category."
-        actionText="Browse Trending"
+        title={messages.categories.noSkillsYetTitle}
+        description={messages.categories.noSkillsYetDescription}
+        actionText={messages.categories.browseTrending}
         actionHref="/trending"
       >
         {#snippet icon()}
@@ -320,9 +325,9 @@
   <!-- Not Found -->
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4 sm:pb-8 category-page-container">
     <EmptyState
-      title="Category Not Found"
-      description="The category you're looking for doesn't exist."
-      actionText="Browse Categories"
+      title={messages.categories.notFoundHeading}
+      description={messages.categories.notFoundDescription}
+      actionText={messages.common.browseCategories}
       actionHref="/categories"
     >
       {#snippet icon()}

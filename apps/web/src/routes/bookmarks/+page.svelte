@@ -4,9 +4,10 @@
   import EmptyState from '$lib/components/feedback/EmptyState.svelte';
   import SearchBox from '$lib/components/common/SearchBox.svelte';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getSettingsCopy } from '$lib/i18n/settings';
   import { SecurityLockIcon, Search01Icon, Bookmark02Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
-  import { SITE_DESCRIPTION } from '$lib/seo/constants';
 
   interface Props {
     data: {
@@ -16,6 +17,9 @@
   }
 
   let { data }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  const copy = $derived(getSettingsCopy(i18n.locale()));
 
   let searchQuery = $state('');
 
@@ -31,8 +35,8 @@
 </script>
 
 <svelte:head>
-  <title>Bookmarks - SkillsCat</title>
-  <meta name="description" content={SITE_DESCRIPTION} />
+  <title>{copy.bookmarks.title} - SkillsCat</title>
+  <meta name="description" content={copy.bookmarks.description} />
   <link rel="canonical" href="https://skills.cat/bookmarks" />
   <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
@@ -44,18 +48,18 @@
       <span class="page-title-icon">
         <HugeiconsIcon icon={Bookmark02Icon} strokeWidth={2} />
       </span>
-      Bookmarks
+      {copy.bookmarks.title}
     </h1>
     <p class="text-fg-muted">
-      Your bookmarked AI agent skills
+      {copy.bookmarks.description}
     </p>
   </div>
 
   {#if !data.isAuthenticated}
     <EmptyState
-      title="Sign in to view bookmarks"
-      description="You need to be signed in to save and view your bookmarked skills."
-      actionText="Sign In"
+      title={copy.bookmarks.signInTitle}
+      description={copy.bookmarks.signInDescription}
+      actionText={messages.common.signIn}
       actionHref="/api/auth/signin"
     >
       {#snippet icon()}
@@ -66,14 +70,17 @@
     <!-- Search -->
     <div class="mb-8 max-w-md">
       <SearchBox
-        placeholder="Filter bookmarks..."
+        placeholder={copy.bookmarks.filterPlaceholder}
         bind:value={searchQuery}
       />
     </div>
 
     <!-- Results count -->
     <div class="mb-6 text-sm text-fg-muted">
-      {filteredBookmarks.length} of {data.favorites.length} bookmarks
+      {i18n.t(copy.bookmarks.countSummary, {
+        shown: filteredBookmarks.length,
+        total: data.favorites.length,
+      })}
     </div>
 
     <!-- Bookmarks Grid -->
@@ -85,8 +92,8 @@
 
     {#if filteredBookmarks.length === 0 && searchQuery}
       <EmptyState
-        title="No matches"
-        description={`No bookmarks found matching "${searchQuery}"`}
+        title={messages.common.noMatches}
+        description={i18n.t(messages.common.noMatchesFor, { query: searchQuery })}
       >
         {#snippet icon()}
           <HugeiconsIcon icon={Search01Icon} size={40} strokeWidth={1.5} />
@@ -95,9 +102,9 @@
     {/if}
   {:else}
     <EmptyState
-      title="No bookmarks yet"
-      description="Start exploring and bookmark skills you like!"
-      actionText="Browse Skills"
+      title={copy.bookmarks.emptyTitle}
+      description={copy.bookmarks.emptyDescription}
+      actionText={messages.common.browseSkills}
       actionHref="/trending"
     >
       {#snippet icon()}

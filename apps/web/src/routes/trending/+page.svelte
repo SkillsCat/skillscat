@@ -1,6 +1,7 @@
 <script lang="ts">
   import ListPage from '$lib/components/layout/ListPage.svelte';
   import SEO from '$lib/components/common/SEO.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Fire03Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
@@ -23,14 +24,16 @@
   }
 
   let { data }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
   const canonicalUrl = $derived(
     `${SITE_URL}/trending${data.pagination.currentPage > 1 ? `?page=${data.pagination.currentPage}` : ''}`
   );
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'trending' });
   const pageTitle = $derived(
-    `Trending Skills${data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat`
+    `${messages.lists.trendingTitle}${data.pagination.currentPage > 1 ? i18n.t(messages.common.pageSuffix, { page: data.pagination.currentPage }) : ''} - SkillsCat`
   );
-  const pageDescription = 'Discover trending AI agent skills gaining momentum in the community right now.';
+  const pageDescription = $derived(messages.lists.trendingDescription);
   const structuredData = $derived({
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
@@ -50,16 +53,16 @@
   description={pageDescription}
   url={canonicalUrl}
   image={ogImageUrl}
-  imageAlt="Trending skills social preview image"
+  imageAlt={messages.legal.trendingImageAlt}
   keywords={['trending ai skills', 'ai agent skills', 'skillscat trending']}
   structuredData={structuredData}
 />
 
 <ListPage
-  title="Trending Skills"
-  description="The hottest skills gaining momentum in the community right now."
+  title={messages.lists.trendingTitle}
+  description={messages.lists.trendingDescription}
   skills={data.skills}
-  emptyMessage="No trending skills yet"
+  emptyMessage={messages.lists.trendingEmpty}
   pagination={data.pagination}
 >
   {#snippet icon()}

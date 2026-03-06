@@ -1,3 +1,5 @@
+import { LOCALE_COOKIE_NAME } from '$lib/i18n/config';
+
 interface PageCacheOptions {
   setHeaders: (headers: Record<string, string>) => void;
   request: Request;
@@ -29,7 +31,11 @@ export function setPublicPageCache({
     return;
   }
 
+  const cookieHeader = request.headers.get('cookie') || '';
+  const hasLocaleCookie = new RegExp(`(?:^|;\\s*)${LOCALE_COOKIE_NAME}=`).test(cookieHeader);
+
   setHeaders({
     'Cache-Control': `public, max-age=0, s-maxage=${sMaxAge}, stale-while-revalidate=${staleWhileRevalidate}`,
+    Vary: hasLocaleCookie ? 'Cookie' : 'Accept-Language',
   });
 }

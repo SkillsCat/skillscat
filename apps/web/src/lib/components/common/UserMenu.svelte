@@ -6,6 +6,7 @@
   import { DropdownMenu } from 'bits-ui';
   import { signOut, useSession } from '$lib/auth-client';
   import Avatar from '$lib/components/common/Avatar.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
   import { fly } from 'svelte/transition';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
@@ -27,6 +28,8 @@
   let { unreadCount = 0 }: Props = $props();
 
   const session = useSession();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 
   let showLoginDialog = $state(false);
   let LoginDialogComponent = $state<LoginDialogComponentType | null>(null);
@@ -61,7 +64,7 @@
         <Avatar
           src={$session.data.user.image}
           fallback={$session.data.user.name}
-          alt={$session.data.user.name || 'User'}
+          alt={$session.data.user.name || messages.userMenu.userAlt}
           size="sm"
           border={false}
           useGithubFallback
@@ -98,12 +101,12 @@
                 <DropdownMenu.Group>
                   <a href="/user/skills" class="dropdown-item">
                     <HugeiconsIcon icon={SparklesIcon} size={16} />
-                    My Skills
+                    {messages.userMenu.mySkills}
                   </a>
 
                   <a href="/user/messages" class="dropdown-item">
                     <HugeiconsIcon icon={Mail01Icon} size={16} />
-                    Messages
+                    {messages.userMenu.messages}
                     {#if unreadCount > 0}
                       <span class="menu-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
                     {/if}
@@ -111,12 +114,12 @@
 
                   <a href="/bookmarks" class="dropdown-item">
                     <HugeiconsIcon icon={Bookmark02Icon} size={16} />
-                    Bookmarks
+                    {messages.userMenu.bookmarks}
                   </a>
 
                   <a href="/user/account" class="dropdown-item">
                     <HugeiconsIcon icon={Settings01Icon} size={16} />
-                    Settings
+                    {messages.userMenu.settings}
                   </a>
                 </DropdownMenu.Group>
 
@@ -124,7 +127,7 @@
 
                 <DropdownMenu.Item class="dropdown-item dropdown-item-danger" onSelect={handleSignOut}>
                   <HugeiconsIcon icon={Logout01Icon} size={16} />
-                  Sign Out
+                  {messages.userMenu.signOut}
                 </DropdownMenu.Item>
               </div>
             </div>
@@ -142,7 +145,7 @@
     class="sign-in-btn"
   >
     <HugeiconsIcon icon={Login03Icon} size={16} />
-    <span class="hidden sm:inline">Sign In</span>
+    <span class="hidden sm:inline">{messages.userMenu.signIn}</span>
   </button>
 
   {#if LoginDialogComponent}

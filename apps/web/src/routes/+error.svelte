@@ -1,33 +1,36 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
-  import { SITE_DESCRIPTION } from '$lib/seo/constants';
+  import { useI18n } from '$lib/i18n/runtime';
 
   // 根据状态码获取默认标题
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+
   function getDefaultTitle(status: number): string {
     switch (status) {
-      case 400: return 'Bad Request';
-      case 401: return 'Unauthorized';
-      case 403: return 'Forbidden';
-      case 404: return 'Page Not Found';
-      case 500: return 'Server Error';
-      case 502: return 'Bad Gateway';
-      case 503: return 'Service Unavailable';
-      default: return 'Something went wrong';
+      case 400: return messages.errorPage.badRequestTitle;
+      case 401: return messages.errorPage.unauthorizedTitle;
+      case 403: return messages.errorPage.forbiddenTitle;
+      case 404: return messages.errorPage.notFoundTitle;
+      case 500: return messages.errorPage.serverErrorTitle;
+      case 502: return messages.errorPage.badGatewayTitle;
+      case 503: return messages.errorPage.serviceUnavailableTitle;
+      default: return messages.errorPage.defaultTitle;
     }
   }
 
   // 根据状态码获取默认消息
   function getDefaultMessage(status: number): string {
     switch (status) {
-      case 400: return 'The request could not be understood by the server.';
-      case 401: return 'You need to be logged in to access this page.';
-      case 403: return "You don't have permission to access this page.";
-      case 404: return "The page you're looking for doesn't exist or has been moved.";
-      case 500: return 'An unexpected error occurred on the server.';
-      case 502: return 'The server received an invalid response.';
-      case 503: return 'The service is temporarily unavailable. Please try again later.';
-      default: return 'An unexpected error occurred.';
+      case 400: return messages.errorPage.badRequestMessage;
+      case 401: return messages.errorPage.unauthorizedMessage;
+      case 403: return messages.errorPage.forbiddenMessage;
+      case 404: return messages.errorPage.notFoundMessage;
+      case 500: return messages.errorPage.serverErrorMessage;
+      case 502: return messages.errorPage.badGatewayMessage;
+      case 503: return messages.errorPage.serviceUnavailableMessage;
+      default: return messages.errorPage.defaultMessage;
     }
   }
 
@@ -38,7 +41,7 @@
 
 <svelte:head>
   <title>{status} - SkillsCat</title>
-  <meta name="description" content={SITE_DESCRIPTION} />
+  <meta name="description" content={message} />
   <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
@@ -47,8 +50,8 @@
   {title}
   {message}
   fullPage
-  primaryActionText="Go Home"
+  primaryActionText={messages.common.goHome}
   primaryActionHref="/"
-  secondaryActionText="Go Back"
+  secondaryActionText={messages.common.goBack}
   secondaryActionClick={() => history.back()}
 />

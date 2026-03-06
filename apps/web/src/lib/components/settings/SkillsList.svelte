@@ -1,5 +1,7 @@
 <script lang="ts">
   import VisibilityBadge from '$lib/components/ui/VisibilityBadge.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getSettingsCopy } from '$lib/i18n/settings';
   import { buildSkillPath } from '$lib/skill-path';
 
 interface Skill {
@@ -30,6 +32,8 @@ interface Skill {
     onRetry,
     onUnpublish,
   }: Props = $props();
+  const i18n = useI18n();
+  const copy = $derived(getSettingsCopy(i18n.locale()));
 
   let searchQuery = $state('');
 
@@ -44,13 +48,13 @@ interface Skill {
 {#if loading}
   <div class="loading-state">
     <div class="loading-spinner"></div>
-    <p>Loading skills...</p>
+    <p>{copy.skillsList.loading}</p>
   </div>
 {:else if error}
   <div class="error-state">
     <p>{error}</p>
     {#if onRetry}
-      <button class="retry-btn" onclick={onRetry}>Try Again</button>
+      <button class="retry-btn" onclick={onRetry}>{copy.skillsList.retry}</button>
     {/if}
   </div>
 {:else if skills.length === 0}
@@ -70,7 +74,7 @@ interface Skill {
     <input
       type="text"
       bind:value={searchQuery}
-      placeholder="Search skills..."
+      placeholder={copy.skillsList.searchPlaceholder}
       class="search-input"
     />
   </div>
@@ -101,7 +105,7 @@ interface Skill {
           {#if skill.visibility === 'private' && onUnpublish}
             <button
               class="unpublish-btn"
-              title="Unpublish skill"
+              title={copy.skillsList.unpublishSkill}
               onclick={(e) => { e.preventDefault(); e.stopPropagation(); onUnpublish(skill); }}
             >
               <svg class="trash-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -118,7 +122,7 @@ interface Skill {
     </div>
   {:else}
     <div class="empty-search">
-      <p>No skills match "{searchQuery}"</p>
+      <p>{i18n.t(copy.skillsList.noMatches, { query: searchQuery })}</p>
     </div>
   {/if}
 {/if}

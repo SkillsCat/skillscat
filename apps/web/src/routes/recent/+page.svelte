@@ -1,6 +1,7 @@
 <script lang="ts">
   import ListPage from '$lib/components/layout/ListPage.svelte';
   import SEO from '$lib/components/common/SEO.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Notification01Icon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
@@ -23,14 +24,16 @@
   }
 
   let { data }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
   const canonicalUrl = $derived(
     `${SITE_URL}/recent${data.pagination.currentPage > 1 ? `?page=${data.pagination.currentPage}` : ''}`
   );
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'recent' });
   const pageTitle = $derived(
-    `Recently Added Skills${data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat`
+    `${messages.lists.recentTitle}${data.pagination.currentPage > 1 ? i18n.t(messages.common.pageSuffix, { page: data.pagination.currentPage }) : ''} - SkillsCat`
   );
-  const pageDescription = 'Browse newly added AI agent skills and try the latest community contributions first.';
+  const pageDescription = $derived(messages.lists.recentDescription);
   const structuredData = $derived({
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
@@ -50,16 +53,16 @@
   description={pageDescription}
   url={canonicalUrl}
   image={ogImageUrl}
-  imageAlt="Recently added skills social preview image"
+  imageAlt={messages.legal.recentImageAlt}
   keywords={['new ai skills', 'recent ai agent skills', 'skillscat recent']}
   structuredData={structuredData}
 />
 
 <ListPage
-  title="Recently Added"
-  description="Fresh skills just added to the collection. Be the first to try them out!"
+  title={messages.lists.recentTitle}
+  description={messages.lists.recentDescription}
   skills={data.skills}
-  emptyMessage="No skills added yet"
+  emptyMessage={messages.lists.recentEmpty}
   pagination={data.pagination}
 >
   {#snippet icon()}

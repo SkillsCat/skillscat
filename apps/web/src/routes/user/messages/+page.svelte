@@ -3,6 +3,9 @@
   import Button from '$lib/components/ui/Button.svelte';
   import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getSettingsCopy } from '$lib/i18n/settings';
+  import { formatRelativeTimestamp } from '$lib/i18n/relative';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     Building04Icon,
@@ -39,6 +42,9 @@
   let processingIds = $state<Set<string>>(new Set());
   let markingAllRead = $state(false);
   let autoMarkedRead = $state(false);
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  const copy = $derived(getSettingsCopy(i18n.locale()));
 
   const hasUnread = $derived(notifications.some((n) => !n.read));
 
@@ -75,10 +81,10 @@
         const data = (await res.json()) as { notifications: Notification[] };
         notifications = data.notifications;
       } else {
-        error = "Failed to load messages";
+        error = copy.messages.failedToLoad;
       }
     } catch {
-      error = "Failed to load messages";
+      error = copy.messages.failedToLoad;
     } finally {
       loading = false;
     }
@@ -148,17 +154,7 @@
   }
 
   function formatRelativeTime(timestamp: number): string {
-    const now = Date.now();
-    const diff = now - timestamp;
-    const seconds = Math.floor(diff / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (days > 0) return `${days}d ago`;
-    if (hours > 0) return `${hours}h ago`;
-    if (minutes > 0) return `${minutes}m ago`;
-    return "Just now";
+    return formatRelativeTimestamp(i18n, messages, timestamp);
   }
 
   function getNotificationIcon(type: string) {
@@ -173,12 +169,16 @@
   }
 </script>
 
+<svelte:head>
+  <title>{copy.messages.title} - {messages.settingsLayout.title} - SkillsCat</title>
+</svelte:head>
+
 <div class="messages-page">
   <div class="page-header">
     <div class="page-header-row">
       <div>
-        <h1>Messages</h1>
-        <p class="description">View your notifications and invitations.</p>
+        <h1>{copy.messages.title}</h1>
+        <p class="description">{copy.messages.description}</p>
       </div>
       {#if hasUnread}
         <Button
@@ -188,26 +188,26 @@
           disabled={markingAllRead}
         >
           <HugeiconsIcon icon={CheckListIcon} size={16} />
-          {markingAllRead ? 'Marking...' : 'Mark all as read'}
+          {markingAllRead ? copy.messages.markingAllAsRead : copy.messages.markAllAsRead}
         </Button>
       {/if}
     </div>
   </div>
 
   <SettingsSection
-    title="All Messages"
-    description="Your notifications and organization invitations."
+    title={copy.messages.sectionTitle}
+    description={copy.messages.sectionDescription}
   >
     {#if loading}
       <div class="loading-state">
         <div class="loading-spinner"></div>
-        <p>Loading messages...</p>
+        <p>{copy.messages.loading}</p>
       </div>
     {:else if error}
       <ErrorState
-        title="Failed to Load"
+        title={copy.messages.failedToLoad}
         message={error}
-        primaryActionText="Try Again"
+        primaryActionText={messages.common.tryAgain}
         primaryActionClick={loadNotifications}
       />
     {:else if notifications.length === 0}
@@ -215,8 +215,8 @@
         <div class="empty-icon">
           <HugeiconsIcon icon={MailMinus01Icon} size={48} />
         </div>
-        <h3>No messages</h3>
-        <p>You don't have any notifications yet.</p>
+        <h3>{copy.messages.noMessages}</h3>
+        <p>{copy.messages.noMessagesDescription}</p>
       </div>
     {:else}
       <div class="notifications-list">
@@ -242,7 +242,7 @@
                 {/if}
                 {#if notification.type === "org_invite" && notification.processed}
                   <p class="notification-status">
-                    {notification.metadata ? "Invitation processed" : "Processed"}
+                    {notification.metadata ? copy.messages.invitationProcessed : copy.messages.processed}
                   </p>
                 {/if}
               </div>
@@ -256,8 +256,8 @@
                   disabled={processingIds.has(notification.id)}
                 >
                   {processingIds.has(notification.id)
-                    ? "Accepting..."
-                    : "Accept"}
+                    ? copy.messages.accepting
+                    : copy.messages.accept}
                 </Button>
                 <Button
                   variant="cute-secondary"
@@ -265,7 +265,7 @@
                   onclick={() => handleReject(notification)}
                   disabled={processingIds.has(notification.id)}
                 >
-                  Decline
+                  {processingIds.has(notification.id) ? copy.messages.declining : copy.messages.decline}
                 </Button>
               </div>
             {/if}

@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
+  import { localizeCategory } from '$lib/i18n/categories';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     Search01Icon,
@@ -42,6 +44,7 @@
     placeholder?: string;
     onSearch?: (query: string) => void;
     onSelectSkill?: (skill: SkillSuggestion) => void;
+    onSelectCategory?: (category: { slug: string; name: string }) => void;
     class?: string;
     showSuggestions?: boolean;
     suggestionMode?: 'categories' | 'skills';
@@ -76,15 +79,19 @@
 
   let {
     value = $bindable(''),
-    placeholder = 'Search skills...',
+    placeholder = '',
     onSearch,
     onSelectSkill,
+    onSelectCategory,
     class: className = '',
     showSuggestions = true,
     suggestionMode = 'categories',
     showHistory = true,
     suggestionCategory = ''
   }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  const effectivePlaceholder = $derived(placeholder || messages.nav.searchSkills);
 
   let isFocused = $state(false);
   let searchFormEl: HTMLFormElement;
@@ -195,6 +202,7 @@
 
     const query = value.toLowerCase();
     return CATEGORIES
+      .map((category) => localizeCategory(category, i18n.locale()))
       .filter(cat =>
         cat.name.toLowerCase().includes(query) ||
         cat.slug.toLowerCase().includes(query)
@@ -318,11 +326,12 @@
     }
   }
 
-  function selectCategorySuggestion(categoryName: string) {
+  function selectCategorySuggestion(category: { slug: string; name: string }) {
     isFocused = false;
-    addQueryToHistory(categoryName);
-    value = categoryName;
-    onSearch?.(categoryName);
+    addQueryToHistory(category.name);
+    value = category.name;
+    onSelectCategory?.(category);
+    onSearch?.(category.name);
   }
 
   function selectSkillSuggestion(skill: SkillSuggestion) {
@@ -399,10 +408,7 @@
   }
 
   function formatStars(stars: number): string {
-    if (stars >= 1000) {
-      return `${(stars / 1000).toFixed(1).replace(/\.0$/, '')}K`;
-    }
-    return String(stars);
+    return i18n.formatCompactNumber(stars);
   }
 
   $effect(() => {
@@ -440,7 +446,7 @@
       onkeydown={handleKeydown}
       onfocus={() => { isFocused = true; }}
       onblur={() => { setTimeout(() => { isFocused = false; }, 200); }}
-      {placeholder}
+      placeholder={effectivePlaceholder}
       class="search-input"
       autocomplete="off"
     />
@@ -450,7 +456,7 @@
         type="button"
         onclick={clearSearch}
         class="clear-btn"
-        aria-label="Clear search"
+        aria-label={messages.searchBox.clearSearch}
       >
         <HugeiconsIcon icon={Cancel01Icon} size={16} strokeWidth={2.5} />
       </button>
@@ -463,11 +469,11 @@
       <div class="suggestions-list">
         {#if visibleQueryHistory().length > 0}
           <div class="history-header">
-            <span class="history-title">Recent searches</span>
+            <span class="history-title">{messages.searchBox.recentSearches}</span>
             <button
               type="button"
               class="history-clear-btn"
-              aria-label="Clear search history"
+              aria-label={messages.searchBox.clearSearchHistory}
               onclick={() => showClearHistoryDialog = true}
             >
               <HugeiconsIcon icon={Delete02Icon} size={14} strokeWidth={2.25} />
@@ -512,7 +518,10 @@
                 <span class="suggestion-name">{skill.name}</span>
                 <span class="suggestion-meta-row">
                   <span class="suggestion-author">
-                    by {skill.repoOwner}{skill.repoName ? `/${skill.repoName}` : ''}
+                    {i18n.t(messages.searchBox.suggestionByRepo, {
+                      owner: skill.repoOwner,
+                      repo: skill.repoName ? `/${skill.repoName}` : '',
+                    })}
                   </span>
                   <span class="suggestion-stars">
                     <HugeiconsIcon icon={StarIcon} size={12} strokeWidth={2} />
@@ -526,7 +535,7 @@
           {#each categorySuggestions() as category (category.slug)}
             <button
               type="button"
-              onclick={() => selectCategorySuggestion(category.name)}
+              onclick={() => selectCategorySuggestion(category)}
               class="suggestion-item"
             >
               <span class="suggestion-icon">
@@ -545,10 +554,10 @@
 
 <ConfirmDialog
   open={showClearHistoryDialog}
-  title="Clear search history"
-  description="This will remove all recent search queries from suggestions."
-  confirmText="Clear all"
-  cancelText="Cancel"
+  title={messages.searchBox.clearSearchHistory}
+  description={messages.searchBox.clearSearchHistoryDescription}
+  confirmText={messages.searchBox.clearAll}
+  cancelText={messages.common.cancel}
   onConfirm={clearQueryHistory}
   onCancel={() => showClearHistoryDialog = false}
   danger={true}

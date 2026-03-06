@@ -2,8 +2,15 @@
   import Button from '$lib/components/ui/Button.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import { useSession, signOut } from '$lib/auth-client';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getSettingsCopy } from '$lib/i18n/settings';
+  import { getUiCopy } from '$lib/i18n/ui';
 
   const session = useSession();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  const copy = $derived(getSettingsCopy(i18n.locale()));
+  const ui = $derived(getUiCopy(i18n.locale()));
 
   let showDeleteConfirm = $state(false);
   let deleteConfirmText = $state('');
@@ -27,24 +34,24 @@
 </script>
 
 <svelte:head>
-  <title>Account - Settings - SkillsCat</title>
+  <title>{copy.account.title} - {messages.settingsLayout.title} - SkillsCat</title>
 </svelte:head>
 
 <div class="account-page">
   <div class="page-header">
-    <h1>Account</h1>
-    <p class="description">Manage your account settings and connected services.</p>
+    <h1>{copy.account.title}</h1>
+    <p class="description">{copy.account.description}</p>
   </div>
 
   <!-- Profile Section -->
   <section class="section">
-    <h2>Profile</h2>
+    <h2>{copy.account.profile}</h2>
     {#if $session.data?.user}
       <div class="profile-card">
         <Avatar
           src={$session.data.user.image}
           fallback={$session.data.user.name}
-          alt={$session.data.user.name || 'User'}
+          alt={$session.data.user.name || messages.userMenu.userAlt}
           size="lg"
           useGithubFallback
         />
@@ -57,7 +64,7 @@
           size="sm"
           href={`/u/${encodeURIComponent($session.data.user.name)}`}
         >
-          View Public Profile
+          {copy.account.viewPublicProfile}
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
           </svg>
@@ -68,9 +75,9 @@
 
   <!-- Connected Accounts -->
   <section class="section">
-    <h2>Connected Accounts</h2>
+    <h2>{copy.account.connectedAccounts}</h2>
     <p class="section-description">
-      Accounts connected to your SkillsCat profile.
+      {copy.account.connectedAccountsDescription}
     </p>
     <div class="connected-accounts">
       <div class="account-item">
@@ -80,25 +87,25 @@
           </svg>
         </div>
         <div class="account-info">
-          <h4>GitHub</h4>
-          <p>Connected as @{$session.data?.user?.name}</p>
+          <h4>{ui.badges.github}</h4>
+          <p>{i18n.t(copy.account.connectedAs, { username: $session.data?.user?.name || '' })}</p>
         </div>
-        <span class="account-status connected">Connected</span>
+        <span class="account-status connected">{ui.badges.connected}</span>
       </div>
     </div>
   </section>
 
   <!-- Danger Zone -->
   <section class="section danger-section">
-    <h2>Danger Zone</h2>
+    <h2>{copy.account.dangerZone}</h2>
     <div class="danger-card">
       <div class="danger-content">
         <div>
-          <h4>Delete Account</h4>
-          <p>Permanently delete your account and all associated data. This action cannot be undone.</p>
+          <h4>{copy.account.deleteAccount}</h4>
+          <p>{copy.account.deleteAccountDescription}</p>
         </div>
         <Button variant="danger" size="sm" onclick={() => showDeleteConfirm = true}>
-          Delete Account
+          {copy.account.deleteAccount}
         </Button>
       </div>
     </div>
@@ -110,21 +117,21 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="dialog-overlay" role="presentation" onclick={() => showDeleteConfirm = false}>
     <div class="dialog danger-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" tabindex="-1" onclick={(e) => e.stopPropagation()}>
-      <h2 id="delete-dialog-title">Delete Account</h2>
+      <h2 id="delete-dialog-title">{copy.account.deleteDialogTitle}</h2>
       <p class="dialog-warning">
-        This will permanently delete:
+        {copy.account.deleteDialogWarning}
       </p>
       <ul class="delete-list">
-        <li>Your API tokens and sessions</li>
-        <li>Your favorites and preferences</li>
-        <li>Your private skills</li>
-        <li>Your organization memberships</li>
+        <li>{copy.account.deleteSessions}</li>
+        <li>{copy.account.deleteFavorites}</li>
+        <li>{copy.account.deletePrivateSkills}</li>
+        <li>{copy.account.deleteMemberships}</li>
       </ul>
       <p class="dialog-note">
-        <strong>Note:</strong> Your public skills will remain visible but unlinked from your account. If you sign in again with the same GitHub account, they will be restored to your account.
+        {copy.account.deleteNote}
       </p>
       <p class="dialog-confirm-text">
-        Type your username <strong>{$session.data?.user?.name}</strong> to confirm:
+        {i18n.t(copy.account.typeUsernameToConfirm, { username: $session.data?.user?.name || '' })}
       </p>
       <input
         type="text"
@@ -135,14 +142,14 @@
       />
       <div class="dialog-actions">
         <Button variant="ghost" onclick={() => { showDeleteConfirm = false; deleteConfirmText = ''; }} disabled={deleting}>
-          Cancel
+          {messages.common.cancel}
         </Button>
         <button
           class="delete-btn"
           onclick={handleDeleteAccount}
           disabled={deleting || deleteConfirmText !== $session.data?.user?.name}
         >
-          {deleting ? 'Deleting...' : 'Delete Account'}
+          {deleting ? messages.common.deleting : copy.account.deleteAccount}
         </button>
       </div>
     </div>
@@ -361,10 +368,6 @@
     border-radius: var(--radius-md);
     margin-bottom: 1rem;
     line-height: 1.5;
-  }
-
-  .dialog-note strong {
-    color: var(--foreground);
   }
 
   .dialog-confirm-text {

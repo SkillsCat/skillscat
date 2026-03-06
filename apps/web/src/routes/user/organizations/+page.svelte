@@ -2,6 +2,9 @@
   import Avatar from '$lib/components/common/Avatar.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getSettingsCopy } from '$lib/i18n/settings';
+  import { getUiCopy } from '$lib/i18n/ui';
 
   interface Org {
     id: string;
@@ -22,6 +25,10 @@
   let createError = $state<string | null>(null);
   let newOrgName = $state('');
   let newOrgSlug = $state('');
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  const copy = $derived(getSettingsCopy(i18n.locale()));
+  const ui = $derived(getUiCopy(i18n.locale()));
 
   $effect(() => {
     loadOrgs();
@@ -36,10 +43,10 @@
         const data = await res.json() as { organizations?: Org[] };
         orgs = data.organizations || [];
       } else {
-        error = 'Failed to load organizations';
+        error = copy.organizations.failedToLoad;
       }
     } catch {
-      error = 'Failed to load organizations';
+      error = copy.organizations.failedToLoad;
     } finally {
       loading = false;
     }
@@ -68,10 +75,10 @@
         await loadOrgs();
       } else {
         const data = await res.json() as { error?: string; message?: string };
-        createError = data.error || data.message || 'Failed to create organization';
+        createError = data.error || data.message || copy.organizations.createFailed;
       }
     } catch {
-      createError = 'Failed to create organization';
+      createError = copy.organizations.createFailed;
     } finally {
       creating = false;
     }
@@ -89,35 +96,46 @@
     newOrgName = target.value;
     newOrgSlug = generateSlug(target.value);
   }
+
+  function getRoleLabel(role: string): string {
+    switch (role) {
+      case 'owner':
+        return ui.badges.owner;
+      case 'admin':
+        return ui.badges.admin;
+      default:
+        return ui.badges.member;
+    }
+  }
 </script>
 
 <svelte:head>
-  <title>Organizations - Settings - SkillsCat</title>
+  <title>{copy.organizations.title} - {messages.settingsLayout.title} - SkillsCat</title>
 </svelte:head>
 
 <div class="orgs-page">
   <div class="page-header">
     <div>
-      <h1>Organizations</h1>
-      <p class="description">Manage your organizations and team skills.</p>
+      <h1>{copy.organizations.title}</h1>
+      <p class="description">{copy.organizations.description}</p>
     </div>
     <Button variant="cute" onclick={() => showCreateDialog = true}>
-      Create Organization
+      {copy.organizations.createOrganization}
     </Button>
   </div>
 
   {#if loading}
     <div class="loading-state">
       <div class="loading-spinner"></div>
-      <p>Loading organizations...</p>
+      <p>{copy.organizations.loading}</p>
     </div>
   {:else if error}
     <ErrorState
-      title="Failed to Load"
+      title={copy.organizations.failedToLoad}
       message={error}
-      primaryActionText="Try Again"
+      primaryActionText={messages.common.tryAgain}
       primaryActionClick={loadOrgs}
-      secondaryActionText="Go Back"
+      secondaryActionText={messages.common.goBack}
       secondaryActionClick={() => history.back()}
     />
   {:else if orgs.length === 0}
@@ -127,10 +145,10 @@
           <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
         </svg>
       </div>
-      <h3>No organizations yet</h3>
-      <p>Create an organization to collaborate with your team.</p>
+      <h3>{copy.organizations.emptyTitle}</h3>
+      <p>{copy.organizations.emptyDescription}</p>
       <Button variant="cute" onclick={() => showCreateDialog = true}>
-        Create Organization
+        {copy.organizations.createOrganization}
       </Button>
     </div>
   {:else}
@@ -151,12 +169,12 @@
                   <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                   </svg>
-                  Verified
+                  {ui.badges.verified}
                 </span>
               {/if}
             </div>
             <p class="org-slug">@{org.slug}</p>
-            <span class="org-role">{org.role}</span>
+            <span class="org-role">{getRoleLabel(org.role)}</span>
           </div>
           <svg class="chevron" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
@@ -172,7 +190,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="dialog-overlay" role="presentation" onclick={() => { showCreateDialog = false; createError = null; }}>
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="create-org-title" tabindex="-1" onclick={(e) => e.stopPropagation()}>
-      <h2 id="create-org-title">Create Organization</h2>
+      <h2 id="create-org-title">{copy.organizations.dialogTitle}</h2>
       <form onsubmit={(e) => { e.preventDefault(); createOrg(); }}>
         {#if createError}
           <div class="form-error">
@@ -180,35 +198,35 @@
           </div>
         {/if}
         <div class="form-group">
-          <label for="org-name">Organization Name</label>
+          <label for="org-name">{copy.organizations.organizationName}</label>
           <input
             id="org-name"
             type="text"
             value={newOrgName}
             oninput={handleNameChange}
-            placeholder="My Organization"
+            placeholder={copy.organizations.organizationNamePlaceholder}
             disabled={creating}
           />
         </div>
         <div class="form-group">
-          <label for="org-slug">URL Slug</label>
+          <label for="org-slug">{copy.organizations.urlSlug}</label>
           <div class="slug-input">
             <span class="slug-prefix">skills.cat/org/</span>
             <input
               id="org-slug"
               type="text"
               bind:value={newOrgSlug}
-              placeholder="my-org"
+              placeholder={copy.organizations.urlSlugPlaceholder}
               disabled={creating}
             />
           </div>
         </div>
         <div class="dialog-actions">
           <Button variant="ghost" onclick={() => { showCreateDialog = false; createError = null; }} disabled={creating}>
-            Cancel
+            {messages.common.cancel}
           </Button>
           <Button variant="cute" type="submit" disabled={creating || !newOrgName.trim() || !newOrgSlug.trim()}>
-            {creating ? 'Creating...' : 'Create'}
+            {creating ? messages.common.creating : messages.common.create}
           </Button>
         </div>
       </form>

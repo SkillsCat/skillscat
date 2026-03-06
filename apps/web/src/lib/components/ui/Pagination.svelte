@@ -4,6 +4,7 @@
    * Features: page numbers, prev/next arrows, goto input
    */
   import { goto } from '$app/navigation';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
 
@@ -18,6 +19,8 @@
   let { currentPage, totalPages, totalItems, itemsPerPage, baseUrl }: Props = $props();
 
   let gotoInput = $state('');
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 
   // Generate page numbers to display (max 7 buttons with ellipsis)
   const pageNumbers = $derived.by(() => {
@@ -81,10 +84,10 @@
 </script>
 
 {#if totalPages > 1}
-  <nav class="pagination" aria-label="Pagination">
+  <nav class="pagination" aria-label={messages.pagination.ariaLabel}>
     <!-- Info text -->
     <div class="pagination-info">
-      Showing {startItem}-{endItem} of {totalItems}
+      {i18n.t(messages.pagination.showingRange, { start: startItem, end: endItem, total: totalItems })}
     </div>
 
     <div class="pagination-controls">
@@ -93,10 +96,10 @@
         class="pagination-btn pagination-arrow"
         onclick={() => navigateToPage(currentPage - 1)}
         disabled={currentPage === 1}
-        aria-label="Previous page"
+        aria-label={messages.pagination.previousPage}
       >
         <HugeiconsIcon icon={ArrowLeft01Icon} size={18} strokeWidth={2} />
-        <span class="hidden sm:inline">Prev</span>
+        <span class="hidden sm:inline">{messages.pagination.prev}</span>
       </button>
 
       <!-- Page numbers -->
@@ -109,7 +112,7 @@
               class="pagination-btn pagination-page"
               class:active={page === currentPage}
               onclick={() => navigateToPage(page)}
-              aria-label="Page {page}"
+              aria-label={i18n.t(messages.pagination.page, { page })}
               aria-current={page === currentPage ? 'page' : undefined}
             >
               {page}
@@ -123,9 +126,9 @@
         class="pagination-btn pagination-arrow"
         onclick={() => navigateToPage(currentPage + 1)}
         disabled={currentPage === totalPages}
-        aria-label="Next page"
+        aria-label={messages.pagination.nextPage}
       >
-        <span class="hidden sm:inline">Next</span>
+        <span class="hidden sm:inline">{messages.pagination.next}</span>
         <HugeiconsIcon icon={ArrowRight01Icon} size={18} strokeWidth={2} />
       </button>
 
@@ -135,18 +138,18 @@
           type="number"
           min="1"
           max={totalPages}
-          placeholder="Go to"
+          placeholder={messages.pagination.gotoPlaceholder}
           bind:value={gotoInput}
           onkeydown={handleGotoKeydown}
           class="pagination-goto-input"
-          aria-label="Go to page"
+          aria-label={messages.pagination.gotoPage}
         />
         <button
           class="pagination-goto-btn"
           onclick={handleGoto}
-          aria-label="Go"
+          aria-label={messages.pagination.gotoAction}
         >
-          Go
+          {messages.pagination.gotoAction}
         </button>
       </div>
     </div>

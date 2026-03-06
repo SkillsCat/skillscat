@@ -1,6 +1,7 @@
 <script lang="ts">
   import { NavigationMenu } from 'bits-ui';
-  import { CATEGORY_SECTIONS } from '$lib/constants/categories';
+  import { getLocalizedCategorySections } from '$lib/i18n/categories';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     GitBranchIcon,
@@ -50,6 +51,8 @@
     Calculator01Icon
   } from '@hugeicons/core-free-icons';
 
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
   const categoryIcons: Record<string, typeof GitBranchIcon> = {
     'code-generation': CodeIcon,
     'refactoring': RefreshIcon,
@@ -100,8 +103,10 @@
     'game-dev': GameboyIcon
   };
 
-  const displaySections = CATEGORY_SECTIONS.filter((section) =>
-    ['development', 'backend', 'frontend', 'devops', 'quality', 'lifestyle'].includes(section.id)
+  const displaySections = $derived(
+    getLocalizedCategorySections(i18n.locale()).filter((section) =>
+      ['development', 'backend', 'frontend', 'devops', 'quality', 'lifestyle'].includes(section.id)
+    )
   );
 </script>
 
@@ -129,7 +134,7 @@
 </div>
 <div class="dropdown-footer">
   <NavigationMenu.Link href="/categories" class="view-all-link">
-    View all categories →
+    {messages.categories.viewAll}
   </NavigationMenu.Link>
 </div>
 

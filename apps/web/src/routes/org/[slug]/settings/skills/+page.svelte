@@ -5,6 +5,8 @@
   import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
   import SkillsList from '$lib/components/settings/SkillsList.svelte';
   import Pagination from '$lib/components/ui/Pagination.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getSettingsCopy } from '$lib/i18n/settings';
 
   interface Skill {
     id: string;
@@ -29,6 +31,8 @@
   let isDesktop = $state(true);
   let sentinelEl = $state<HTMLDivElement | null>(null);
   let observer: IntersectionObserver | null = null;
+  const i18n = useI18n();
+  const copy = $derived(getSettingsCopy(i18n.locale()));
 
   const slug = $derived($page.params.slug);
 
@@ -81,10 +85,10 @@
         allSkills = [...skills];
         hasMore = currentPage < totalPages;
       } else {
-        error = 'Failed to load skills';
+        error = copy.orgSkills.failedToLoad;
       }
     } catch {
-      error = 'Failed to load skills';
+      error = copy.orgSkills.failedToLoad;
     } finally {
       loading = false;
     }
@@ -115,8 +119,8 @@
 
 <div class="skills-page">
   <div class="page-header">
-    <h1>Skills</h1>
-    <p class="description">Manage skills published by this organization.</p>
+    <h1>{copy.orgSkills.title}</h1>
+    <p class="description">{copy.orgSkills.description}</p>
   </div>
 
   <!-- CLI Upload Hint -->
@@ -128,8 +132,8 @@
         </svg>
       </div>
       <div class="cli-hint-content">
-        <p class="cli-hint-title">Publish skills via CLI</p>
-        <p class="cli-hint-text">Use the SkillsCat CLI to publish skills for this organization:</p>
+        <p class="cli-hint-title">{copy.orgSkills.cliHintTitle}</p>
+        <p class="cli-hint-text">{copy.orgSkills.cliHintText}</p>
         <div class="cli-command">
           <code>npx skillscat publish --org {slug}</code>
           <CopyButton text="npx skillscat publish --org {slug}" size="sm" />
@@ -138,13 +142,13 @@
     </div>
   {/if}
 
-  <SettingsSection title="Organization Skills" description="Skills published under this organization.">
+  <SettingsSection title={copy.orgSkills.sectionTitle} description={copy.orgSkills.sectionDescription}>
     <SkillsList
       skills={displaySkills}
       {loading}
       {error}
-      emptyTitle="No skills yet"
-      emptyDescription="Use the CLI above to publish your first skill."
+      emptyTitle={copy.orgSkills.emptyTitle}
+      emptyDescription={copy.orgSkills.emptyDescription}
       onRetry={() => loadSkills(currentPage)}
     />
 

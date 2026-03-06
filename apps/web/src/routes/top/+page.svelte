@@ -1,6 +1,7 @@
 <script lang="ts">
   import ListPage from '$lib/components/layout/ListPage.svelte';
   import SEO from '$lib/components/common/SEO.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { StarIcon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
@@ -23,14 +24,16 @@
   }
 
   let { data }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
   const canonicalUrl = $derived(
     `${SITE_URL}/top${data.pagination.currentPage > 1 ? `?page=${data.pagination.currentPage}` : ''}`
   );
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'top' });
   const pageTitle = $derived(
-    `Top Rated Skills${data.pagination.currentPage > 1 ? ` - Page ${data.pagination.currentPage}` : ''} - SkillsCat`
+    `${messages.lists.topTitle}${data.pagination.currentPage > 1 ? i18n.t(messages.common.pageSuffix, { page: data.pagination.currentPage }) : ''} - SkillsCat`
   );
-  const pageDescription = 'Explore top-rated AI agent skills ranked by community stars and overall quality.';
+  const pageDescription = $derived(messages.lists.topDescription);
   const structuredData = $derived({
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
@@ -50,16 +53,16 @@
   description={pageDescription}
   url={canonicalUrl}
   image={ogImageUrl}
-  imageAlt="Top rated skills social preview image"
+  imageAlt={messages.legal.topImageAlt}
   keywords={['top ai skills', 'best ai agent skills', 'skillscat top rated']}
   structuredData={structuredData}
 />
 
 <ListPage
-  title="Top Rated"
-  description="The most starred skills loved by the community. Quality guaranteed!"
+  title={messages.lists.topTitle}
+  description={messages.lists.topDescription}
   skills={data.skills}
-  emptyMessage="No top rated skills yet"
+  emptyMessage={messages.lists.topEmpty}
   pagination={data.pagination}
 >
   {#snippet icon()}

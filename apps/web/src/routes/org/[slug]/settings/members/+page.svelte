@@ -4,6 +4,9 @@
   import Button from '$lib/components/ui/Button.svelte';
   import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
   import { Select } from "bits-ui";
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getSettingsCopy } from '$lib/i18n/settings';
+  import { getUiCopy } from '$lib/i18n/ui';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 
@@ -29,6 +32,10 @@
   }
 
   let { data }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  const copy = $derived(getSettingsCopy(i18n.locale()));
+  const ui = $derived(getUiCopy(i18n.locale()));
 
   // Local state that syncs with server data but can be mutated
   let members = $state<Member[]>([]);
@@ -72,11 +79,22 @@
   }
 
   function formatDate(timestamp: number): string {
-    return new Date(timestamp).toLocaleDateString("en-US", {
+    return i18n.formatDate(timestamp, {
       year: "numeric",
       month: "short",
       day: "numeric",
     });
+  }
+
+  function getRoleLabel(role: string): string {
+    switch (role) {
+      case 'owner':
+        return ui.badges.owner;
+      case 'admin':
+        return ui.badges.admin;
+      default:
+        return ui.badges.member;
+    }
   }
 
   function getRoleBadgeClass(role: string): string {
@@ -126,13 +144,13 @@
       const data = (await res.json()) as { message?: string };
 
       if (res.ok) {
-        inviteSuccess = data.message || "Invitation sent successfully";
+        inviteSuccess = data.message || copy.orgMembers.inviteSuccess;
         inviteUsername = "";
       } else {
-        inviteError = data.message || "Failed to send invitation";
+        inviteError = data.message || copy.orgMembers.inviteFailed;
       }
     } catch {
-      inviteError = "Failed to send invitation";
+      inviteError = copy.orgMembers.inviteFailed;
     } finally {
       inviting = false;
     }
@@ -142,8 +160,8 @@
 <div class="members-page">
   <div class="page-header">
     <div>
-      <h1>Members</h1>
-      <p class="description">Manage organization members and their roles.</p>
+      <h1>{copy.orgMembers.title}</h1>
+      <p class="description">{copy.orgMembers.description}</p>
     </div>
     {#if isAdmin}
       <Button variant="cute" size="sm" onclick={openInviteDialog}>
@@ -160,14 +178,14 @@
             d="M12 4.5v15m7.5-7.5h-15"
           />
         </svg>
-        Invite Member
+        {copy.orgMembers.inviteAction}
       </Button>
     {/if}
   </div>
 
   <SettingsSection
-    title="Organization Members"
-    description="People who have access to this organization."
+    title={copy.orgMembers.sectionTitle}
+    description={copy.orgMembers.sectionDescription}
   >
     {#if members.length === 0}
       <div class="empty-state">
@@ -184,8 +202,8 @@
             d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"
           />
         </svg>
-        <h3>No members</h3>
-        <p>Invite members to collaborate on this organization.</p>
+        <h3>{copy.orgMembers.emptyTitle}</h3>
+        <p>{copy.orgMembers.emptyDescription}</p>
       </div>
     {:else}
       <div class="members-list">
@@ -202,11 +220,11 @@
               <div class="member-header">
                 <a href={getMemberProfileHref(member)} class="member-name">{member.name}</a>
                 <span class="role-badge {getRoleBadgeClass(member.role)}"
-                  >{member.role}</span
+                  >{getRoleLabel(member.role)}</span
                 >
               </div>
               <p class="member-email">{member.email}</p>
-              <p class="member-joined">Joined {formatDate(member.joinedAt)}</p>
+              <p class="member-joined">{i18n.t(copy.orgMembers.joinedOn, { date: formatDate(member.joinedAt) })}</p>
             </div>
             {#if isOwner && member.role !== "owner"}
               <div class="member-actions">
@@ -246,21 +264,20 @@
       tabindex="-1"
       onclick={(e) => e.stopPropagation()}
     >
-      <h2 id="invite-dialog-title">Invite Member</h2>
+      <h2 id="invite-dialog-title">{copy.orgMembers.inviteDialogTitle}</h2>
       <p class="dialog-description">
-        Invite a user by their GitHub username.<br />
-        They will receive a notification to accept or decline.
+        {copy.orgMembers.inviteDialogDescription}
       </p>
 
       <div class="form-group">
-        <label for="github-username">GitHub Username</label>
+        <label for="github-username">{copy.orgMembers.githubUsername}</label>
         <div class="input-wrapper">
           <span class="input-prefix">@</span>
           <input
             id="github-username"
             type="text"
             bind:value={inviteUsername}
-            placeholder="username"
+            placeholder={copy.orgMembers.githubUsernamePlaceholder}
             class="invite-input"
             disabled={inviting}
           />
@@ -268,7 +285,7 @@
       </div>
 
       <div class="form-group">
-        <label for="invite-role">Role</label>
+        <label for="invite-role">{copy.orgMembers.role}</label>
         <Select.Root
           type="single"
           value={inviteRole}
@@ -279,7 +296,7 @@
         >
           <Select.Trigger class="select-trigger">
             <span class="select-value">
-              {inviteRole === "member" ? "Member" : "Admin"}
+              {inviteRole === "member" ? copy.orgMembers.roleMember : copy.orgMembers.roleAdmin}
             </span>
             <HugeiconsIcon
               icon={ArrowDown01Icon}
@@ -290,9 +307,9 @@
           <Select.Portal>
             <Select.Content class="select-content" sideOffset={4}>
               <Select.Item value="member" class="select-item"
-                >Member</Select.Item
+                >{copy.orgMembers.roleMember}</Select.Item
               >
-              <Select.Item value="admin" class="select-item">Admin</Select.Item>
+              <Select.Item value="admin" class="select-item">{copy.orgMembers.roleAdmin}</Select.Item>
             </Select.Content>
           </Select.Portal>
         </Select.Root>
@@ -308,14 +325,14 @@
 
       <div class="dialog-actions">
         <Button variant="ghost" onclick={closeInviteDialog} disabled={inviting}>
-          Cancel
+          {messages.common.cancel}
         </Button>
         <Button
           variant="cute"
           onclick={handleInvite}
           disabled={inviting || !inviteUsername.trim()}
         >
-          {inviting ? "Sending..." : "Send Invitation"}
+          {inviting ? copy.orgMembers.sendingInvitation : copy.orgMembers.sendInvitation}
         </Button>
       </div>
     </div>

@@ -6,6 +6,8 @@
   import Pagination from '$lib/components/ui/Pagination.svelte';
   import { invalidateAll } from '$app/navigation';
   import { browser } from '$app/environment';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getSettingsCopy } from '$lib/i18n/settings';
 
   interface Skill {
     id: string;
@@ -27,6 +29,9 @@
   }
 
   let { data } = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  const copy = $derived(getSettingsCopy(i18n.locale()));
 
   const pageSkills = $derived(data.skills as Skill[]);
   const pagination = $derived(data.pagination);
@@ -120,7 +125,7 @@
 
   const unpublishDescription = $derived(
     unpublishTarget
-      ? `Are you sure you want to unpublish "${unpublishTarget.name}"? This action cannot be undone.`
+      ? i18n.t(copy.userSkills.unpublishDescription, { name: unpublishTarget.name })
       : ''
   );
 
@@ -130,14 +135,14 @@
 </script>
 
 <svelte:head>
-  <title>My Skills - Settings - SkillsCat</title>
+  <title>{copy.userSkills.title} - {messages.settingsLayout.title} - SkillsCat</title>
 </svelte:head>
 
 <div class="skills-page">
   <div class="page-header">
     <div>
-      <h1>My Skills</h1>
-      <p class="description">Manage your uploaded and indexed skills.</p>
+      <h1>{copy.userSkills.title}</h1>
+      <p class="description">{copy.userSkills.description}</p>
     </div>
   </div>
 
@@ -150,8 +155,8 @@
         </svg>
       </div>
       <div class="cli-hint-content">
-        <p class="cli-hint-title">Upload skills via CLI</p>
-        <p class="cli-hint-text">Use the SkillsCat CLI to publish your skills:</p>
+        <p class="cli-hint-title">{copy.userSkills.cliHintTitle}</p>
+        <p class="cli-hint-text">{copy.userSkills.cliHintText}</p>
         <div class="cli-command">
           <code>npx skillscat publish</code>
           <CopyButton text="npx skillscat publish" size="sm" />
@@ -160,13 +165,13 @@
     </div>
   {/if}
 
-  <SettingsSection title="Your Skills" description="Skills you have published to SkillsCat.">
+  <SettingsSection title={copy.userSkills.sectionTitle} description={copy.userSkills.sectionDescription}>
     <SkillsList
       skills={displaySkills}
       loading={false}
       error={null}
-      emptyTitle="No skills yet"
-      emptyDescription="Use the CLI above to publish your first skill."
+      emptyTitle={copy.userSkills.emptyTitle}
+      emptyDescription={copy.userSkills.emptyDescription}
       onUnpublish={handleUnpublishClick}
     />
 
@@ -198,10 +203,10 @@
 
 <ConfirmDialog
   open={!!unpublishTarget}
-  title="Unpublish Skill"
+  title={copy.userSkills.unpublishTitle}
   description={unpublishDescription}
-  confirmText="Unpublish"
-  cancelText="Cancel"
+  confirmText={copy.userSkills.unpublishConfirm}
+  cancelText={messages.common.cancel}
   danger={true}
   loading={unpublishLoading}
   onConfirm={confirmUnpublish}

@@ -7,6 +7,7 @@
   import Button from '$lib/components/ui/Button.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import { buildSkillPath } from '$lib/skill-path';
+  import { useI18n } from '$lib/i18n/runtime';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { useSession, signOut } from '$lib/auth-client';
@@ -49,6 +50,8 @@
   let isLoadingLoginDialog = $state(false);
 
   const session = useSession();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 
   // Close mobile menu on navigation
   $effect(() => {
@@ -161,7 +164,7 @@
           onSearch={handleSearch}
           onSelectSkill={handleSkillSuggestionSelect}
           suggestionMode="skills"
-          placeholder="Search skills..."
+          placeholder={messages.nav.searchSkills}
         />
       </div>
 
@@ -175,7 +178,7 @@
                 href="/trending"
                 class="nav-link"
               >
-                Trending
+                {messages.nav.trending}
               </NavigationMenu.Link>
             </NavigationMenu.Item>
 
@@ -186,7 +189,7 @@
                 onpointerenter={() => void ensureCategoriesMenuLoaded()}
                 onfocus={() => void ensureCategoriesMenuLoaded()}
               >
-                Categories
+                {messages.nav.categories}
                 <span class="chevron-icon">
                   <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2} />
                 </span>
@@ -220,7 +223,7 @@
               onclick={openSubmitDialog}
             >
               <HugeiconsIcon icon={Add01Icon} size={16} strokeWidth={2} />
-              <span class="submit-btn-text">Submit</span>
+              <span class="submit-btn-text">{messages.nav.submit}</span>
             </Button>
           {/if}
           <ThemeToggle />
@@ -231,7 +234,7 @@
         <button
           class="mobile-menu-btn"
           onclick={toggleMobileMenu}
-          aria-label="Toggle menu"
+          aria-label={messages.nav.toggleMenu}
         >
           {#if mobileMenuOpen}
             <HugeiconsIcon icon={Cancel01Icon} size={20} strokeWidth={1.5} />
@@ -253,7 +256,7 @@
             onSearch={handleSearch}
             onSelectSkill={handleSkillSuggestionSelect}
             suggestionMode="skills"
-            placeholder="Search skills..."
+            placeholder={messages.nav.searchSkills}
           />
         </div>
 
@@ -287,16 +290,16 @@
               }}
             >
               <HugeiconsIcon icon={Add01Icon} size={16} strokeWidth={2} />
-              Submit a Skill
+              {messages.submitDialog.title}
             </button>
           {/if}
           <a href="/trending" class="mobile-link" onclick={() => mobileMenuOpen = false}>
             <HugeiconsIcon icon={SparklesIcon} size={16} strokeWidth={2} />
-            Trending
+            {messages.nav.trending}
           </a>
           <a href="/categories" class="mobile-link" onclick={() => mobileMenuOpen = false}>
             <HugeiconsIcon icon={Folder01Icon} size={16} strokeWidth={2} />
-            Categories
+            {messages.nav.categories}
           </a>
         </div>
 
@@ -306,22 +309,22 @@
           <div class="mobile-links">
             <a href="/user/skills" class="mobile-link" onclick={() => mobileMenuOpen = false}>
               <HugeiconsIcon icon={CodeIcon} size={16} strokeWidth={2} />
-              My Skills
+              {messages.userMenu.mySkills}
             </a>
             <a href="/user/messages" class="mobile-link" onclick={() => mobileMenuOpen = false}>
               <HugeiconsIcon icon={Mail01Icon} size={16} strokeWidth={2} />
-              Messages
+              {messages.userMenu.messages}
               {#if unreadCount > 0}
                 <span class="mobile-badge">{unreadCount}</span>
               {/if}
             </a>
             <a href="/bookmarks" class="mobile-link" onclick={() => mobileMenuOpen = false}>
               <HugeiconsIcon icon={Bookmark02Icon} size={16} strokeWidth={2} />
-              Bookmarks
+              {messages.userMenu.bookmarks}
             </a>
             <a href="/user/account" class="mobile-link" onclick={() => mobileMenuOpen = false}>
               <HugeiconsIcon icon={Settings01Icon} size={16} strokeWidth={2} />
-              Settings
+              {messages.userMenu.settings}
             </a>
           </div>
 
@@ -329,7 +332,7 @@
           <div class="mobile-links">
             <button class="mobile-link mobile-link-danger" onclick={handleSignOut}>
               <HugeiconsIcon icon={Logout01Icon} size={16} strokeWidth={2} />
-              Sign Out
+              {messages.userMenu.signOut}
             </button>
           </div>
         {:else}
@@ -342,7 +345,7 @@
               }}
             >
               <HugeiconsIcon icon={Login03Icon} size={16} strokeWidth={2} />
-              Sign In with GitHub
+              {messages.auth.continueWithGithub}
             </button>
           </div>
         {/if}

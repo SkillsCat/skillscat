@@ -1,6 +1,10 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
+  import { useI18n } from '$lib/i18n/runtime';
+
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 
   // Redirect to skills page as the default user view
   onMount(() => {
@@ -9,11 +13,11 @@
 </script>
 
 <svelte:head>
-  <title>Settings - SkillsCat</title>
+  <title>{messages.settingsLayout.title} - SkillsCat</title>
 </svelte:head>
 
 <div class="redirect-message">
-  <p>Redirecting...</p>
+  <p>{messages.common.loading}</p>
 </div>
 
 <style>

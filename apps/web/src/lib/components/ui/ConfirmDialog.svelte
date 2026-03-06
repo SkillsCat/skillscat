@@ -3,6 +3,7 @@
    * ConfirmDialog - Reusable confirmation dialog component
    */
   import Button from '$lib/components/ui/Button.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
 
   interface Props {
     open: boolean;
@@ -20,13 +21,15 @@
     open,
     title,
     description,
-    confirmText = 'Confirm',
-    cancelText = 'Cancel',
+    confirmText = '',
+    cancelText = '',
     onConfirm,
     onCancel,
     danger = true,
     loading = false,
   }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 </script>
 
 {#if open}
@@ -45,10 +48,10 @@
       <p class="dialog-description">{description}</p>
       <div class="dialog-actions">
         <Button variant="ghost" onclick={onCancel} disabled={loading}>
-          {cancelText}
+          {cancelText || messages.common.cancel}
         </Button>
         <Button variant={danger ? 'danger' : 'cute'} onclick={onConfirm} disabled={loading}>
-          {loading ? 'Processing...' : confirmText}
+          {loading ? messages.common.processing : confirmText || messages.common.confirm}
         </Button>
       </div>
     </div>

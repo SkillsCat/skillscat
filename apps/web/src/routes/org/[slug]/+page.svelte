@@ -3,6 +3,9 @@
   import Avatar from '$lib/components/common/Avatar.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getProfilesCopy } from '$lib/i18n/profiles';
+  import { getUiCopy } from '$lib/i18n/ui';
   import { buildSkillPath } from '$lib/skill-path';
   import { buildOgImageUrl } from '$lib/seo/og';
   import { SITE_URL } from '$lib/seo/constants';
@@ -53,6 +56,10 @@
   }
 
   let { data }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  const copy = $derived(getProfilesCopy(i18n.locale()));
+  const ui = $derived(getUiCopy(i18n.locale()));
 
   let loadedOrg = $state<Org | null | undefined>(undefined);
   let loadedMembers = $state<Member[] | undefined>(undefined);
@@ -145,20 +152,20 @@
   const pageTitle = $derived(
     org
       ? trimSeoText(
-          `${orgName} Organization AI Agent Skills${org.skillCount ? ` (${org.skillCount})` : ''} | SkillsCat`,
+          i18n.t(copy.org.seoTitle, {
+            name: orgName,
+            countPart: org.skillCount ? ` (${org.skillCount})` : '',
+          }),
           MAX_SEO_TITLE_LENGTH
         )
-      : 'Organization Not Found - SkillsCat'
+      : copy.org.seoNotFoundTitle
   );
   const orgDescription = $derived(
     (() => {
       const orgBio = cleanSeoText(org?.description);
       const publicCount = publicSkillsForSeo.length || (org?.skillCount ?? 0);
-      const fallback = `Explore ${publicCount} public AI agent skill${publicCount === 1 ? '' : 's'} from ${orgName} on SkillsCat.`;
-      const topSkillsPart = orgTopSkillNames.length > 0
-        ? `Featured skills: ${orgTopSkillNames.slice(0, 2).join(', ')}.`
-        : '';
-      return trimSeoText(`${orgBio || fallback} ${topSkillsPart}`.trim(), MAX_SEO_DESCRIPTION_LENGTH);
+      const fallback = i18n.t(copy.org.seoFallbackDescription, { count: publicCount, name: orgName });
+      return trimSeoText(orgBio || fallback, MAX_SEO_DESCRIPTION_LENGTH);
     })()
   );
   const orgSeoKeywords = $derived((() => {
@@ -221,11 +228,11 @@
             },
           },
           {
-            '@context': 'https://schema.org',
+              '@context': 'https://schema.org',
             '@type': 'BreadcrumbList',
             itemListElement: [
-              { '@type': 'ListItem', position: 1, name: 'Home', item: SITE_URL },
-              { '@type': 'ListItem', position: 2, name: 'Organizations', item: `${SITE_URL}/trending` },
+              { '@type': 'ListItem', position: 1, name: copy.org.breadcrumbHome, item: SITE_URL },
+              { '@type': 'ListItem', position: 2, name: copy.org.breadcrumbOrganizations, item: `${SITE_URL}/trending` },
               { '@type': 'ListItem', position: 3, name: orgName, item: canonicalUrl },
             ],
           },
@@ -233,7 +240,7 @@
             ? [{
                 '@context': 'https://schema.org',
                   '@type': 'ItemList',
-                  name: `${orgName} public skills`,
+                  name: i18n.t(copy.org.itemListName, { name: orgName }),
                   url: canonicalUrl,
                   itemListElement: orgSkillItemList,
               }]
@@ -268,7 +275,7 @@
         loadedOrg = data.organization ?? null;
       } else {
         loadedOrg = null;
-        loadedError = "Organization not found";
+        loadedError = copy.org.notFoundTitle;
         return;
       }
 
@@ -282,7 +289,7 @@
         loadedSkills = data.skills || [];
       }
     } catch {
-      loadedError = "Failed to load organization";
+      loadedError = messages.orgSettings.failedToLoadOrganization;
     } finally {
       loading = false;
     }
@@ -295,7 +302,7 @@
     description={orgDescription}
     url={canonicalUrl}
     image={ogImageUrl}
-    imageAlt={`${orgName} organization social preview image`}
+    imageAlt={i18n.t(copy.org.imageAlt, { name: orgName })}
     type="profile"
     keywords={orgSeoKeywords}
     noindex={orgPublicSkillCountForSeo === 0}
@@ -304,9 +311,9 @@
 {:else}
   <SEO
     title={pageTitle}
-    description="The requested organization could not be found on SkillsCat."
+    description={copy.org.seoNotFoundDescription}
     image={ogImageUrl}
-    imageAlt="Organization not found social preview image"
+    imageAlt={copy.org.notFoundImageAlt}
     noindex
     structuredData={null}
   />
@@ -316,15 +323,15 @@
   {#if loading}
     <div class="loading-state">
       <div class="loading-spinner"></div>
-      <p>Loading organization...</p>
+      <p>{copy.org.loading}</p>
     </div>
   {:else if error}
     <ErrorState
-      title="Organization Not Found"
+      title={copy.org.notFoundTitle}
       message={error}
-      primaryActionText="Try Again"
+      primaryActionText={messages.common.tryAgain}
       primaryActionClick={loadOrg}
-      secondaryActionText="Go Back"
+      secondaryActionText={messages.common.goBack}
       secondaryActionClick={() => history.back()}
     />
   {:else if org}
@@ -342,7 +349,7 @@
           <div class="header-title-row">
             <h1>{org.displayName || org.name}</h1>
             {#if org.verified}
-              <span class="verified-badge" title="Verified Organization">
+              <span class="verified-badge" title={copy.org.verifiedTitle}>
                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
@@ -354,11 +361,9 @@
             <p class="org-description">{org.description}</p>
           {/if}
           <div class="org-stats">
-            <span
-              >{org.memberCount} member{org.memberCount !== 1 ? "s" : ""}</span
-            >
+            <span>{i18n.t(copy.org.memberCount, { count: org.memberCount, suffix: org.memberCount !== 1 ? 's' : '' })}</span>
             <span class="separator">·</span>
-            <span>{org.skillCount} skill{org.skillCount !== 1 ? "s" : ""}</span>
+            <span>{i18n.t(copy.org.skillCount, { count: org.skillCount, suffix: org.skillCount !== 1 ? 's' : '' })}</span>
           </div>
         </div>
       </div>
@@ -383,7 +388,7 @@
                 d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
               />
             </svg>
-            Settings
+            {copy.org.settings}
           </Button>
         </div>
       {/if}
@@ -409,7 +414,7 @@
             d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
           />
         </svg>
-        Skills
+        {copy.org.skillsTab}
         <span class="tab-count">{skills.length}</span>
       </button>
       <button
@@ -430,7 +435,7 @@
             d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
           />
         </svg>
-        Members
+        {copy.org.membersTab}
         <span class="tab-count">{members.length}</span>
       </button>
     </div>
@@ -479,8 +484,8 @@
                 d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
               />
             </svg>
-            <h3>No skills yet</h3>
-            <p>This organization hasn't published any skills.</p>
+            <h3>{copy.org.emptySkillsTitle}</h3>
+            <p>{copy.org.emptySkillsDescription}</p>
           </div>
         {/if}
       {:else}
@@ -498,7 +503,9 @@
                 />
                 <div class="member-info">
                   <span class="member-name">{member.name}</span>
-                  <span class="member-role">{member.role}</span>
+                  <span class="member-role">
+                    {member.role === 'owner' ? ui.badges.owner : member.role === 'admin' ? ui.badges.admin : ui.badges.member}
+                  </span>
                 </div>
               </a>
             {/each}
@@ -518,8 +525,8 @@
                 d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
               />
             </svg>
-            <h3>No members</h3>
-            <p>This organization has no public members.</p>
+            <h3>{copy.org.emptyMembersTitle}</h3>
+            <p>{copy.org.emptyMembersDescription}</p>
           </div>
         {/if}
       {/if}

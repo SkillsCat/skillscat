@@ -1,5 +1,7 @@
 <script lang="ts">
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getUiCopy } from '$lib/i18n/ui';
   import { LockIcon, ViewOffIcon, GlobeIcon } from '@hugeicons/core-free-icons';
 
   interface Props {
@@ -8,11 +10,13 @@
   }
 
   let { visibility, size = 'sm' }: Props = $props();
+  const i18n = useI18n();
+  const copy = $derived(getUiCopy(i18n.locale()));
 
   const config = $derived({
-    private: { icon: LockIcon, label: 'Private' },
-    unlisted: { icon: ViewOffIcon, label: 'Unlisted' },
-    public: { icon: GlobeIcon, label: 'Public' },
+    private: { icon: LockIcon, label: copy.visibility.private },
+    unlisted: { icon: ViewOffIcon, label: copy.visibility.unlisted },
+    public: { icon: GlobeIcon, label: copy.visibility.public },
   }[visibility]);
 </script>
 

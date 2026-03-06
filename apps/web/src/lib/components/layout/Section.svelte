@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { ArrowRight01Icon } from '@hugeicons/core-free-icons';
 
@@ -12,6 +13,8 @@
   }
 
   let { title, href, children, class: className = '', icon }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 </script>
 
 <section class="mb-12 {className}">
@@ -26,7 +29,7 @@
     </h2>
     {#if href}
       <a {href} class="view-all-link">
-        View all
+        {messages.common.viewAll}
         <HugeiconsIcon icon={ArrowRight01Icon} size={16} strokeWidth={2} />
       </a>
     {/if}

@@ -4,6 +4,7 @@
   import SkillCard from '$lib/components/skill/SkillCard.svelte';
   import EmptyState from '$lib/components/feedback/EmptyState.svelte';
   import SEO from '$lib/components/common/SEO.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import {
     Fire03Icon,
@@ -15,7 +16,7 @@
   } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
   import { buildOgImageUrl } from '$lib/seo/og';
-  import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from '$lib/seo/constants';
+  import { SITE_NAME, SITE_URL } from '$lib/seo/constants';
 
   interface Props {
     data: {
@@ -27,13 +28,12 @@
   }
 
   let { data }: Props = $props();
-
-  const SKILL_COUNT_FORMATTER = new Intl.NumberFormat('en-US');
-  let displayCount = $derived(SKILL_COUNT_FORMATTER.format(data.stats.totalSkills));
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  let displayCount = $derived(i18n.formatNumber(data.stats.totalSkills));
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'home' });
-  const heroDescription = SITE_DESCRIPTION;
-  const homeDescription = heroDescription;
-  const homeStructuredData = {
+  const homeDescription = $derived(messages.home.heroTitle);
+  const homeStructuredData = $derived({
     '@context': 'https://schema.org',
     '@type': 'WebSite',
     name: 'SkillsCat',
@@ -53,7 +53,7 @@
       },
       'query-input': 'required name=search_term_string',
     },
-  };
+  });
 </script>
 
 <SEO
@@ -61,7 +61,7 @@
   description={homeDescription}
   url="/"
   image={ogImageUrl}
-  imageAlt="SkillsCat home page social preview image"
+  imageAlt={messages.legal.homeImageAlt}
   keywords={['ai agent skills', 'skillscat', 'open source skills', 'ai automation']}
   structuredData={homeStructuredData}
 />
@@ -76,16 +76,16 @@
         <div class="hero-circle hero-circle-blue"></div>
 
         <div class="hero-content">
-          <h1 class="hero-title">{heroDescription}</h1>
+          <h1 class="hero-title">{homeDescription}</h1>
           <p class="hero-subtitle">
-            Browse {displayCount} community skills to extend agent capabilities.
+            {i18n.t(messages.home.heroSubtitle, { count: displayCount })}
           </p>
         </div>
       </div>
     </div>
 
     <!-- Trending Section -->
-    <Section title="Trending Skills" href="/trending">
+    <Section title={messages.home.trendingTitle} href="/trending">
       {#snippet icon()}
         <HugeiconsIcon icon={Fire03Icon} size={20} strokeWidth={2} />
       {/snippet}
@@ -97,8 +97,8 @@
         </Grid>
       {:else}
         <EmptyState
-          title="No trending skills yet"
-          description="Be the first to submit a skill!"
+          title={messages.home.trendingEmptyTitle}
+          description={messages.home.trendingEmptyDescription}
         >
           {#snippet icon()}
             <HugeiconsIcon icon={RocketIcon} size={40} strokeWidth={1.5} />
@@ -108,7 +108,7 @@
     </Section>
 
     <!-- Recently Added Section -->
-    <Section title="Recently Added" href="/recent">
+    <Section title={messages.home.recentTitle} href="/recent">
       {#snippet icon()}
         <HugeiconsIcon icon={Notification01Icon} size={20} strokeWidth={2} />
       {/snippet}
@@ -120,8 +120,8 @@
         </Grid>
       {:else}
         <EmptyState
-          title="No skills added yet"
-          description="Skills will appear here once they're indexed."
+          title={messages.home.recentEmptyTitle}
+          description={messages.home.recentEmptyDescription}
         >
           {#snippet icon()}
             <HugeiconsIcon icon={Sad01Icon} size={40} strokeWidth={1.5} />
@@ -131,7 +131,7 @@
     </Section>
 
     <!-- Top Rated Section -->
-    <Section title="Top Rated" href="/top">
+    <Section title={messages.home.topTitle} href="/top">
       {#snippet icon()}
         <HugeiconsIcon icon={StarIcon} size={20} strokeWidth={2} />
       {/snippet}
@@ -143,8 +143,8 @@
         </Grid>
       {:else}
         <EmptyState
-          title="No top rated skills yet"
-          description="Star your favorite skills to see them here."
+          title={messages.home.topEmptyTitle}
+          description={messages.home.topEmptyDescription}
         >
           {#snippet icon()}
             <HugeiconsIcon icon={HeartbreakIcon} size={40} strokeWidth={1.5} />

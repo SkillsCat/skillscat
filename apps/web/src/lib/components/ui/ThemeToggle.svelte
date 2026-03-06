@@ -1,9 +1,12 @@
 <script lang="ts">
   import { browser } from '$app/environment';
+  import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Sun02Icon, Moon02Icon } from '@hugeicons/core-free-icons';
 
   let isDark = $state(false);
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 
   function toggleTheme() {
     isDark = !isDark;
@@ -27,7 +30,7 @@
 <button
   onclick={toggleTheme}
   class="theme-toggle"
-  aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+  aria-label={isDark ? messages.theme.switchToLight : messages.theme.switchToDark}
 >
   <span class="icon-wrapper" class:rotate={isDark}>
     {#if isDark}

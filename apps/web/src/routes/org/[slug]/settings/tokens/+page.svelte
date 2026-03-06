@@ -6,6 +6,9 @@
   import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
   import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
+  import { getSettingsCopy } from '$lib/i18n/settings';
+  import { formatRelativeTimestamp } from '$lib/i18n/relative';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Key01Icon, Delete02Icon, Tick02Icon, Copy01Icon, ArrowDown01Icon } from '@hugeicons/core-free-icons';
 
@@ -25,21 +28,6 @@
     description: string;
   }
 
-  const availableScopes: Scope[] = [
-    { id: 'read', label: 'Read', description: 'View skills and metadata' },
-    { id: 'write', label: 'Write', description: 'Manage organization skills' },
-    { id: 'publish', label: 'Publish', description: 'Upload new skills' },
-  ];
-
-  const expirationOptions = [
-    { value: 7, label: '7 days' },
-    { value: 30, label: '30 days' },
-    { value: 90, label: '90 days' },
-    { value: 180, label: '180 days' },
-    { value: 365, label: '1 year' },
-    { value: null, label: 'No expiration' },
-  ];
-
   let tokens = $state<Token[]>([]);
   let loading = $state(true);
   let loadError = $state<string | null>(null);
@@ -56,6 +44,34 @@
   let revoking = $state(false);
 
   const slug = $derived($page.params.slug);
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
+  const copy = $derived(getSettingsCopy(i18n.locale()));
+  const availableScopes = $derived<Scope[]>([
+    {
+      id: 'read',
+      label: copy.tokens.readScopeLabel,
+      description: copy.tokens.readScopeDescription,
+    },
+    {
+      id: 'write',
+      label: copy.tokens.writeScopeLabel,
+      description: copy.tokens.writeScopeDescriptionOrg,
+    },
+    {
+      id: 'publish',
+      label: copy.tokens.publishScopeLabel,
+      description: copy.tokens.publishScopeDescription,
+    },
+  ]);
+  const expirationOptions = $derived([
+    { value: 7, label: copy.tokens.expiration7Days },
+    { value: 30, label: copy.tokens.expiration30Days },
+    { value: 90, label: copy.tokens.expiration90Days },
+    { value: 180, label: copy.tokens.expiration180Days },
+    { value: 365, label: copy.tokens.expiration1Year },
+    { value: null, label: copy.tokens.neverExpires },
+  ]);
 
   $effect(() => {
     if (slug) {
@@ -72,10 +88,10 @@
         const data = await res.json() as { tokens?: Token[] };
         tokens = data.tokens || [];
       } else {
-        loadError = 'Failed to load tokens';
+        loadError = copy.tokens.failedToLoad;
       }
     } catch {
-      loadError = 'Failed to load tokens';
+      loadError = copy.tokens.failedToLoad;
     } finally {
       loading = false;
     }
@@ -105,10 +121,10 @@
         await loadTokens();
       } else {
         const data = await res.json() as { error?: string };
-        toast(data.error || 'Failed to create token', 'error');
+        toast(data.error || copy.tokens.failedToCreate, 'error');
       }
     } catch {
-      toast('Failed to create token', 'error');
+      toast(copy.tokens.failedToCreate, 'error');
     } finally {
       creating = false;
     }
@@ -126,13 +142,13 @@
     try {
       const res = await fetch(`/api/orgs/${slug}/tokens/${tokenToRevoke.id}`, { method: 'DELETE' });
       if (res.ok) {
-        toast('Token revoked successfully', 'success');
+        toast(copy.tokens.revokedSuccess, 'success');
         showRevokeDialog = false;
         tokenToRevoke = null;
         await loadTokens();
       }
     } catch {
-      toast('Failed to revoke token', 'error');
+      toast(copy.tokens.failedToRevoke, 'error');
     } finally {
       revoking = false;
     }
@@ -144,8 +160,8 @@
   }
 
   function formatDate(timestamp: number | null): string {
-    if (!timestamp) return 'Never';
-    return new Date(timestamp).toLocaleDateString('en-US', {
+    if (!timestamp) return messages.common.never;
+    return i18n.formatDate(timestamp, {
       year: 'numeric',
       month: 'short',
       day: 'numeric'
@@ -153,12 +169,7 @@
   }
 
   function formatRelativeTime(timestamp: number): string {
-    const seconds = Math.floor((Date.now() - timestamp) / 1000);
-    if (seconds < 60) return 'just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
-    return formatDate(timestamp);
+    return formatRelativeTimestamp(i18n, messages, timestamp);
   }
 
   function isExpiringSoon(expiresAt: number | null): boolean {
@@ -168,13 +179,13 @@
   }
 
   function formatExpiration(expiresAt: number | null): string {
-    if (!expiresAt) return 'Never expires';
+    if (!expiresAt) return copy.tokens.neverExpires;
     const now = Date.now();
-    if (expiresAt < now) return 'Expired';
+    if (expiresAt < now) return messages.common.expired;
     const daysUntilExpiry = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
-    if (daysUntilExpiry <= 1) return 'Expires today';
-    if (daysUntilExpiry <= 7) return `Expires in ${daysUntilExpiry} days`;
-    return `Expires ${formatDate(expiresAt)}`;
+    if (daysUntilExpiry <= 1) return copy.tokens.expiresToday;
+    if (daysUntilExpiry <= 7) return i18n.t(copy.tokens.expiresInDays, { count: daysUntilExpiry });
+    return i18n.t(copy.tokens.expiresOn, { date: formatDate(expiresAt) });
   }
 
   function toggleScope(scope: string) {
@@ -189,7 +200,7 @@
     if (!createdToken) return;
     await navigator.clipboard.writeText(createdToken);
     copiedToken = true;
-    toast('Token copied to clipboard', 'success');
+    toast(copy.tokens.copiedSuccess, 'success');
     setTimeout(() => copiedToken = false, 2000);
   }
 </script>
@@ -200,9 +211,9 @@
       <HugeiconsIcon icon={Key01Icon} size={24} />
     </div>
     <div>
-      <h1>API Tokens</h1>
+      <h1>{copy.tokens.title}</h1>
       <p class="description">
-        Create tokens to authenticate with the SkillsCat API for this organization.
+        {copy.tokens.descriptionOrg}
       </p>
     </div>
   </div>
@@ -215,41 +226,41 @@
           <HugeiconsIcon icon={Tick02Icon} size={20} />
         </div>
         <div>
-          <h3>Token Created Successfully</h3>
-          <p>Copy this token now. It will not be shown again.</p>
+          <h3>{copy.tokens.createdTitle}</h3>
+          <p>{copy.tokens.createdDescription}</p>
         </div>
       </div>
       <div class="token-display">
         <code>{createdToken}</code>
         <Button variant="cute" size="sm" onclick={copyToken}>
           <HugeiconsIcon icon={copiedToken ? Tick02Icon : Copy01Icon} size={16} />
-          {copiedToken ? 'Copied!' : 'Copy'}
+          {copiedToken ? messages.common.copied : messages.common.copy}
         </Button>
       </div>
       <div class="success-actions">
         <Button variant="cute-secondary" size="sm" onclick={() => { createdToken = null; }}>
-          Done
+          {messages.common.done}
         </Button>
       </div>
     </div>
   {/if}
 
   <!-- Create Token Form -->
-  <SettingsSection title="Create New Token" description="Generate a new API token for this organization.">
+  <SettingsSection title={copy.tokens.createTitleOrg} description={copy.tokens.createDescriptionOrg}>
     <form onsubmit={(e) => { e.preventDefault(); createToken(); }}>
       <div class="form-group">
-        <label for="token-name">Token Name</label>
+        <label for="token-name">{copy.tokens.nameLabel}</label>
         <input
           id="token-name"
           type="text"
           bind:value={newTokenName}
-          placeholder="e.g., CI/CD Pipeline"
+          placeholder={copy.tokens.nameOrgPlaceholder}
           disabled={creating}
         />
       </div>
 
       <div class="form-group">
-        <span class="form-label">Permissions</span>
+        <span class="form-label">{copy.tokens.permissions}</span>
         <div class="scopes-grid">
           {#each availableScopes as scope (scope.id)}
             <Checkbox.Root
@@ -276,7 +287,7 @@
       </div>
 
       <div class="form-group">
-        <span class="form-label">Expiration</span>
+        <span class="form-label">{copy.tokens.expiration}</span>
         <Select.Root
           type="single"
           value={String(newTokenExpiration)}
@@ -285,7 +296,7 @@
         >
           <Select.Trigger class="select-trigger">
             <span class="select-value">
-              {expirationOptions.find(o => String(o.value) === String(newTokenExpiration))?.label || 'Select...'}
+              {expirationOptions.find(o => String(o.value) === String(newTokenExpiration))?.label || messages.common.selectPlaceholder}
             </span>
             <HugeiconsIcon icon={ArrowDown01Icon} size={16} class="select-icon" />
           </Select.Trigger>
@@ -303,24 +314,24 @@
 
       <div class="form-actions">
         <Button variant="cute" type="submit" disabled={creating || !newTokenName.trim() || newTokenScopes.length === 0}>
-          {creating ? 'Creating...' : 'Create Token'}
+          {creating ? messages.common.creating : copy.tokens.createAction}
         </Button>
       </div>
     </form>
   </SettingsSection>
 
   <!-- Active Tokens -->
-  <SettingsSection title="Active Tokens" description="Tokens currently active for this organization.">
+  <SettingsSection title={copy.tokens.activeTitle} description={copy.tokens.activeDescriptionOrg}>
     {#if loading}
       <div class="loading-state">
         <div class="loading-spinner"></div>
-        <p>Loading tokens...</p>
+        <p>{copy.tokens.loading}</p>
       </div>
     {:else if loadError}
       <ErrorState
-        title="Failed to Load"
+        title={copy.tokens.failedToLoad}
         message={loadError}
-        primaryActionText="Try Again"
+        primaryActionText={messages.common.tryAgain}
         primaryActionClick={loadTokens}
       />
     {:else if tokens.length === 0}
@@ -328,8 +339,8 @@
         <div class="empty-icon">
           <HugeiconsIcon icon={Key01Icon} size={32} />
         </div>
-        <p>No active tokens</p>
-        <span class="empty-hint">Create your first token above to get started.</span>
+        <p>{copy.tokens.emptyTitle}</p>
+        <span class="empty-hint">{copy.tokens.emptyDescription}</span>
       </div>
     {:else}
       <div class="token-list">
@@ -346,16 +357,16 @@
                 {/each}
               </div>
               <div class="token-meta">
-                <span>Created {formatRelativeTime(token.createdAt)}</span>
+                <span>{i18n.t(copy.tokens.created, { time: formatRelativeTime(token.createdAt) })}</span>
                 {#if token.lastUsedAt}
                   <span class="separator">•</span>
-                  <span>Last used {formatRelativeTime(token.lastUsedAt)}</span>
+                  <span>{i18n.t(copy.tokens.lastUsed, { time: formatRelativeTime(token.lastUsedAt) })}</span>
                 {/if}
                 <span class="separator">•</span>
                 <span class:expiring-soon={isExpiringSoon(token.expiresAt)}>{formatExpiration(token.expiresAt)}</span>
               </div>
             </div>
-            <button class="delete-btn" onclick={() => revokeToken(token)} aria-label="Revoke token">
+            <button class="delete-btn" onclick={() => revokeToken(token)} aria-label={copy.tokens.revokeTitle}>
               <HugeiconsIcon icon={Delete02Icon} size={16} />
             </button>
           </div>
@@ -368,9 +379,9 @@
 <!-- Revoke Token Confirmation Dialog -->
 <ConfirmDialog
   open={showRevokeDialog}
-  title="Revoke Token"
-  description={`Are you sure you want to revoke "${tokenToRevoke?.name}"? This action cannot be undone and any applications using this token will stop working.`}
-  confirmText="Revoke Token"
+  title={copy.tokens.revokeTitle}
+  description={tokenToRevoke ? i18n.t(copy.tokens.revokeDescription, { name: tokenToRevoke.name }) : ''}
+  confirmText={copy.tokens.revokeTitle}
   onConfirm={confirmRevoke}
   onCancel={cancelRevoke}
   loading={revoking}

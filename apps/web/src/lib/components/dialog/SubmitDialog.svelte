@@ -7,6 +7,7 @@
   import { fade, fly } from 'svelte/transition';
   import Button from '$lib/components/ui/Button.svelte';
   import Input from '$lib/components/ui/Input.svelte';
+  import { useI18n } from '$lib/i18n/runtime';
   import { buildSkillPath } from '$lib/skill-path';
 
   interface Props {
@@ -21,6 +22,8 @@
   }
 
   let { isOpen = false, onClose }: Props = $props();
+  const i18n = useI18n();
+  const messages = $derived(i18n.messages());
 
   // Form state
   let githubUrl = $state('');
@@ -74,9 +77,9 @@
       if (!response.ok) {
         if (data.existingSlug) {
           existingSkillSlug = data.existingSlug;
-          error = 'This skill already exists in our database.';
+          error = messages.submitDialog.alreadyExists;
         } else {
-          throw new Error(data.error || 'Failed to submit skill');
+          throw new Error(data.error || messages.submitDialog.failedToSubmit);
         }
         return;
       }
@@ -93,7 +96,7 @@
     } catch (err: unknown) {
       error = err instanceof Error && err.message
         ? err.message
-        : 'An error occurred';
+        : messages.submitDialog.occurredError;
     } finally {
       isSubmitting = false;
     }
@@ -139,8 +142,8 @@
         {#if open}
           <div {...props} class="dialog" transition:fly={{ y: 10, duration: 200 }}>
             <div class="dialog-header">
-              <Dialog.Title class="dialog-title">Submit a Skill</Dialog.Title>
-              <Dialog.Close class="dialog-close" aria-label="Close">
+              <Dialog.Title class="dialog-title">{messages.submitDialog.title}</Dialog.Title>
+              <Dialog.Close class="dialog-close" aria-label={messages.common.close}>
                 <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -155,51 +158,55 @@
                   </div>
                   <h3 class="success-title">
                     {#if submittedCount > 1}
-                      {submittedCount} Skills Submitted!
+                      {i18n.t(messages.submitDialog.successMultiTitle, { count: submittedCount })}
                     {:else}
-                      Skill Submitted!
+                      {messages.submitDialog.successSingleTitle}
                     {/if}
                   </h3>
                   <Dialog.Description class="success-text">
                     {#if submittedCount > 1}
-                      Your skills have been submitted for review. They will appear in our catalog once processed.
+                      {messages.submitDialog.successMultiDescription}
                     {:else}
-                      Your skill has been submitted for review. It will appear in our catalog once processed.
+                      {messages.submitDialog.successSingleDescription}
                     {/if}
                   </Dialog.Description>
 
                   {#if submitResults.length > 1}
                     <div class="results-summary">
                       {#if existingCount > 0}
-                        <p class="results-note">{existingCount} skill{existingCount !== 1 ? 's' : ''} already existed</p>
+                        <p class="results-note">
+                          {existingCount === 1
+                            ? i18n.t(messages.submitDialog.existingSummary, { count: existingCount })
+                            : i18n.t(messages.submitDialog.existingSummaryPlural, { count: existingCount })}
+                        </p>
                       {/if}
                     </div>
                   {/if}
 
                   <div class="success-action">
                     <Button variant="cute" onclick={handleDone}>
-                      Done
+                      {messages.common.done}
                     </Button>
                   </div>
                 </div>
               {:else}
                 <Dialog.Description class="dialog-description">
-                  Share an AI agent skill with the community. Enter the GitHub URL of a repository containing SKILL.md file(s).
+                  {messages.submitDialog.description}
                 </Dialog.Description>
 
                 <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
                   <div class="form-group">
-                    <label for="github-url" class="form-label">GitHub URL</label>
+                    <label for="github-url" class="form-label">{messages.submitDialog.githubUrl}</label>
                     <Input
                       id="github-url"
                       type="url"
-                      placeholder="https://github.com/owner/repo"
+                      placeholder={messages.submitDialog.githubUrlPlaceholder}
                       bind:value={githubUrl}
                       disabled={isSubmitting}
                       variant="cute"
                     />
                     <p class="form-hint">
-                      All SKILL.md files in the repository will be automatically submitted
+                      {messages.submitDialog.formHint}
                     </p>
                   </div>
 
@@ -208,7 +215,7 @@
                       <p>{error}</p>
                       {#if existingSkillSlug}
                         <a href={buildSkillPath(existingSkillSlug)} class="error-link">
-                          View existing skill →
+                          {messages.submitDialog.viewExistingSkill}
                         </a>
                       {/if}
                     </div>
@@ -217,7 +224,7 @@
                   <div class="form-actions">
                     <Dialog.Close>
                       <Button variant="secondary" type="button">
-                        Cancel
+                        {messages.common.cancel}
                       </Button>
                     </Dialog.Close>
                     <Button
@@ -230,21 +237,21 @@
                           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
-                        Submitting...
+                        {messages.common.submitting}
                       {:else}
-                        Submit
+                        {messages.common.submit}
                       {/if}
                     </Button>
                   </div>
                 </form>
 
                 <div class="guidelines">
-                  <h4 class="guidelines-title">Submission Guidelines</h4>
+                  <h4 class="guidelines-title">{messages.submitDialog.submissionGuidelines}</h4>
                   <ul class="guidelines-list">
-                    <li><span class="guidelines-icon">📦</span> The repository must be public</li>
-                    <li><span class="guidelines-icon">📄</span> Must contain valid SKILL.md file(s)</li>
-                    <li><span class="guidelines-icon">🎯</span> Skills should be useful for AI agent users</li>
-                    <li><span class="guidelines-icon">🛡️</span> No malicious or harmful content</li>
+                    <li><span class="guidelines-icon">📦</span> {messages.submitDialog.guidelinePublicRepo}</li>
+                    <li><span class="guidelines-icon">📄</span> {messages.submitDialog.guidelineSkillFile}</li>
+                    <li><span class="guidelines-icon">🎯</span> {messages.submitDialog.guidelineUseful}</li>
+                    <li><span class="guidelines-icon">🛡️</span> {messages.submitDialog.guidelineSafe}</li>
                   </ul>
                 </div>
               {/if}
