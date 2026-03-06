@@ -162,7 +162,7 @@ const en = {
     gotoPage: 'Go to page',
   },
   home: {
-    heroTitle: 'An open platform for discovering, sharing, and installing AI agent skills.',
+    heroTitle: 'An open platform for discovering, sharing, and installing AI Agent Skills.',
     heroSubtitle: 'Browse {count} community skills to extend agent capabilities.',
     trendingTitle: 'Trending Skills',
     trendingEmptyTitle: 'No trending skills yet',
@@ -455,7 +455,7 @@ const zhCN: MessageCatalog = {
     gotoPage: '跳转页码',
   },
   home: {
-    heroTitle: '一个用于发现、分享和安装 AI agent skills 的开放平台。',
+    heroTitle: '一个用于发现、分享和安装 AI Agent Skills 的开放平台。',
     heroSubtitle: '浏览 {count} 个社区技能，扩展 agent 的能力。',
     trendingTitle: '热门技能',
     trendingEmptyTitle: '还没有热门技能',
@@ -746,7 +746,7 @@ const ja: MessageCatalog = {
     gotoPage: 'ページへ移動',
   },
   home: {
-    heroTitle: 'AI agent skills を見つけ、共有し、インストールできるオープンプラットフォームです。',
+    heroTitle: 'AI Agent Skills を見つけ、共有し、インストールできるオープンプラットフォームです。',
     heroSubtitle: '{count} 件のコミュニティスキルを見つけて、agent の能力を拡張しましょう。',
     trendingTitle: '人気のスキル',
     trendingEmptyTitle: 'まだ人気のスキルはありません',
@@ -1037,7 +1037,7 @@ const ko: MessageCatalog = {
     gotoPage: '페이지로 이동',
   },
   home: {
-    heroTitle: 'AI agent skills를 찾고, 공유하고, 설치할 수 있는 오픈 플랫폼입니다.',
+    heroTitle: 'AI Agent Skills를 찾고, 공유하고, 설치할 수 있는 오픈 플랫폼입니다.',
     heroSubtitle: '{count}개의 커뮤니티 스킬을 둘러보며 agent의 기능을 확장해 보세요.',
     trendingTitle: '인기 스킬',
     trendingEmptyTitle: '아직 인기 스킬이 없습니다',
