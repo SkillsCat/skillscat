@@ -25,6 +25,10 @@
     return i18n.formatCompactNumber(num);
   }
 
+  function formatAuthorLabel(author: string): string {
+    return i18n.locale() === 'en' ? i18n.t(messages.common.byAuthor, { author }) : author;
+  }
+
   function formatRelativeTime(timestamp: number): string {
     const now = Date.now();
     const diff = now - timestamp;
@@ -60,7 +64,7 @@
       </span>
     </div>
     <div class="text-xs text-fg-muted font-medium">
-      {i18n.t(messages.common.byAuthor, { author: skill.repoOwner })}
+      {formatAuthorLabel(skill.repoOwner)}
     </div>
   </div>
 
