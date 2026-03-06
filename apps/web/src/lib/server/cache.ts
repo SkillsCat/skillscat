@@ -8,6 +8,7 @@
 const CACHE_DOMAIN = 'https://skills.cat/cache';
 const DEFAULT_CACHE_VERSION = 'v1';
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
+type WaitUntilFn = (promise: Promise<unknown>) => void;
 
 // Cloudflare Workers extends CacheStorage with a 'default' property
 declare const caches: CacheStorage & { default: Cache };
@@ -30,6 +31,19 @@ function buildCacheRequest(cacheKey: string): Request {
   return new Request(`${CACHE_DOMAIN}/${cacheKey}`);
 }
 
+function scheduleCacheWrite(write: Promise<void>, waitUntil?: WaitUntilFn): void {
+  const guardedWrite = write.catch(() => {
+    // Ignore cache write errors.
+  });
+
+  if (waitUntil) {
+    waitUntil(guardedWrite);
+    return;
+  }
+
+  void guardedWrite;
+}
+
 /**
  * Set cache namespace version.
  * Call this once per request from hooks using runtime env vars.
@@ -49,7 +63,10 @@ export function setCacheVersion(version: string | undefined | null): void {
 export async function getCached<T>(
   cacheKey: string,
   fetcher: () => Promise<T>,
-  ttl: number
+  ttl: number,
+  options?: {
+    waitUntil?: WaitUntilFn;
+  }
 ): Promise<{ data: T; hit: boolean }> {
   const versionedKey = getVersionedCacheKey(cacheKey);
 
@@ -72,7 +89,7 @@ export async function getCached<T>(
     if (legacyCached) {
       const promoted = legacyCached.clone();
       const data = await legacyCached.json() as T;
-      void cache.put(versionedRequest, promoted);
+      scheduleCacheWrite(cache.put(versionedRequest, promoted), options?.waitUntil);
       return { data, hit: true };
     }
   } catch {
@@ -98,8 +115,7 @@ export async function getCached<T>(
           'Content-Type': 'application/json'
         }
       });
-      // Don't await - let it happen in background
-      cache.put(cacheUrl, response);
+      scheduleCacheWrite(cache.put(cacheUrl, response), options?.waitUntil);
     } catch {
       // Ignore cache write errors
     }
@@ -123,7 +139,10 @@ export async function getCached<T>(
 export async function getCachedText(
   cacheKey: string,
   fetcher: () => Promise<string>,
-  ttl: number
+  ttl: number,
+  options?: {
+    waitUntil?: WaitUntilFn;
+  }
 ): Promise<{ data: string; hit: boolean }> {
   const versionedKey = getVersionedCacheKey(cacheKey);
 
@@ -143,7 +162,7 @@ export async function getCachedText(
     if (legacyCached) {
       const promoted = legacyCached.clone();
       const data = await legacyCached.text();
-      void cache.put(versionedRequest, promoted);
+      scheduleCacheWrite(cache.put(versionedRequest, promoted), options?.waitUntil);
       return { data, hit: true };
     }
   } catch {
@@ -168,7 +187,7 @@ export async function getCachedText(
           'Content-Type': 'text/plain'
         }
       });
-      cache.put(cacheUrl, response);
+      scheduleCacheWrite(cache.put(cacheUrl, response), options?.waitUntil);
     } catch {
       // Ignore cache write errors
     }

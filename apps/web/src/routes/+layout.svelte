@@ -1,29 +1,23 @@
 <script lang="ts">
   import '../app.css';
   import { browser } from '$app/environment';
+  import type { LayoutData } from './$types';
   import Navbar from '$lib/components/layout/Navbar.svelte';
   import Footer from '$lib/components/layout/Footer.svelte';
   import Toast from '$lib/components/ui/Toast.svelte';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { useSession } from '$lib/auth-client';
   import { createI18nRuntime, setI18nContext } from '$lib/i18n/runtime';
-  import type { SupportedLocale } from '$lib/i18n/config';
 
   interface Props {
     children: import('svelte').Snippet;
-    data: {
-      unreadCount: number;
-      locale: SupportedLocale;
-      localeSource: 'cookie' | 'accept-language' | 'default';
-      htmlLang: string;
-      availableLocales: ReadonlyArray<{ code: SupportedLocale; label: string }>;
-    };
+    data: LayoutData;
   }
 
   let { children, data }: Props = $props();
-  let selectedLocale = $state<SupportedLocale | null>(null);
+  let selectedLocale = $state<LayoutData['locale'] | null>(null);
   const locale = $derived(selectedLocale ?? data.locale);
+  const currentUserId = $derived(data.currentUser?.id ?? null);
 
   const i18n = createI18nRuntime({
     getLocale: () => locale,
@@ -39,7 +33,6 @@
   let unreadCountLastFetchedAt = $state(0);
   let unreadCountFetchUserId = $state<string | null>(null);
   let isLoadingUnreadCount = $state(false);
-  const session = useSession();
   const UNREAD_COUNT_REFRESH_INTERVAL_MS = 15_000;
 
   $effect(() => {
@@ -50,7 +43,7 @@
 
   async function loadUnreadCount(options?: { force?: boolean; signal?: AbortSignal }): Promise<void> {
     const force = options?.force ?? false;
-    const userId = $session.data?.user?.id ?? null;
+    const userId = currentUserId;
     if (!userId) {
       unreadCount = 0;
       unreadCountFetchUserId = null;
@@ -104,10 +97,7 @@
   // Refresh unread count asynchronously after navigation/session changes without blocking SSR/data.json.
   $effect(() => {
     $page.url.pathname;
-    const userId = $session.data?.user?.id ?? null;
-    const pending = $session.isPending;
-
-    if (pending) return;
+    const userId = currentUserId;
     if (!userId) {
       unreadCount = 0;
       unreadCountFetchUserId = null;
@@ -190,7 +180,7 @@
       </div>
 
       <div class="main-content">
-        <Navbar {unreadCount} />
+        <Navbar {unreadCount} currentUser={data.currentUser} />
 
         <main class="flex-1">
           {@render children()}

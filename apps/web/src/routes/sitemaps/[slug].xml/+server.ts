@@ -4,6 +4,9 @@ import {
   SITEMAP_CORE_CACHE_TTL,
   SITEMAP_DYNAMIC_CACHE_CONTROL,
   SITEMAP_DYNAMIC_CACHE_TTL,
+  type SitemapPage,
+  SitemapNotFoundError,
+  buildMissingSitemapResponse,
   buildUrlSetXml,
   createCachedSitemapResponse,
   getCoreSitemapPages,
@@ -14,16 +17,10 @@ import {
 
 const DYNAMIC_KIND_PATTERN = /^(skills|profiles|orgs)-([1-9]\d*)$/;
 
-function invalidSitemapResponse(): Response {
-  return new Response('Not found', {
-    status: 404,
-    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-  });
-}
-
 export const GET: RequestHandler = async ({ params, platform }) => {
   const slug = params.slug;
   const db = platform?.env?.DB;
+  const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
 
   if (slug === 'core') {
     return createCachedSitemapResponse({
@@ -31,13 +28,14 @@ export const GET: RequestHandler = async ({ params, platform }) => {
       ttl: SITEMAP_CORE_CACHE_TTL,
       cacheControl: SITEMAP_CORE_CACHE_CONTROL,
       debugTag: 'core',
+      waitUntil,
       fetcher: async () => buildUrlSetXml(getCoreSitemapPages()),
     });
   }
 
   const match = DYNAMIC_KIND_PATTERN.exec(slug);
   if (!match) {
-    return invalidSitemapResponse();
+    return buildMissingSitemapResponse();
   }
 
   const [, kind, pagePart] = match;
@@ -48,22 +46,29 @@ export const GET: RequestHandler = async ({ params, platform }) => {
     ttl: SITEMAP_DYNAMIC_CACHE_TTL,
     cacheControl: SITEMAP_DYNAMIC_CACHE_CONTROL,
     debugTag: `${kind}-${page}`,
+    waitUntil,
     fetcher: async () => {
-      try {
-        switch (kind) {
-          case 'skills':
-            return buildUrlSetXml(await loadSkillsSitemapPage(db, page));
-          case 'profiles':
-            return buildUrlSetXml(await loadProfilesSitemapPage(db, page));
-          case 'orgs':
-            return buildUrlSetXml(await loadOrgsSitemapPage(db, page));
-          default:
-            return buildUrlSetXml([]);
-        }
-      } catch (error) {
-        console.error(`Error building sitemap page ${kind}-${page}:`, error);
-        return buildUrlSetXml([]);
+      let pages: SitemapPage[];
+
+      switch (kind) {
+        case 'skills':
+          pages = await loadSkillsSitemapPage(db, page);
+          break;
+        case 'profiles':
+          pages = await loadProfilesSitemapPage(db, page);
+          break;
+        case 'orgs':
+          pages = await loadOrgsSitemapPage(db, page);
+          break;
+        default:
+          pages = [];
       }
+
+      if (pages.length === 0) {
+        throw new SitemapNotFoundError();
+      }
+
+      return buildUrlSetXml(pages);
     },
   });
 };

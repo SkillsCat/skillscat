@@ -3,8 +3,8 @@ import { getCachedText } from '$lib/server/cache';
 import { encodeSkillSlugForPath } from '$lib/skill-path';
 
 export const SITE_URL = 'https://skills.cat';
-// Keep each sitemap file well below the 50k URL spec limit to reduce response size and fetch latency.
-export const SITEMAP_URL_LIMIT = 20000;
+// Keep each sitemap comfortably small so bots can fetch them quickly even on cold builds.
+export const SITEMAP_URL_LIMIT = 5000;
 
 export const SITEMAP_INDEX_CACHE_TTL = 600;
 export const SITEMAP_DYNAMIC_CACHE_TTL = 900;
@@ -18,6 +18,7 @@ export const SITEMAP_CORE_CACHE_CONTROL =
   'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800';
 
 const inflightSitemapBuilds = new Map<string, Promise<string>>();
+type WaitUntilFn = (promise: Promise<unknown>) => void;
 
 type ChangeFrequency = 'hourly' | 'daily' | 'weekly' | 'monthly';
 
@@ -65,6 +66,13 @@ interface CountAndMaxRow {
   max_ts: number | string | null;
 }
 
+export class SitemapNotFoundError extends Error {
+  constructor(message = 'Sitemap not found') {
+    super(message);
+    this.name = 'SitemapNotFoundError';
+  }
+}
+
 function toNumber(value: unknown): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
@@ -103,8 +111,8 @@ ${pages
   .map(
     (page) => `  <url>
     <loc>${escapeXml(`${SITE_URL}${page.url}`)}</loc>
-    <changefreq>${page.changefreq}</changefreq>
-    <priority>${page.priority}</priority>${page.lastmod ? `\n    <lastmod>${page.lastmod}</lastmod>` : ''}
+    ${page.lastmod ? `<lastmod>${page.lastmod}</lastmod>\n    ` : ''}<changefreq>${page.changefreq}</changefreq>
+    <priority>${page.priority}</priority>
   </url>`
   )
   .join('\n')}
@@ -167,11 +175,11 @@ export async function getDynamicSitemapStats(db: SitemapDb | undefined): Promise
     db.prepare(`
       SELECT COUNT(*) AS count, MAX(o.updated_at) AS max_ts
       FROM organizations o
-      INNER JOIN (
-        SELECT DISTINCT org_id
-        FROM skills
-        WHERE visibility = 'public' AND org_id IS NOT NULL
-      ) po ON po.org_id = o.id
+      WHERE EXISTS (
+        SELECT 1
+        FROM skills s
+        WHERE s.org_id = o.id AND s.visibility = 'public'
+      )
     `).bind().first<CountAndMaxRow>(),
   ]);
 
@@ -219,7 +227,7 @@ export async function loadSkillsSitemapPage(
     SELECT slug, updated_at, indexed_at, last_commit_at
     FROM skills
     WHERE visibility = 'public'
-    ORDER BY CASE WHEN last_commit_at IS NULL THEN indexed_at ELSE last_commit_at END DESC
+    ORDER BY slug ASC
     LIMIT ? OFFSET ?
   `)
     .bind(SITEMAP_URL_LIMIT, offset)
@@ -249,7 +257,7 @@ export async function loadProfilesSitemapPage(
     SELECT username, updated_at
     FROM authors
     WHERE username IS NOT NULL AND skills_count > 0
-    ORDER BY updated_at DESC
+    ORDER BY username ASC
     LIMIT ? OFFSET ?
   `)
     .bind(SITEMAP_URL_LIMIT, offset)
@@ -273,12 +281,12 @@ export async function loadOrgsSitemapPage(
   const orgs = await db.prepare(`
     SELECT o.slug, o.updated_at
     FROM organizations o
-    INNER JOIN (
-      SELECT DISTINCT org_id
-      FROM skills
-      WHERE visibility = 'public' AND org_id IS NOT NULL
-    ) po ON po.org_id = o.id
-    ORDER BY o.updated_at DESC
+    WHERE EXISTS (
+      SELECT 1
+      FROM skills s
+      WHERE s.org_id = o.id AND s.visibility = 'public'
+    )
+    ORDER BY o.slug ASC
     LIMIT ? OFFSET ?
   `)
     .bind(SITEMAP_URL_LIMIT, offset)
@@ -292,38 +300,72 @@ export async function loadOrgsSitemapPage(
   }));
 }
 
+export function buildMissingSitemapResponse(): Response {
+  return new Response('Not found', {
+    status: 404,
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'public, max-age=300, s-maxage=300',
+    },
+  });
+}
+
+export function buildUnavailableSitemapResponse(debugTag: string): Response {
+  return new Response('Service unavailable', {
+    status: 503,
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Retry-After': '300',
+      'X-Sitemap': debugTag,
+    },
+  });
+}
+
 export async function createCachedSitemapResponse(options: {
   cacheKey: string;
   ttl: number;
   cacheControl: string;
   fetcher: () => Promise<string>;
   debugTag: string;
+  waitUntil?: WaitUntilFn;
 }): Promise<Response> {
-  const { cacheKey, ttl, cacheControl, fetcher, debugTag } = options;
-  const { data: xml, hit } = await getCachedText(
-    cacheKey,
-    async () => {
-      const existing = inflightSitemapBuilds.get(cacheKey);
-      if (existing) {
-        return existing;
-      }
+  const { cacheKey, ttl, cacheControl, fetcher, debugTag, waitUntil } = options;
 
-      const promise = fetcher().finally(() => {
-        inflightSitemapBuilds.delete(cacheKey);
-      });
+  try {
+    const { data: xml, hit } = await getCachedText(
+      cacheKey,
+      async () => {
+        const existing = inflightSitemapBuilds.get(cacheKey);
+        if (existing) {
+          return existing;
+        }
 
-      inflightSitemapBuilds.set(cacheKey, promise);
-      return promise;
-    },
-    ttl
-  );
+        const promise = fetcher().finally(() => {
+          inflightSitemapBuilds.delete(cacheKey);
+        });
 
-  return new Response(xml, {
-    headers: {
-      'Content-Type': 'application/xml; charset=utf-8',
-      'Cache-Control': cacheControl,
-      'X-Cache': hit ? 'HIT' : 'MISS',
-      'X-Sitemap': debugTag,
-    },
-  });
+        inflightSitemapBuilds.set(cacheKey, promise);
+        return promise;
+      },
+      ttl,
+      { waitUntil }
+    );
+
+    return new Response(xml, {
+      headers: {
+        'Content-Type': 'application/xml; charset=utf-8',
+        'Cache-Control': cacheControl,
+        'X-Cache': hit ? 'HIT' : 'MISS',
+        'X-Sitemap': debugTag,
+      },
+    });
+  } catch (error) {
+    if (error instanceof SitemapNotFoundError) {
+      return buildMissingSitemapResponse();
+    }
+
+    console.error(`Error building sitemap ${debugTag}:`, error);
+    return buildUnavailableSitemapResponse(debugTag);
+  }
 }
