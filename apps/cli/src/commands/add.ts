@@ -384,13 +384,14 @@ async function resolveInstallSkills({
   const requestedNamesLower = new Set(requestedSkillNames.map((name) => name.toLowerCase()));
   const needsRegistryFirst = repoSource.platform === 'github' && !explicitRefBypassRegistry;
   const preferSlugLookup = isAmbiguousSlugOrRepoInput(sourceInput, repoSource);
+  const canShortCircuitExactSlug = preferSlugLookup && requestedNamesLower.size === 0;
 
   let resolved: ResolvedInstallSkill[] = [];
   let selectionMode: ResolveSelectionMode = 'default';
   let registryRepoMatchesFound = false;
   let registrySummariesNeedingGitBackfill: RegistryRepoSkillSummary[] = [];
 
-  if (preferSlugLookup) {
+  if (canShortCircuitExactSlug) {
     const registrySlugSkill = await fetchSkill(sourceInput).catch((err) => {
       verboseLog(`Registry slug lookup failed: ${err instanceof Error ? err.message : 'unknown'}`);
       return null;

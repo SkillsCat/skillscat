@@ -1,4 +1,4 @@
-import { json } from '@sveltejs/kit';
+import { isHttpError, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
   parseRegistryRepoInput,
@@ -22,6 +22,14 @@ function responseHeaders(opts: { cacheControl: string; cacheStatus?: string }): 
     headers['X-Cache'] = opts.cacheStatus;
   }
   return headers;
+}
+
+function getHttpErrorMessage(err: { body: unknown; status: number }): string {
+  if (typeof err.body === 'object' && err.body !== null && 'message' in err.body) {
+    return String((err.body as { message: unknown }).message);
+  }
+
+  return `Request failed (${err.status})`;
 }
 
 export const GET: RequestHandler = async ({ params, platform, request, locals, url }) => {
@@ -53,6 +61,16 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       })
     });
   } catch (err) {
+    if (isHttpError(err)) {
+      return json(
+        { error: getHttpErrorMessage(err) },
+        {
+          status: err.status,
+          headers: responseHeaders({ cacheControl: 'no-store', cacheStatus: 'BYPASS' })
+        }
+      );
+    }
+
     console.error('Error fetching registry repo skills:', err);
     return json(
       { skills: [], total: 0 } satisfies RegistryRepoResult,

@@ -839,6 +839,101 @@ describe('CLI commands with mocked network', () => {
     expect(seenUrls).not.toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
   });
 
+  it('does not let an exact slug short-circuit an explicit --skill selection', async () => {
+    const seenUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      seenUrls.push(url);
+
+      if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
+        return mockResponse({
+          skills: [
+            {
+              slug: 'testowner/testrepo',
+              name: 'Repo Root Skill',
+              description: 'The root slug skill',
+              owner: 'testowner',
+              repo: 'testrepo',
+              skillPath: '',
+              githubUrl: 'https://github.com/testowner/testrepo',
+              visibility: 'public',
+              updatedAt: Date.now(),
+              stars: 0,
+            },
+            {
+              slug: 'testowner/nested-skill',
+              name: 'Nested Skill',
+              description: 'The requested nested skill',
+              owner: 'testowner',
+              repo: 'testrepo',
+              skillPath: 'skills/nested',
+              githubUrl: 'https://github.com/testowner/testrepo',
+              visibility: 'public',
+              updatedAt: Date.now(),
+              stars: 0,
+            },
+          ],
+          total: 2,
+        }, 200);
+      }
+
+      if (url === `${REGISTRY_URL}/skill/testowner/nested-skill`) {
+        return mockResponse({
+          name: 'Nested Skill',
+          description: 'The requested nested skill',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Nested Skill'),
+          githubUrl: 'https://github.com/testowner/testrepo',
+          visibility: 'public',
+          slug: 'testowner/nested-skill',
+          skillPath: 'skills/nested',
+        }, 200);
+      }
+
+      if (url === `${REGISTRY_URL}/skill/testowner/testrepo`) {
+        return mockResponse({
+          name: 'Repo Root Skill',
+          description: 'The root slug skill',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Repo Root Skill'),
+          githubUrl: 'https://github.com/testowner/testrepo',
+          visibility: 'public',
+          slug: 'testowner/testrepo',
+          skillPath: '',
+        }, 200);
+      }
+
+      if (url.endsWith('/api/submit')) {
+        return mockResponse({ success: true }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() => add('testowner/testrepo', {
+      yes: true,
+      skill: ['Nested Skill'],
+    }));
+
+    expect(result.exitCode).toBeNull();
+    expect(existsSync(join(process.cwd(), '.claude/skills', 'Nested Skill', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(process.cwd(), '.claude/skills', 'Repo Root Skill', 'SKILL.md'))).toBe(false);
+    expect(seenUrls).not.toContain(`${REGISTRY_URL}/skill/testowner/testrepo`);
+    expect(seenUrls).toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
+    expect(seenUrls).toContain(`${REGISTRY_URL}/skill/testowner/nested-skill`);
+  });
+
   it('prompts to install all repo skills when shorthand slug lookup misses', async () => {
     vi.resetModules();
     const ui = await import('../src/utils/core/ui');
