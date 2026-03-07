@@ -53,6 +53,10 @@ function mockGitHubFetch(content: string, sha = 'sha1') {
   const fetchMock = vi.fn(async (input: unknown) => {
     const url = toUrlString(input);
 
+    if (url === `${REGISTRY_URL}/skill/testowner/testrepo`) {
+      return mockResponse({ error: 'Not found' }, 404);
+    }
+
     if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
       return mockResponse({ skills: [], total: 0 }, 200);
     }
@@ -621,6 +625,10 @@ describe('CLI commands with mocked network', () => {
     const fetchMock = vi.fn(async (input: unknown, init?: unknown) => {
       const url = toUrlString(input);
 
+      if (url === 'https://skills.cat/registry/skill/testowner/testrepo') {
+        return mockResponse({ error: 'Not found' }, 404);
+      }
+
       if (url === 'https://skills.cat/registry/repo/testowner/testrepo' || url.startsWith('https://skills.cat/registry/repo/testowner/testrepo?')) {
         return mockResponse({ skills: [], total: 0 }, 200);
       }
@@ -670,6 +678,10 @@ describe('CLI commands with mocked network', () => {
       const fetchMock = vi.fn(async (input: unknown) => {
         const url = toUrlString(input);
 
+        if (url === 'https://skills.cat/registry/skill/testowner/testrepo') {
+          return mockResponse({ error: 'Not found' }, 404);
+        }
+
         if (url === 'https://skills.cat/registry/repo/testowner/testrepo' || url.startsWith('https://skills.cat/registry/repo/testowner/testrepo?')) {
           return mockResponse({ skills: [], total: 0 }, 200);
         }
@@ -702,11 +714,15 @@ describe('CLI commands with mocked network', () => {
     }
   });
 
-  it('prefers registry repo results over GitHub for direct GitHub repo installs', async () => {
+  it('falls back to registry repo results when shorthand slug lookup misses', async () => {
     const seenUrls: string[] = [];
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = toUrlString(input);
       seenUrls.push(url);
+
+      if (url === `${REGISTRY_URL}/skill/testowner/testrepo`) {
+        return mockResponse({ error: 'Not found' }, 404);
+      }
 
       if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
         return mockResponse({
@@ -760,14 +776,172 @@ describe('CLI commands with mocked network', () => {
     expect(existsSync(skillFile)).toBe(true);
     expect(readFileSync(skillFile, 'utf-8')).toContain('Registry First Skill');
 
+    expect(seenUrls).toContain(`${REGISTRY_URL}/skill/testowner/testrepo`);
     expect(seenUrls).toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
     expect(seenUrls).toContain(`${REGISTRY_URL}/skill/testowner/test-skill`);
     expect(seenUrls).not.toContain('http://localhost:3000/api/submit');
   });
 
+  it('prefers an exact registry slug over installing all skills from the matching repo', async () => {
+    const seenUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      seenUrls.push(url);
+
+      if (url === `${REGISTRY_URL}/skill/testowner/testrepo`) {
+        return mockResponse({
+          name: 'Exact Slug Skill',
+          description: 'Published as an exact slug',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Exact Slug Skill'),
+          githubUrl: '',
+          visibility: 'private',
+          slug: 'testowner/testrepo',
+        }, 200);
+      }
+
+      if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
+        return mockResponse({
+          skills: [{
+            slug: 'testowner/other-skill',
+            name: 'Other Skill',
+            description: 'Should not be used',
+            owner: 'testowner',
+            repo: 'testrepo',
+            skillPath: 'skills/other',
+            githubUrl: 'https://github.com/testowner/testrepo',
+            visibility: 'public',
+            updatedAt: Date.now(),
+            stars: 0,
+          }],
+          total: 1,
+        }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() => add('testowner/testrepo', { yes: true }));
+    expect(result.exitCode).toBeNull();
+
+    const skillFile = join(process.cwd(), '.claude/skills', 'Exact Slug Skill', 'SKILL.md');
+    expect(existsSync(skillFile)).toBe(true);
+    expect(readFileSync(skillFile, 'utf-8')).toContain('Exact Slug Skill');
+
+    expect(seenUrls).toContain(`${REGISTRY_URL}/skill/testowner/testrepo`);
+    expect(seenUrls).not.toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
+  });
+
+  it('prompts to install all repo skills when shorthand slug lookup misses', async () => {
+    vi.resetModules();
+    const ui = await import('../src/utils/core/ui');
+    const promptSpy = vi.spyOn(ui, 'prompt')
+      .mockResolvedValueOnce('y')
+      .mockResolvedValueOnce('y');
+
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+
+      if (url === `${REGISTRY_URL}/skill/testowner/testrepo`) {
+        return mockResponse({ error: 'Not found' }, 404);
+      }
+
+      if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
+        return mockResponse({
+          skills: [
+            {
+              slug: 'testowner/skill-one',
+              name: 'Skill One',
+              description: 'First repo skill',
+              owner: 'testowner',
+              repo: 'testrepo',
+              skillPath: '',
+              githubUrl: 'https://github.com/testowner/testrepo',
+              visibility: 'private',
+              updatedAt: Date.now(),
+              stars: 0,
+            },
+            {
+              slug: 'testowner/skill-two',
+              name: 'Skill Two',
+              description: 'Second repo skill',
+              owner: 'testowner',
+              repo: 'testrepo',
+              skillPath: 'skills/two',
+              githubUrl: 'https://github.com/testowner/testrepo',
+              visibility: 'private',
+              updatedAt: Date.now(),
+              stars: 0,
+            },
+          ],
+          total: 2,
+        }, 200);
+      }
+
+      if (url === `${REGISTRY_URL}/skill/testowner/skill-one`) {
+        return mockResponse({
+          name: 'Skill One',
+          description: 'First repo skill',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Skill One'),
+          githubUrl: 'https://github.com/testowner/testrepo',
+          visibility: 'private',
+          slug: 'testowner/skill-one',
+          skillPath: '',
+        }, 200);
+      }
+
+      if (url === `${REGISTRY_URL}/skill/testowner/skill-two`) {
+        return mockResponse({
+          name: 'Skill Two',
+          description: 'Second repo skill',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Skill Two'),
+          githubUrl: 'https://github.com/testowner/testrepo',
+          visibility: 'private',
+          slug: 'testowner/skill-two',
+          skillPath: 'skills/two',
+        }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() => add('testowner/testrepo', { agent: ['claude-code'] }));
+    expect(result.exitCode).toBeNull();
+
+    expect(existsSync(join(process.cwd(), '.claude/skills', 'Skill One', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(process.cwd(), '.claude/skills', 'Skill Two', 'SKILL.md'))).toBe(true);
+
+    expect(promptSpy).toHaveBeenNthCalledWith(1, 'Install all 2 skill(s) from testowner/testrepo? [y/N] ');
+    expect(promptSpy).toHaveBeenNthCalledWith(2, 'Install to project directory? [Y/n] ');
+  });
+
   it('fails when -s requests are only partially resolved', async () => {
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = toUrlString(input);
+
+      if (url === `${REGISTRY_URL}/skill/testowner/testrepo`) {
+        return mockResponse({ error: 'Not found' }, 404);
+      }
 
       if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
         return mockResponse({
@@ -832,6 +1006,10 @@ describe('CLI commands with mocked network', () => {
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = toUrlString(input);
       seenUrls.push(url);
+
+      if (url === `${REGISTRY_URL}/skill/testowner/testrepo`) {
+        return mockResponse({ error: 'Not found' }, 404);
+      }
 
       if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
         return mockResponse({

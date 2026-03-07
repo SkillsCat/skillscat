@@ -41,6 +41,13 @@ interface ResolvedInstallSkill {
   companionFilesHydrationFailed?: boolean;
 }
 
+type ResolveSelectionMode = 'default' | 'install-all';
+
+interface ResolveInstallSkillsResult {
+  resolved: ResolvedInstallSkill[];
+  selectionMode: ResolveSelectionMode;
+}
+
 const COMPANION_MANIFEST_FILE = '.skillscat-companion-files.json';
 const COMPANION_MANIFEST_VERSION = 1;
 
@@ -70,15 +77,18 @@ export async function add(source: string, options: AddOptions): Promise<void> {
 
   const discoverSpinner = spinner('Discovering skills');
   let resolvedSkills: ResolvedInstallSkill[] = [];
+  let selectionMode: ResolveSelectionMode = 'default';
 
   try {
-    resolvedSkills = await resolveInstallSkills({
+    const resolution = await resolveInstallSkills({
       sourceInput: source,
       repoSource,
       requestedSkillNames: options.skill ?? [],
       explicitRefBypassRegistry: isExplicitGitHubRefSource,
       githubSnapshot,
     });
+    resolvedSkills = resolution.resolved;
+    selectionMode = resolution.selectionMode;
   } catch (err) {
     discoverSpinner.stop(false);
     error(err instanceof Error ? err.message : 'Failed to discover skills');
@@ -124,6 +134,22 @@ export async function add(source: string, options: AddOptions): Promise<void> {
     return;
   }
 
+  if (selectionMode === 'install-all' && !options.yes && (!options.skill || options.skill.length === 0)) {
+    console.log();
+    info(`No published skill slug matched ${pc.cyan(sourceLabel)}.`);
+    console.log(pc.dim(`Found ${resolvedSkills.length} published skill(s) in repository ${sourceLabel}:`));
+    for (const entry of resolvedSkills) {
+      console.log(pc.dim(`  - ${entry.skill.name}${formatSkillPathHint(entry.skill.path)}`));
+    }
+    console.log();
+
+    const confirm = await prompt(`Install all ${resolvedSkills.length} skill(s) from ${sourceLabel}? [y/N] `);
+    if (confirm.trim().toLowerCase() !== 'y') {
+      info('Installation cancelled.');
+      process.exit(0);
+    }
+  }
+
   // Final name filter (safety net after mixed registry+git resolution)
   let selectedEntries = resolvedSkills;
   if (options.skill && options.skill.length > 0) {
@@ -139,7 +165,7 @@ export async function add(source: string, options: AddOptions): Promise<void> {
       }
       process.exit(1);
     }
-  } else if (!options.yes && resolvedSkills.length > 1) {
+  } else if (selectionMode !== 'install-all' && !options.yes && resolvedSkills.length > 1) {
     selectedEntries = [await selectSingleSkillInteractive(resolvedSkills)];
   }
 
@@ -354,13 +380,29 @@ async function resolveInstallSkills({
   requestedSkillNames: string[];
   explicitRefBypassRegistry: boolean;
   githubSnapshot?: GitHubRepoSnapshot | null;
-}): Promise<ResolvedInstallSkill[]> {
+}): Promise<ResolveInstallSkillsResult> {
   const requestedNamesLower = new Set(requestedSkillNames.map((name) => name.toLowerCase()));
   const needsRegistryFirst = repoSource.platform === 'github' && !explicitRefBypassRegistry;
+  const preferSlugLookup = isAmbiguousSlugOrRepoInput(sourceInput, repoSource);
 
   let resolved: ResolvedInstallSkill[] = [];
+  let selectionMode: ResolveSelectionMode = 'default';
   let registryRepoMatchesFound = false;
   let registrySummariesNeedingGitBackfill: RegistryRepoSkillSummary[] = [];
+
+  if (preferSlugLookup) {
+    const registrySlugSkill = await fetchSkill(sourceInput).catch((err) => {
+      verboseLog(`Registry slug lookup failed: ${err instanceof Error ? err.message : 'unknown'}`);
+      return null;
+    });
+
+    if (registrySlugSkill?.content) {
+      return {
+        resolved: [toRegistryResolvedSkill(registrySlugSkill, sourceInput, repoSource)],
+        selectionMode,
+      };
+    }
+  }
 
   if (needsRegistryFirst) {
     try {
@@ -380,6 +422,8 @@ async function resolveInstallSkills({
         let selectedSummaries = summaries;
         if (requestedNamesLower.size > 0) {
           selectedSummaries = summaries.filter((item) => requestedNamesLower.has(item.name.toLowerCase()));
+        } else if (preferSlugLookup) {
+          selectionMode = 'install-all';
         }
 
         if (selectedSummaries.length > 0) {
@@ -432,7 +476,10 @@ async function resolveInstallSkills({
         const registrySkill = await fetchSkill(sourceInput).catch(() => null);
         if (registrySkill?.content) {
           resolved.push(toRegistryResolvedSkill(registrySkill, sourceInput, repoSource));
-          return mergeResolvedSkills([], resolved);
+          return {
+            resolved: mergeResolvedSkills([], resolved),
+            selectionMode,
+          };
         }
       }
 
@@ -441,7 +488,10 @@ async function resolveInstallSkills({
         if (getMissingRequestedNames(requestedSkillNames, resolved).length > 0) {
           throw err;
         }
-        return mergeResolvedSkills([], resolved);
+        return {
+          resolved: mergeResolvedSkills([], resolved),
+          selectionMode,
+        };
       }
 
       throw err;
@@ -452,7 +502,10 @@ async function resolveInstallSkills({
     resolved = resolved.filter((entry) => requestedNamesLower.has(entry.skill.name.toLowerCase()));
   }
 
-  return mergeResolvedSkills([], resolved);
+  return {
+    resolved: mergeResolvedSkills([], resolved),
+    selectionMode,
+  };
 }
 
 async function fetchRegistryResolvedSkills(
@@ -790,9 +843,24 @@ function normalizeSkillPath(path?: string): string {
   return normalized.replace(/(?:^|\/)SKILL\.md$/i, '');
 }
 
+function formatSkillPathHint(path?: string): string {
+  const normalized = normalizeSkillPath(path);
+  return normalized ? ` (${normalized})` : '';
+}
+
 function toSkillFilePath(path?: string): string {
   const normalized = normalizeSkillPath(path);
   return normalized ? `${normalized}/SKILL.md` : 'SKILL.md';
+}
+
+function isAmbiguousSlugOrRepoInput(sourceInput: string, repoSource: RepoSource): boolean {
+  return (
+    repoSource.platform === 'github'
+    && !repoSource.path
+    && !repoSource.branch
+    && repoSource.hasExplicitRef !== true
+    && sourceInput.trim() === `${repoSource.owner}/${repoSource.repo}`
+  );
 }
 
 function gitDiscoveryRanFailedDueToEmptyPath(_err: unknown): boolean {
