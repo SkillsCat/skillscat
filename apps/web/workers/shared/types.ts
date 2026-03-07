@@ -433,7 +433,7 @@ export const KNOWN_ORGS = [
 export interface GitHubGraphQLRepoData {
   stargazerCount: number;
   forkCount: number;
-  pushedAt: string;
+  pushedAt: string | null;
   description: string | null;
   repositoryTopics: {
     nodes: Array<{ topic: { name: string } }>;

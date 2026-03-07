@@ -37,7 +37,10 @@ export async function graphqlBatchRepoMetadata(
   }).join('\n');
 
   const query = `query { ${repoQueries} }`;
-  const { data } = await githubGraphqlRequest<Record<string, BatchRepoMetadata | null>>(query, undefined, options);
+  const { data } = await githubGraphqlRequest<Record<string, BatchRepoMetadata | null>>(query, undefined, {
+    ...options,
+    allowPartialData: true,
+  });
 
   repos.forEach((repo, idx) => {
     const repoData = data[`repo${idx}`];
@@ -68,7 +71,10 @@ export async function graphqlRepoResurrectionMetadata(
 
   const { data } = await githubGraphqlRequest<{
     repository: ResurrectionRepoMetadata | null;
-  }>(query, { owner, name }, options);
+  }>(query, { owner, name }, {
+    ...options,
+    allowPartialData: true,
+  });
 
   return data.repository || null;
 }

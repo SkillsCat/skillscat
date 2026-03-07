@@ -29,6 +29,9 @@ const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
 const AI_CLASSIFICATION_THRESHOLD = 100; // Stars threshold for AI classification
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
+export const SKILL_REFRESH_SELECT_COLUMNS = `
+  id, repo_owner, repo_name, stars, forks, star_snapshots, indexed_at, last_commit_at,
+  tier, last_accessed_at, access_count_7d, download_count_7d, next_update_at`;
 
 function getListCachePaths(listName: string, cacheVersion?: string): string[] {
   const normalizedVersion = (cacheVersion || '').trim();
@@ -41,6 +44,36 @@ function getListCachePaths(listName: string, cacheVersion?: string): string[] {
   // Keep writing legacy key for backward compatibility / smooth rollouts.
   paths.push(`cache/${listName}.json`);
   return paths;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+export function resolveRefreshRepoMetrics(
+  skill: Pick<SkillRecord, 'id' | 'stars' | 'forks' | 'last_commit_at'>,
+  ghData?: Pick<GitHubGraphQLRepoData, 'stargazerCount' | 'forkCount' | 'pushedAt'> | null
+): { stars: number; forks: number; lastCommitAt: number | null } | null {
+  const fallbackStars = isFiniteNumber(skill.stars) ? skill.stars : null;
+  const fallbackForks = isFiniteNumber(skill.forks) ? skill.forks : null;
+
+  const stars = ghData?.stargazerCount ?? fallbackStars;
+  const forks = ghData?.forkCount ?? fallbackForks;
+
+  if (stars === null || forks === null) {
+    return null;
+  }
+
+  if (!ghData?.pushedAt) {
+    return { stars, forks, lastCommitAt: skill.last_commit_at };
+  }
+
+  const pushedAt = new Date(ghData.pushedAt).getTime();
+  return {
+    stars,
+    forks,
+    lastCommitAt: Number.isFinite(pushedAt) ? pushedAt : skill.last_commit_at,
+  };
 }
 
 export function calculateTrendingScore(skill: {
@@ -239,8 +272,7 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
 
   const placeholders = skillIds.map(() => '?').join(',');
   const skills = await env.DB.prepare(`
-    SELECT id, repo_owner, repo_name, stars, star_snapshots, indexed_at, last_commit_at,
-           tier, last_accessed_at, access_count_7d, download_count_7d
+    SELECT ${SKILL_REFRESH_SELECT_COLUMNS}
     FROM skills WHERE id IN (${placeholders})
   `)
     .bind(...skillIds)
@@ -273,7 +305,13 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
       ? JSON.parse(skill.star_snapshots)
       : [];
 
-    const newStars = ghData.stargazerCount;
+    const repoMetrics = resolveRefreshRepoMetrics(skill, ghData);
+    if (!repoMetrics) {
+      console.warn(`Skipping marked skill ${skill.id}: repo metrics unavailable`);
+      continue;
+    }
+
+    const newStars = repoMetrics.stars;
     if (newStars !== skill.stars) {
       snapshots.push({
         d: new Date().toISOString().split('T')[0],
@@ -282,13 +320,12 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
     }
 
     const compressed = compressSnapshots(snapshots);
-    const pushedAt = new Date(ghData.pushedAt).getTime();
 
     const score = calculateTrendingScore({
       stars: newStars,
       starSnapshots: compressed,
       indexedAt: skill.indexed_at,
-      lastCommitAt: pushedAt,
+      lastCommitAt: repoMetrics.lastCommitAt,
       downloadCount7d: skill.download_count_7d,
     });
 
@@ -301,7 +338,7 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
     updates.push({
       id: skill.id,
       stars: newStars,
-      forks: ghData.forkCount,
+      forks: repoMetrics.forks,
       starSnapshots: JSON.stringify(compressed),
       score,
       tier: newTier,
@@ -339,12 +376,8 @@ async function updateSkillsByTier(
 ): Promise<{ count: number; updatedIds: string[] }> {
   const now = Date.now();
   const tierPlaceholders = tiers.map(() => '?').join(',');
-  const skillSelectColumns = `
-    id, repo_owner, repo_name, stars, star_snapshots, indexed_at, last_commit_at,
-    tier, last_accessed_at, access_count_7d, download_count_7d, next_update_at`;
-
   const skillSelectSql = `
-    SELECT ${skillSelectColumns}
+    SELECT ${SKILL_REFRESH_SELECT_COLUMNS}
     FROM skills
     WHERE tier IN (${tierPlaceholders})`;
 
@@ -365,7 +398,7 @@ async function updateSkillsByTier(
     const remaining = limit - selectedSkills.length;
     const dueByTierSql = tiers.map(() => `
       SELECT * FROM (
-        SELECT ${skillSelectColumns}
+        SELECT ${SKILL_REFRESH_SELECT_COLUMNS}
         FROM skills INDEXED BY skills_public_tier_due_idx
         WHERE tier = ?
           AND next_update_at < ?
@@ -379,9 +412,7 @@ async function updateSkillsByTier(
       WITH due_by_tier AS (
         ${dueByTierSql}
       )
-      SELECT
-        id, repo_owner, repo_name, stars, star_snapshots, indexed_at, last_commit_at,
-        tier, last_accessed_at, access_count_7d, download_count_7d
+      SELECT ${SKILL_REFRESH_SELECT_COLUMNS}
       FROM due_by_tier
       ORDER BY next_update_at ASC
       LIMIT ?
@@ -425,10 +456,13 @@ async function updateSkillsByTier(
     for (const skill of batch) {
       const ghData = githubData.get(skill.id);
 
-      // If GitHub fetch failed, just recalculate score with existing data
-      const newStars = ghData?.stargazerCount ?? skill.stars;
-      const newForks = ghData?.forkCount ?? skill.forks;
-      const pushedAt = ghData ? new Date(ghData.pushedAt).getTime() : skill.last_commit_at;
+      const repoMetrics = resolveRefreshRepoMetrics(skill, ghData);
+      if (!repoMetrics) {
+        console.warn(`Skipping tier refresh for ${skill.id}: repo metrics unavailable`);
+        continue;
+      }
+
+      const newStars = repoMetrics.stars;
 
       const snapshots: StarSnapshot[] = skill.star_snapshots
         ? JSON.parse(skill.star_snapshots)
@@ -447,7 +481,7 @@ async function updateSkillsByTier(
         stars: newStars,
         starSnapshots: compressed,
         indexedAt: skill.indexed_at,
-        lastCommitAt: pushedAt,
+        lastCommitAt: repoMetrics.lastCommitAt,
         downloadCount7d: skill.download_count_7d,
       });
 
@@ -460,7 +494,7 @@ async function updateSkillsByTier(
       updates.push({
         id: skill.id,
         stars: newStars,
-        forks: newForks,
+        forks: repoMetrics.forks,
         starSnapshots: JSON.stringify(compressed),
         score,
         tier: newTier,

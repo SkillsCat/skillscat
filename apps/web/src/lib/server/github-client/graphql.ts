@@ -3,7 +3,7 @@ import { recordRateLimitFromHeaders } from './rate-limit-kv';
 
 export const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql';
 
-interface GraphQLErrorItem {
+export interface GraphQLErrorItem {
   message?: string;
   type?: string;
   path?: Array<string | number>;
@@ -55,6 +55,7 @@ export interface GitHubGraphqlRequestOptions {
   rateLimitKV?: KVNamespace;
   rateLimitKeyPrefix?: string;
   endpointId?: string;
+  allowPartialData?: boolean;
 }
 
 function graphQLErrorLooksRateLimited(error: GraphQLErrorItem): boolean {
@@ -74,7 +75,7 @@ export async function githubGraphqlRequest<TData, TVariables = Record<string, un
   query: string,
   variables?: TVariables,
   options: GitHubGraphqlRequestOptions = {}
-): Promise<{ data: TData; response: Response }> {
+): Promise<{ data: TData; response: Response; errors: GraphQLErrorItem[] }> {
   const response = await rawGitHubRequest(GITHUB_GRAPHQL_URL, {
     method: 'POST',
     token: options.token,
@@ -136,6 +137,14 @@ export async function githubGraphqlRequest<TData, TVariables = Record<string, un
   }
 
   if (envelope.errors && envelope.errors.length > 0) {
+    if (options.allowPartialData && envelope.data !== undefined) {
+      return {
+        data: envelope.data,
+        response,
+        errors: envelope.errors,
+      };
+    }
+
     const message = envelope.errors.map((e) => e.message).filter(Boolean).join('; ') || 'GitHub GraphQL request failed';
     throw new GitHubGraphqlError(message, {
       status: 502,
@@ -147,5 +156,9 @@ export async function githubGraphqlRequest<TData, TVariables = Record<string, un
     throw new GitHubGraphqlError('GitHub GraphQL response missing data', { status: 502, errors: envelope.errors });
   }
 
-  return { data: envelope.data, response };
+  return {
+    data: envelope.data,
+    response,
+    errors: envelope.errors ?? [],
+  };
 }
