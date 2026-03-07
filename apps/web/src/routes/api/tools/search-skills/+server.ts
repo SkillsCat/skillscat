@@ -52,6 +52,7 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
 
 export const POST: RequestHandler = async ({ platform, request, locals }) => {
   const db = platform?.env?.DB;
+  const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
   let payload: Record<string, unknown> = {};
 
   try {
@@ -63,7 +64,7 @@ export const POST: RequestHandler = async ({ platform, request, locals }) => {
   const input = parseRegistrySearchInput(payload);
 
   try {
-    const resolved = await resolveRegistrySearch({ db, request, locals }, input);
+    const resolved = await resolveRegistrySearch({ db, request, locals, waitUntil }, input);
     return json(resolved.data, { headers: responseHeaders(resolved, true) });
   } catch (err) {
     console.error('Error executing search-skills tool:', err);
