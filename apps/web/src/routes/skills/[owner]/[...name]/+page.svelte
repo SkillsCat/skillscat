@@ -11,7 +11,7 @@
   import { getSkillPageCopy } from '$lib/i18n/skill-page';
   import { formatRelativeTimestamp } from '$lib/i18n/relative';
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
-  import { buildSkillscatInstallCommand, shouldScopeSkillscatInstall } from '$lib/skill-install';
+  import { buildSkillscatInstallCommand } from '$lib/skill-install';
   import { encodeSkillSlugForPath } from '$lib/skill-path';
   import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
   import type { Highlighter } from 'shiki';
@@ -341,27 +341,9 @@
   }
 
   const skillscatInstallCommand = $derived(data.skill
-    ? buildSkillscatInstallCommand({
-      name: data.skill.name,
-      slug: data.skill.slug,
-      repoOwner: data.skill.repoOwner,
-      repoName: data.skill.repoName,
-      visibility: data.skill.visibility,
-      sourceType: data.skill.sourceType,
-    })
+    ? buildSkillscatInstallCommand({ slug: data.skill.slug })
     : ''
   );
-
-  const scopedSkillscatInstall = $derived(Boolean(
-    data.skill && shouldScopeSkillscatInstall({
-      name: data.skill.name,
-      slug: data.skill.slug,
-      repoOwner: data.skill.repoOwner,
-      repoName: data.skill.repoName,
-      visibility: data.skill.visibility,
-      sourceType: data.skill.sourceType,
-    })
-  ));
 
   const canUseVercelInstaller = $derived(Boolean(
     data.skill &&
@@ -1324,12 +1306,6 @@
         {currentInstaller?.description}
       </p>
 
-      {#if currentInstaller?.name === 'skillscat'}
-        <p class="command-hint">{copy.skillscatOpenClawHint}</p>
-        {#if scopedSkillscatInstall}
-          <p class="command-hint">{copy.skillscatScopedInstallHint}</p>
-        {/if}
-      {/if}
     {/snippet}
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 skill-detail-layout">
@@ -2445,13 +2421,6 @@
     margin-top: 0.75rem;
     padding-top: 0.75rem;
     border-top: 1px solid var(--border);
-    font-size: 0.75rem;
-    color: var(--fg-muted);
-    line-height: 1.5;
-  }
-
-  .command-hint {
-    margin-top: 0.5rem;
     font-size: 0.75rem;
     color: var(--fg-muted);
     line-height: 1.5;
