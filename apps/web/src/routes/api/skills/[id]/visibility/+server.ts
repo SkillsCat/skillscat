@@ -1,5 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middleware/auth';
 import { isSkillOwner } from '$lib/server/permissions';
 import { getRepo } from '$lib/server/github-client/rest';
@@ -90,10 +91,10 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
 
   // Get current skill info
   const skill = await db.prepare(`
-    SELECT visibility, source_type, github_url FROM skills WHERE id = ?
+    SELECT slug, visibility, source_type, github_url FROM skills WHERE id = ?
   `)
     .bind(skillId)
-    .first<{ visibility: string; source_type: string; github_url: string | null }>();
+    .first<{ slug: string; visibility: string; source_type: string; github_url: string | null }>();
 
   if (!skill) {
     throw error(404, 'Skill not found');
@@ -147,6 +148,32 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
       .bind(visibility, Date.now(), skillId)
       .run();
   }
+
+  const categoryRows = await db.prepare(`
+    SELECT category_slug FROM skill_categories WHERE skill_id = ?
+  `)
+    .bind(skillId)
+    .all<{ category_slug: string }>();
+
+  const cacheKeys = new Set<string>([
+    `api:skill:${skill.slug}`,
+    `api:skill-files:${skill.slug}`,
+    `skill:${skillId}`,
+    `recommend:${skillId}`,
+    'page:home:v1',
+    'page:trending:v1:1',
+    'page:recent:v1:1',
+    'page:top:v1:1',
+    'page:categories:v1',
+  ]);
+
+  for (const row of categoryRows.results || []) {
+    if (row.category_slug) {
+      cacheKeys.add(`page:category:v1:${row.category_slug}:1`);
+    }
+  }
+
+  await Promise.all(Array.from(cacheKeys, (cacheKey) => invalidateCache(cacheKey)));
 
   return json({
     success: true,
