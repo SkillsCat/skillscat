@@ -224,9 +224,9 @@
                   <div class="form-actions">
                     <Dialog.Close>
                       {#snippet child({ props })}
-                        <button {...props} type="button" class="btn btn-secondary btn-md">
+                        <Button {...props} variant="secondary" renderAs="div" type="button">
                           {messages.common.cancel}
-                        </button>
+                        </Button>
                       {/snippet}
                     </Dialog.Close>
                     <Button

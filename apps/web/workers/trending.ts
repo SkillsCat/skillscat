@@ -21,6 +21,7 @@ import type {
   ClassificationMessage,
 } from './shared/types';
 import { TIER_CONFIG } from './shared/types';
+import { SKILL_REFRESH_SELECT_COLUMNS, resolveRefreshRepoMetrics } from './shared/trending-refresh';
 import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
 import { getNonlinearStarScore, buildTopRatedSortScoreSql } from '../src/lib/server/ranking';
 import { markSearchDirtyBatch } from '../src/lib/server/search-precompute';
@@ -29,9 +30,6 @@ const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
 const AI_CLASSIFICATION_THRESHOLD = 100; // Stars threshold for AI classification
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
-export const SKILL_REFRESH_SELECT_COLUMNS = `
-  id, repo_owner, repo_name, stars, forks, star_snapshots, indexed_at, last_commit_at,
-  tier, last_accessed_at, access_count_7d, download_count_7d, next_update_at`;
 
 function getListCachePaths(listName: string, cacheVersion?: string): string[] {
   const normalizedVersion = (cacheVersion || '').trim();
@@ -44,36 +42,6 @@ function getListCachePaths(listName: string, cacheVersion?: string): string[] {
   // Keep writing legacy key for backward compatibility / smooth rollouts.
   paths.push(`cache/${listName}.json`);
   return paths;
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
-export function resolveRefreshRepoMetrics(
-  skill: Pick<SkillRecord, 'id' | 'stars' | 'forks' | 'last_commit_at'>,
-  ghData?: Pick<GitHubGraphQLRepoData, 'stargazerCount' | 'forkCount' | 'pushedAt'> | null
-): { stars: number; forks: number; lastCommitAt: number | null } | null {
-  const fallbackStars = isFiniteNumber(skill.stars) ? skill.stars : null;
-  const fallbackForks = isFiniteNumber(skill.forks) ? skill.forks : null;
-
-  const stars = ghData?.stargazerCount ?? fallbackStars;
-  const forks = ghData?.forkCount ?? fallbackForks;
-
-  if (stars === null || forks === null) {
-    return null;
-  }
-
-  if (!ghData?.pushedAt) {
-    return { stars, forks, lastCommitAt: skill.last_commit_at };
-  }
-
-  const pushedAt = new Date(ghData.pushedAt).getTime();
-  return {
-    stars,
-    forks,
-    lastCommitAt: Number.isFinite(pushedAt) ? pushedAt : skill.last_commit_at,
-  };
 }
 
 export function calculateTrendingScore(skill: {

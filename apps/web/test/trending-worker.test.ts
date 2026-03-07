@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { SKILL_REFRESH_SELECT_COLUMNS, resolveRefreshRepoMetrics } from '../workers/trending';
+import { SKILL_REFRESH_SELECT_COLUMNS, resolveRefreshRepoMetrics } from '../workers/shared/trending-refresh';
 import type { SkillRecord } from '../workers/shared/types';
 
 type RefreshSkill = Pick<SkillRecord, 'id' | 'stars' | 'forks' | 'last_commit_at'>;
