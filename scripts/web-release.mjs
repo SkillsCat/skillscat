@@ -390,11 +390,11 @@ function printPlan(mode, versionInfo, tag, options) {
   console.log('- Deploy web: run');
   if (mode === 'deploy-all') {
     console.log(`- Deploy workers: run (env: ${options.workersEnv})`);
-    console.log(`- Commit version bump: ${versionInfo.changed ? 'run' : 'skip (no version change)'}`);
-    console.log(`- Push branch: ${versionInfo.changed ? 'run' : 'skip (no version change)'}`);
   }
+  console.log(`- Commit version bump: ${versionInfo.changed ? 'run' : 'skip (no version change)'}`);
+  console.log(`- Push branch: ${versionInfo.changed ? 'run' : 'skip (no version change)'}`);
   console.log(
-    `- Tag: ${tag ? `create ${tag} (after successful deploy${mode === 'deploy-all' ? ' + git push' : ''})` : 'skip'}`
+    `- Tag: ${tag ? `create ${tag} (after successful deploy + git push)` : 'skip'}`
   );
   console.log(`- Push tag: ${tag ? (options.pushTag ? 'yes' : 'no') : 'n/a (no tag)'}`);
   if (options.dryRun) {
@@ -432,7 +432,7 @@ function runWorkersDeploy(options) {
   });
 }
 
-function runDeployAllGitFlow(versionInfo, options) {
+function runVersionCommitFlow(versionInfo, options) {
   if (!versionInfo.changed) {
     console.log('[git] Version unchanged, skipping commit/push.');
     return;
@@ -498,9 +498,9 @@ async function runDeploy(command, options) {
 
   if (command === 'deploy-all') {
     runWorkersDeploy(options);
-    runDeployAllGitFlow(versionInfo, options);
   }
 
+  runVersionCommitFlow(versionInfo, options);
   runTagFlow(tag, versionInfo.nextVersion, options);
   console.log(`\nWeb ${command} flow completed.`);
 }
