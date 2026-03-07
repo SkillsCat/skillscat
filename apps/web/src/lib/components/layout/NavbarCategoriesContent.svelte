@@ -51,8 +51,12 @@
     Calculator01Icon
   } from '@hugeicons/core-free-icons';
 
+  type MenuDensity = 'compact' | 'comfortable' | 'full';
+
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
+  let windowWidth = $state(1440);
+
   const categoryIcons: Record<string, typeof GitBranchIcon> = {
     'code-generation': CodeIcon,
     'refactoring': RefreshIcon,
@@ -103,14 +107,29 @@
     'game-dev': GameboyIcon
   };
 
-  const displaySections = $derived(
-    getLocalizedCategorySections(i18n.locale()).filter((section) =>
-      ['development', 'backend', 'frontend', 'devops', 'quality', 'lifestyle'].includes(section.id)
-    )
-  );
+  const sectionIdsByDensity: Record<MenuDensity, readonly string[]> = {
+    compact: ['development', 'backend', 'frontend', 'devops'],
+    comfortable: ['development', 'backend', 'frontend', 'devops', 'quality'],
+    full: ['development', 'backend', 'frontend', 'devops', 'quality', 'lifestyle'],
+  };
+
+  const menuDensity = $derived.by<MenuDensity>(() => {
+    if (windowWidth < 1200) return 'compact';
+    if (windowWidth < 1440) return 'comfortable';
+    return 'full';
+  });
+
+  const displaySections = $derived.by(() => {
+    const allowedSectionIds = new Set(sectionIdsByDensity[menuDensity]);
+    return getLocalizedCategorySections(i18n.locale()).filter((section) =>
+      allowedSectionIds.has(section.id)
+    );
+  });
 </script>
 
-<div class="dropdown-sections">
+<svelte:window bind:innerWidth={windowWidth} />
+
+<div class="dropdown-sections" data-density={menuDensity}>
   {#each displaySections as section}
     <div class="section-group">
       <div class="section-title">{section.name}</div>
@@ -132,7 +151,7 @@
     </div>
   {/each}
 </div>
-<div class="dropdown-footer">
+<div class="dropdown-footer" data-density={menuDensity}>
   <NavigationMenu.Link href="/categories" class="view-all-link">
     {messages.categories.viewAll}
   </NavigationMenu.Link>
@@ -140,19 +159,36 @@
 
 <style>
   .dropdown-sections {
+    box-sizing: border-box;
     display: grid;
-    grid-template-columns: repeat(3, minmax(140px, 1fr));
-    gap: 0.25rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
     padding: 1rem;
-    min-width: 450px;
-    max-width: 500px;
+    width: min(calc(100vw - 2rem), 30rem);
   }
 
-  @media (min-width: 1024px) {
-    .dropdown-sections {
-      grid-template-columns: repeat(6, minmax(130px, 1fr));
-      min-width: 800px;
-      max-width: 900px;
+  .dropdown-sections[data-density='compact'] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.25rem;
+    padding: 0.8rem 0.85rem 0.7rem;
+    width: min(calc(100vw - 2rem), 56rem);
+  }
+
+  .dropdown-sections[data-density='comfortable'] {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    width: min(calc(100vw - 2.75rem), 60rem);
+  }
+
+  .dropdown-sections[data-density='full'] {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    width: min(calc(100vw - 3.5rem), 68rem);
+  }
+
+  @media (max-width: 1023px) {
+    .dropdown-sections[data-density='compact'],
+    .dropdown-sections[data-density='comfortable'],
+    .dropdown-sections[data-density='full'] {
+      width: min(calc(100vw - 1.5rem), 50rem);
     }
   }
 
@@ -160,6 +196,10 @@
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+  }
+
+  .dropdown-sections[data-density='compact'] .section-group {
+    gap: 0.15rem;
   }
 
   .section-title {
@@ -170,6 +210,12 @@
     color: var(--muted-foreground);
     padding: 0.25rem 0.5rem;
     margin-bottom: 0.125rem;
+  }
+
+  .dropdown-sections[data-density='compact'] .section-title {
+    padding: 0.2rem 0.35rem;
+    font-size: 0.625rem;
+    letter-spacing: 0.04em;
   }
 
   .category-list {
@@ -191,6 +237,11 @@
     transition: all 0.15s ease;
   }
 
+  .dropdown-sections[data-density='compact'] :global(.category-item) {
+    gap: 0.4rem;
+    padding: 0.28rem 0.35rem;
+  }
+
   :global(.category-item:hover),
   :global(.category-item[data-highlighted]) {
     background-color: var(--primary-subtle);
@@ -209,6 +260,11 @@
     transition: all 0.15s ease;
   }
 
+  .dropdown-sections[data-density='compact'] .category-icon {
+    width: 1.3rem;
+    height: 1.3rem;
+  }
+
   :global(.category-item:hover) .category-icon {
     background: var(--primary);
     color: var(--primary-foreground);
@@ -222,14 +278,24 @@
     line-height: 1.25;
   }
 
+  .dropdown-sections[data-density='compact'] .category-name {
+    font-size: 0.76rem;
+    line-height: 1.15;
+  }
+
   :global(.category-item:hover) .category-name {
     color: var(--primary);
   }
 
   .dropdown-footer {
+    box-sizing: border-box;
     padding: 0.75rem 1rem;
     border-top: 2px solid var(--border);
     background-color: var(--bg-muted);
+  }
+
+  .dropdown-footer[data-density='compact'] {
+    padding: 0.55rem 0.85rem 0.65rem;
   }
 
   :global(.view-all-link) {

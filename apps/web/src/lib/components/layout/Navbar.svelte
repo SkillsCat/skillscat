@@ -395,7 +395,8 @@
     top: 100%;
     transform: translateX(-50%);
     margin-top: 0.75rem;
-    width: var(--bits-navigation-menu-viewport-width);
+    width: min(var(--bits-navigation-menu-viewport-width), calc(100vw - 1rem));
+    max-width: calc(100vw - 1rem);
     height: var(--bits-navigation-menu-viewport-height);
     overflow: hidden;
     background-color: var(--card);
