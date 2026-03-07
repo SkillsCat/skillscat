@@ -22,6 +22,7 @@ export interface SkillFilesInput {
 export interface ResolvedSkillFiles {
   data: SkillFilesResult;
   cacheControl: string;
+  cacheStatus: 'HIT' | 'MISS' | 'BYPASS';
 }
 
 interface SkillInfo {
@@ -46,10 +47,17 @@ interface GitHubTreeItem {
   size?: number;
 }
 
+interface CachedPublicSkillFiles {
+  result: SkillFilesResult;
+  skillId: string;
+}
+
 const COMMIT_CACHE_TTL = 300;
+const PUBLIC_CACHE_TTL_SECONDS = 300;
 const STALE_SKILL_REFRESH_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
 const STALE_SKILL_COMMIT_CACHE_TTL_SECONDS = 6 * 60 * 60;
 const CLIENT_GITHUB_RATE_LIMIT_HEADER = 'x-skillscat-client-github-rate-limited';
+type WaitUntilFn = (promise: Promise<unknown>) => void;
 
 const TEXT_EXTENSIONS = new Set([
   'md', 'txt', 'json', 'yaml', 'yml', 'toml',
@@ -98,6 +106,30 @@ export function parseSkillFilesInput(input: Record<string, unknown>): SkillFiles
   return { slug };
 }
 
+class PublicSkillFilesCacheBypass extends Error {
+  reason: 'not_found' | 'private' | 'unlisted';
+  skill: SkillInfo | null;
+
+  constructor(reason: 'not_found' | 'private' | 'unlisted', skill: SkillInfo | null = null) {
+    super(reason);
+    this.reason = reason;
+    this.skill = skill;
+  }
+}
+
+function scheduleNonCritical(promise: Promise<unknown>, waitUntil?: WaitUntilFn): void {
+  const guarded = promise.catch(() => {
+    // Non-critical telemetry writes should not fail the request.
+  });
+
+  if (waitUntil) {
+    waitUntil(guarded);
+    return;
+  }
+
+  void guarded;
+}
+
 async function recordClientGitHubRateLimited(db: D1Database, skillId: string): Promise<void> {
   try {
     await db.prepare(`
@@ -108,6 +140,19 @@ async function recordClientGitHubRateLimited(db: D1Database, skillId: string): P
       .run();
   } catch {
     // non-critical telemetry
+  }
+}
+
+async function recordSkillDownload(db: D1Database, skillId: string): Promise<void> {
+  try {
+    await db.prepare(`
+      INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
+      VALUES (?, NULL, ?, 'download', ?)
+    `)
+      .bind(crypto.randomUUID(), skillId, Date.now())
+      .run();
+  } catch {
+    // non-critical
   }
 }
 
@@ -243,50 +288,25 @@ async function getR2CacheSha(r2: R2Bucket, r2Prefix: string): Promise<string | n
   return obj?.customMetadata?.commitSha || obj?.customMetadata?.sha || null;
 }
 
-export async function resolveSkillFiles(
-  {
-    db,
-    r2,
-    githubToken,
-    request,
-    locals,
-  }: {
-    db: D1Database | undefined;
-    r2: R2Bucket | undefined;
-    githubToken?: string;
-    request: Request;
-    locals: App.Locals;
-  },
-  input: SkillFilesInput
-): Promise<ResolvedSkillFiles> {
-  if (!db || !r2) {
-    throw error(503, 'Storage not available');
-  }
-
-  const skill = await db.prepare(`
+async function fetchSkillInfo(db: D1Database, slug: string): Promise<SkillInfo | null> {
+  return db.prepare(`
     SELECT id, name, slug, source_type, repo_owner, repo_name, skill_path, readme, visibility,
            last_commit_at, indexed_at, updated_at
     FROM skills WHERE slug = ?
-  `).bind(input.slug).first<SkillInfo>();
+  `).bind(slug).first<SkillInfo>();
+}
 
-  if (!skill) throw error(404, 'Skill not found');
-
-  if (skill.visibility === 'private') {
-    const auth = await getAuthContext(request, locals, db);
-    if (!auth.userId) {
-      throw error(401, 'Authentication required');
-    }
-    requireScope(auth, 'read');
-    const hasAccess = await checkSkillAccess(skill.id, auth.userId, db);
-    if (!hasAccess) {
-      throw error(403, 'You do not have permission to access this skill');
-    }
+async function buildSkillFilesData(
+  {
+    skill,
+    r2,
+    githubToken,
+  }: {
+    skill: SkillInfo;
+    r2: R2Bucket;
+    githubToken?: string;
   }
-
-  if (request.headers.get(CLIENT_GITHUB_RATE_LIMIT_HEADER) === '1') {
-    await recordClientGitHubRateLimited(db, skill.id);
-  }
-
+): Promise<SkillFilesResult> {
   const files: SkillFile[] = [];
   const folderName = skill.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
 
@@ -367,19 +387,107 @@ export async function resolveSkillFiles(
     throw error(404, 'Skill files not found');
   }
 
-  try {
-    await db.prepare(`
-      INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
-      VALUES (?, NULL, ?, 'download', ?)
-    `)
-      .bind(crypto.randomUUID(), skill.id, Date.now())
-      .run();
-  } catch {
-    // non-critical
+  return { folderName, files };
+}
+
+export async function resolveSkillFiles(
+  {
+    db,
+    r2,
+    githubToken,
+    request,
+    locals,
+    waitUntil,
+  }: {
+    db: D1Database | undefined;
+    r2: R2Bucket | undefined;
+    githubToken?: string;
+    request: Request;
+    locals: App.Locals;
+    waitUntil?: WaitUntilFn;
+  },
+  input: SkillFilesInput
+): Promise<ResolvedSkillFiles> {
+  if (!db || !r2) {
+    throw error(503, 'Storage not available');
   }
 
+  let cachedPublic: CachedPublicSkillFiles | null = null;
+  let cacheStatus: 'HIT' | 'MISS' | 'BYPASS' = 'BYPASS';
+  let bypassSkill: SkillInfo | null = null;
+
+  try {
+    const cached = await getCached(
+      `api:skill-files:${input.slug}`,
+      async () => {
+        const skill = await fetchSkillInfo(db, input.slug);
+        if (!skill) {
+          throw new PublicSkillFilesCacheBypass('not_found');
+        }
+        if (skill.visibility !== 'public') {
+          throw new PublicSkillFilesCacheBypass(skill.visibility as 'private' | 'unlisted', skill);
+        }
+
+        return {
+          skillId: skill.id,
+          result: await buildSkillFilesData({ skill, r2, githubToken }),
+        };
+      },
+      PUBLIC_CACHE_TTL_SECONDS,
+      { waitUntil }
+    );
+
+    cachedPublic = cached.data;
+    cacheStatus = cached.hit ? 'HIT' : 'MISS';
+  } catch (err) {
+    if (err instanceof PublicSkillFilesCacheBypass) {
+      bypassSkill = err.skill;
+    } else {
+      throw err;
+    }
+  }
+
+  const shouldRecordRateLimited = request.headers.get(CLIENT_GITHUB_RATE_LIMIT_HEADER) === '1';
+
+  if (cachedPublic) {
+    if (shouldRecordRateLimited) {
+      scheduleNonCritical(recordClientGitHubRateLimited(db, cachedPublic.skillId), waitUntil);
+    }
+    scheduleNonCritical(recordSkillDownload(db, cachedPublic.skillId), waitUntil);
+
+    return {
+      data: cachedPublic.result,
+      cacheControl: `public, max-age=${PUBLIC_CACHE_TTL_SECONDS}, stale-while-revalidate=600`,
+      cacheStatus,
+    };
+  }
+
+  if (!bypassSkill) {
+    throw error(404, 'Skill not found');
+  }
+
+  if (shouldRecordRateLimited) {
+    scheduleNonCritical(recordClientGitHubRateLimited(db, bypassSkill.id), waitUntil);
+  }
+
+  if (bypassSkill.visibility === 'private') {
+    const auth = await getAuthContext(request, locals, db);
+    if (!auth.userId) {
+      throw error(401, 'Authentication required');
+    }
+    requireScope(auth, 'read');
+    const hasAccess = await checkSkillAccess(bypassSkill.id, auth.userId, db);
+    if (!hasAccess) {
+      throw error(403, 'You do not have permission to access this skill');
+    }
+  }
+
+  const result = await buildSkillFilesData({ skill: bypassSkill, r2, githubToken });
+  scheduleNonCritical(recordSkillDownload(db, bypassSkill.id), waitUntil);
+
   return {
-    data: { folderName, files },
-    cacheControl: skill.visibility === 'private' ? 'private, no-cache' : 'public, max-age=300',
+    data: result,
+    cacheControl: 'private, no-cache',
+    cacheStatus: 'BYPASS',
   };
 }

@@ -33,6 +33,7 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
   const githubToken = platform?.env?.GITHUB_TOKEN;
+  const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
 
   if (!input) {
     return json(
@@ -42,12 +43,18 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
   }
 
   try {
-    const resolved = await resolveSkillFiles({ db, r2, githubToken, request, locals }, input);
-    return json(resolved.data, { headers: { ...corsHeaders(), 'Cache-Control': resolved.cacheControl } });
+    const resolved = await resolveSkillFiles({ db, r2, githubToken, request, locals, waitUntil }, input);
+    return json(resolved.data, {
+      headers: {
+        ...corsHeaders(),
+        'Cache-Control': resolved.cacheControl,
+        'X-Cache': resolved.cacheStatus,
+      }
+    });
   } catch (err) {
     return json(
       { error: getErrorMessage(err) },
-      { status: getErrorStatus(err), headers: { ...corsHeaders(), 'Cache-Control': 'no-store' } }
+      { status: getErrorStatus(err), headers: { ...corsHeaders(), 'Cache-Control': 'no-store', 'X-Cache': 'BYPASS' } }
     );
   }
 };
@@ -56,6 +63,7 @@ export const POST: RequestHandler = async ({ platform, request, locals }) => {
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
   const githubToken = platform?.env?.GITHUB_TOKEN;
+  const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
   let payload: Record<string, unknown> = {};
 
   try {
@@ -74,12 +82,12 @@ export const POST: RequestHandler = async ({ platform, request, locals }) => {
   }
 
   try {
-    const resolved = await resolveSkillFiles({ db, r2, githubToken, request, locals }, input);
-    return json(resolved.data, { headers: { ...corsHeaders(), 'Cache-Control': 'no-store' } });
+    const resolved = await resolveSkillFiles({ db, r2, githubToken, request, locals, waitUntil }, input);
+    return json(resolved.data, { headers: { ...corsHeaders(), 'Cache-Control': 'no-store', 'X-Cache': 'BYPASS' } });
   } catch (err) {
     return json(
       { error: getErrorMessage(err) },
-      { status: getErrorStatus(err), headers: { ...corsHeaders(), 'Cache-Control': 'no-store' } }
+      { status: getErrorStatus(err), headers: { ...corsHeaders(), 'Cache-Control': 'no-store', 'X-Cache': 'BYPASS' } }
     );
   }
 };

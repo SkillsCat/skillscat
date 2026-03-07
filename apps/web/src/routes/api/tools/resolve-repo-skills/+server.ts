@@ -54,6 +54,7 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
 
 export const POST: RequestHandler = async ({ platform, request, locals }) => {
   const db = platform?.env?.DB;
+  const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
   let payload: Record<string, unknown> = {};
 
   try {
@@ -72,7 +73,7 @@ export const POST: RequestHandler = async ({ platform, request, locals }) => {
   }
 
   try {
-    const resolved = await resolveRegistryRepo({ db, request, locals }, input);
+    const resolved = await resolveRegistryRepo({ db, request, locals, waitUntil }, input);
     return json(resolved.data, { headers: successHeaders(resolved, true) });
   } catch (err) {
     console.error('Error executing resolve-repo-skills tool:', err);

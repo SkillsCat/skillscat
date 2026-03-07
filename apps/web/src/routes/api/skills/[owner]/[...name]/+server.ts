@@ -1,9 +1,10 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import type { SkillDetail, SkillCardData, ApiResponse, FileNode } from '$lib/types';
-import { getCached, invalidateCache } from '$lib/server/cache';
+import type { ApiResponse } from '$lib/types';
+import { invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
-import { isSkillOwner, checkSkillAccess } from '$lib/server/permissions';
+import { isSkillOwner } from '$lib/server/permissions';
+import { resolveSkillDetail } from '$lib/server/skill-detail';
 import {
   buildSkillSlug,
   buildUploadSkillR2Key,
@@ -11,6 +12,14 @@ import {
   normalizeSkillOwner,
   parseSkillSlug,
 } from '$lib/skill-path';
+
+function responseHeaders(opts: { cacheControl: string; cacheStatus: 'HIT' | 'MISS' | 'BYPASS' }): Record<string, string> {
+  return {
+    'Cache-Control': opts.cacheControl,
+    Vary: 'Authorization',
+    'X-Cache': opts.cacheStatus,
+  };
+}
 
 /**
  * GET /api/skills/[owner]/[...name] - Get skill by owner and name
@@ -25,242 +34,44 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
 
   try {
     const db = platform?.env?.DB;
+    const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
+    const resolved = await resolveSkillDetail({ db, request, locals, waitUntil }, slug);
 
-    if (!db) {
+    if (!resolved.data) {
       return json({
         success: false,
-        error: 'Database not available'
-      } satisfies ApiResponse<never>, { status: 503 });
+        error: resolved.error || 'Skill not found'
+      } satisfies ApiResponse<never>, {
+        status: resolved.status,
+        headers: responseHeaders({
+          cacheControl: resolved.cacheControl,
+          cacheStatus: resolved.cacheStatus,
+        })
+      });
     }
-
-    const { data, hit } = await getCached(
-      `api:skill:${slug}`,
-      async () => {
-        const row = await db.prepare(`
-          SELECT
-            s.id,
-            s.name,
-            s.slug,
-            s.description,
-            s.repo_owner as repoOwner,
-            s.repo_name as repoName,
-            s.github_url as githubUrl,
-            s.skill_path as skillPath,
-            s.stars,
-            s.forks,
-            s.trending_score as trendingScore,
-            COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-            s.readme,
-            s.file_structure as fileStructure,
-            s.last_commit_at as lastCommitAt,
-            s.created_at as createdAt,
-            s.indexed_at as indexedAt,
-            s.source_type as sourceType,
-            s.visibility,
-            GROUP_CONCAT(sc.category_slug) as categories,
-            a.username as authorUsername,
-            a.display_name as authorDisplayName,
-            a.avatar_url as authorAvatar,
-            a.bio as authorBio,
-            a.skills_count as authorSkillsCount,
-            a.total_stars as authorTotalStars
-          FROM skills s
-          LEFT JOIN skill_categories sc ON s.id = sc.skill_id
-          LEFT JOIN authors a ON s.repo_owner = a.username
-          WHERE s.slug = ?
-          GROUP BY s.id
-        `).bind(slug).first<{
-          id: string;
-          name: string;
-          slug: string;
-          description: string | null;
-          repoOwner: string;
-          repoName: string;
-          githubUrl: string;
-          skillPath: string;
-          stars: number;
-          forks: number;
-          trendingScore: number;
-          updatedAt: number;
-          readme: string | null;
-          fileStructure: string | null;
-          lastCommitAt: number | null;
-          createdAt: number;
-          indexedAt: number;
-          sourceType: string;
-          visibility: string;
-          categories: string | null;
-          authorUsername: string | null;
-          authorDisplayName: string | null;
-          authorAvatar: string | null;
-          authorBio: string | null;
-          authorSkillsCount: number | null;
-          authorTotalStars: number | null;
-        }>();
-
-        if (!row) {
-          return null;
-        }
-
-        // Parse file structure JSON (use pre-built fileTree)
-        let fileStructure: FileNode[] | null = null;
-        if (row.fileStructure) {
-          try {
-            const parsed = JSON.parse(row.fileStructure);
-            if (parsed.fileTree && Array.isArray(parsed.fileTree)) {
-              fileStructure = parsed.fileTree;
-            }
-          } catch {
-            // Invalid JSON, leave as null
-          }
-        }
-
-        const skill: SkillDetail = {
-          id: row.id,
-          name: row.name,
-          slug: row.slug,
-          description: row.description,
-          repoOwner: row.repoOwner,
-          repoName: row.repoName,
-          githubUrl: row.githubUrl,
-          skillPath: row.skillPath,
-          stars: row.stars,
-          forks: row.forks,
-          trendingScore: row.trendingScore,
-          updatedAt: row.updatedAt,
-          readme: row.readme,
-          fileStructure,
-          lastCommitAt: row.lastCommitAt,
-          createdAt: row.createdAt,
-          indexedAt: row.indexedAt,
-          categories: row.categories ? row.categories.split(',') : [],
-          authorAvatar: row.authorAvatar || undefined,
-          authorUsername: row.authorUsername || undefined,
-          authorDisplayName: row.authorDisplayName || undefined,
-          authorBio: row.authorBio || undefined,
-          authorSkillsCount: row.authorSkillsCount || undefined,
-          authorTotalStars: row.authorTotalStars || undefined,
-          visibility: (row.visibility as 'public' | 'private' | 'unlisted') || 'public',
-          sourceType: (row.sourceType as 'github' | 'upload') || 'github',
-        };
-
-        // Get recommend skills (same category, exclude current)
-        let recommendSkills: SkillCardData[] = [];
-
-        if (skill.categories.length > 0) {
-          const recommendResult = await db.prepare(`
-            WITH matched AS (
-              SELECT
-                s.id,
-                s.name,
-                s.slug,
-                s.description,
-                s.repo_owner as repoOwner,
-                s.repo_name as repoName,
-                s.stars,
-                s.forks,
-                s.trending_score as trendingScore,
-                COALESCE(s.last_commit_at, s.updated_at) as updatedAt
-              FROM skill_categories sc
-              CROSS JOIN skills s
-              WHERE s.id = sc.skill_id
-                AND sc.category_slug IN (${skill.categories.map(() => '?').join(',')})
-                AND s.id != ?
-                AND s.visibility = 'public'
-              GROUP BY s.id
-              ORDER BY s.trending_score DESC
-              LIMIT 6
-            )
-            SELECT
-              matched.*,
-              (
-                SELECT GROUP_CONCAT(sc2.category_slug)
-                FROM skill_categories sc2
-                WHERE sc2.skill_id = matched.id
-              ) as categories,
-              a.avatar_url as authorAvatar
-            FROM matched
-            LEFT JOIN authors a ON matched.repoOwner = a.username
-            ORDER BY matched.trendingScore DESC
-          `).bind(...skill.categories, row.id).all<{
-            id: string;
-            name: string;
-            slug: string;
-            description: string | null;
-            repoOwner: string;
-            repoName: string;
-            stars: number;
-            forks: number;
-            trendingScore: number;
-            updatedAt: number;
-            categories: string | null;
-            authorAvatar: string | null;
-          }>();
-
-          recommendSkills = (recommendResult.results || []).map(r => ({
-            id: r.id,
-            name: r.name,
-            slug: r.slug,
-            description: r.description,
-            repoOwner: r.repoOwner,
-            repoName: r.repoName,
-            stars: r.stars,
-            forks: r.forks,
-            trendingScore: r.trendingScore,
-            updatedAt: r.updatedAt,
-            categories: r.categories ? r.categories.split(',') : [],
-            authorAvatar: r.authorAvatar || undefined
-          }));
-        }
-
-        return { skill, recommendSkills };
-      },
-      300
-    );
-
-    if (!data) {
-      return json({
-        success: false,
-        error: 'Skill not found'
-      } satisfies ApiResponse<never>, { status: 404 });
-    }
-
-    // Access control for private skills
-    if (data.skill.visibility === 'private') {
-      const auth = await getAuthContext(request, locals, db);
-      if (!auth.userId) {
-        return json({
-          success: false,
-          error: 'Authentication required'
-        } satisfies ApiResponse<never>, { status: 401 });
-      }
-      requireScope(auth, 'read');
-      const hasAccess = await checkSkillAccess(data.skill.id, auth.userId, db);
-      if (!hasAccess) {
-        return json({
-          success: false,
-          error: 'You do not have permission to access this skill'
-        } satisfies ApiResponse<never>, { status: 403 });
-      }
-    }
-
-    const isPrivate = data.skill.visibility === 'private';
 
     return json({
       success: true,
-      data
-    } satisfies ApiResponse<{ skill: SkillDetail; recommendSkills: SkillCardData[] }>, {
-      headers: {
-        'Cache-Control': isPrivate ? 'private, no-cache' : 'public, max-age=300, stale-while-revalidate=600',
-        'X-Cache': hit ? 'HIT' : 'MISS'
-      }
+      data: resolved.data
+    } satisfies ApiResponse<typeof resolved.data>, {
+      status: resolved.status,
+      headers: responseHeaders({
+        cacheControl: resolved.cacheControl,
+        cacheStatus: resolved.cacheStatus,
+      })
     });
   } catch (err) {
     console.error('Error fetching skill:', err);
     return json({
       success: false,
       error: 'Failed to fetch skill'
-    } satisfies ApiResponse<never>, { status: 500 });
+    } satisfies ApiResponse<never>, {
+      status: 500,
+      headers: responseHeaders({
+        cacheControl: 'no-store',
+        cacheStatus: 'BYPASS',
+      })
+    });
   }
 };
 
@@ -373,6 +184,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
   try {
     const cacheKeys = new Set<string>([
       `api:skill:${skill.slug}`,
+      `api:skill-files:${skill.slug}`,
       `skill:${skill.id}`,
       `recommend:${skill.id}`,
       'page:home:v1',

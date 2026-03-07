@@ -200,6 +200,122 @@ private content
     expect(missingResponse.headers.get('x-cache')).toBe('BYPASS');
   });
 
+  it('api skill detail and files endpoints cache public results and bypass protected paths', async () => {
+    const unique = Date.now();
+    const owner = 'apiskilltest';
+    const name = `private-skill-${unique}`;
+    const slug = `${owner}/${name}`;
+    const now = Date.now();
+
+    execLocalD1(`
+      INSERT INTO skills (id, name, slug, description, repo_owner, repo_name, github_url, visibility, source_type, owner_id, readme, created_at, updated_at, indexed_at)
+      VALUES (
+        'api-private-skill-${unique}',
+        'Private API Skill',
+        '${slug}',
+        'private api row',
+        '${owner}',
+        '${name}',
+        NULL,
+        'private',
+        'upload',
+        '${TEST_USER_ID}',
+        '---
+name: Private API Skill
+description: private api row
+---
+# Private API Skill
+private api content
+',
+        ${now},
+        ${now},
+        ${now}
+      );
+    `);
+
+    const publicSlug = encodeURIComponent('testowner/testrepo');
+    const privateSlug = encodeURIComponent(slug);
+
+    const publicDetailResponse = await fetch(`http://localhost:3000/api/skills/${publicSlug}`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/0.1.0',
+      }
+    });
+
+    expect(publicDetailResponse.status).toBe(200);
+    expect(publicDetailResponse.headers.get('cache-control') || '').toContain('public');
+    expect(publicDetailResponse.headers.get('vary') || '').toContain('Authorization');
+    expect(publicDetailResponse.headers.get('x-cache')).toMatch(/^(HIT|MISS)$/);
+    const publicDetail = await publicDetailResponse.json() as { success: boolean; data: { skill: { visibility: string } } };
+    expect(publicDetail.success).toBe(true);
+    expect(publicDetail.data.skill.visibility).toBe('public');
+
+    const privateDetailAnon = await fetch(`http://localhost:3000/api/skills/${privateSlug}`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/0.1.0',
+      }
+    });
+
+    expect(privateDetailAnon.status).toBe(401);
+    expect(privateDetailAnon.headers.get('cache-control') || '').toContain('no-store');
+    expect(privateDetailAnon.headers.get('vary') || '').toContain('Authorization');
+    expect(privateDetailAnon.headers.get('x-cache')).toBe('BYPASS');
+
+    const privateDetailAuthed = await fetch(`http://localhost:3000/api/skills/${privateSlug}`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/0.1.0',
+        Authorization: `Bearer ${TEST_TOKEN}`,
+      }
+    });
+
+    expect(privateDetailAuthed.status).toBe(200);
+    expect(privateDetailAuthed.headers.get('cache-control') || '').toContain('private, no-cache');
+    expect(privateDetailAuthed.headers.get('vary') || '').toContain('Authorization');
+    expect(privateDetailAuthed.headers.get('x-cache')).toBe('BYPASS');
+    const privateDetail = await privateDetailAuthed.json() as { success: boolean; data: { skill: { visibility: string } } };
+    expect(privateDetail.success).toBe(true);
+    expect(privateDetail.data.skill.visibility).toBe('private');
+
+    const publicFilesResponse = await fetch(`http://localhost:3000/api/skills/${publicSlug}/files`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/0.1.0',
+      }
+    });
+
+    expect(publicFilesResponse.status).toBe(200);
+    expect(publicFilesResponse.headers.get('cache-control') || '').toContain('public');
+    expect(publicFilesResponse.headers.get('vary') || '').toContain('Authorization');
+    expect(publicFilesResponse.headers.get('x-cache')).toMatch(/^(HIT|MISS)$/);
+    const publicFiles = await publicFilesResponse.json() as { files: Array<{ path: string }> };
+    expect(publicFiles.files.some((file) => file.path === 'SKILL.md')).toBe(true);
+
+    const privateFilesAnon = await fetch(`http://localhost:3000/api/skills/${privateSlug}/files`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/0.1.0',
+      }
+    });
+
+    expect(privateFilesAnon.status).toBe(401);
+    expect(privateFilesAnon.headers.get('cache-control') || '').toContain('no-store');
+    expect(privateFilesAnon.headers.get('vary') || '').toContain('Authorization');
+    expect(privateFilesAnon.headers.get('x-cache')).toBe('BYPASS');
+
+    const privateFilesAuthed = await fetch(`http://localhost:3000/api/skills/${privateSlug}/files`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/0.1.0',
+        Authorization: `Bearer ${TEST_TOKEN}`,
+      }
+    });
+
+    expect(privateFilesAuthed.status).toBe(200);
+    expect(privateFilesAuthed.headers.get('cache-control') || '').toContain('private, no-cache');
+    expect(privateFilesAuthed.headers.get('vary') || '').toContain('Authorization');
+    expect(privateFilesAuthed.headers.get('x-cache')).toBe('BYPASS');
+    const privateFiles = await privateFilesAuthed.json() as { files: Array<{ path: string; content: string }> };
+    expect(privateFiles.files[0]?.path).toBe('SKILL.md');
+    expect(privateFiles.files[0]?.content).toContain('private api content');
+  });
+
   it('registry repo and search preserve 403 with no-store when token lacks read scope', async () => {
     const unique = Date.now();
     const writeOnlyToken = `sk_write_only_preview_${unique}`;
