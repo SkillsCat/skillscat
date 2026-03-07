@@ -49,14 +49,12 @@ interface GitHubTreeItem {
 
 interface CachedPublicSkillFiles {
   result: SkillFilesResult;
-  skillId: string;
 }
 
 const COMMIT_CACHE_TTL = 300;
 const PUBLIC_CACHE_TTL_SECONDS = 300;
 const STALE_SKILL_REFRESH_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
 const STALE_SKILL_COMMIT_CACHE_TTL_SECONDS = 6 * 60 * 60;
-const CLIENT_GITHUB_RATE_LIMIT_HEADER = 'x-skillscat-client-github-rate-limited';
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 
 const TEXT_EXTENSIONS = new Set([
@@ -114,45 +112,6 @@ class PublicSkillFilesCacheBypass extends Error {
     super(reason);
     this.reason = reason;
     this.skill = skill;
-  }
-}
-
-function scheduleNonCritical(promise: Promise<unknown>, waitUntil?: WaitUntilFn): void {
-  const guarded = promise.catch(() => {
-    // Non-critical telemetry writes should not fail the request.
-  });
-
-  if (waitUntil) {
-    waitUntil(guarded);
-    return;
-  }
-
-  void guarded;
-}
-
-async function recordClientGitHubRateLimited(db: D1Database, skillId: string): Promise<void> {
-  try {
-    await db.prepare(`
-      INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
-      VALUES (?, NULL, ?, 'github_client_rate_limited', ?)
-    `)
-      .bind(crypto.randomUUID(), skillId, Date.now())
-      .run();
-  } catch {
-    // non-critical telemetry
-  }
-}
-
-async function recordSkillDownload(db: D1Database, skillId: string): Promise<void> {
-  try {
-    await db.prepare(`
-      INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
-      VALUES (?, NULL, ?, 'download', ?)
-    `)
-      .bind(crypto.randomUUID(), skillId, Date.now())
-      .run();
-  } catch {
-    // non-critical
   }
 }
 
@@ -429,7 +388,6 @@ export async function resolveSkillFiles(
         }
 
         return {
-          skillId: skill.id,
           result: await buildSkillFilesData({ skill, r2, githubToken }),
         };
       },
@@ -447,14 +405,7 @@ export async function resolveSkillFiles(
     }
   }
 
-  const shouldRecordRateLimited = request.headers.get(CLIENT_GITHUB_RATE_LIMIT_HEADER) === '1';
-
   if (cachedPublic) {
-    if (shouldRecordRateLimited) {
-      scheduleNonCritical(recordClientGitHubRateLimited(db, cachedPublic.skillId), waitUntil);
-    }
-    scheduleNonCritical(recordSkillDownload(db, cachedPublic.skillId), waitUntil);
-
     return {
       data: cachedPublic.result,
       cacheControl: `public, max-age=${PUBLIC_CACHE_TTL_SECONDS}, stale-while-revalidate=600`,
@@ -464,10 +415,6 @@ export async function resolveSkillFiles(
 
   if (!bypassSkill) {
     throw error(404, 'Skill not found');
-  }
-
-  if (shouldRecordRateLimited) {
-    scheduleNonCritical(recordClientGitHubRateLimited(db, bypassSkill.id), waitUntil);
   }
 
   if (bypassSkill.visibility === 'private') {
@@ -483,7 +430,6 @@ export async function resolveSkillFiles(
   }
 
   const result = await buildSkillFilesData({ skill: bypassSkill, r2, githubToken });
-  scheduleNonCritical(recordSkillDownload(db, bypassSkill.id), waitUntil);
 
   return {
     data: result,

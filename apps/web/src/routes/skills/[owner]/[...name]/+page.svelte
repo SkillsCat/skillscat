@@ -653,6 +653,17 @@
   let isDownloading = $state(false);
   let downloadSuccess = $state(false);
 
+  function trackSuccessfulInstall(): void {
+    if (!data.skill) return;
+
+    void fetch(`/api/skills/${encodedApiSkillSlug}/track-install`, {
+      method: 'POST',
+      keepalive: true,
+    }).catch(() => {
+      // Tracking should not block a successful install UX.
+    });
+  }
+
   // Download skill files
   async function handleDownload() {
     if (!data.skill || isDownloading) return;
@@ -712,6 +723,7 @@
           }
 
           // Show success - both button state and toast
+          trackSuccessfulInstall();
           downloadSuccess = true;
           toast(i18n.t(copy.installedSuccess, { name: data.skill.name }), 'success', { celebrate: true });
           setTimeout(() => downloadSuccess = false, 3000);

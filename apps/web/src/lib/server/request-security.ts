@@ -69,11 +69,17 @@ const CSRF_EXEMPT_PATHS = [
 
 const UA_PROTECTED_ROUTE_IDS = new Set([
   '/api/skills/upload',
+  '/api/skills/[slug]',
+  '/api/skills/[owner]/[...name]',
   '/api/skills/[slug]/download',
   '/api/skills/[slug]/files',
   '/api/skills/[slug]/file',
   '/api/skills/[slug]/track-install',
+  '/api/tools/search-skills',
+  '/api/tools/resolve-repo-skills',
+  '/api/tools/get-skill-files',
   '/registry/skill/[owner]/[...name]',
+  '/registry/search/tool',
 ]);
 
 const BLOCKED_AUTOMATION_UA = [
@@ -157,10 +163,16 @@ function routeNeedsUaProtection(routeId: string | null, pathname: string): boole
 
   return (
     /^\/api\/skills\/.+\/(download|files|file|track-install)$/.test(pathname) ||
+    /^\/api\/tools\/(search-skills|resolve-repo-skills|get-skill-files)$/.test(pathname) ||
     pathname === '/api/skills/upload' ||
     /^\/registry\/skill\//.test(pathname) ||
-    /^\/registry\/repo\//.test(pathname)
+    /^\/registry\/repo\//.test(pathname) ||
+    pathname === '/registry/search/tool'
   );
+}
+
+function isCorsProtectedPath(pathname: string): boolean {
+  return pathname.startsWith('/registry/') || pathname.startsWith('/api/tools/');
 }
 
 function isAllowedCrawler(ua: string): boolean {
@@ -296,8 +308,11 @@ function pickRateLimitConfig(
   }
 
   if (
+    routeId === '/api/skills/[slug]' ||
+    routeId === '/api/skills/[owner]/[...name]' ||
     routeId === '/api/skills/[slug]/files' ||
     routeId === '/api/skills/[slug]/download' ||
+    routeId === '/api/tools/get-skill-files' ||
     routeId === '/registry/skill/[owner]/[...name]'
   ) {
     return HEAVY_TRANSFER_LIMIT;
@@ -344,7 +359,7 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
   }
 
   const routeId = route.id ?? null;
-  const cors = pathname.startsWith('/registry/');
+  const cors = isCorsProtectedPath(pathname);
   const tokenAuth = hasTokenAuthHeader(request);
   const anonymousCliBackgroundSubmit = isAnonymousCliBackgroundSubmitRequest(request);
 
