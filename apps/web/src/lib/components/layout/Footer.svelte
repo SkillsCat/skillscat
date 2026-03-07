@@ -1,15 +1,10 @@
 <script lang="ts">
   import Logo from '$lib/components/common/Logo.svelte';
-  import type { SupportedLocale } from '$lib/i18n/config';
+  import LocaleSwitcher from '$lib/components/ui/LocaleSwitcher.svelte';
   import { useI18n } from '$lib/i18n/runtime';
 
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
-
-  function handleLocaleChange(event: Event): void {
-    const nextLocale = (event.currentTarget as HTMLSelectElement).value as SupportedLocale;
-    void i18n.switchLocale(nextLocale);
-  }
 </script>
 
 <footer class="border-t border-border mt-16 bg-bg-subtle/50">
@@ -106,18 +101,7 @@
         </div>
       </div>
       <div class="flex items-center gap-4">
-        <label class="sr-only" for="footer-locale">{messages.footer.language}</label>
-        <select
-          id="footer-locale"
-          class="locale-select"
-          value={i18n.locale()}
-          aria-label={messages.footer.language}
-          onchange={handleLocaleChange}
-        >
-          {#each i18n.availableLocales() as locale}
-            <option value={locale.code}>{locale.label}</option>
-          {/each}
-        </select>
+        <LocaleSwitcher />
         <a
           href="https://github.com/backrunner/skillscat"
           target="_blank"
@@ -133,20 +117,3 @@
     </div>
   </div>
 </footer>
-
-<style>
-  .locale-select {
-    min-width: 8.5rem;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.875rem;
-    color: var(--fg);
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-  }
-
-  .locale-select:focus {
-    outline: 2px solid var(--primary);
-    outline-offset: 2px;
-  }
-</style>
