@@ -118,6 +118,12 @@ export const AGENTS: Agent[] = [
     globalPath: join(homedir(), '.config', 'opencode', 'skill')
   },
   {
+    id: 'openclaw',
+    name: 'OpenClaw',
+    projectPath: 'skills/',
+    globalPath: join(homedir(), '.openclaw', 'skills')
+  },
+  {
     id: 'qoder',
     name: 'Qoder',
     projectPath: '.qoder/skills/',

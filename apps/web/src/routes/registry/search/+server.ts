@@ -1,4 +1,4 @@
-import { json } from '@sveltejs/kit';
+import { isHttpError, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
   parseRegistrySearchInput,
@@ -24,6 +24,14 @@ function responseHeaders(opts: { cacheControl: string; cacheStatus?: string }): 
   return headers;
 }
 
+function getHttpErrorMessage(err: { body: unknown; status: number }): string {
+  if (typeof err.body === 'object' && err.body !== null && 'message' in err.body) {
+    return String((err.body as { message: unknown }).message);
+  }
+
+  return `Request failed (${err.status})`;
+}
+
 export const GET: RequestHandler = async ({ url, platform, request, locals }) => {
   const db = platform?.env?.DB;
   const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
@@ -46,6 +54,16 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
       })
     });
   } catch (err) {
+    if (isHttpError(err)) {
+      return json(
+        { error: getHttpErrorMessage(err) },
+        {
+          status: err.status,
+          headers: responseHeaders({ cacheControl: 'no-store', cacheStatus: 'BYPASS' })
+        }
+      );
+    }
+
     console.error('Error searching skills:', err);
     return json(
       { skills: [], total: 0 } satisfies RegistrySearchResult,

@@ -19,6 +19,7 @@ describe('buildLlmTxt', () => {
     expect(text).toContain('npx skillscat add <owner>/<repo> --skill "<skill-name>"');
     expect(text).toContain('npx skillscat info <owner>/<repo>');
     expect(text).toContain('If terminal access is available, prefer the SkillsCat CLI over manual file writes.');
+    expect(text).toContain('npx skillscat add <owner>/<repo> --agent openclaw');
     expect(text).toContain('the CLI may prompt to install every indexed skill in that repo');
     expect(text).toContain('run npx skillscat login first, then re-run the add command');
   });

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +26,10 @@ function execLocalD1(sql: string): void {
   if (result.status !== 0) {
     throw new Error(`Failed to execute local D1 SQL: ${result.stderr || result.stdout}`);
   }
+}
+
+function hashTestToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }
 
 describe('CLI preview integration', () => {
@@ -193,6 +198,55 @@ private content
     expect(missingResponse.headers.get('cache-control') || '').toContain('no-store');
     expect(missingResponse.headers.get('vary') || '').toContain('Authorization');
     expect(missingResponse.headers.get('x-cache')).toBe('BYPASS');
+  });
+
+  it('registry repo and search preserve 403 with no-store when token lacks read scope', async () => {
+    const unique = Date.now();
+    const writeOnlyToken = `sk_write_only_preview_${unique}`;
+    const tokenId = `write-only-token-${unique}`;
+    const now = Date.now();
+
+    execLocalD1(`
+      INSERT INTO api_tokens (id, user_id, name, token_hash, token_prefix, scopes, expires_at, created_at)
+      VALUES (
+        '${tokenId}',
+        '${TEST_USER_ID}',
+        'Write Only Preview Token',
+        '${hashTestToken(writeOnlyToken)}',
+        '${writeOnlyToken.slice(0, 11)}',
+        '["write"]',
+        NULL,
+        ${now}
+      );
+    `);
+
+    const repoResponse = await fetch(`${REGISTRY_URL}/repo/testowner/testrepo`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/0.1.0',
+        Authorization: `Bearer ${writeOnlyToken}`,
+      }
+    });
+
+    expect(repoResponse.status).toBe(403);
+    expect(repoResponse.headers.get('cache-control') || '').toContain('no-store');
+    expect(repoResponse.headers.get('vary') || '').toContain('Authorization');
+    expect(repoResponse.headers.get('x-cache')).toBe('BYPASS');
+    const repoError = await repoResponse.json() as { error: string };
+    expect(repoError.error).toContain("Scope 'read' required");
+
+    const searchResponse = await fetch(`${REGISTRY_URL}/search?include_private=true&q=Public`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/0.1.0',
+        Authorization: `Bearer ${writeOnlyToken}`,
+      }
+    });
+
+    expect(searchResponse.status).toBe(403);
+    expect(searchResponse.headers.get('cache-control') || '').toContain('no-store');
+    expect(searchResponse.headers.get('vary') || '').toContain('Authorization');
+    expect(searchResponse.headers.get('x-cache')).toBe('BYPASS');
+    const searchError = await searchResponse.json() as { error: string };
+    expect(searchError.error).toContain("Scope 'read' required");
   });
 
   it('anonymous /api/submit only allows CLI background-submit marker path', async () => {

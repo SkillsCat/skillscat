@@ -1,8 +1,12 @@
 import type { GitHubGraphQLRepoData, SkillRecord } from './types';
 
-export const SKILL_REFRESH_SELECT_COLUMNS = `
+const SKILL_REFRESH_SELECT_COLUMNS = `
   id, repo_owner, repo_name, stars, forks, star_snapshots, indexed_at, last_commit_at,
   tier, last_accessed_at, access_count_7d, download_count_7d, next_update_at`;
+
+export function getSkillRefreshSelectColumns(): string {
+  return SKILL_REFRESH_SELECT_COLUMNS;
+}
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);

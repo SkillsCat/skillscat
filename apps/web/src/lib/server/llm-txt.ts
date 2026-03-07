@@ -121,6 +121,7 @@ INSTALL_WITH_SKILLSCAT_CLI:
 OPENCLAW_WITH_SKILLSCAT_CLI:
 If terminal access is available, prefer the SkillsCat CLI over manual file writes.
 - run commands from the target workspace root so project-local installs land in ./skills when appropriate
+- target OpenClaw only when needed with: npx skillscat add <owner>/<repo> --agent openclaw
 - install a repo or root skill: npx skillscat add <owner>/<repo>
 - install one skill from a multi-skill repo: npx skillscat add <owner>/<repo> --skill "<skill-name>"
 - if <owner>/<repo> is not a single published slug but the repo exists in the registry, the CLI may prompt to install every indexed skill in that repo

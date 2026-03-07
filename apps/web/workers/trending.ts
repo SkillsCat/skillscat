@@ -21,7 +21,7 @@ import type {
   ClassificationMessage,
 } from './shared/types';
 import { TIER_CONFIG } from './shared/types';
-import { SKILL_REFRESH_SELECT_COLUMNS, resolveRefreshRepoMetrics } from './shared/trending-refresh';
+import { getSkillRefreshSelectColumns, resolveRefreshRepoMetrics } from './shared/trending-refresh';
 import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
 import { getNonlinearStarScore, buildTopRatedSortScoreSql } from '../src/lib/server/ranking';
 import { markSearchDirtyBatch } from '../src/lib/server/search-precompute';
@@ -30,6 +30,7 @@ const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
 const AI_CLASSIFICATION_THRESHOLD = 100; // Stars threshold for AI classification
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
+const SKILL_REFRESH_SELECT_COLUMNS = getSkillRefreshSelectColumns();
 
 function getListCachePaths(listName: string, cacheVersion?: string): string[] {
   const normalizedVersion = (cacheVersion || '').trim();
