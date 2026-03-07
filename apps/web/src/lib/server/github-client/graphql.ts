@@ -67,6 +67,15 @@ function graphQLErrorLooksRateLimited(error: GraphQLErrorItem): boolean {
     || type.includes('abuse');
 }
 
+function graphQLErrorLooksNotFound(error: GraphQLErrorItem): boolean {
+  const message = (error.message || '').toLowerCase();
+  const type = (error.type || error.extensions?.type || error.extensions?.code || '').toLowerCase();
+
+  return type === 'not_found'
+    || type === 'not found'
+    || message.includes('could not resolve to ');
+}
+
 function envelopeLooksRateLimited<TData>(envelope: GraphQLResponseEnvelope<TData>): boolean {
   return (envelope.errors || []).some(graphQLErrorLooksRateLimited);
 }
@@ -137,7 +146,11 @@ export async function githubGraphqlRequest<TData, TVariables = Record<string, un
   }
 
   if (envelope.errors && envelope.errors.length > 0) {
-    if (options.allowPartialData && envelope.data !== undefined) {
+    if (
+      options.allowPartialData
+      && envelope.data !== undefined
+      && envelope.errors.every(graphQLErrorLooksNotFound)
+    ) {
       return {
         data: envelope.data,
         response,

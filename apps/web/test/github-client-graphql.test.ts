@@ -43,6 +43,21 @@ describe('githubGraphqlRequest', () => {
     expect(result.data).toEqual({ repository: null });
     expect(result.errors).toHaveLength(1);
   });
+
+  it('still throws when allowPartialData is enabled for non-not-found errors', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      data: { repository: null },
+      errors: [{ message: 'Something went wrong resolving repository topics.' }],
+    }));
+
+    await expect(
+      githubGraphqlRequest<{ repository: null }>(
+        'query { repository { id } }',
+        undefined,
+        { allowPartialData: true }
+      )
+    ).rejects.toBeInstanceOf(GitHubGraphqlError);
+  });
 });
 
 describe('repo metadata queries', () => {
