@@ -1,6 +1,6 @@
 {
   "name": "@skillscat/web",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "build:sw": "node scripts/build-sw.mjs",
