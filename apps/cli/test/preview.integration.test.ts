@@ -8,6 +8,7 @@ import { runCommand } from './helpers/output';
 
 const REGISTRY_URL = process.env.SKILLSCAT_TEST_REGISTRY_URL || 'http://localhost:3000/registry';
 const TEST_TOKEN = process.env.SKILLSCAT_TEST_TOKEN || 'sk_test_local_token';
+const TEST_USER_ID = process.env.SKILLSCAT_TEST_USER_ID || 'user_cli_test';
 const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 function execLocalD1(sql: string): void {
@@ -106,6 +107,92 @@ describe('CLI preview integration', () => {
     });
     expect(invalidResponse.status).toBe(400);
     expect(invalidResponse.headers.get('cache-control') || '').toContain('no-store');
+  });
+
+  it('registry skill endpoint applies cache headers for public results and bypasses protected paths', async () => {
+    const unique = Date.now();
+    const owner = 'skillapitest';
+    const name = `private-skill-${unique}`;
+    const slug = `${owner}/${name}`;
+    const now = Date.now();
+
+    execLocalD1(`
+      INSERT INTO skills (id, name, slug, description, repo_owner, repo_name, github_url, visibility, source_type, owner_id, readme, created_at, updated_at, indexed_at)
+      VALUES (
+        'private-skill-${unique}',
+        'Private Endpoint Skill',
+        '${slug}',
+        'private row',
+        '${owner}',
+        '${name}',
+        NULL,
+        'private',
+        'upload',
+        '${TEST_USER_ID}',
+        '---
+name: Private Endpoint Skill
+description: private row
+---
+# Private Endpoint Skill
+private content
+',
+        ${now},
+        ${now},
+        ${now}
+      );
+    `);
+
+    const publicResponse = await fetch(`${REGISTRY_URL}/skill/testowner/testrepo`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/0.1.0',
+      }
+    });
+
+    expect(publicResponse.status).toBe(200);
+    expect(publicResponse.headers.get('cache-control') || '').toContain('public');
+    expect(publicResponse.headers.get('vary') || '').toContain('Authorization');
+    expect(publicResponse.headers.get('x-cache')).toMatch(/^(HIT|MISS)$/);
+    const publicData = await publicResponse.json() as { name: string; visibility: string };
+    expect(publicData.name).toBe('Public Test Skill');
+    expect(publicData.visibility).toBe('public');
+
+    const privateAnonResponse = await fetch(`${REGISTRY_URL}/skill/${owner}/${name}`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/0.1.0',
+      }
+    });
+
+    expect(privateAnonResponse.status).toBe(401);
+    expect(privateAnonResponse.headers.get('cache-control') || '').toContain('no-store');
+    expect(privateAnonResponse.headers.get('vary') || '').toContain('Authorization');
+    expect(privateAnonResponse.headers.get('x-cache')).toBe('BYPASS');
+
+    const privateAuthedResponse = await fetch(`${REGISTRY_URL}/skill/${owner}/${name}`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/0.1.0',
+        Authorization: `Bearer ${TEST_TOKEN}`,
+      }
+    });
+
+    expect(privateAuthedResponse.status).toBe(200);
+    expect(privateAuthedResponse.headers.get('cache-control') || '').toContain('private, no-cache');
+    expect(privateAuthedResponse.headers.get('vary') || '').toContain('Authorization');
+    expect(privateAuthedResponse.headers.get('x-cache')).toBe('BYPASS');
+    const privateData = await privateAuthedResponse.json() as { name: string; visibility: string; content: string };
+    expect(privateData.name).toBe('Private Endpoint Skill');
+    expect(privateData.visibility).toBe('private');
+    expect(privateData.content).toContain('private content');
+
+    const missingResponse = await fetch(`${REGISTRY_URL}/skill/${owner}/missing-${unique}`, {
+      headers: {
+        'User-Agent': 'skillscat-cli/0.1.0',
+      }
+    });
+
+    expect(missingResponse.status).toBe(404);
+    expect(missingResponse.headers.get('cache-control') || '').toContain('no-store');
+    expect(missingResponse.headers.get('vary') || '').toContain('Authorization');
+    expect(missingResponse.headers.get('x-cache')).toBe('BYPASS');
   });
 
   it('anonymous /api/submit only allows CLI background-submit marker path', async () => {

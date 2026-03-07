@@ -1,0 +1,385 @@
+import { error } from '@sveltejs/kit';
+import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { checkSkillAccess } from '$lib/server/permissions';
+import { getCached } from '$lib/server/cache';
+import { getBlob, getCommitByRef, getRepo, getTreeRecursive } from '$lib/server/github-client/rest';
+import { buildUploadSkillR2Prefix, normalizeSkillSlug } from '$lib/skill-path';
+
+export interface SkillFile {
+  path: string;
+  content: string;
+}
+
+export interface SkillFilesResult {
+  folderName: string;
+  files: SkillFile[];
+}
+
+export interface SkillFilesInput {
+  slug: string;
+}
+
+export interface ResolvedSkillFiles {
+  data: SkillFilesResult;
+  cacheControl: string;
+}
+
+interface SkillInfo {
+  id: string;
+  name: string;
+  slug: string;
+  source_type: string;
+  repo_owner: string | null;
+  repo_name: string | null;
+  skill_path: string | null;
+  readme: string | null;
+  visibility: string;
+  last_commit_at: number | null;
+  indexed_at: number | null;
+  updated_at: number | null;
+}
+
+interface GitHubTreeItem {
+  path: string;
+  type: 'blob' | 'tree';
+  sha: string;
+  size?: number;
+}
+
+const COMMIT_CACHE_TTL = 300;
+const STALE_SKILL_REFRESH_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
+const STALE_SKILL_COMMIT_CACHE_TTL_SECONDS = 6 * 60 * 60;
+const CLIENT_GITHUB_RATE_LIMIT_HEADER = 'x-skillscat-client-github-rate-limited';
+
+const TEXT_EXTENSIONS = new Set([
+  'md', 'txt', 'json', 'yaml', 'yml', 'toml',
+  'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs',
+  'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cpp', 'h', 'hpp',
+  'html', 'css', 'scss', 'less', 'sass',
+  'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd',
+  'xml', 'svg', 'sql', 'graphql', 'gql',
+  'env', 'gitignore', 'dockerignore', 'editorconfig',
+  'svelte', 'vue', 'astro'
+]);
+
+function isTextFile(path: string): boolean {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  if (!ext || TEXT_EXTENSIONS.has(ext)) return true;
+  const fileName = path.split('/').pop()?.toLowerCase() || '';
+  if (['dockerfile', 'makefile', 'readme', 'license', 'changelog'].includes(fileName)) return true;
+  return false;
+}
+
+function decodeBase64ToUtf8(base64: string): string {
+  const cleanBase64 = base64.replace(/\n/g, '');
+  const binaryString = atob(cleanBase64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+function getSkillFreshnessTimestamp(skill: SkillInfo): number {
+  return skill.last_commit_at || skill.indexed_at || skill.updated_at || 0;
+}
+
+function shouldRunRealtimeRefresh(skill: SkillInfo, hasR2Files: boolean): boolean {
+  if (!hasR2Files) return true;
+  const freshnessTs = getSkillFreshnessTimestamp(skill);
+  if (!freshnessTs) return true;
+  return Date.now() - freshnessTs >= STALE_SKILL_REFRESH_AFTER_MS;
+}
+
+export function parseSkillFilesInput(input: Record<string, unknown>): SkillFilesInput | null {
+  const slug = normalizeSkillSlug(String(input.slug ?? ''));
+  if (!slug) return null;
+  if (!/^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/.test(slug)) return null;
+  return { slug };
+}
+
+async function recordClientGitHubRateLimited(db: D1Database, skillId: string): Promise<void> {
+  try {
+    await db.prepare(`
+      INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
+      VALUES (?, NULL, ?, 'github_client_rate_limited', ?)
+    `)
+      .bind(crypto.randomUUID(), skillId, Date.now())
+      .run();
+  } catch {
+    // non-critical telemetry
+  }
+}
+
+async function getLatestCommitSha(
+  owner: string,
+  repo: string,
+  githubToken?: string,
+  options: { cacheTtlSeconds?: number; cacheKeySuffix?: string } = {}
+): Promise<{ sha: string; branch: string } | null> {
+  const cacheTtlSeconds = options.cacheTtlSeconds ?? COMMIT_CACHE_TTL;
+  const cacheKeySuffix = options.cacheKeySuffix ?? 'default';
+  const { data } = await getCached(
+    `commit:${owner}/${repo}:${cacheKeySuffix}`,
+    async () => {
+      const repoRes = await getRepo(owner, repo, {
+        token: githubToken,
+        userAgent: 'SkillsCat/1.0',
+      });
+      if (!repoRes.ok) {
+        if (repoRes.status === 404) return null;
+        throw new Error(`Failed to fetch repo: ${repoRes.status}`);
+      }
+      const repoInfo = await repoRes.json() as { default_branch: string };
+      const branch = repoInfo.default_branch;
+
+      const commitRes = await getCommitByRef(owner, repo, branch, {
+        token: githubToken,
+        userAgent: 'SkillsCat/1.0',
+      });
+      if (!commitRes.ok) return null;
+      const commitInfo = await commitRes.json() as { sha: string };
+
+      return { sha: commitInfo.sha, branch };
+    },
+    cacheTtlSeconds
+  );
+
+  return data;
+}
+
+async function fetchGitHubFiles(
+  owner: string,
+  repo: string,
+  branch: string,
+  skillPath: string | null,
+  githubToken?: string
+): Promise<SkillFile[]> {
+  const treeRes = await getTreeRecursive(owner, repo, branch, {
+    token: githubToken,
+    userAgent: 'SkillsCat/1.0',
+  });
+  if (!treeRes.ok) throw new Error(`Failed to fetch tree: ${treeRes.status}`);
+  const treeData = await treeRes.json() as { tree: GitHubTreeItem[] };
+
+  const prefix = skillPath ? `${skillPath}/` : '';
+  const files: SkillFile[] = [];
+
+  const MAX_FILES = 50;
+  let fileCount = 0;
+
+  for (const item of treeData.tree) {
+    if (fileCount >= MAX_FILES) break;
+    if (item.type !== 'blob') continue;
+
+    let relativePath: string;
+    if (prefix) {
+      if (!item.path.startsWith(prefix)) continue;
+      relativePath = item.path.slice(prefix.length);
+    } else {
+      if (item.path !== 'SKILL.md') continue;
+      relativePath = item.path;
+    }
+
+    if (item.size && item.size > 512 * 1024) continue;
+    if (!isTextFile(relativePath)) continue;
+
+    const blobRes = await getBlob(owner, repo, item.sha, {
+      token: githubToken,
+      userAgent: 'SkillsCat/1.0',
+    });
+    if (!blobRes.ok) continue;
+    const blobData = await blobRes.json() as { content: string };
+
+    try {
+      const content = decodeBase64ToUtf8(blobData.content);
+      files.push({ path: relativePath, content });
+      fileCount++;
+    } catch {
+      continue;
+    }
+  }
+
+  return files;
+}
+
+async function fetchR2Files(r2: R2Bucket, r2Prefix: string): Promise<SkillFile[]> {
+  const files: SkillFile[] = [];
+  const listed = await r2.list({ prefix: r2Prefix, limit: 50 });
+
+  for (const obj of listed.objects) {
+    const relativePath = obj.key.replace(r2Prefix, '');
+    if (!relativePath) continue;
+    if (!isTextFile(relativePath)) continue;
+    if (obj.size > 512 * 1024) continue;
+
+    const r2Object = await r2.get(obj.key);
+    if (r2Object) {
+      const content = await r2Object.text();
+      files.push({ path: relativePath, content });
+    }
+  }
+
+  return files;
+}
+
+async function updateR2Cache(
+  r2: R2Bucket,
+  r2Prefix: string,
+  files: SkillFile[],
+  commitSha: string
+): Promise<void> {
+  for (const file of files) {
+    await r2.put(`${r2Prefix}${file.path}`, file.content, {
+      httpMetadata: { contentType: 'text/plain' },
+      customMetadata: { commitSha, updatedAt: new Date().toISOString() }
+    });
+  }
+}
+
+async function getR2CacheSha(r2: R2Bucket, r2Prefix: string): Promise<string | null> {
+  const skillMdKey = `${r2Prefix}SKILL.md`;
+  const obj = await r2.head(skillMdKey);
+  return obj?.customMetadata?.commitSha || obj?.customMetadata?.sha || null;
+}
+
+export async function resolveSkillFiles(
+  {
+    db,
+    r2,
+    githubToken,
+    request,
+    locals,
+  }: {
+    db: D1Database | undefined;
+    r2: R2Bucket | undefined;
+    githubToken?: string;
+    request: Request;
+    locals: App.Locals;
+  },
+  input: SkillFilesInput
+): Promise<ResolvedSkillFiles> {
+  if (!db || !r2) {
+    throw error(503, 'Storage not available');
+  }
+
+  const skill = await db.prepare(`
+    SELECT id, name, slug, source_type, repo_owner, repo_name, skill_path, readme, visibility,
+           last_commit_at, indexed_at, updated_at
+    FROM skills WHERE slug = ?
+  `).bind(input.slug).first<SkillInfo>();
+
+  if (!skill) throw error(404, 'Skill not found');
+
+  if (skill.visibility === 'private') {
+    const auth = await getAuthContext(request, locals, db);
+    if (!auth.userId) {
+      throw error(401, 'Authentication required');
+    }
+    requireScope(auth, 'read');
+    const hasAccess = await checkSkillAccess(skill.id, auth.userId, db);
+    if (!hasAccess) {
+      throw error(403, 'You do not have permission to access this skill');
+    }
+  }
+
+  if (request.headers.get(CLIENT_GITHUB_RATE_LIMIT_HEADER) === '1') {
+    await recordClientGitHubRateLimited(db, skill.id);
+  }
+
+  const files: SkillFile[] = [];
+  const folderName = skill.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
+
+  let r2Prefix: string;
+  if (skill.source_type === 'upload') {
+    const uploadPrefix = buildUploadSkillR2Prefix(skill.slug);
+    if (!uploadPrefix) {
+      throw error(500, 'Invalid upload skill path');
+    }
+    r2Prefix = uploadPrefix;
+  } else {
+    const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
+    r2Prefix = `skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/`;
+  }
+
+  if (skill.source_type === 'github' && skill.visibility === 'public' && skill.repo_owner && skill.repo_name) {
+    const r2Files = await fetchR2Files(r2, r2Prefix);
+    const hasR2Files = r2Files.length > 0;
+    const shouldRealtimeRefresh = shouldRunRealtimeRefresh(skill, hasR2Files);
+
+    if (!shouldRealtimeRefresh) {
+      files.push(...r2Files);
+    } else {
+      try {
+        const commitCacheTtl = hasR2Files ? STALE_SKILL_COMMIT_CACHE_TTL_SECONDS : COMMIT_CACHE_TTL;
+        const latestCommit = await getLatestCommitSha(
+          skill.repo_owner,
+          skill.repo_name,
+          githubToken,
+          {
+            cacheTtlSeconds: commitCacheTtl,
+            cacheKeySuffix: hasR2Files ? 'stale' : 'default'
+          }
+        );
+
+        if (!latestCommit) {
+          throw error(404, 'Repository not found - it may have been deleted');
+        }
+
+        const cachedSha = await getR2CacheSha(r2, r2Prefix);
+
+        if (cachedSha === latestCommit.sha && hasR2Files) {
+          files.push(...r2Files);
+        } else {
+          const githubFiles = await fetchGitHubFiles(
+            skill.repo_owner,
+            skill.repo_name,
+            latestCommit.branch,
+            skill.skill_path,
+            githubToken
+          );
+
+          if (githubFiles.length > 0) {
+            await updateR2Cache(r2, r2Prefix, githubFiles, latestCommit.sha);
+            files.push(...githubFiles);
+          } else {
+            files.push(...r2Files);
+          }
+        }
+      } catch (err: unknown) {
+        if (err && typeof err === 'object' && 'status' in err && (err.status === 404 || err.status === 429)) {
+          throw err;
+        }
+        console.error('GitHub fetch failed, falling back to R2:', err);
+        files.push(...r2Files);
+      }
+    }
+  } else {
+    const r2Files = await fetchR2Files(r2, r2Prefix);
+    files.push(...r2Files);
+  }
+
+  if (files.length === 0 && skill.readme) {
+    files.push({ path: 'SKILL.md', content: skill.readme });
+  }
+
+  if (files.length === 0) {
+    throw error(404, 'Skill files not found');
+  }
+
+  try {
+    await db.prepare(`
+      INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
+      VALUES (?, NULL, ?, 'download', ?)
+    `)
+      .bind(crypto.randomUUID(), skill.id, Date.now())
+      .run();
+  } catch {
+    // non-critical
+  }
+
+  return {
+    data: { folderName, files },
+    cacheControl: skill.visibility === 'private' ? 'private, no-cache' : 'public, max-age=300',
+  };
+}

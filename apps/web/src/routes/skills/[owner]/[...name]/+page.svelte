@@ -11,6 +11,7 @@
   import { getSkillPageCopy } from '$lib/i18n/skill-page';
   import { formatRelativeTimestamp } from '$lib/i18n/relative';
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
+  import { buildSkillscatInstallCommand, shouldScopeSkillscatInstall } from '$lib/skill-install';
   import { encodeSkillSlugForPath } from '$lib/skill-path';
   import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
   import type { Highlighter } from 'shiki';
@@ -339,16 +340,28 @@
     highlightedReadme = container.innerHTML;
   }
 
-  // Determine the install identifier based on skill type
-  const skillIdentifier = $derived(() => {
-    if (!data.skill) return '';
-    // For private/uploaded skills, use the slug format (owner/name)
-    if (data.skill.visibility !== 'public' || data.skill.sourceType === 'upload') {
-      return data.skill.slug;
-    }
-    // For public GitHub skills, use owner/repo format
-    return `${data.skill.repoOwner}/${data.skill.repoName}`;
-  });
+  const skillscatInstallCommand = $derived(data.skill
+    ? buildSkillscatInstallCommand({
+      name: data.skill.name,
+      slug: data.skill.slug,
+      repoOwner: data.skill.repoOwner,
+      repoName: data.skill.repoName,
+      visibility: data.skill.visibility,
+      sourceType: data.skill.sourceType,
+    })
+    : ''
+  );
+
+  const scopedSkillscatInstall = $derived(Boolean(
+    data.skill && shouldScopeSkillscatInstall({
+      name: data.skill.name,
+      slug: data.skill.slug,
+      repoOwner: data.skill.repoOwner,
+      repoName: data.skill.repoName,
+      visibility: data.skill.visibility,
+      sourceType: data.skill.sourceType,
+    })
+  ));
 
   const canUseVercelInstaller = $derived(Boolean(
     data.skill &&
@@ -609,7 +622,7 @@
     {
       name: 'skillscat',
       label: 'SkillsCat CLI',
-      command: `npx skillscat add ${skillIdentifier()}`,
+      command: skillscatInstallCommand,
       description: data.skill.visibility === 'private'
         ? copy.privateCliDescription
         : copy.registryCliDescription
@@ -1082,7 +1095,7 @@
         highlighted.push(`<span class="cmd-npx">${escapeHtml(part)}</span>`);
       } else if (part === 'skillscat' || part === 'skills') {
         highlighted.push(`<span class="cmd-tool">${escapeHtml(part)}</span>`);
-      } else if (part === 'add') {
+      } else if (part === 'add' || part === '--skill') {
         highlighted.push(`<span class="cmd-action">${escapeHtml(part)}</span>`);
       } else if (part.includes('/')) {
         // owner/repo format
@@ -1298,6 +1311,13 @@
       <p class="command-description">
         {currentInstaller?.description}
       </p>
+
+      {#if currentInstaller?.name === 'skillscat'}
+        <p class="command-hint">{copy.skillscatOpenClawHint}</p>
+        {#if scopedSkillscatInstall}
+          <p class="command-hint">{copy.skillscatScopedInstallHint}</p>
+        {/if}
+      {/if}
     {/snippet}
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 skill-detail-layout">
@@ -2413,6 +2433,13 @@
     margin-top: 0.75rem;
     padding-top: 0.75rem;
     border-top: 1px solid var(--border);
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+    line-height: 1.5;
+  }
+
+  .command-hint {
+    margin-top: 0.5rem;
     font-size: 0.75rem;
     color: var(--fg-muted);
     line-height: 1.5;

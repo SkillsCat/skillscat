@@ -139,6 +139,7 @@ export function getCoreSitemapPages(): SitemapPage[] {
     { url: '/recent', priority: '0.9', changefreq: 'hourly' },
     { url: '/top', priority: '0.9', changefreq: 'daily' },
     { url: '/categories', priority: '0.8', changefreq: 'weekly' },
+    { url: '/llm.txt', priority: '0.5', changefreq: 'weekly' },
     { url: '/privacy', priority: '0.3', changefreq: 'monthly' },
     { url: '/terms', priority: '0.3', changefreq: 'monthly' },
   ] satisfies SitemapPage[];
