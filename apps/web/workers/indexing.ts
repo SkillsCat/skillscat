@@ -1085,6 +1085,29 @@ async function updateSkill(
   return result?.id || null;
 }
 
+export async function syncRepoMetricsForGithubSkills(
+  db: IndexingEnv['DB'],
+  owner: string,
+  name: string,
+  stars: number,
+  forks: number
+): Promise<void> {
+  await db.prepare(`
+    UPDATE skills
+    SET stars = ?,
+        forks = ?
+    WHERE source_type = 'github'
+      AND repo_owner = ?
+      AND repo_name = ?
+      AND (
+        COALESCE(stars, -1) != ?
+        OR COALESCE(forks, -1) != ?
+      )
+  `)
+    .bind(stars, forks, owner, name, stars, forks)
+    .run();
+}
+
 /**
  * Save skill tags from frontmatter to the database
  */
@@ -1227,6 +1250,13 @@ async function processMessage(
   if (exists && !shouldFetchContent) {
     const updatedId = await updateSkill(canonicalRepoOwner, canonicalRepoName, skillPath || null, repo, env);
     if (updatedId) {
+      await syncRepoMetricsForGithubSkills(
+        env.DB,
+        canonicalRepoOwner,
+        canonicalRepoName,
+        repo.stargazers_count,
+        repo.forks_count
+      );
       log.log(`Updated stars/forks only for skill: ${updatedId}`);
     }
     return;
@@ -1334,6 +1364,14 @@ async function processMessage(
       log.log(`Created skill: ${skillId}`);
     }
   }
+
+  await syncRepoMetricsForGithubSkills(
+    env.DB,
+    canonicalRepoOwner,
+    canonicalRepoName,
+    repo.stargazers_count,
+    repo.forks_count
+  );
 
   // Store content hashes for future duplicate detection
   await storeContentHashes(skillId, fullHash, normalizedHash, env);
