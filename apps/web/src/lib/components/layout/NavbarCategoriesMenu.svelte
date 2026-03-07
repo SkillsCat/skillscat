@@ -22,7 +22,7 @@
         </span>
       </NavigationMenu.Trigger>
 
-      <NavigationMenu.Content class="nav-content" forceMount>
+      <NavigationMenu.Content class="nav-content">
         <NavbarCategoriesContent />
       </NavigationMenu.Content>
     </NavigationMenu.Item>
@@ -32,5 +32,5 @@
     </NavigationMenu.Indicator>
   </NavigationMenu.List>
 
-  <NavigationMenu.Viewport class="nav-viewport" forceMount />
+  <NavigationMenu.Viewport class="nav-viewport" />
 </NavigationMenu.Root>
