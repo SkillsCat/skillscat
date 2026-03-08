@@ -96,6 +96,10 @@ export function buildNonlinearStarScoreSql(starsExpr: string): string {
     END)`;
 }
 
+export function buildRecentActivitySortSql(lastCommitAtExpr: string, updatedAtExpr: string): string {
+  return `CASE WHEN ${lastCommitAtExpr} IS NULL THEN ${updatedAtExpr} ELSE ${lastCommitAtExpr} END`;
+}
+
 /**
  * SQL expression version of getTopRatedSortScore().
  * Inputs must be trusted SQL fragments.

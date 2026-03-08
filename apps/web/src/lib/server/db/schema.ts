@@ -1,8 +1,9 @@
 import { sqliteTable, text, integer, real, primaryKey, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
-import { buildTopRatedSortScoreSql } from '../ranking';
+import { buildRecentActivitySortSql, buildTopRatedSortScoreSql } from '../ranking';
 
 const TOP_RATED_SORT_SCORE_SQL = buildTopRatedSortScoreSql('stars', 'download_count_90d');
+const TOP_RATED_RECENT_ACTIVITY_SQL = buildRecentActivitySortSql('last_commit_at', 'updated_at');
 
 // ========== Better Auth Tables ==========
 export const user = sqliteTable('user', {
@@ -171,7 +172,7 @@ export const skills = sqliteTable('skills', {
       sql.raw(`download_count_30d DESC`),
       sql.raw(`stars DESC`),
       sql.raw(`trending_score DESC`),
-      sql.raw(`CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC`)
+      sql.raw(`${TOP_RATED_RECENT_ACTIVITY_SQL} DESC`)
     )
     .where(sql.raw(`visibility = 'public' AND (
       skill_path IS NULL
