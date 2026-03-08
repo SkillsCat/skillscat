@@ -1,5 +1,6 @@
 import { SITE_URL } from '$lib/seo/constants';
 
+const MCP_URL = `${SITE_URL}/mcp`;
 const REGISTRY_SEARCH_URL = `${SITE_URL}/registry/search`;
 const REGISTRY_SEARCH_TOOL_URL = `${SITE_URL}/registry/search/tool`;
 const REGISTRY_REPO_URL = `${SITE_URL}/registry/repo/<owner>/<repo>`;
@@ -29,11 +30,21 @@ Prefer the JSON endpoints below over scraping HTML pages.
 Use the returned skill "slug" as the canonical identifier for follow-up requests and installs.
 Send a descriptive User-Agent on machine requests; missing or generic scraping UAs may be blocked by abuse protection.
 
+AGENT_CONTENT_MODEL:
+- the primary install artifact is the full skill bundle, not just SKILL.md
+- prefer /api/skills/<slug>/files or MCP get_skill_bundle when you need an install-ready skill
+- MCP is an additional integration surface over the same data, not a separate content source
+
 AGENT_TOOL_ENDPOINTS:
 - search skills: POST ${API_TOOL_SEARCH_URL}
 - resolve repo skills: POST ${API_TOOL_REPO_URL}
 - get skill files: POST ${API_TOOL_FILES_URL}
 - all tool endpoints also support GET for simple integrations
+
+MCP_ENDPOINT:
+- streamable HTTP MCP endpoint: POST ${MCP_URL}
+- supported MCP tools: search_skills, resolve_repo_skills, get_skill_detail, get_skill_bundle
+- prefer get_skill_bundle when you need the full skill bundle through MCP
 
 CANONICAL_IDENTIFIER:
 - slug format: owner/name or owner/path/to/skill

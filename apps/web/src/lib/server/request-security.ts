@@ -68,6 +68,7 @@ const CSRF_EXEMPT_PATHS = [
 ];
 
 const UA_PROTECTED_ROUTE_IDS = new Set([
+  '/mcp',
   '/api/skills/upload',
   '/api/skills/[slug]',
   '/api/skills/[owner]/[...name]',
@@ -129,6 +130,10 @@ const ALLOWED_CRAWLER_UA = [
 ];
 
 function isApiOrRegistryPath(pathname: string): boolean {
+  if (pathname === '/mcp') {
+    return true;
+  }
+
   if (pathname.startsWith('/api/')) {
     return true;
   }
@@ -162,6 +167,7 @@ function routeNeedsUaProtection(routeId: string | null, pathname: string): boole
   }
 
   return (
+    pathname === '/mcp' ||
     /^\/api\/skills\/.+\/(download|files|file|track-install)$/.test(pathname) ||
     /^\/api\/tools\/(search-skills|resolve-repo-skills|get-skill-files)$/.test(pathname) ||
     pathname === '/api/skills/upload' ||
@@ -173,6 +179,10 @@ function routeNeedsUaProtection(routeId: string | null, pathname: string): boole
 
 function isCorsProtectedPath(pathname: string): boolean {
   return pathname.startsWith('/registry/') || pathname.startsWith('/api/tools/');
+}
+
+function isMcpPath(pathname: string): boolean {
+  return pathname === '/mcp';
 }
 
 function isAllowedCrawler(ua: string): boolean {
@@ -308,6 +318,8 @@ function pickRateLimitConfig(
   }
 
   if (
+    routeId === '/mcp' ||
+    pathname === '/mcp' ||
     routeId === '/api/skills/[slug]' ||
     routeId === '/api/skills/[owner]/[...name]' ||
     routeId === '/api/skills/[slug]/files' ||
@@ -364,6 +376,19 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
   const anonymousCliBackgroundSubmit = isAnonymousCliBackgroundSubmitRequest(request);
 
   if (
+    isMcpPath(pathname) &&
+    request.headers.has('origin') &&
+    request.headers.get('origin') !== getCurrentRequestOrigin(url)
+  ) {
+    return securityJsonResponse(
+      403,
+      { error: 'Invalid MCP request origin' },
+      { 'X-Security-Block': 'mcp-origin' },
+      cors
+    );
+  }
+
+  if (
     isMutationMethod(method) &&
     !tokenAuth &&
     !isCsrfExemptPath(pathname) &&
@@ -392,7 +417,16 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
       );
     }
 
-    if (!isAllowedCrawler(ua)) {
+    if (isMcpPath(pathname)) {
+      if (isBlockedAutomation(ua)) {
+        return securityJsonResponse(
+          403,
+          { error: 'Request blocked by abuse protection policy' },
+          { 'X-Security-Block': 'ua-policy' },
+          cors
+        );
+      }
+    } else if (!isAllowedCrawler(ua)) {
       const allowedClient = isBrowserOrTrustedClient(ua);
       if (!allowedClient || isBlockedAutomation(ua)) {
         return securityJsonResponse(
@@ -438,6 +472,10 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
 }
 
 export function shouldNoIndexPath(pathname: string): boolean {
+  if (pathname === '/mcp') {
+    return true;
+  }
+
   if (pathname.startsWith('/api/')) {
     return true;
   }

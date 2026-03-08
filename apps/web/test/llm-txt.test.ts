@@ -11,6 +11,9 @@ describe('buildLlmTxt', () => {
     expect(text).toContain('POST https://skills.cat/api/tools/search-skills');
     expect(text).toContain('POST https://skills.cat/api/tools/resolve-repo-skills');
     expect(text).toContain('POST https://skills.cat/api/tools/get-skill-files');
+    expect(text).toContain('POST https://skills.cat/mcp');
+    expect(text).toContain('the primary install artifact is the full skill bundle, not just SKILL.md');
+    expect(text).toContain('MCP is an additional integration surface over the same data, not a separate content source');
     expect(text).toContain('GET https://skills.cat/api/skills/<slug>/files');
     expect(text).toContain('This currently only guarantees SKILL.md in the zip payload.');
     expect(text).toContain('project-local: <workspace>/skills/<folderName>/');

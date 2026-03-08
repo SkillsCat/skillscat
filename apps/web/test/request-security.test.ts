@@ -6,12 +6,17 @@ function createEvent(options: {
   routeId: string;
   method?: string;
   userAgent?: string;
+  origin?: string;
 }): Parameters<typeof runRequestSecurity>[0] {
   const url = new URL(`https://skills.cat${options.pathname}`);
   const headers = new Headers();
 
   if (options.userAgent) {
     headers.set('user-agent', options.userAgent);
+  }
+
+  if (options.origin) {
+    headers.set('origin', options.origin);
   }
 
   return {
@@ -53,6 +58,48 @@ describe('request security', () => {
     expect(response?.headers.get('x-security-block')).toBe('ua-policy');
     await expect(response?.json()).resolves.toEqual({
       error: 'Request blocked by abuse protection policy',
+    });
+  });
+
+  it('blocks blocked automation UAs on the MCP endpoint', async () => {
+    const response = await runRequestSecurity(createEvent({
+      pathname: '/mcp',
+      routeId: '/mcp',
+      method: 'POST',
+      userAgent: 'curl/8.7.1',
+    }));
+
+    expect(response?.status).toBe(403);
+    expect(response?.headers.get('x-security-block')).toBe('ua-policy');
+    await expect(response?.json()).resolves.toEqual({
+      error: 'Request blocked by abuse protection policy',
+    });
+  });
+
+  it('allows descriptive MCP client user agents on the MCP endpoint', async () => {
+    const response = await runRequestSecurity(createEvent({
+      pathname: '/mcp',
+      routeId: '/mcp',
+      method: 'POST',
+      userAgent: 'Claude-Desktop/1.0',
+    }));
+
+    expect(response).toBeNull();
+  });
+
+  it('blocks cross-origin browser requests to the MCP endpoint', async () => {
+    const response = await runRequestSecurity(createEvent({
+      pathname: '/mcp',
+      routeId: '/mcp',
+      method: 'POST',
+      userAgent: 'Mozilla/5.0',
+      origin: 'https://example.com',
+    }));
+
+    expect(response?.status).toBe(403);
+    expect(response?.headers.get('x-security-block')).toBe('mcp-origin');
+    await expect(response?.json()).resolves.toEqual({
+      error: 'Invalid MCP request origin',
     });
   });
 });
