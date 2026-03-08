@@ -4,7 +4,7 @@
 
 import type { FileNode, SkillCardData, SkillDetail } from '$lib/types';
 import { buildUploadSkillR2Key, parseSkillSlug } from '$lib/skill-path';
-import { buildTopRatedSortScoreSql } from '$lib/server/ranking';
+import { buildRecentActivitySortSql, buildTopRatedSortScoreSql } from '$lib/server/ranking';
 import { CATEGORIES } from '$lib/constants/categories';
 
 export interface DbEnv {
@@ -573,6 +573,7 @@ export async function getTopSkills(
   limit: number = 12
 ): Promise<SkillCardData[]> {
   const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
+  const recentActivitySortSql = buildRecentActivitySortSql('s.last_commit_at', 's.updated_at');
   // 先尝试从 R2 缓存读取
   const cached = await getCachedList(env.R2, 'top', env.CACHE_VERSION, {
     maxAgeMs: LIST_CACHE_MAX_AGE_MS,
@@ -612,7 +613,7 @@ export async function getTopSkills(
       )
     ORDER BY ${topRatedSortScoreSql} DESC, s.download_count_90d DESC, s.download_count_30d DESC,
              s.stars DESC, s.trending_score DESC,
-             COALESCE(s.last_commit_at, s.updated_at) DESC
+             ${recentActivitySortSql} DESC
     LIMIT ?
   `)
     .bind(limit)
@@ -634,6 +635,7 @@ export async function getTopSkillsPaginated(
   const offset = (page - 1) * limit;
   const queryLimit = offset === 0 ? limit + 1 : limit;
   const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
+  const recentActivitySortSql = buildRecentActivitySortSql('s.last_commit_at', 's.updated_at');
 
   const result = await env.DB.prepare(`
     SELECT
@@ -661,7 +663,7 @@ export async function getTopSkillsPaginated(
       )
     ORDER BY ${topRatedSortScoreSql} DESC, s.download_count_90d DESC, s.download_count_30d DESC,
              s.stars DESC, s.trending_score DESC,
-             COALESCE(s.last_commit_at, s.updated_at) DESC
+             ${recentActivitySortSql} DESC
     LIMIT ? OFFSET ?
   `)
     .bind(queryLimit, offset)

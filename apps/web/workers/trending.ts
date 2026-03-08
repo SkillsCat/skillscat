@@ -23,7 +23,7 @@ import type {
 import { TIER_CONFIG } from './shared/types';
 import { getSkillRefreshSelectColumns, resolveRefreshRepoMetrics } from './shared/trending-refresh';
 import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
-import { getNonlinearStarScore, buildTopRatedSortScoreSql } from '../src/lib/server/ranking';
+import { buildRecentActivitySortSql, getNonlinearStarScore, buildTopRatedSortScoreSql } from '../src/lib/server/ranking';
 import { markSearchDirtyBatch } from '../src/lib/server/search-precompute';
 
 const BATCH_SIZE = 50; // GitHub GraphQL limit
@@ -660,6 +660,7 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
 async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   const now = Date.now();
   const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
+  const recentActivitySortSql = buildRecentActivitySortSql('s.last_commit_at', 's.updated_at');
 
   const trending = await env.DB.prepare(`
     SELECT s.id, s.name, s.slug, s.description,
@@ -704,7 +705,7 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
       )
     ORDER BY ${topRatedSortScoreSql} DESC, s.download_count_90d DESC, s.download_count_30d DESC,
              s.stars DESC, s.trending_score DESC,
-             COALESCE(s.last_commit_at, s.updated_at) DESC
+             ${recentActivitySortSql} DESC
     LIMIT 100
   `).all<SkillListItem>();
 
