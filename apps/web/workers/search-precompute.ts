@@ -122,6 +122,9 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
 
   let candidatesResult;
   try {
+    // Avoid version-mismatch inequality scans here: `algo_version != ?` forces a
+    // full scan of the state table in SQLite/D1. Dirty/null/due state still
+    // drives background refresh, and recommend requests can backfill on access.
     if (includeRecommendMissingStateScan) {
       candidatesResult = await env.DB.prepare(`
         WITH state_candidates AS (
@@ -132,8 +135,6 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
           SELECT skill_id FROM skill_recommend_state WHERE next_update_at <= ?
           UNION
           SELECT skill_id FROM skill_recommend_state WHERE algo_version IS NULL
-          UNION
-          SELECT skill_id FROM skill_recommend_state WHERE algo_version != ?
         ),
         missing_state AS (
           SELECT s.id as skill_id
@@ -181,7 +182,7 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
           COALESCE(rs.next_update_at, 0) ASC
         LIMIT ?
       `)
-        .bind(now, algoVersion, recommendMissingScanLimit, limit)
+        .bind(now, recommendMissingScanLimit, limit)
         .all<RecommendPrecomputeCandidate>();
     } else {
       candidatesResult = await env.DB.prepare(`
@@ -193,8 +194,6 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
           SELECT skill_id FROM skill_recommend_state WHERE next_update_at <= ?
           UNION
           SELECT skill_id FROM skill_recommend_state WHERE algo_version IS NULL
-          UNION
-          SELECT skill_id FROM skill_recommend_state WHERE algo_version != ?
         ),
         candidate_ids AS (
           SELECT skill_id FROM state_candidates
@@ -230,7 +229,7 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
           COALESCE(rs.next_update_at, 0) ASC
         LIMIT ?
       `)
-        .bind(now, algoVersion, limit)
+        .bind(now, limit)
         .all<RecommendPrecomputeCandidate>();
     }
   } catch (err) {
@@ -379,8 +378,6 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
           SELECT skill_id FROM skill_search_state WHERE next_update_at <= ?
           UNION
           SELECT skill_id FROM skill_search_state WHERE algo_version IS NULL
-          UNION
-          SELECT skill_id FROM skill_search_state WHERE algo_version != ?
         ),
         missing_state AS (
           SELECT s.id as skill_id
@@ -445,7 +442,7 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
           COALESCE(ss.next_update_at, 0) ASC
         LIMIT ?
       `)
-        .bind(now, algoVersion, searchMissingScanLimit, limit)
+        .bind(now, searchMissingScanLimit, limit)
         .all<SearchPrecomputeCandidate>();
     } else {
       candidatesResult = await env.DB.prepare(`
@@ -459,8 +456,6 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
           SELECT skill_id FROM skill_search_state WHERE next_update_at <= ?
           UNION
           SELECT skill_id FROM skill_search_state WHERE algo_version IS NULL
-          UNION
-          SELECT skill_id FROM skill_search_state WHERE algo_version != ?
         ),
         candidate_ids AS (
           SELECT skill_id FROM state_candidates
@@ -513,7 +508,7 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
           COALESCE(ss.next_update_at, 0) ASC
         LIMIT ?
       `)
-        .bind(now, algoVersion, limit)
+        .bind(now, limit)
         .all<SearchPrecomputeCandidate>();
     }
   } catch (err) {
