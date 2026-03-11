@@ -60,7 +60,7 @@
   url="/"
   image={ogImageUrl}
   imageAlt={messages.legal.homeImageAlt}
-  keywords={['ai agent skills', 'skillscat', 'open source skills', 'ai automation']}
+  keywords={['ai agent skills', 'skillscat', 'open source skills', 'ai automation', 'openclaw skills', 'clawbot skills']}
   structuredData={homeStructuredData}
 />
 
@@ -80,6 +80,14 @@
           </p>
         </div>
       </div>
+
+      <a href="/openclaw" class="hero-support-strip">
+        <span class="hero-support-kicker">OpenClaw / ClawBot</span>
+        <span class="hero-support-copy">
+          Install OpenClaw-compatible skills with SkillsCat and read the dedicated guide.
+        </span>
+        <span class="hero-support-cta">Open guide</span>
+      </a>
     </div>
 
     <!-- Trending Section -->
@@ -206,10 +214,58 @@
     box-shadow: 4px 4px 0 var(--border-sketch);
   }
 
+  .hero-support-strip {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+    margin-top: 1rem;
+    padding: 1rem 1.15rem;
+    border: 2px solid var(--border);
+    border-radius: 0.9rem;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--primary-subtle) 78%, white), color-mix(in srgb, var(--bg-subtle) 88%, white));
+    text-decoration: none;
+    color: var(--fg);
+    box-shadow: 3px 3px 0 color-mix(in srgb, var(--border) 88%, transparent);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+
+  .hero-support-strip:hover {
+    transform: translateY(-1px);
+    border-color: var(--primary);
+    box-shadow: 4px 4px 0 color-mix(in srgb, var(--primary) 50%, var(--border));
+  }
+
+  .hero-support-kicker {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--primary);
+  }
+
+  .hero-support-copy {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--fg-muted);
+  }
+
+  .hero-support-cta {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--fg);
+  }
+
   @media (min-width: 768px) {
     .hero-card {
       flex-direction: row;
       padding: 2rem 3rem;
+    }
+
+    .hero-support-strip {
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 1rem;
     }
   }
 

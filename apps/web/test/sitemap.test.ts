@@ -62,6 +62,7 @@ describe('getExpandedCoreSitemapPages', () => {
 
     const pages = await getExpandedCoreSitemapPages(db as never);
 
+    expect(pages.some((page) => page.url === '/openclaw')).toBe(true);
     expect(pages.some((page) => page.url === '/trending?page=2')).toBe(true);
     expect(pages.some((page) => page.url === `/trending?page=${MAX_CORE_LIST_SITEMAP_PAGES}`)).toBe(true);
     expect(pages.some((page) => page.url === `/trending?page=${MAX_CORE_LIST_SITEMAP_PAGES + 1}`)).toBe(false);
