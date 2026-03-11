@@ -29,6 +29,16 @@
   const canonicalUrl = $derived(
     `${SITE_URL}/top${data.pagination.currentPage > 1 ? `?page=${data.pagination.currentPage}` : ''}`
   );
+  const prevUrl = $derived(
+    data.pagination.currentPage > 1
+      ? `/top${data.pagination.currentPage === 2 ? '' : `?page=${data.pagination.currentPage - 1}`}`
+      : ''
+  );
+  const nextUrl = $derived(
+    data.pagination.currentPage < data.pagination.totalPages
+      ? `/top?page=${data.pagination.currentPage + 1}`
+      : ''
+  );
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'top' });
   const pageTitle = $derived(
     `${messages.lists.topTitle}${data.pagination.currentPage > 1 ? i18n.t(messages.common.pageSuffix, { page: data.pagination.currentPage }) : ''} - SkillsCat`
@@ -52,6 +62,8 @@
   title={pageTitle}
   description={pageDescription}
   url={canonicalUrl}
+  {prevUrl}
+  {nextUrl}
   image={ogImageUrl}
   imageAlt={messages.legal.topImageAlt}
   keywords={['top ai skills', 'best ai agent skills', 'skillscat top rated']}

@@ -29,6 +29,13 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_OPENROUTER_MODEL = 'openrouter/free';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_MODEL = 'deepseek-chat';
+const KEYWORD_SCORE_CAP_PER_KEYWORD = 3;
+const KEYWORD_SLUG_TAG_MATCH_BOOST = 6;
+const KEYWORD_TAG_MATCH_BOOST = 4;
+const KEYWORD_MIN_SECONDARY_SCORE = 3;
+const KEYWORD_SECONDARY_SCORE_RATIO = 0.5;
+const KEYWORD_MIN_TERTIARY_SCORE = 5;
+const KEYWORD_TERTIARY_SCORE_RATIO = 0.85;
 
 // Extended classification result with optional suggested category
 interface ExtendedClassificationResult extends ClassificationResult {
@@ -98,6 +105,16 @@ function tryDirectCategoryMatch(
     confidence: 1.0, // Author-specified categories have highest confidence
     reasoning: 'Directly matched from SKILL.md frontmatter',
   };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function countKeywordMatches(contentLower: string, keyword: string): number {
+  const escapedKeyword = escapeRegExp(keyword.toLowerCase());
+  const pattern = new RegExp(`(^|[^a-z0-9])${escapedKeyword}(?=$|[^a-z0-9])`, 'g');
+  return [...contentLower.matchAll(pattern)].length;
 }
 
 function buildClassificationPrompt(skillMdContent: string, tags?: string[]): string {
@@ -310,35 +327,37 @@ async function callDeepSeek(
   return parseClassificationResult(content);
 }
 
-function classifyByKeywords(content: string, tags?: string[]): ClassificationResult {
+export function classifyByKeywords(content: string, tags?: string[]): ClassificationResult {
   const contentLower = content.toLowerCase();
+  const normalizedTags = (tags || []).map((tag) => tag.toLowerCase().trim()).filter(Boolean);
   const scores: Record<string, number> = {};
 
   for (const category of CATEGORIES) {
     let score = 0;
     for (const keyword of category.keywords) {
-      const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
-      const matches = contentLower.match(regex);
-      if (matches) {
-        score += matches.length;
+      const matches = countKeywordMatches(contentLower, keyword);
+      if (matches > 0) {
+        score += Math.min(matches, KEYWORD_SCORE_CAP_PER_KEYWORD);
       }
+
       // Boost score if tag matches category keyword
-      if (tags?.some((tag) => tag.toLowerCase() === keyword.toLowerCase())) {
-        score += 3; // Significant boost for tag match
+      if (normalizedTags.includes(keyword.toLowerCase())) {
+        score += KEYWORD_TAG_MATCH_BOOST;
       }
     }
+
     // Also check if any tag directly matches the category slug
-    if (tags?.some((tag) => tag.toLowerCase() === category.slug.toLowerCase())) {
-      score += 5; // Strong boost for direct category match
+    if (normalizedTags.includes(category.slug.toLowerCase())) {
+      score += KEYWORD_SLUG_TAG_MATCH_BOOST;
     }
+
     if (score > 0) {
       scores[category.slug] = score;
     }
   }
 
   const sorted = Object.entries(scores)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3);
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 
   if (sorted.length === 0) {
     return {
@@ -348,10 +367,30 @@ function classifyByKeywords(content: string, tags?: string[]): ClassificationRes
     };
   }
 
+  const [topSlug, topScore] = sorted[0];
+  const selected: string[] = [topSlug];
+
+  for (const [slug, score] of sorted.slice(1)) {
+    if (selected.length >= 3) break;
+
+    const shouldIncludeAsSecondary =
+      selected.length === 1 &&
+      score >= KEYWORD_MIN_SECONDARY_SCORE &&
+      score / topScore >= KEYWORD_SECONDARY_SCORE_RATIO;
+    const shouldIncludeAsTertiary =
+      selected.length === 2 &&
+      score >= KEYWORD_MIN_TERTIARY_SCORE &&
+      score / topScore >= KEYWORD_TERTIARY_SCORE_RATIO;
+
+    if (shouldIncludeAsSecondary || shouldIncludeAsTertiary) {
+      selected.push(slug);
+    }
+  }
+
   return {
-    categories: sorted.map(([slug]) => slug),
-    confidence: 0.6,
-    reasoning: 'Classified by keyword matching',
+    categories: selected,
+    confidence: Math.min(0.85, 0.4 + topScore * 0.05 + (selected.length - 1) * 0.05),
+    reasoning: `Classified by weighted keyword matching${normalizedTags.length > 0 ? ' with tag boosts' : ''}`,
   };
 }
 

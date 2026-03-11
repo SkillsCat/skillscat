@@ -29,6 +29,16 @@
   const canonicalUrl = $derived(
     `${SITE_URL}/trending${data.pagination.currentPage > 1 ? `?page=${data.pagination.currentPage}` : ''}`
   );
+  const prevUrl = $derived(
+    data.pagination.currentPage > 1
+      ? `/trending${data.pagination.currentPage === 2 ? '' : `?page=${data.pagination.currentPage - 1}`}`
+      : ''
+  );
+  const nextUrl = $derived(
+    data.pagination.currentPage < data.pagination.totalPages
+      ? `/trending?page=${data.pagination.currentPage + 1}`
+      : ''
+  );
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'trending' });
   const pageTitle = $derived(
     `${messages.lists.trendingTitle}${data.pagination.currentPage > 1 ? i18n.t(messages.common.pageSuffix, { page: data.pagination.currentPage }) : ''} - SkillsCat`
@@ -52,6 +62,8 @@
   title={pageTitle}
   description={pageDescription}
   url={canonicalUrl}
+  {prevUrl}
+  {nextUrl}
   image={ogImageUrl}
   imageAlt={messages.legal.trendingImageAlt}
   keywords={['trending ai skills', 'ai agent skills', 'skillscat trending']}

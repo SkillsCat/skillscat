@@ -97,12 +97,39 @@ function buildGroundedSeoDescription(skill: SkillDetail): string {
   return trimToLength(`Discover ${skill.name} on SkillsCat.`, MAX_SEO_DESCRIPTION_LENGTH);
 }
 
-function buildSkillSeoKeywords(skill: SkillDetail): string[] {
-  const keywords: string[] = [];
-  const seen = new Set<string>();
+function getSeoRelevantCategories(skill: SkillDetail): Category[] {
   const categories = (skill.categories ?? [])
     .map((slug) => CATEGORY_BY_SLUG.get(slug))
     .filter(isCategory);
+
+  if (categories.length === 0) {
+    return [];
+  }
+
+  if (skill.classificationMethod !== 'keyword') {
+    return categories;
+  }
+
+  const primaryCategory = categories[0];
+  if (!primaryCategory) {
+    return [];
+  }
+
+  const evidenceText = `${skill.name} ${skill.description ?? ''}`
+    .toLowerCase()
+    .replace(/[-_/]+/g, ' ');
+  const hasPrimaryCategoryEvidence =
+    evidenceText.includes(primaryCategory.name.toLowerCase()) ||
+    evidenceText.includes(primaryCategory.slug.replace(/-/g, ' ')) ||
+    primaryCategory.keywords.some((keyword) => evidenceText.includes(keyword.toLowerCase()));
+
+  return hasPrimaryCategoryEvidence ? [primaryCategory] : [];
+}
+
+function buildSkillSeoKeywords(skill: SkillDetail): string[] {
+  const keywords: string[] = [];
+  const seen = new Set<string>();
+  const categories = getSeoRelevantCategories(skill);
   const descriptionKeywords = extractDescriptionKeywords(skill.description);
   const primaryCategory = categories[0];
   const primaryCategoryName = primaryCategory?.name?.toLowerCase();
@@ -157,9 +184,7 @@ function buildSkillSeoKeywords(skill: SkillDetail): string[] {
 }
 
 function buildSkillSeoPayload(skill: SkillDetail): SkillSeoPayload {
-  const categories = (skill.categories ?? [])
-    .map((slug) => CATEGORY_BY_SLUG.get(slug))
-    .filter(isCategory);
+  const categories = getSeoRelevantCategories(skill);
   const primaryCategory = categories[0];
   const primaryCategoryName = primaryCategory?.name;
   const descriptionKeywords = extractDescriptionKeywords(skill.description);

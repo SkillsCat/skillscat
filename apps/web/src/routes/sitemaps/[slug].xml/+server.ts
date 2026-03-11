@@ -7,9 +7,9 @@ import {
   type SitemapPage,
   SitemapNotFoundError,
   buildMissingSitemapResponse,
+  getExpandedCoreSitemapPages,
   buildUrlSetXml,
   createCachedSitemapResponse,
-  getCoreSitemapPages,
   loadOrgsSitemapPage,
   loadProfilesSitemapPage,
   loadSkillsSitemapPage,
@@ -29,7 +29,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
       cacheControl: SITEMAP_CORE_CACHE_CONTROL,
       debugTag: 'core',
       waitUntil,
-      fetcher: async () => buildUrlSetXml(getCoreSitemapPages()),
+      fetcher: async () => buildUrlSetXml(await getExpandedCoreSitemapPages(db)),
     });
   }
 

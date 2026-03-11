@@ -88,6 +88,7 @@ interface SkillDetailRow {
   orgSlug: string | null;
   orgAvatar: string | null;
   categoriesJson: string | null;
+  classification_method: SkillDetail['classificationMethod'];
 }
 
 interface CategoryRow {
@@ -725,19 +726,25 @@ export async function getSkillsByCategory(
         s.stars,
         s.forks,
         s.trending_score as trendingScore,
-        COALESCE(s.last_commit_at, s.updated_at) as updatedAt
+        COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
+        CASE
+          WHEN s.classification_method = 'direct' THEN 0
+          WHEN s.classification_method = 'ai' THEN 1
+          WHEN s.classification_method = 'keyword' THEN 2
+          ELSE 3
+        END as classificationRank
       FROM skill_categories sc
       CROSS JOIN skills s
       WHERE s.id = sc.skill_id
         AND sc.category_slug = ?
         AND s.visibility = 'public'
-      ORDER BY s.trending_score DESC
+      ORDER BY classificationRank ASC, s.trending_score DESC
       LIMIT ? OFFSET ?
     )
     SELECT matched.*, a.avatar_url as authorAvatar
     FROM matched
     LEFT JOIN authors a ON matched.repoOwner = a.username
-    ORDER BY matched.trendingScore DESC
+    ORDER BY matched.classificationRank ASC, matched.trendingScore DESC
   `)
     .bind(categorySlug, queryLimit, offset)
     .all<SkillListRow>();
@@ -1108,6 +1115,7 @@ export async function getSkillBySlug(
     readme,
     fileStructure,
     categories,
+    classificationMethod: skillData.classification_method ?? null,
     authorAvatar: skillData.authorAvatar,
     authorUsername: skillData.authorUsername,
     authorDisplayName: skillData.authorDisplayName,

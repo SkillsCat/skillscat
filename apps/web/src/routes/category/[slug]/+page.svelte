@@ -169,6 +169,16 @@
         }`
       : `${SITE_URL}/categories`
   );
+  const prevUrl = $derived(
+    displayCategory && data.pagination && data.pagination.currentPage > 1
+      ? `/category/${displayCategory.slug}${data.pagination.currentPage === 2 ? '' : `?page=${data.pagination.currentPage - 1}`}`
+      : ''
+  );
+  const nextUrl = $derived(
+    displayCategory && data.pagination && data.pagination.currentPage < data.pagination.totalPages
+      ? `/category/${displayCategory.slug}?page=${data.pagination.currentPage + 1}`
+      : ''
+  );
   const categoryDescription = $derived(
     displayCategory
       ? i18n.t(messages.categories.categoryPageDescription, { description: displayCategory.description })
@@ -206,6 +216,8 @@
     title={pageTitle}
     description={categoryDescription}
     url={canonicalUrl}
+    {prevUrl}
+    {nextUrl}
     image={ogImageUrl}
     imageAlt={i18n.t(messages.legal.categoryImageAlt, { name: displayCategory.name })}
     keywords={[`${displayCategory.name} skills`, 'ai agent skills', 'skillscat category']}

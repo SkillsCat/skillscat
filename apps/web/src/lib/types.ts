@@ -33,6 +33,7 @@ export interface SkillCardData {
   updatedAt: number;
   authorAvatar?: string | null;
   categories: string[]; // category slugs
+  classificationMethod?: 'ai' | 'keyword' | 'direct' | null;
 }
 
 export interface SkillDetail extends SkillCardData {

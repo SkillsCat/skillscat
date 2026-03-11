@@ -12,6 +12,8 @@
     title: string;
     description: string;
     url?: string;
+    prevUrl?: string;
+    nextUrl?: string;
     image?: string;
     imageAlt?: string;
     type?: 'website' | 'article' | 'product' | 'profile';
@@ -29,6 +31,8 @@
     title,
     description,
     url = '',
+    prevUrl = '',
+    nextUrl = '',
     image = buildOgImageUrl({ type: 'page', slug: 'home' }),
     imageAlt = title,
     type = 'website',
@@ -54,6 +58,20 @@
   );
   const fullImage = $derived(
     image.startsWith('http://') || image.startsWith('https://') ? image : `${siteUrl}${image}`
+  );
+  const fullPrevUrl = $derived(
+    prevUrl
+      ? (prevUrl.startsWith('http://') || prevUrl.startsWith('https://')
+          ? prevUrl
+          : `${siteUrl}${prevUrl}`)
+      : ''
+  );
+  const fullNextUrl = $derived(
+    nextUrl
+      ? (nextUrl.startsWith('http://') || nextUrl.startsWith('https://')
+          ? nextUrl
+          : `${siteUrl}${nextUrl}`)
+      : ''
   );
   const hasCanonical = $derived(Boolean(url) || !noindex);
   const robotsContent = $derived(
@@ -141,6 +159,12 @@
   <!-- Canonical URL -->
   {#if hasCanonical}
     <link rel="canonical" href={fullUrl} />
+  {/if}
+  {#if fullPrevUrl}
+    <link rel="prev" href={fullPrevUrl} />
+  {/if}
+  {#if fullNextUrl}
+    <link rel="next" href={fullNextUrl} />
   {/if}
 
   <!-- Structured Data -->

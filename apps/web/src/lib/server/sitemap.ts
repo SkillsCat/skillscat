@@ -9,6 +9,9 @@ export const SITEMAP_URL_LIMIT = 5000;
 export const SITEMAP_INDEX_CACHE_TTL = 600;
 export const SITEMAP_DYNAMIC_CACHE_TTL = 900;
 export const SITEMAP_CORE_CACHE_TTL = 86400;
+export const PUBLIC_LIST_PAGE_SIZE = 24;
+export const MAX_CORE_LIST_SITEMAP_PAGES = 10;
+export const MAX_CORE_CATEGORY_SITEMAP_PAGES = 5;
 
 export const SITEMAP_INDEX_CACHE_CONTROL =
   'public, max-age=300, s-maxage=600, stale-while-revalidate=3600';
@@ -64,6 +67,10 @@ export type DynamicSitemapStatsMap = Record<DynamicSitemapKind, DynamicSitemapSt
 interface CountAndMaxRow {
   count: number | string | null;
   max_ts: number | string | null;
+}
+
+interface CategoryCountRow extends CountAndMaxRow {
+  slug: string | null;
 }
 
 export class SitemapNotFoundError extends Error {
@@ -151,6 +158,116 @@ export function getCoreSitemapPages(): SitemapPage[] {
   })) satisfies SitemapPage[];
 
   return dedupePages([...staticPages, ...categoryPages]);
+}
+
+function buildPaginatedCollectionPages(options: {
+  baseUrl: string;
+  totalItems: number;
+  maxPages: number;
+  priority: string;
+  changefreq: ChangeFrequency;
+  lastmod?: string;
+}): SitemapPage[] {
+  const { baseUrl, totalItems, maxPages, priority, changefreq, lastmod } = options;
+  const totalPages = Math.ceil(totalItems / PUBLIC_LIST_PAGE_SIZE);
+  const endPage = Math.min(totalPages, maxPages);
+
+  const pages: SitemapPage[] = [];
+  for (let page = 2; page <= endPage; page += 1) {
+    pages.push({
+      url: `${baseUrl}?page=${page}`,
+      priority,
+      changefreq,
+      lastmod,
+    });
+  }
+
+  return pages;
+}
+
+export async function getExpandedCoreSitemapPages(
+  db: SitemapDb | undefined
+): Promise<SitemapPage[]> {
+  const basePages = getCoreSitemapPages();
+  if (!db) return basePages;
+
+  const publicSkillsRow = await db.prepare(`
+    SELECT COUNT(*) AS count, MAX(COALESCE(last_commit_at, updated_at, indexed_at)) AS max_ts
+    FROM skills
+    WHERE visibility = 'public'
+  `).bind().first<CountAndMaxRow>();
+
+  const publicSkillCount = Math.max(0, toNumber(publicSkillsRow?.count));
+  const publicSkillLastmod = toIsoDate(publicSkillsRow?.max_ts);
+
+  const listPages = [
+    ...buildPaginatedCollectionPages({
+      baseUrl: '/trending',
+      totalItems: publicSkillCount,
+      maxPages: MAX_CORE_LIST_SITEMAP_PAGES,
+      priority: '0.8',
+      changefreq: 'hourly',
+      lastmod: publicSkillLastmod,
+    }),
+    ...buildPaginatedCollectionPages({
+      baseUrl: '/recent',
+      totalItems: publicSkillCount,
+      maxPages: MAX_CORE_LIST_SITEMAP_PAGES,
+      priority: '0.8',
+      changefreq: 'hourly',
+      lastmod: publicSkillLastmod,
+    }),
+    ...buildPaginatedCollectionPages({
+      baseUrl: '/top',
+      totalItems: publicSkillCount,
+      maxPages: MAX_CORE_LIST_SITEMAP_PAGES,
+      priority: '0.75',
+      changefreq: 'daily',
+      lastmod: publicSkillLastmod,
+    }),
+  ];
+
+  const categorySlugs = CATEGORIES.map((category) => category.slug);
+  if (categorySlugs.length === 0) {
+    return dedupePages([...basePages, ...listPages]);
+  }
+
+  const categoryPlaceholders = categorySlugs.map(() => '?').join(', ');
+  const categoryCounts = await db.prepare(`
+    SELECT
+      sc.category_slug AS slug,
+      COUNT(*) AS count,
+      MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at)) AS max_ts
+    FROM skill_categories sc
+    JOIN skills s ON s.id = sc.skill_id
+    WHERE s.visibility = 'public'
+      AND sc.category_slug IN (${categoryPlaceholders})
+    GROUP BY sc.category_slug
+  `)
+    .bind(...categorySlugs)
+    .all<CategoryCountRow>();
+
+  const categoryCountMap = new Map(
+    (categoryCounts.results || [])
+      .filter((row): row is CategoryCountRow & { slug: string } => typeof row.slug === 'string' && row.slug.length > 0)
+      .map((row) => [row.slug, row])
+  );
+
+  const categoryPages = CATEGORIES.flatMap((category) => {
+    const row = categoryCountMap.get(category.slug);
+    if (!row) return [];
+
+    return buildPaginatedCollectionPages({
+      baseUrl: `/category/${category.slug}`,
+      totalItems: Math.max(0, toNumber(row.count)),
+      maxPages: MAX_CORE_CATEGORY_SITEMAP_PAGES,
+      priority: '0.65',
+      changefreq: 'daily',
+      lastmod: toIsoDate(row.max_ts),
+    });
+  });
+
+  return dedupePages([...basePages, ...listPages, ...categoryPages]);
 }
 
 export async function getDynamicSitemapStats(db: SitemapDb | undefined): Promise<DynamicSitemapStatsMap> {

@@ -58,16 +58,10 @@
     return `${baseUrl}${separator}page=${page}`;
   }
 
-  function navigateToPage(page: number) {
-    if (page >= 1 && page <= totalPages && page !== currentPage) {
-      goto(getPageUrl(page));
-    }
-  }
-
   function handleGoto() {
     const page = parseInt(gotoInput, 10);
-    if (!isNaN(page) && page >= 1 && page <= totalPages) {
-      navigateToPage(page);
+    if (!isNaN(page) && page >= 1 && page <= totalPages && page !== currentPage) {
+      goto(getPageUrl(page));
       gotoInput = '';
     }
   }
@@ -92,45 +86,71 @@
 
     <div class="pagination-controls">
       <!-- Previous button -->
-      <button
-        class="pagination-btn pagination-arrow"
-        onclick={() => navigateToPage(currentPage - 1)}
-        disabled={currentPage === 1}
-        aria-label={messages.pagination.previousPage}
-      >
-        <HugeiconsIcon icon={ArrowLeft01Icon} size={18} strokeWidth={2} />
-        <span class="hidden sm:inline">{messages.pagination.prev}</span>
-      </button>
+      {#if currentPage > 1}
+        <a
+          class="pagination-btn pagination-arrow"
+          href={getPageUrl(currentPage - 1)}
+          aria-label={messages.pagination.previousPage}
+        >
+          <HugeiconsIcon icon={ArrowLeft01Icon} size={18} strokeWidth={2} />
+          <span class="hidden sm:inline">{messages.pagination.prev}</span>
+        </a>
+      {:else}
+        <span
+          class="pagination-btn pagination-arrow disabled"
+          aria-label={messages.pagination.previousPage}
+          aria-disabled="true"
+        >
+          <HugeiconsIcon icon={ArrowLeft01Icon} size={18} strokeWidth={2} />
+          <span class="hidden sm:inline">{messages.pagination.prev}</span>
+        </span>
+      {/if}
 
       <!-- Page numbers -->
       <div class="pagination-pages">
         {#each pageNumbers as page}
           {#if page === 'ellipsis'}
             <span class="pagination-ellipsis">...</span>
-          {:else}
-            <button
-              class="pagination-btn pagination-page"
-              class:active={page === currentPage}
-              onclick={() => navigateToPage(page)}
+          {:else if page === currentPage}
+            <span
+              class="pagination-btn pagination-page active"
               aria-label={i18n.t(messages.pagination.page, { page })}
-              aria-current={page === currentPage ? 'page' : undefined}
+              aria-current="page"
             >
               {page}
-            </button>
+            </span>
+          {:else}
+            <a
+              class="pagination-btn pagination-page"
+              href={getPageUrl(page)}
+              aria-label={i18n.t(messages.pagination.page, { page })}
+            >
+              {page}
+            </a>
           {/if}
         {/each}
       </div>
 
       <!-- Next button -->
-      <button
-        class="pagination-btn pagination-arrow"
-        onclick={() => navigateToPage(currentPage + 1)}
-        disabled={currentPage === totalPages}
-        aria-label={messages.pagination.nextPage}
-      >
-        <span class="hidden sm:inline">{messages.pagination.next}</span>
-        <HugeiconsIcon icon={ArrowRight01Icon} size={18} strokeWidth={2} />
-      </button>
+      {#if currentPage < totalPages}
+        <a
+          class="pagination-btn pagination-arrow"
+          href={getPageUrl(currentPage + 1)}
+          aria-label={messages.pagination.nextPage}
+        >
+          <span class="hidden sm:inline">{messages.pagination.next}</span>
+          <HugeiconsIcon icon={ArrowRight01Icon} size={18} strokeWidth={2} />
+        </a>
+      {:else}
+        <span
+          class="pagination-btn pagination-arrow disabled"
+          aria-label={messages.pagination.nextPage}
+          aria-disabled="true"
+        >
+          <span class="hidden sm:inline">{messages.pagination.next}</span>
+          <HugeiconsIcon icon={ArrowRight01Icon} size={18} strokeWidth={2} />
+        </span>
+      {/if}
 
       <!-- Goto input -->
       <div class="pagination-goto">
@@ -194,6 +214,7 @@
     border: 2px solid var(--border);
     border-radius: var(--radius-md);
     cursor: pointer;
+    text-decoration: none;
     transition: all 0.15s ease;
     min-width: 2.5rem;
     min-height: 2.5rem;
@@ -208,6 +229,12 @@
   .pagination-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+
+  .pagination-btn.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
   }
 
   .pagination-arrow {
