@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { configureAuth, configureRegistry, createWorkspace, resetTestCacheDir, resetTestConfigDir } from './helpers/env';
 import { runCommand } from './helpers/output';
@@ -239,10 +239,29 @@ describe('CLI commands with mocked network', () => {
 
     const { add } = await import('../src/commands/add');
     const { convert } = await import('../src/commands/convert');
-    const { getInstalledSkills } = await import('../src/utils/storage/db');
+    const { getInstalledSkills, recordInstallation } = await import('../src/utils/storage/db');
 
     await runCommand(() => add('testowner/testrepo', { yes: true }));
     expect(existsSync(join(process.cwd(), '.agents', 'Test Skill', 'SKILL.md'))).toBe(true);
+
+    const skippedSkillName = 'Existing Skill';
+    const skippedSourceDir = join(process.cwd(), '.agents', skippedSkillName);
+    const skippedTargetDir = join(process.cwd(), '.claude', 'skills', skippedSkillName);
+    mkdirSync(skippedSourceDir, { recursive: true });
+    mkdirSync(skippedTargetDir, { recursive: true });
+    writeFileSync(join(skippedSourceDir, 'SKILL.md'), SKILL_MD_V1.replaceAll('Test Skill', skippedSkillName), 'utf-8');
+    writeFileSync(join(skippedTargetDir, 'SKILL.md'), SKILL_MD_V1.replaceAll('Test Skill', `${skippedSkillName} local`), 'utf-8');
+
+    recordInstallation({
+      name: skippedSkillName,
+      description: 'existing target copy',
+      source: { platform: 'github', owner: 'testowner', repo: 'testrepo' },
+      agents: ['agents'],
+      global: false,
+      installedAt: Date.now(),
+      path: 'SKILL.md',
+      installRoot: process.cwd(),
+    });
 
     const result = await runCommand(() => convert('claude-code', {}));
     expect(result.exitCode).toBeNull();
@@ -250,6 +269,24 @@ describe('CLI commands with mocked network', () => {
 
     const trackedInstall = getInstalledSkills().find((skill) => skill.name === 'Test Skill' && !skill.global);
     expect(trackedInstall?.agents).toEqual(['agents', 'claude-code']);
+
+    const skippedInstall = getInstalledSkills().find((skill) => skill.name === skippedSkillName && !skill.global);
+    expect(skippedInstall?.agents).toEqual(['agents']);
+  });
+
+  it('drops tracked installs after the local skill directory is manually deleted', async () => {
+    mockGitHubFetch(SKILL_MD_V1, 'sha-delete-track');
+
+    const { add } = await import('../src/commands/add');
+    const { update } = await import('../src/commands/update');
+
+    await runCommand(() => add('testowner/testrepo', { yes: true }));
+
+    const skillDir = join(process.cwd(), '.agents', 'Test Skill');
+    rmSync(skillDir, { recursive: true, force: true });
+
+    const result = await runCommand(() => update(undefined, {}));
+    expect(result.stderr).toContain('No tracked skill installations found.');
   });
 
   it('parses explicit GitHub tree/blob refs and marks them as explicit', async () => {

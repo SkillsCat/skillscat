@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { getInstalledDbPath, ensureConfigDir } from '../config/config';
 import type { RepoSource } from '../source/source';
+import { getAgentById, getSkillPath } from '../agents/agents';
 
 export type UpdateStrategy = 'git' | 'registry';
 
@@ -16,6 +18,7 @@ export interface InstalledSkill {
   sha?: string;
   path: string;
   contentHash?: string;
+  installRoot?: string;
 }
 
 export interface InstalledSkillsDb {
@@ -84,6 +87,7 @@ function normalizeSkill(raw: unknown): InstalledSkill | null {
     sha: typeof candidate.sha === 'string' ? candidate.sha : undefined,
     path,
     contentHash: typeof candidate.contentHash === 'string' ? candidate.contentHash : undefined,
+    installRoot: typeof candidate.installRoot === 'string' && candidate.installRoot ? candidate.installRoot : undefined,
   };
 }
 
@@ -140,11 +144,92 @@ function sameInstallationIdentity(a: InstalledSkill, b: InstalledSkill): boolean
   return (
     a.name === b.name &&
     a.global === b.global &&
+    (a.installRoot ?? '') === (b.installRoot ?? '') &&
     a.path === b.path &&
     (a.registrySlug ?? '') === (b.registrySlug ?? '') &&
     getUpdateStrategy(a) === getUpdateStrategy(b) &&
     sameSource(a.source, b.source)
   );
+}
+
+function sameLegacyProjectIdentity(existing: InstalledSkill, next: InstalledSkill): boolean {
+  return (
+    !existing.global &&
+    !next.global &&
+    !existing.installRoot &&
+    Boolean(next.installRoot) &&
+    existing.name === next.name &&
+    existing.path === next.path &&
+    (existing.registrySlug ?? '') === (next.registrySlug ?? '') &&
+    getUpdateStrategy(existing) === getUpdateStrategy(next) &&
+    sameSource(existing.source, next.source)
+  );
+}
+
+function saveDbIfChanged(db: InstalledSkillsDb, changed: boolean): InstalledSkillsDb {
+  if (changed) {
+    saveDb(db);
+  }
+
+  return db;
+}
+
+function reconcileInstallations(db: InstalledSkillsDb): InstalledSkillsDb {
+  let changed = false;
+  const cwd = process.cwd();
+
+  db.skills = db.skills.flatMap((skill) => {
+    let reconciledSkill = skill;
+
+    if (!reconciledSkill.global && !reconciledSkill.installRoot) {
+      const hasCurrentWorkspaceMatch = reconciledSkill.agents.some((agentId) => {
+        const agent = getAgentById(agentId);
+        if (!agent) {
+          return false;
+        }
+        const skillDir = getSkillPath(agent, reconciledSkill.name, false, cwd);
+        return existsSync(join(skillDir, 'SKILL.md'));
+      });
+
+      if (!hasCurrentWorkspaceMatch) {
+        return [reconciledSkill];
+      }
+
+      reconciledSkill = {
+        ...reconciledSkill,
+        installRoot: cwd,
+      };
+      changed = true;
+    }
+
+    const remainingAgents = reconciledSkill.agents.filter((agentId) => {
+      const agent = getAgentById(agentId);
+      if (!agent) {
+        changed = true;
+        return false;
+      }
+
+      const skillDir = getSkillPath(agent, reconciledSkill.name, reconciledSkill.global, reconciledSkill.installRoot);
+      return existsSync(join(skillDir, 'SKILL.md'));
+    });
+
+    if (remainingAgents.length === reconciledSkill.agents.length) {
+      return [reconciledSkill];
+    }
+
+    changed = true;
+
+    if (remainingAgents.length === 0) {
+      return [];
+    }
+
+    return [{
+      ...reconciledSkill,
+      agents: remainingAgents,
+    }];
+  });
+
+  return saveDbIfChanged(db, changed);
 }
 
 /**
@@ -158,7 +243,10 @@ export function recordInstallation(skill: InstalledSkill): void {
   }
 
   // Replace only exact same installation identity.
-  db.skills = db.skills.filter((existing) => !sameInstallationIdentity(existing, normalized));
+  db.skills = db.skills.filter((existing) =>
+    !sameInstallationIdentity(existing, normalized) &&
+    !sameLegacyProjectIdentity(existing, normalized)
+  );
 
   db.skills.push(normalized);
   saveDb(db);
@@ -173,6 +261,7 @@ export function removeInstallation(
     source?: RepoSource;
     agents?: string[];
     global?: boolean;
+    installRoot?: string;
   }
 ): void {
   const db = loadDb();
@@ -193,6 +282,10 @@ export function removeInstallation(
       return [skill];
     }
 
+    if (options?.installRoot !== undefined && (skill.installRoot ?? '') !== options.installRoot) {
+      return [skill];
+    }
+
     if (targetAgents && targetAgents.length > 0) {
       const remainingAgents = skill.agents.filter((agentId) => !targetAgents.includes(agentId));
       if (remainingAgents.length === 0) {
@@ -210,7 +303,11 @@ export function removeInstallation(
 export function copyInstallationAgent(
   sourceAgentId: string,
   targetAgentId: string,
-  options?: { global?: boolean }
+  options?: {
+    global?: boolean;
+    installRoot?: string;
+    sourceSkillDirs?: string[];
+  }
 ): number {
   if (sourceAgentId === targetAgentId) {
     return 0;
@@ -218,6 +315,8 @@ export function copyInstallationAgent(
 
   const db = loadDb();
   let updated = 0;
+  const sourceSkillDirs = options?.sourceSkillDirs ? new Set(options.sourceSkillDirs) : null;
+  const sourceAgent = getAgentById(sourceAgentId);
 
   db.skills = db.skills.map((skill) => {
     if (options?.global !== undefined && skill.global !== options.global) {
@@ -228,9 +327,34 @@ export function copyInstallationAgent(
       return skill;
     }
 
+    let installRoot = skill.installRoot;
+    if (options?.installRoot !== undefined) {
+      if (installRoot) {
+        if (installRoot !== options.installRoot) {
+          return skill;
+        }
+      } else if (
+        !skill.global &&
+        sourceAgent &&
+        existsSync(join(getSkillPath(sourceAgent, skill.name, false, options.installRoot), 'SKILL.md'))
+      ) {
+        installRoot = options.installRoot;
+      } else {
+        return skill;
+      }
+    }
+
+    if (sourceSkillDirs && sourceAgent) {
+      const sourceSkillDir = getSkillPath(sourceAgent, skill.name, skill.global, installRoot);
+      if (!sourceSkillDirs.has(sourceSkillDir)) {
+        return skill;
+      }
+    }
+
     updated += 1;
     return {
       ...skill,
+      installRoot,
       agents: [...skill.agents, targetAgentId],
     };
   });
@@ -246,7 +370,7 @@ export function copyInstallationAgent(
  * Get all installed skills
  */
 export function getInstalledSkills(): InstalledSkill[] {
-  const db = loadDb();
+  const db = reconcileInstallations(loadDb());
   return db.skills;
 }
 
@@ -254,7 +378,7 @@ export function getInstalledSkills(): InstalledSkill[] {
  * Get installed skill by name
  */
 export function getInstalledSkill(skillName: string): InstalledSkill | undefined {
-  const db = loadDb();
+  const db = reconcileInstallations(loadDb());
   return db.skills.find(s => s.name === skillName);
 }
 
@@ -262,7 +386,7 @@ export function getInstalledSkill(skillName: string): InstalledSkill | undefined
  * Check if a skill is installed
  */
 export function isSkillInstalled(skillName: string, source?: RepoSource): boolean {
-  const db = loadDb();
+  const db = reconcileInstallations(loadDb());
 
   if (source) {
     return db.skills.some(

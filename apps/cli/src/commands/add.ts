@@ -320,6 +320,7 @@ export async function add(source: string, options: AddOptions): Promise<void> {
         sha: skill.sha,
         path: skill.path,
         contentHash: skill.contentHash,
+        installRoot: isGlobal ? undefined : process.cwd(),
       });
 
       trackInstallation(entry.trackingSlug).catch(() => {});

@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from 'node:fs';
 import pc from 'picocolors';
 import { AGENTS, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents/agents';
-import { removeInstallation } from '../utils/storage/db';
+import { getInstalledSkills, removeInstallation } from '../utils/storage/db';
 import { success, error, warn } from '../utils/core/ui';
 
 interface RemoveOptions {
@@ -10,6 +10,9 @@ interface RemoveOptions {
 }
 
 export async function remove(skillName: string, options: RemoveOptions): Promise<void> {
+  // Reconcile tracked installs so manual deletions do not leave stale records behind.
+  getInstalledSkills();
+
   // Determine which agents to check
   let agents: Agent[];
 
@@ -48,6 +51,7 @@ export async function remove(skillName: string, options: RemoveOptions): Promise
     removeInstallation(skillName, {
       agents: agents.map((agent) => agent.id),
       global: isGlobal,
+      installRoot: isGlobal ? undefined : process.cwd(),
     });
   }
 

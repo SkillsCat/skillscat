@@ -200,7 +200,7 @@ export async function update(skillName: string | undefined, options: UpdateOptio
     }
 
     for (const agent of skillAgents) {
-      const skillDir = getSkillPath(agent, skill.name, skill.global);
+      const skillDir = getSkillPath(agent, skill.name, skill.global, skill.installRoot);
       const skillFile = join(skillDir, 'SKILL.md');
 
       try {

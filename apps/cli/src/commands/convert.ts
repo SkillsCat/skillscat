@@ -54,9 +54,11 @@ export async function convert(targetAgentId: string, options: ConvertOptions): P
 
   let copied = 0;
   let skipped = 0;
+  const copiedSkillDirs: string[] = [];
 
   for (const sourceSkillDir of sourceSkills) {
-    const targetSkillDir = join(targetBase, basename(sourceSkillDir));
+    const skillName = basename(sourceSkillDir);
+    const targetSkillDir = join(targetBase, skillName);
 
     if (existsSync(targetSkillDir)) {
       if (!options.force) {
@@ -69,6 +71,7 @@ export async function convert(targetAgentId: string, options: ConvertOptions): P
     mkdirSync(dirname(targetSkillDir), { recursive: true });
     cpSync(sourceSkillDir, targetSkillDir, { recursive: true });
     copied += 1;
+    copiedSkillDirs.push(sourceSkillDir);
   }
 
   if (copied === 0) {
@@ -77,7 +80,11 @@ export async function convert(targetAgentId: string, options: ConvertOptions): P
     return;
   }
 
-  const trackedUpdates = copyInstallationAgent(sourceAgent.id, targetAgent.id, { global: isGlobal });
+  const trackedUpdates = copyInstallationAgent(sourceAgent.id, targetAgent.id, {
+    global: isGlobal,
+    installRoot: isGlobal ? undefined : process.cwd(),
+    sourceSkillDirs: copiedSkillDirs,
+  });
 
   console.log();
   success(`Copied ${copied} skill(s) from ${sourceAgent.name} to ${targetAgent.name}.`);
