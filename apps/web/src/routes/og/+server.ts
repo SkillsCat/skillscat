@@ -4,6 +4,7 @@ import { SITE_NAME, SITE_DESCRIPTION, SITE_OG_DEFAULT_SUBTITLE, SITE_URL } from 
 import { OG_IMAGE_VERSION } from '$lib/seo/og';
 import { getSkillBySlug, type DbEnv } from '$lib/server/db/utils';
 import { getCategoryBySlug } from '$lib/constants/categories';
+import { buildSkillscatInstallCommand, splitShellCommand } from '$lib/skill-install';
 
 const WIDTH = 1200;
 const HEIGHT = 630;
@@ -31,18 +32,18 @@ interface OgData {
   author: string;
   avatarUrl: string;
   stars: number;
-  installSlug: string;
+  installCommand: string;
 }
 
 const STATIC_PAGES: Record<string, OgData> = {
-  home: { title: SITE_NAME, subtitle: SITE_DESCRIPTION, tag: 'Home', author: '', avatarUrl: '', stars: 0, installSlug: '' },
-  trending: { title: 'Trending Skills', subtitle: SITE_DESCRIPTION, tag: 'Trending', author: '', avatarUrl: '', stars: 0, installSlug: '' },
-  top: { title: 'Top Rated Skills', subtitle: SITE_DESCRIPTION, tag: 'Top Rated', author: '', avatarUrl: '', stars: 0, installSlug: '' },
-  recent: { title: 'Recently Added Skills', subtitle: SITE_DESCRIPTION, tag: 'Recent', author: '', avatarUrl: '', stars: 0, installSlug: '' },
-  categories: { title: 'Categories', subtitle: SITE_DESCRIPTION, tag: 'Categories', author: '', avatarUrl: '', stars: 0, installSlug: '' },
-  privacy: { title: 'Privacy Policy', subtitle: SITE_DESCRIPTION, tag: 'Policy', author: '', avatarUrl: '', stars: 0, installSlug: '' },
-  terms: { title: 'Terms of Service', subtitle: SITE_DESCRIPTION, tag: 'Policy', author: '', avatarUrl: '', stars: 0, installSlug: '' },
-  '404': { title: 'Page Not Found', subtitle: 'The requested page does not exist.', tag: '404', author: '', avatarUrl: '', stars: 0, installSlug: '' },
+  home: { title: SITE_NAME, subtitle: SITE_DESCRIPTION, tag: 'Home', author: '', avatarUrl: '', stars: 0, installCommand: '' },
+  trending: { title: 'Trending Skills', subtitle: SITE_DESCRIPTION, tag: 'Trending', author: '', avatarUrl: '', stars: 0, installCommand: '' },
+  top: { title: 'Top Rated Skills', subtitle: SITE_DESCRIPTION, tag: 'Top Rated', author: '', avatarUrl: '', stars: 0, installCommand: '' },
+  recent: { title: 'Recently Added Skills', subtitle: SITE_DESCRIPTION, tag: 'Recent', author: '', avatarUrl: '', stars: 0, installCommand: '' },
+  categories: { title: 'Categories', subtitle: SITE_DESCRIPTION, tag: 'Categories', author: '', avatarUrl: '', stars: 0, installCommand: '' },
+  privacy: { title: 'Privacy Policy', subtitle: SITE_DESCRIPTION, tag: 'Policy', author: '', avatarUrl: '', stars: 0, installCommand: '' },
+  terms: { title: 'Terms of Service', subtitle: SITE_DESCRIPTION, tag: 'Policy', author: '', avatarUrl: '', stars: 0, installCommand: '' },
+  '404': { title: 'Page Not Found', subtitle: 'The requested page does not exist.', tag: '404', author: '', avatarUrl: '', stars: 0, installCommand: '' },
 };
 
 const DEFAULT_OG: OgData = {
@@ -52,7 +53,7 @@ const DEFAULT_OG: OgData = {
   author: '',
   avatarUrl: '',
   stars: 0,
-  installSlug: '',
+  installCommand: '',
 };
 
 // --- Data resolvers ---
@@ -72,7 +73,14 @@ async function resolveSkill(slug: string, env: DbEnv): Promise<OgData | null> {
     author,
     avatarUrl,
     stars: skill.stars || 0,
-    installSlug: slug,
+    installCommand: buildSkillscatInstallCommand({
+      slug: skill.slug,
+      skillName: skill.name,
+      skillPath: skill.skillPath,
+      sourceType: skill.sourceType,
+      repoOwner: skill.repoOwner,
+      repoName: skill.repoName,
+    }),
   };
 }
 
@@ -89,7 +97,7 @@ async function resolveUser(slug: string, db: D1Database): Promise<OgData | null>
     author: displayName,
     avatarUrl: row.avatar_url || `https://github.com/${slug}.png?size=128`,
     stars: row.total_stars || 0,
-    installSlug: '',
+    installCommand: '',
   };
 }
 
@@ -106,7 +114,7 @@ async function resolveOrg(slug: string, db: D1Database): Promise<OgData | null> 
     author: name,
     avatarUrl: row.avatar_url || '',
     stars: 0,
-    installSlug: '',
+    installCommand: '',
   };
 }
 
@@ -120,7 +128,7 @@ function resolveCategory(slug: string): OgData | null {
     author: '',
     avatarUrl: '',
     stars: 0,
-    installSlug: '',
+    installCommand: '',
   };
 }
 
@@ -222,7 +230,7 @@ interface CommandSegment {
 function getCommandSegmentColor(token: string): string {
   if (token === 'npx') return COLOR.accent;
   if (token === 'skillscat' || token === 'skills') return COLOR.fg;
-  if (token === 'add') return COLOR.primary;
+  if (token === 'add' || token === '--skill') return COLOR.primary;
   if (token.includes('/')) return COLOR.muted;
   return COLOR.fg;
 }
@@ -267,7 +275,7 @@ function appendEllipsis(line: CommandSegment[], maxChars: number): CommandSegmen
 
 function wrapCommandSegments(command: string, maxCharsPerLine: number, maxLines: number): CommandSegment[][] {
   const safeMaxChars = Math.max(8, maxCharsPerLine);
-  const tokens = command.split(/\s+/).filter(Boolean);
+  const tokens = splitShellCommand(command);
   const lines: CommandSegment[][] = [];
   let currentLine: CommandSegment[] = [];
   let currentLength = 0;
@@ -325,8 +333,8 @@ function wrapCommandSegments(command: string, maxCharsPerLine: number, maxLines:
   return truncated;
 }
 
-function buildInstallCapsule(installSlug: string, cardX: number, cardY: number, cardW: number, cardH: number): { svg: string; reservedBottom: number } {
-  const installText = `npx skillscat add ${installSlug}`;
+function buildInstallCapsule(installCommand: string, cardX: number, cardY: number, cardW: number, cardH: number): { svg: string; reservedBottom: number } {
+  const installText = installCommand;
   const maxLines = 4;
   const installX = cardX + 30;
   const bottomPadding = 30;
@@ -428,7 +436,7 @@ function buildSvg(
   tag: string,
   author: string,
   stars: number,
-  installSlug: string,
+  installCommand: string,
   showSubtitle: boolean,
   font: string,
   logo: string,
@@ -451,8 +459,8 @@ function buildSvg(
   const textStartX = hasAvatar ? contentX + avatarSize + 20 : contentX;
 
   // Reserve bottom space for install capsule.
-  const hasInstall = !!installSlug;
-  const installLayout = hasInstall ? buildInstallCapsule(installSlug, cardX, cardY, cardW, cardH) : null;
+  const hasInstall = !!installCommand;
+  const installLayout = hasInstall ? buildInstallCapsule(installCommand, cardX, cardY, cardW, cardH) : null;
   const reservedBottom = installLayout?.reservedBottom ?? 30;
 
   // Title section anchors.
@@ -608,7 +616,7 @@ export const GET: RequestHandler = async ({ url, platform, request }) => {
     data.avatarUrl ? fetchImageDataUri(data.avatarUrl) : Promise.resolve(null),
   ]);
 
-  const svg = buildSvg(title, subtitle, tag, author, data.stars, data.installSlug, showSubtitle, fontData.dataUri, logo, avatar);
+  const svg = buildSvg(title, subtitle, tag, author, data.stars, data.installCommand, showSubtitle, fontData.dataUri, logo, avatar);
 
   const resvg = new Resvg(svg, {
     fitTo: { mode: 'width', value: 1200 },

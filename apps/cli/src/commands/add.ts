@@ -10,7 +10,15 @@ import {
 } from '../utils/source/git';
 import { fetchSkill, fetchSkillsByRepo, type RegistryRepoSkillSummary } from '../utils/api/registry';
 import { submitRepoForIndexingInBackground } from '../utils/api/background-submit';
-import { AGENTS, detectInstalledAgents, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents/agents';
+import {
+  AGENTS,
+  detectPreferredAgents,
+  FALLBACK_AGENT_ID,
+  getAgentBasePath,
+  getAgentsByIds,
+  getSkillPath,
+  type Agent,
+} from '../utils/agents/agents';
 import { recordInstallation } from '../utils/storage/db';
 import { trackInstallation } from '../utils/api/tracking';
 import { success, error, warn, info, spinner, prompt } from '../utils/core/ui';
@@ -171,6 +179,8 @@ export async function add(source: string, options: AddOptions): Promise<void> {
 
   // Detect or select agents
   let targetAgents: Agent[];
+  const isGlobal = options.global ?? false;
+  let usedFallbackAgent = false;
 
   if (options.agent && options.agent.length > 0) {
     targetAgents = getAgentsByIds(options.agent);
@@ -183,41 +193,14 @@ export async function add(source: string, options: AddOptions): Promise<void> {
       process.exit(1);
     }
   } else {
-    targetAgents = detectInstalledAgents();
+    targetAgents = detectPreferredAgents(isGlobal);
+    usedFallbackAgent = targetAgents.length === 1 && targetAgents[0]?.id === FALLBACK_AGENT_ID;
 
-    if (targetAgents.length === 0) {
-      if (!options.yes) {
-        console.log();
-        warn('No coding agents detected.');
-        console.log(pc.dim('Select agents to install skills for:'));
-        console.log();
-
-        for (let i = 0; i < AGENTS.length; i++) {
-          console.log(`  ${pc.dim(`${i + 1}.`)} ${AGENTS[i].name} (${AGENTS[i].id})`);
-        }
-        console.log();
-
-        const response = await prompt('Enter agent numbers (comma-separated) or "all": ');
-        if (response.toLowerCase() === 'all') {
-          targetAgents = AGENTS;
-        } else {
-          const indices = response.split(',').map((s) => parseInt(s.trim()) - 1);
-          targetAgents = indices
-            .filter((i) => i >= 0 && i < AGENTS.length)
-            .map((i) => AGENTS[i]);
-        }
-
-        if (targetAgents.length === 0) {
-          error('No agents selected.');
-          process.exit(1);
-        }
-      } else {
-        targetAgents = AGENTS.filter((a) => a.id === 'claude-code');
-      }
+    if (usedFallbackAgent) {
+      warn('No agent-specific directory detected. Installing to .agents.');
     }
   }
 
-  const isGlobal = options.global ?? false;
   const locationLabel = isGlobal ? 'global' : 'project';
 
   console.log();
@@ -233,7 +216,7 @@ export async function add(source: string, options: AddOptions): Promise<void> {
 
   console.log(pc.dim('Target agents:'));
   for (const agent of targetAgents) {
-    const path = isGlobal ? agent.globalPath : join(process.cwd(), agent.projectPath);
+    const path = getAgentBasePath(agent, isGlobal);
     console.log(`  ${pc.cyan('•')} ${agent.name} → ${pc.dim(path)}`);
   }
   console.log();
@@ -366,6 +349,9 @@ export async function add(source: string, options: AddOptions): Promise<void> {
   console.log();
   console.log(pc.dim('Skills are now available in your coding agents.'));
   console.log(pc.dim('Restart your agent or start a new session to use them.'));
+  if (usedFallbackAgent) {
+    console.log(pc.dim('Need a tool-specific copy later? Run `npx skillscat convert <agent>` to copy from .agents.'));
+  }
 }
 
 async function resolveInstallSkills({

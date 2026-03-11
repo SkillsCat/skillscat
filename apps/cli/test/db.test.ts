@@ -49,4 +49,29 @@ describe('installed db identity', () => {
     expect(projectSkill?.agents).toEqual(['cursor']);
     expect(projectSkill?.installedAt).toBe(3);
   });
+
+  it('can copy tracked installs from .agents to a specific agent target', async () => {
+    const {
+      copyInstallationAgent,
+      getInstalledSkills,
+      recordInstallation,
+    } = await import('../src/utils/storage/db');
+
+    recordInstallation({
+      name: 'Shared Skill',
+      description: 'test',
+      source: { platform: 'github', owner: 'owner', repo: 'repo' },
+      agents: ['agents'],
+      global: false,
+      installedAt: 1,
+      path: 'SKILL.md',
+    });
+
+    const updated = copyInstallationAgent('agents', 'claude-code', { global: false });
+    const skills = getInstalledSkills();
+
+    expect(updated).toBe(1);
+    expect(skills).toHaveLength(1);
+    expect(skills[0]?.agents).toEqual(['agents', 'claude-code']);
+  });
 });

@@ -7,7 +7,10 @@ export interface Agent {
   name: string;
   projectPath: string;
   globalPath: string;
+  aliases?: string[];
 }
+
+export const FALLBACK_AGENT_ID = 'agents';
 
 function sanitizeSkillDirName(skillName: string): string {
   const sanitized = skillName
@@ -27,6 +30,13 @@ function sanitizeSkillDirName(skillName: string): string {
 }
 
 export const AGENTS: Agent[] = [
+  {
+    id: FALLBACK_AGENT_ID,
+    name: '.agents',
+    projectPath: '.agents/',
+    globalPath: join(homedir(), '.agents'),
+    aliases: ['.agents', 'generic']
+  },
   {
     id: 'amp',
     name: 'Amp',
@@ -149,22 +159,62 @@ export const AGENTS: Agent[] = [
   }
 ];
 
+function normalizeAgentId(id: string): string {
+  return id.trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+function getGlobalDetectionPath(agent: Agent): string {
+  const normalized = agent.globalPath.replace(/[\\/]+$/, '');
+  const container = normalized.replace(/[\\/](?:skill|skills)$/i, '');
+  return container || normalized;
+}
+
+export function getAgentBasePath(agent: Agent, global: boolean, cwd = process.cwd()): string {
+  return global ? agent.globalPath : join(cwd, agent.projectPath);
+}
+
 /**
  * Detect which agents are installed by checking for their config directories
  */
 export function detectInstalledAgents(): Agent[] {
   return AGENTS.filter(agent => {
-    // Check if global path exists (indicating agent is installed)
-    const globalDir = agent.globalPath.replace(/\/skills\/?$/, '').replace(/\/skill\/?$/, '');
-    return existsSync(globalDir);
+    const globalDir = getGlobalDetectionPath(agent);
+    return existsSync(agent.globalPath) || existsSync(globalDir);
   });
+}
+
+export function detectProjectAgents(cwd = process.cwd()): Agent[] {
+  return AGENTS.filter((agent) => existsSync(getAgentBasePath(agent, false, cwd)));
+}
+
+function preferSpecificAgents(agents: Agent[]): Agent[] {
+  const specificAgents = agents.filter((agent) => agent.id !== FALLBACK_AGENT_ID);
+  return specificAgents.length > 0 ? specificAgents : agents;
+}
+
+export function detectPreferredAgents(global: boolean, cwd = process.cwd()): Agent[] {
+  if (global) {
+    const installedAgents = preferSpecificAgents(detectInstalledAgents());
+    return installedAgents.length > 0 ? installedAgents : [getFallbackAgent()];
+  }
+
+  const projectAgents = preferSpecificAgents(detectProjectAgents(cwd));
+  if (projectAgents.length > 0) {
+    return projectAgents;
+  }
+
+  const installedAgents = preferSpecificAgents(detectInstalledAgents());
+  return installedAgents.length > 0 ? installedAgents : [getFallbackAgent()];
 }
 
 /**
  * Get agent by ID
  */
 export function getAgentById(id: string): Agent | undefined {
-  return AGENTS.find(a => a.id === id || a.id === id.toLowerCase().replace(/\s+/g, '-'));
+  const normalized = normalizeAgentId(id);
+  return AGENTS.find((agent) =>
+    agent.id === normalized || agent.aliases?.some((alias) => normalizeAgentId(alias) === normalized)
+  );
 }
 
 /**
@@ -174,10 +224,18 @@ export function getAgentsByIds(ids: string[]): Agent[] {
   return ids.map(id => getAgentById(id)).filter((a): a is Agent => a !== undefined);
 }
 
+export function getFallbackAgent(): Agent {
+  const fallbackAgent = getAgentById(FALLBACK_AGENT_ID);
+  if (!fallbackAgent) {
+    throw new Error('Fallback .agents target is not configured');
+  }
+  return fallbackAgent;
+}
+
 /**
  * Get skill installation path for an agent
  */
-export function getSkillPath(agent: Agent, skillName: string, global: boolean): string {
-  const basePath = global ? agent.globalPath : join(process.cwd(), agent.projectPath);
+export function getSkillPath(agent: Agent, skillName: string, global: boolean, cwd = process.cwd()): string {
+  const basePath = getAgentBasePath(agent, global, cwd);
   return join(basePath, sanitizeSkillDirName(skillName));
 }

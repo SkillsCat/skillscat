@@ -7,6 +7,7 @@ import { list } from './commands/list';
 import { search } from './commands/search';
 import { remove } from './commands/remove';
 import { update } from './commands/update';
+import { convert } from './commands/convert';
 import { selfUpgrade } from './commands/self-upgrade';
 import { info } from './commands/info';
 import { login } from './commands/login';
@@ -40,7 +41,7 @@ program
   .alias('i')
   .description('Add a skill from a repository')
   .option('-g, --global', 'Install to user directory instead of project')
-  .option('-a, --agent <agents...>', 'Target specific agents (e.g., claude-code, cursor)')
+  .option('-a, --agent <agents...>', 'Target specific agents (e.g., claude-code, cursor, agents)')
   .option('-s, --skill <skills...>', 'Install specific skills by name')
   .option('-l, --list', 'List available skills without installing')
   .option('-y, --yes', 'Skip confirmation prompts')
@@ -75,6 +76,15 @@ program
   .option('-a, --agent <agents...>', 'Update for specific agents')
   .option('--check', 'Check for updates without installing')
   .action(update);
+
+program
+  .command('convert <agent>')
+  .alias('sync')
+  .description('Copy skills from .agents into a specific agent directory')
+  .option('--from <agent>', 'Source agent directory to copy from', 'agents')
+  .option('-g, --global', 'Copy from user directory instead of project')
+  .option('-f, --force', 'Overwrite existing skills in the target directory')
+  .action(convert);
 
 // Self-upgrade command
 program

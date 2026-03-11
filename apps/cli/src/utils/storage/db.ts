@@ -207,6 +207,41 @@ export function removeInstallation(
   saveDb(db);
 }
 
+export function copyInstallationAgent(
+  sourceAgentId: string,
+  targetAgentId: string,
+  options?: { global?: boolean }
+): number {
+  if (sourceAgentId === targetAgentId) {
+    return 0;
+  }
+
+  const db = loadDb();
+  let updated = 0;
+
+  db.skills = db.skills.map((skill) => {
+    if (options?.global !== undefined && skill.global !== options.global) {
+      return skill;
+    }
+
+    if (!skill.agents.includes(sourceAgentId) || skill.agents.includes(targetAgentId)) {
+      return skill;
+    }
+
+    updated += 1;
+    return {
+      ...skill,
+      agents: [...skill.agents, targetAgentId],
+    };
+  });
+
+  if (updated > 0) {
+    saveDb(db);
+  }
+
+  return updated;
+}
+
 /**
  * Get all installed skills
  */

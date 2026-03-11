@@ -11,7 +11,11 @@
   import { getSkillPageCopy } from '$lib/i18n/skill-page';
   import { formatRelativeTimestamp } from '$lib/i18n/relative';
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
-  import { buildSkillscatInstallCommand } from '$lib/skill-install';
+  import {
+    buildSkillscatInstallCommand,
+    buildVercelSkillsInstallCommand,
+    splitShellCommand
+  } from '$lib/skill-install';
   import { encodeSkillSlugForPath } from '$lib/skill-path';
   import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
   import type { Highlighter } from 'shiki';
@@ -341,8 +345,26 @@
   }
 
   const skillscatInstallCommand = $derived(data.skill
-    ? buildSkillscatInstallCommand({ slug: data.skill.slug })
+    ? buildSkillscatInstallCommand({
+        slug: data.skill.slug,
+        skillName: data.skill.name,
+        skillPath: data.skill.skillPath,
+        sourceType: data.skill.sourceType,
+        repoOwner: data.skill.repoOwner,
+        repoName: data.skill.repoName,
+      })
     : ''
+  );
+  const vercelSkillsInstallCommand = $derived(data.skill
+    ? buildVercelSkillsInstallCommand({
+        slug: data.skill.slug,
+        skillName: data.skill.name,
+        skillPath: data.skill.skillPath,
+        sourceType: data.skill.sourceType,
+        repoOwner: data.skill.repoOwner,
+        repoName: data.skill.repoName,
+      })
+    : null
   );
 
   const canUseVercelInstaller = $derived(Boolean(
@@ -612,7 +634,7 @@
     ...(canUseVercelInstaller ? [{
       name: 'skills',
       label: 'Vercel Skills CLI',
-      command: `npx skills ${data.skill.repoOwner}/${data.skill.repoName}`,
+      command: vercelSkillsInstallCommand || '',
       description: copy.vercelCliDescription
     }] : [])
   ] : []);
@@ -1078,9 +1100,7 @@
 
   // Highlight command syntax
   function highlightCommand(command: string): string {
-    // Parse: $ npx skillscat add owner/repo
-    // or: $ npx skills owner/repo
-    const parts = command.split(' ');
+    const parts = splitShellCommand(command);
     const highlighted: string[] = [];
 
     for (let i = 0; i < parts.length; i++) {

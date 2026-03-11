@@ -133,6 +133,7 @@ export const SKILL_DISCOVERY_PATHS = [
   'skills/.experimental',
   'skills/.system',
   '.opencode/skill',
+  '.agents',
   '.claude/skills',
   '.codex/skills',
   '.cursor/skills',

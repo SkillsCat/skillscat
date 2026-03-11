@@ -213,7 +213,7 @@ describe('CLI commands with mocked network', () => {
 
     await runCommand(() => add('testowner/testrepo', { yes: true }));
 
-    const skillFile = join(process.cwd(), '.claude/skills', 'Test Skill', 'SKILL.md');
+    const skillFile = join(process.cwd(), '.agents', 'Test Skill', 'SKILL.md');
     expect(existsSync(skillFile)).toBe(true);
 
     const listResult = await runCommand(() => list({}));
@@ -232,6 +232,24 @@ describe('CLI commands with mocked network', () => {
 
     const removeResult = await runCommand(() => remove('Test Skill', {}));
     expect(removeResult.stdout).toContain('Removed Test Skill');
+  });
+
+  it('copies fallback .agents installs into a tool-specific directory with convert', async () => {
+    mockGitHubFetch(SKILL_MD_V1, 'sha-convert');
+
+    const { add } = await import('../src/commands/add');
+    const { convert } = await import('../src/commands/convert');
+    const { getInstalledSkills } = await import('../src/utils/storage/db');
+
+    await runCommand(() => add('testowner/testrepo', { yes: true }));
+    expect(existsSync(join(process.cwd(), '.agents', 'Test Skill', 'SKILL.md'))).toBe(true);
+
+    const result = await runCommand(() => convert('claude-code', {}));
+    expect(result.exitCode).toBeNull();
+    expect(existsSync(join(process.cwd(), '.claude/skills', 'Test Skill', 'SKILL.md'))).toBe(true);
+
+    const trackedInstall = getInstalledSkills().find((skill) => skill.name === 'Test Skill' && !skill.global);
+    expect(trackedInstall?.agents).toEqual(['agents', 'claude-code']);
   });
 
   it('parses explicit GitHub tree/blob refs and marks them as explicit', async () => {
@@ -275,7 +293,7 @@ describe('CLI commands with mocked network', () => {
 
     expect(result.exitCode).toBeNull();
 
-    const skillFile = join(process.cwd(), '.claude/skills', 'Test Skill', 'SKILL.md');
+    const skillFile = join(process.cwd(), '.agents', 'Test Skill', 'SKILL.md');
     expect(existsSync(skillFile)).toBe(true);
     expect(readFileSync(skillFile, 'utf-8')).toContain('Hello from v1');
     expect(fetchMock.mock.calls.map((call) => toUrlString(call[0]))).not.toContain('http://localhost:3000/api/submit');
@@ -291,7 +309,7 @@ describe('CLI commands with mocked network', () => {
 
     expect(result.exitCode).toBeNull();
 
-    const skillRoot = join(process.cwd(), '.claude/skills', 'Test Skill');
+    const skillRoot = join(process.cwd(), '.agents', 'Test Skill');
     expect(readFileSync(join(skillRoot, 'SKILL.md'), 'utf-8')).toContain('Hello from v1');
     expect(readFileSync(join(skillRoot, 'notes.txt'), 'utf-8')).toBe('local notes');
     expect(readFileSync(join(skillRoot, 'templates', 'prompt.txt'), 'utf-8')).toBe('shared prompt content');
@@ -365,7 +383,7 @@ describe('CLI commands with mocked network', () => {
     );
 
     expect(result.exitCode).toBeNull();
-    const installedBytes = readFileSync(join(process.cwd(), '.claude/skills', 'Test Skill', 'asset.bin'));
+    const installedBytes = readFileSync(join(process.cwd(), '.agents', 'Test Skill', 'asset.bin'));
     expect(installedBytes.equals(binaryBytes)).toBe(true);
   });
 
@@ -412,7 +430,7 @@ describe('CLI commands with mocked network', () => {
     );
 
     expect(result.exitCode).toBeNull();
-    const notes = readFileSync(join(process.cwd(), '.claude/skills', 'Test Skill', 'notes.txt'), 'utf-8');
+    const notes = readFileSync(join(process.cwd(), '.agents', 'Test Skill', 'notes.txt'), 'utf-8');
     expect(notes).toBe('blob-correct');
   });
 
@@ -463,7 +481,7 @@ describe('CLI commands with mocked network', () => {
     );
     expect(first.exitCode).toBeNull();
 
-    const skillRoot = join(process.cwd(), '.claude/skills', 'Test Skill');
+    const skillRoot = join(process.cwd(), '.agents', 'Test Skill');
     expect(existsSync(join(skillRoot, 'old.txt'))).toBe(true);
 
     const second = await runCommand(() =>
@@ -484,7 +502,7 @@ describe('CLI commands with mocked network', () => {
     );
     expect(first.exitCode).toBeNull();
 
-    const skillRoot = join(process.cwd(), '.claude/skills', 'Test Skill');
+    const skillRoot = join(process.cwd(), '.agents', 'Test Skill');
     const notesPath = join(skillRoot, 'notes.txt');
     expect(readFileSync(notesPath, 'utf-8')).toBe('local notes');
 
@@ -772,7 +790,7 @@ describe('CLI commands with mocked network', () => {
     const result = await runCommand(() => add('testowner/testrepo', { yes: true }));
     expect(result.exitCode).toBeNull();
 
-    const skillFile = join(process.cwd(), '.claude/skills', 'Registry First Skill', 'SKILL.md');
+    const skillFile = join(process.cwd(), '.agents', 'Registry First Skill', 'SKILL.md');
     expect(existsSync(skillFile)).toBe(true);
     expect(readFileSync(skillFile, 'utf-8')).toContain('Registry First Skill');
 
@@ -831,7 +849,7 @@ describe('CLI commands with mocked network', () => {
     const result = await runCommand(() => add('testowner/testrepo', { yes: true }));
     expect(result.exitCode).toBeNull();
 
-    const skillFile = join(process.cwd(), '.claude/skills', 'Exact Slug Skill', 'SKILL.md');
+    const skillFile = join(process.cwd(), '.agents', 'Exact Slug Skill', 'SKILL.md');
     expect(existsSync(skillFile)).toBe(true);
     expect(readFileSync(skillFile, 'utf-8')).toContain('Exact Slug Skill');
 
@@ -927,8 +945,8 @@ describe('CLI commands with mocked network', () => {
     }));
 
     expect(result.exitCode).toBeNull();
-    expect(existsSync(join(process.cwd(), '.claude/skills', 'Nested Skill', 'SKILL.md'))).toBe(true);
-    expect(existsSync(join(process.cwd(), '.claude/skills', 'Repo Root Skill', 'SKILL.md'))).toBe(false);
+    expect(existsSync(join(process.cwd(), '.agents', 'Nested Skill', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(process.cwd(), '.agents', 'Repo Root Skill', 'SKILL.md'))).toBe(false);
     expect(seenUrls).not.toContain(`${REGISTRY_URL}/skill/testowner/testrepo`);
     expect(seenUrls).toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
     expect(seenUrls).toContain(`${REGISTRY_URL}/skill/testowner/nested-skill`);
@@ -1090,7 +1108,7 @@ describe('CLI commands with mocked network', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).not.toContain('Installed');
 
-    const installedSkillFile = join(process.cwd(), '.claude/skills', 'Registry First Skill', 'SKILL.md');
+    const installedSkillFile = join(process.cwd(), '.agents', 'Registry First Skill', 'SKILL.md');
     expect(existsSync(installedSkillFile)).toBe(false);
   });
 
@@ -1154,7 +1172,7 @@ describe('CLI commands with mocked network', () => {
     }
     expect(result.exitCode).toBeNull();
 
-    const skillFile = join(process.cwd(), '.claude/skills', 'Test Skill', 'SKILL.md');
+    const skillFile = join(process.cwd(), '.agents', 'Test Skill', 'SKILL.md');
     expect(existsSync(skillFile)).toBe(true);
     expect(readFileSync(skillFile, 'utf-8')).toContain('Hello from v1');
     expect(seenUrls.some((url) => url.includes('https://api.github.com/repos/testowner/testrepo'))).toBe(true);
@@ -1227,7 +1245,7 @@ describe('CLI commands with mocked network', () => {
 
     await runCommand(() => add('testowner/testrepo', { yes: true }));
 
-    const skillFile = join(process.cwd(), '.claude/skills', 'Private Registry Skill', 'SKILL.md');
+    const skillFile = join(process.cwd(), '.agents', 'Private Registry Skill', 'SKILL.md');
     expect(existsSync(skillFile)).toBe(true);
     expect(readFileSync(skillFile, 'utf-8')).toContain('Hello from v1');
 
