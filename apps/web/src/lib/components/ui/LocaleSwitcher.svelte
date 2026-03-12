@@ -44,6 +44,9 @@
 
 <style>
   :global(.locale-switcher-trigger) {
+    --locale-trigger-shadow-offset: 4px;
+    --locale-trigger-ambient-shadow: 0 8px 18px -18px rgba(0, 0, 0, 0.4);
+
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
@@ -56,9 +59,10 @@
     border: 2px solid var(--border-sketch);
     border-radius: var(--radius-full);
     box-shadow:
-      0 3px 0 0 var(--border-sketch),
-      0 8px 18px -18px rgba(0, 0, 0, 0.4);
+      0 var(--locale-trigger-shadow-offset) 0 0 var(--border-sketch),
+      var(--locale-trigger-ambient-shadow);
     cursor: pointer;
+    transform: translateY(0);
     transition:
       transform var(--duration-fast) var(--ease-spring),
       box-shadow var(--duration-fast) var(--ease-default),
@@ -66,19 +70,27 @@
   }
 
   :global(.locale-switcher-trigger:hover) {
+    --locale-trigger-shadow-offset: 6px;
+    --locale-trigger-ambient-shadow: 0 10px 20px -18px rgba(0, 0, 0, 0.45);
+
     border-color: var(--primary);
-    box-shadow:
-      0 4px 0 0 var(--border-sketch),
-      0 10px 20px -18px rgba(0, 0, 0, 0.45);
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+  }
+
+  :global(.locale-switcher-trigger:active) {
+    --locale-trigger-shadow-offset: 1px;
+    --locale-trigger-ambient-shadow: 0 0 0 0 transparent;
+
+    border-color: var(--primary);
+    transform: translateY(3px);
   }
 
   :global(.locale-switcher-trigger[data-state="open"]) {
+    --locale-trigger-shadow-offset: 1px;
+    --locale-trigger-ambient-shadow: 0 0 0 0 transparent;
+
     border-color: var(--primary);
-    box-shadow:
-      0 1px 0 0 var(--border-sketch),
-      0 6px 12px -16px rgba(0, 0, 0, 0.3);
-    transform: translateY(2px);
+    transform: translateY(3px);
   }
 
   :global(.locale-switcher-trigger:focus-visible) {
@@ -174,9 +186,11 @@
   }
 
   :global(:root.dark .locale-switcher-trigger) {
+    --locale-trigger-ambient-shadow: 0 8px 18px -20px rgba(0, 0, 0, 0.8);
+
     box-shadow:
-      0 3px 0 0 var(--border-sketch),
-      0 8px 18px -20px rgba(0, 0, 0, 0.8);
+      0 var(--locale-trigger-shadow-offset) 0 0 var(--border-sketch),
+      var(--locale-trigger-ambient-shadow);
   }
 
   :global(:root.dark .locale-switcher-content) {

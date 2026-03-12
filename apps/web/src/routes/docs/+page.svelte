@@ -3,9 +3,9 @@
   import DocsProseCard from '$lib/components/docs/DocsProseCard.svelte';
   import { buildOgImageUrl } from '$lib/seo/og';
 
-  const title = 'SkillsCat Docs';
+  const title = 'SkillsCat Documentation';
   const description =
-    'Official SkillsCat documentation hub. Read the CLI reference and the OpenClaw integration guide from stable, SEO-friendly paths.';
+    'Documentation hub for SkillsCat: understand the product, learn the CLI, and connect OpenClaw to SkillsCat.';
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'docs' });
   const repoUrl = 'https://github.com/backrunner/skillscat';
 
@@ -13,19 +13,19 @@
     {
       href: '/docs/cli',
       eyebrow: 'CLI',
-      summary: '用一套命令完成搜索、安装、更新和发布。',
+      summary: '搜索、安装、更新、发布都在这一套命令里。',
       bullets: [
         '搜索与仓库检查',
-        '安装、登录、更新、发布',
+        '安装、更新、发布',
       ],
     },
     {
       href: '/docs/openclaw',
       eyebrow: 'OpenClaw',
-      summary: '把技能正确装进 OpenClaw 或 ClawBot 的目录结构。',
+      summary: '把 SkillsCat 接进 OpenClaw 的自动安装和本机目录。',
       bullets: [
-        '目标路径与 CLI 参数',
-        'Bundle 规则与重启检查',
+        '自动安装与兼容 registry',
+        '目录、bundle 与重启检查',
       ],
     },
   ] as const;
@@ -49,7 +49,7 @@
       </div>
       <h1>SkillsCat Documentation</h1>
       <p class="docs-summary">
-        Start here to learn what SkillsCat is, how the CLI works, and how to use it with OpenClaw.
+        从这里开始，快速了解 SkillsCat 是什么、CLI 怎么用，以及怎么接进 OpenClaw。
       </p>
     </section>
 
@@ -75,37 +75,28 @@
 
     <DocsProseCard title="docs/README.md">
       <p>
-        SkillsCat 是一个帮助你发现、安装、发布 AI agent skills 的产品。它会把 prompt、
-        scripts、templates 这些配套文件一起管理好，让 skill 真正能被装上、跑起来、复用起来。
+        SkillsCat 是一个给 AI agent skills 用的 registry 和 CLI。你可以先搜到合适的 skill，再把完整
+        bundle 装进项目、OpenClaw 或团队环境，而不是手动搬一堆零散文件。
       </p>
 
-      <h2>它解决什么问题</h2>
+      <h2>它是什么</h2>
       <ul>
-        <li>
-          先搜到合适的 skill，再决定要不要装，不用靠仓库名盲猜。
-        </li>
-        <li>
-          安装时把 skill 需要的文件一起带上，避免只复制一段 prompt，结果实际不能用。
-        </li>
-        <li>
-          用同一套 CLI 处理安装、更新、登录和发布，流程更顺，也更适合团队协作。
-        </li>
-        <li>
-          需要接 OpenClaw 时，也能按正确目录落地，不用手动搬文件。
-        </li>
+        <li>一个可搜索的 AI agent skill catalog，不用只靠 GitHub 仓库名盲猜。</li>
+        <li>一个能安装完整 bundle 的 CLI，不只是拷一份 <code>SKILL.md</code>。</li>
+        <li>一个能把 OpenClaw、ClawBot、本地项目接到同一套 skill 源的入口。</li>
       </ul>
 
-      <h2>适合谁</h2>
+      <h2>你能用它做什么</h2>
       <ul>
-        <li>想快速给 agent 加能力的个人用户。</li>
-        <li>想把内部 workflow 打包成可复用 skill 的团队。</li>
-        <li>需要在本地项目、共享环境、OpenClaw 之间复用同一套 skill 的开发者。</li>
+        <li>搜索任务相关的 skill，先确认内容，再决定要不要安装。</li>
+        <li>把一个 skill 连同 templates、scripts、config 一起装下来，减少手工拼装。</li>
+        <li>统一处理安装、更新、登录、发布和 OpenClaw 接入。</li>
       </ul>
 
       <h2>从哪里开始</h2>
       <p>
-        想先学怎么搜、怎么装、怎么更新，就看 <a href="/docs/cli">CLI 文档</a>。如果你已经在用
-        OpenClaw 或 ClawBot，就直接看 <a href="/docs/openclaw">OpenClaw 文档</a>。
+        想先学怎么搜、怎么装、怎么更新，就看 <a href="/docs/cli">CLI 文档</a>。如果你已经在用 OpenClaw、
+        ClawBot，或者想把默认 registry 换成 SkillsCat，就直接看 <a href="/docs/openclaw">OpenClaw 文档</a>。
       </p>
     </DocsProseCard>
 
@@ -114,8 +105,7 @@
         <p class="github-star-eyebrow">GitHub</p>
         <h2 id="github-star-title">Star SkillsCat on GitHub</h2>
         <p class="github-star-summary">
-          Follow releases, product changes, docs updates, and the ongoing work around portable
-          agent skills in one place.
+          看版本发布、产品更新、文档变化，也能顺手给 SkillsCat 一个 star，帮这个项目更容易被搜索到。
         </p>
       </div>
 
@@ -218,9 +208,9 @@
     overflow: visible;
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
-    min-height: 10.25rem;
-    padding: 0.95rem 1rem;
+    gap: 0.42rem;
+    min-height: 8.85rem;
+    padding: 0.9rem 1rem;
     background: var(--card);
     border: 3px solid var(--border-sketch);
     border-radius: 1.75rem;
@@ -270,13 +260,14 @@
   .doc-link-summary {
     margin: 0;
     color: var(--fg-muted);
-    font-size: 0.84rem;
-    line-height: 1.38;
+    font-size: 0.82rem;
+    line-height: 1.34;
   }
 
   .doc-link-list {
     display: grid;
-    gap: 0.1rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.15rem 0.85rem;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -284,10 +275,10 @@
 
   .doc-link-item {
     position: relative;
-    padding: 0.05rem 0 0.05rem 0.9rem;
+    padding: 0.02rem 0 0.02rem 0.82rem;
     color: var(--fg-muted);
-    font-size: 0.79rem;
-    line-height: 1.42;
+    font-size: 0.76rem;
+    line-height: 1.34;
     transition: color 0.2s ease;
   }
 
@@ -431,6 +422,10 @@
     .doc-link-card {
       min-height: 0;
       padding: 0.9rem;
+    }
+
+    .doc-link-list {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 

@@ -14,7 +14,7 @@
   } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
   import { buildOgImageUrl } from '$lib/seo/og';
-  import { SITE_NAME, SITE_URL } from '$lib/seo/constants';
+  import { SITE_URL } from '$lib/seo/constants';
 
   interface Props {
     data: {
@@ -30,37 +30,51 @@
   const messages = $derived(i18n.messages());
   let displayCount = $derived(i18n.formatNumber(data.stats.totalSkills));
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'home' });
-  const homeDescription = $derived(messages.home.heroTitle);
+  const homeTitle = 'SkillsCat | AI Agent Skill Registry and CLI';
+  const homeDescription =
+    'SkillsCat is an AI agent skill registry and CLI for discovering, installing, and publishing reusable skills for OpenClaw, ClawBot, Claude Code, and local agent workflows.';
   const homeStructuredData = $derived({
     '@context': 'https://schema.org',
-    '@type': 'WebSite',
-    name: 'SkillsCat',
-    url: SITE_URL,
-    description: homeDescription,
-    publisher: {
-      '@type': 'Organization',
-      name: 'SkillsCat',
-      url: SITE_URL,
-      sameAs: ['https://github.com/backrunner/skillscat'],
-    },
-    potentialAction: {
-      '@type': 'SearchAction',
-      target: {
-        '@type': 'EntryPoint',
-        urlTemplate: `${SITE_URL}/search?q={search_term_string}`,
+    '@graph': [
+      {
+        '@type': 'WebSite',
+        name: 'SkillsCat',
+        url: SITE_URL,
+        description: homeDescription,
+        potentialAction: {
+          '@type': 'SearchAction',
+          target: {
+            '@type': 'EntryPoint',
+            urlTemplate: `${SITE_URL}/search?q={search_term_string}`,
+          },
+          'query-input': 'required name=search_term_string',
+        },
       },
-      'query-input': 'required name=search_term_string',
-    },
+      {
+        '@type': 'Organization',
+        name: 'SkillsCat',
+        url: SITE_URL,
+        sameAs: ['https://github.com/backrunner/skillscat'],
+      },
+    ],
   });
 </script>
 
 <SEO
-  title={SITE_NAME}
+  title={homeTitle}
   description={homeDescription}
   url="/"
   image={ogImageUrl}
   imageAlt={messages.legal.homeImageAlt}
-  keywords={['ai agent skills', 'skillscat', 'open source skills', 'ai automation', 'openclaw skills', 'clawbot skills']}
+  keywords={[
+    'skillscat',
+    'skillscat cli',
+    'skillscat docs',
+    'ai agent skills',
+    'open source skills',
+    'openclaw skills',
+    'clawbot skills',
+  ]}
   structuredData={homeStructuredData}
 />
 
@@ -74,7 +88,8 @@
         <div class="hero-circle hero-circle-blue"></div>
 
         <div class="hero-content">
-          <h1 class="hero-title">{homeDescription}</h1>
+          <p class="hero-brand">SkillsCat</p>
+          <h1 class="hero-title">{messages.home.heroTitle}</h1>
           <p class="hero-subtitle">
             {i18n.t(messages.home.heroSubtitle, { count: displayCount })}
           </p>
@@ -244,6 +259,15 @@
     position: relative;
     z-index: 10;
     max-width: 42rem;
+  }
+
+  .hero-brand {
+    margin: 0 0 0.65rem;
+    font-size: 0.82rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--primary);
   }
 
   .hero-title {

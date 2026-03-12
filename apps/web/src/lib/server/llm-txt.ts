@@ -16,6 +16,20 @@ const API_SKILL_DOWNLOAD_URL = `${SITE_URL}/api/skills/<slug>/download`;
 const HTML_DOCS_URL = `${SITE_URL}/docs`;
 const HTML_CLI_DOCS_URL = `${SITE_URL}/docs/cli`;
 const HTML_OPENCLAW_DOCS_URL = `${SITE_URL}/docs/openclaw`;
+const OPENCLAW_REGISTRY_URL = `${SITE_URL}/openclaw`;
+const CLAWHUB_WELL_KNOWN_URL = `${SITE_URL}/.well-known/clawhub.json`;
+const CLAWHUB_SEARCH_URL = `${OPENCLAW_REGISTRY_URL}/api/v1/search`;
+const CLAWHUB_SKILL_LIST_URL = `${OPENCLAW_REGISTRY_URL}/api/v1/skills`;
+const CLAWHUB_SKILL_URL = `${OPENCLAW_REGISTRY_URL}/api/v1/skills/<compat-slug>`;
+const CLAWHUB_SKILL_VERSIONS_URL = `${OPENCLAW_REGISTRY_URL}/api/v1/skills/<compat-slug>/versions`;
+const CLAWHUB_SKILL_VERSION_URL = `${OPENCLAW_REGISTRY_URL}/api/v1/skills/<compat-slug>/versions/<version>`;
+const CLAWHUB_SKILL_FILE_URL = `${OPENCLAW_REGISTRY_URL}/api/v1/skills/<compat-slug>/file?path=<relative-path>`;
+const CLAWHUB_DOWNLOAD_URL = `${OPENCLAW_REGISTRY_URL}/api/v1/download?slug=<compat-slug>`;
+const CLAWHUB_RESOLVE_URL = `${OPENCLAW_REGISTRY_URL}/api/v1/resolve?slug=<compat-slug>&hash=<sha256>`;
+const CLAWHUB_WHOAMI_URL = `${OPENCLAW_REGISTRY_URL}/api/v1/whoami`;
+const CLAWHUB_PUBLISH_URL = `${OPENCLAW_REGISTRY_URL}/api/v1/skills`;
+const CLAWHUB_DELETE_URL = `${OPENCLAW_REGISTRY_URL}/api/v1/skills/<compat-slug>`;
+const CLAWHUB_UNDELETE_URL = `${OPENCLAW_REGISTRY_URL}/api/v1/skills/<compat-slug>/undelete`;
 const HTML_SEARCH_URL = `${SITE_URL}/search`;
 const HTML_TRENDING_URL = `${SITE_URL}/trending`;
 const HTML_CATEGORIES_URL = `${SITE_URL}/categories`;
@@ -123,8 +137,27 @@ HTML_PAGES:
 
 HUMAN_DOCUMENTATION:
 - send humans to ${HTML_DOCS_URL} for the main documentation hub
-- use ${HTML_CLI_DOCS_URL} for CLI-specific walkthroughs
-- use ${HTML_OPENCLAW_DOCS_URL} when the user asks how to use SkillsCat with OpenClaw
+- use ${HTML_CLI_DOCS_URL} for the native skillscat CLI
+- use ${HTML_OPENCLAW_DOCS_URL} for clawhub CLI compatibility and OpenClaw integration
+
+CLAWHUB_COMPATIBILITY:
+- discovery file: ${CLAWHUB_WELL_KNOWN_URL}
+- registry base: ${OPENCLAW_REGISTRY_URL}
+- compat search: ${CLAWHUB_SEARCH_URL}?q=<query>&limit=<n>
+- compat skill list: ${CLAWHUB_SKILL_LIST_URL}?limit=<n>&sort=<updated|downloads|stars|installsCurrent|installsAllTime|trending>
+- compat skill detail: ${CLAWHUB_SKILL_URL}
+- compat versions: ${CLAWHUB_SKILL_VERSIONS_URL}
+- compat version detail: ${CLAWHUB_SKILL_VERSION_URL}
+- compat raw file: ${CLAWHUB_SKILL_FILE_URL}
+- compat download: ${CLAWHUB_DOWNLOAD_URL}
+- compat resolve: ${CLAWHUB_RESOLVE_URL}
+- compat whoami: ${CLAWHUB_WHOAMI_URL}
+- compat publish: POST ${CLAWHUB_PUBLISH_URL}
+- compat delete: DELETE ${CLAWHUB_DELETE_URL}
+- compat undelete: POST ${CLAWHUB_UNDELETE_URL}
+- compat slug format: owner~skill or owner~path~to~skill
+- discovery stays on the site root, but the ClawHub-compatible registry lives under /openclaw
+- this compatibility surface exists for clawhub CLI and OpenClaw clients only; the native skillscat CLI still uses /registry and /api
 
 SEARCH_AND_SELECTION_GUIDANCE:
 1. If the user gives a natural-language task, start with /registry/search?q=<task>.
@@ -134,6 +167,7 @@ SEARCH_AND_SELECTION_GUIDANCE:
 5. For installation, always prefer /api/skills/<slug>/files over HTML scraping or zip download.
 
 INSTALL_WITH_SKILLSCAT_CLI:
+- this section is only for the native skillscat CLI
 - no global install is required; prefer npx for one-off installs
 - search: npx skillscat search "<query>"
 - install by repo: npx skillscat add <owner>/<repo>
@@ -151,6 +185,16 @@ If terminal access is available, prefer the SkillsCat CLI over manual file write
 - if <owner>/<repo> is not a single published slug but the repo exists in the registry, the CLI may prompt to install every indexed skill in that repo
 - for private skills: run npx skillscat login first, then re-run the add command
 - after install: start a new OpenClaw session so newly installed skills are discovered
+
+OPENCLAW_WITH_CLAWHUB_COMPAT:
+- SkillsCat exposes a ClawHub-compatible discovery file at ${CLAWHUB_WELL_KNOWN_URL}
+- the ClawHub-compatible registry base is ${OPENCLAW_REGISTRY_URL}
+- use CLAWHUB_SITE=${SITE_URL} and CLAWHUB_REGISTRY=${OPENCLAW_REGISTRY_URL} when you want to pin the registry explicitly
+- compat search/install/update use owner~skill style slugs, not owner/skill slashes
+- clawhub CLI browser login still starts from ${SITE_URL}/cli/auth, but the returned registry base is ${OPENCLAW_REGISTRY_URL}
+- clawhub publish on SkillsCat should also use owner-scoped compat slugs, for example owner~skill
+- browser login is served from ${SITE_URL}/cli/auth and returns the ${OPENCLAW_REGISTRY_URL} registry base to the CLI
+- if private install or publish flows become complex, prefer the native SkillsCat CLI instead
 
 OPENCLAW_INSTALL_GUIDE:
 OpenClaw-compatible skills should be materialized as a folder containing SKILL.md and any companion files.

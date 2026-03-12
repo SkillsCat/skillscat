@@ -87,6 +87,7 @@
     margin-top: 1.75em;
     margin-bottom: 0.75em;
     line-height: 1.3;
+    scroll-margin-top: 7rem;
   }
 
   .prose-readme :global(h1) {
