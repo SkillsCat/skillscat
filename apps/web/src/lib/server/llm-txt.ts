@@ -150,6 +150,7 @@ CLAWHUB_COMPATIBILITY:
 - compat version detail: ${CLAWHUB_SKILL_VERSION_URL}
 - compat raw file: ${CLAWHUB_SKILL_FILE_URL}
 - compat download: ${CLAWHUB_DOWNLOAD_URL}
+- compat download returns the current ClawHub-compatible text bundle for the requested compat slug/version
 - compat resolve: ${CLAWHUB_RESOLVE_URL}
 - compat whoami: ${CLAWHUB_WHOAMI_URL}
 - compat publish: POST ${CLAWHUB_PUBLISH_URL}
@@ -194,6 +195,7 @@ OPENCLAW_WITH_CLAWHUB_COMPAT:
 - clawhub CLI browser login still starts from ${SITE_URL}/cli/auth, but the returned registry base is ${OPENCLAW_REGISTRY_URL}
 - clawhub publish on SkillsCat should also use owner-scoped compat slugs, for example owner~skill
 - browser login is served from ${SITE_URL}/cli/auth and returns the ${OPENCLAW_REGISTRY_URL} registry base to the CLI
+- authenticated compat search can include private skills, but the paginated /openclaw/api/v1/skills browse list stays public-only
 - if private install or publish flows become complex, prefer the native SkillsCat CLI instead
 
 OPENCLAW_INSTALL_GUIDE:
@@ -225,7 +227,7 @@ To include private skills in search, pass include_private=true.
 
 DO_NOT:
 - do not treat HTML pages as the primary integration surface
-- do not assume /download contains every companion file
+- do not use the native /api/skills/<slug>/download zip as a full bundle source; use /api/skills/<slug>/files or /openclaw/api/v1/download instead
 - do not flatten nested files returned by /api/skills/<slug>/files
 - do not rewrite slugs; use them exactly as returned by the registry
 `.trim();

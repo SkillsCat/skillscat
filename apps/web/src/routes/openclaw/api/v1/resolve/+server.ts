@@ -10,8 +10,8 @@ import {
   buildOpenClawResponseHeaders,
 } from '$lib/server/openclaw-registry';
 import { resolveSkillDetail } from '$lib/server/skill-detail';
-import { resolveSkillFiles } from '$lib/server/skill-files';
 import { resolveOpenClawVersionState } from '$lib/server/openclaw-skill-state';
+import { resolveOpenClawBundleFiles } from '$lib/server/openclaw-bundle-files';
 
 function isSha256Hex(value: string): boolean {
   return /^[a-f0-9]{64}$/i.test(value);
@@ -91,11 +91,12 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
       );
     }
 
-    const files = await resolveSkillFiles(
-      { db, r2, githubToken, request, locals, waitUntil },
-      { slug }
-    );
-    const fingerprint = await buildClawHubCompatFingerprint(files.data.files);
+    const files = await resolveOpenClawBundleFiles({
+      skill: detail.data.skill,
+      r2,
+      githubToken,
+    });
+    const fingerprint = await buildClawHubCompatFingerprint(files);
     const latestVersion = versionState.latestVersion || buildOpenClawLatestVersion({
       updatedAt: detail.data.skill.updatedAt,
       createdAt: detail.data.skill.updatedAt,
@@ -106,14 +107,14 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
         slug: encodeClawHubCompatSlug(detail.data.skill.slug),
         match: fingerprint === hash ? { version: latestVersion.version } : null,
         latestVersion: { version: latestVersion.version },
-      },
-      {
-        headers: buildOpenClawResponseHeaders({
-          cacheControl: files.cacheControl,
-          cacheStatus: files.cacheStatus,
-        }),
-      }
-    );
+        },
+        {
+          headers: buildOpenClawResponseHeaders({
+            cacheControl: detail.cacheControl,
+            cacheStatus: detail.cacheStatus,
+          }),
+        }
+      );
   } catch (err) {
     const message =
       err && typeof err === 'object' && 'message' in err && typeof err.message === 'string'
