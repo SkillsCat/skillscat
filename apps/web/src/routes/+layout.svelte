@@ -2,6 +2,7 @@
   import '../app.css';
   import { browser } from '$app/environment';
   import type { LayoutData } from './$types';
+  import { useSession } from '$lib/auth-client';
   import Navbar from '$lib/components/layout/Navbar.svelte';
   import Footer from '$lib/components/layout/Footer.svelte';
   import Toast from '$lib/components/ui/Toast.svelte';
@@ -17,7 +18,25 @@
   let { children, data }: Props = $props();
   let selectedLocale = $state<LayoutData['locale'] | null>(null);
   const locale = $derived(selectedLocale ?? data.locale);
-  const currentUserId = $derived(data.currentUser?.id ?? null);
+  const session = useSession();
+  const currentUser = $derived.by(() => {
+    if ($session.isPending) {
+      return data.currentUser;
+    }
+
+    const sessionUser = $session.data?.user;
+    if (!sessionUser) {
+      return null;
+    }
+
+    return {
+      id: sessionUser.id,
+      name: sessionUser.name ?? null,
+      email: sessionUser.email ?? null,
+      image: sessionUser.image ?? null,
+    };
+  });
+  const currentUserId = $derived(currentUser?.id ?? null);
 
   const i18n = createI18nRuntime({
     getLocale: () => locale,
@@ -180,7 +199,7 @@
       </div>
 
       <div class="main-content">
-        <Navbar {unreadCount} currentUser={data.currentUser} />
+        <Navbar {unreadCount} {currentUser} />
 
         <main class="flex-1">
           {@render children()}

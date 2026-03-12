@@ -10,6 +10,7 @@ import {
 
 // Cache metadata header key
 const CACHE_TIME_HEADER = 'sw-cache-time';
+const SESSION_COOKIE_PATTERN = /(better-auth|session|auth\.session|session_token)/i;
 
 /**
  * Cache First for static assets.
@@ -163,6 +164,13 @@ export function isNavigationRequest(request: Request): boolean {
  */
 export function isSvelteKitDataRequest(url: URL): boolean {
   return url.pathname === '/__data.json' || url.pathname.endsWith('/__data.json');
+}
+
+/**
+ * Detect authenticated requests so the SW can avoid replaying anonymous page caches.
+ */
+export function hasSessionCookie(request: Request): boolean {
+  return SESSION_COOKIE_PATTERN.test(request.headers.get('cookie') ?? '');
 }
 
 /**

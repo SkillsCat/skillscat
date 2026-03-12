@@ -2,12 +2,17 @@
   import SEO from '$lib/components/common/SEO.svelte';
   import DocsProseCard from '$lib/components/docs/DocsProseCard.svelte';
   import DocsTableOfContents from '$lib/components/docs/DocsTableOfContents.svelte';
+  import { getDocsCopy } from '$lib/i18n/docs';
+  import { useI18n } from '$lib/i18n/runtime';
   import { buildOgImageUrl } from '$lib/seo/og';
   import { SITE_URL } from '$lib/seo/constants';
 
-  const title = 'SkillsCat CLI Documentation';
-  const description =
-    'Detailed SkillsCat CLI documentation for search, install, update, auth, config, and publish workflows.';
+  const i18n = useI18n();
+  const docsCopy = $derived(getDocsCopy(i18n.locale()));
+  const commonCopy = $derived(docsCopy.common);
+  const pageCopy = $derived(docsCopy.cli);
+  const title = $derived(pageCopy.title);
+  const description = $derived(pageCopy.description);
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'docs-cli' });
 
   const toc = [
@@ -51,7 +56,7 @@
     },
   ] as const;
 
-  const structuredData = [
+  const structuredData = $derived([
     {
       '@context': 'https://schema.org',
       '@type': 'TechArticle',
@@ -81,18 +86,18 @@
         {
           '@type': 'ListItem',
           position: 1,
-          name: 'Docs',
+          name: commonCopy.docsBreadcrumb,
           item: `${SITE_URL}/docs`,
         },
         {
           '@type': 'ListItem',
           position: 2,
-          name: 'CLI',
+          name: pageCopy.breadcrumb,
           item: `${SITE_URL}/docs/cli`,
         },
       ],
     },
-  ];
+  ]);
 </script>
 
 <SEO
@@ -100,7 +105,7 @@
   {description}
   url="/docs/cli"
   image={ogImageUrl}
-  imageAlt="SkillsCat CLI documentation preview"
+  imageAlt={pageCopy.imageAlt}
   keywords={[
     'skillscat cli',
     'skillscat docs',
@@ -119,7 +124,7 @@
     <section class="card docs-hero">
       <div class="docs-hero-copy">
         <div class="docs-hero-meta">
-          <a href="/docs" class="docs-back-link" aria-label="Back to docs">
+          <a href="/docs" class="docs-back-link" aria-label={commonCopy.backToDocsAriaLabel}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
               <path
                 d="M15 18l-6-6 6-6"
@@ -129,9 +134,9 @@
               />
             </svg>
           </a>
-          <p class="docs-eyebrow">CLI Reference</p>
+          <p class="docs-eyebrow">{pageCopy.eyebrow}</p>
         </div>
-        <h1>SkillsCat CLI docs</h1>
+        <h1>{pageCopy.heading}</h1>
         <p class="docs-summary">
           这页只讲 SkillsCat 自己的 CLI。它继续走原生 registry，不是给 <code>clawhub</code> CLI 兼容层用的。
         </p>
@@ -148,7 +153,7 @@
           </p>
           <p>
             如果你现在手里用的是 OpenClaw 生态里的 <code>clawhub</code> CLI，而不是 <code>skillscat</code> CLI，
-            直接跳到 <a href="/docs/openclaw">OpenClaw docs</a>。那一页讲的是 <code>/openclaw</code> 兼容接口。
+            直接跳到 <a href="/docs/openclaw">{commonCopy.links.openclawDocs}</a>。那一页讲的是 <code>/openclaw</code> 兼容接口。
           </p>
 
           <h2 id="quick-start">快速开始</h2>
@@ -266,7 +271,7 @@ npx skillscat unpublish owner/my-skill</code></pre>
 
           <blockquote>
             目标环境是 OpenClaw、ClawBot，或者你想把 OpenClaw 默认的 ClawHub registry 改成 SkillsCat，
-            直接继续看 <a href="/docs/openclaw">OpenClaw guide</a>。
+            直接继续看 <a href="/docs/openclaw">{commonCopy.links.openclawGuide}</a>。
           </blockquote>
         </DocsProseCard>
       </div>

@@ -36,12 +36,11 @@ interface Skill {
   updatedAt?: number;
 }
 
-export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, request, cookies, platform }) => {
+export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, request, platform }) => {
   setPublicPageCache({
     setHeaders,
     request,
     isAuthenticated: Boolean(locals.user),
-    hasCookies: cookies.getAll().length > 0,
     sMaxAge: 120,
     staleWhileRevalidate: 600,
   });

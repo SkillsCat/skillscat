@@ -8,12 +8,11 @@ import {
 import { getCached } from '$lib/server/cache';
 import { setPublicPageCache } from '$lib/server/page-cache';
 
-export const load: PageServerLoad = async ({ platform, setHeaders, locals, request, cookies }) => {
+export const load: PageServerLoad = async ({ platform, setHeaders, locals, request }) => {
   setPublicPageCache({
     setHeaders,
     request,
     isAuthenticated: Boolean(locals.user),
-    hasCookies: cookies.getAll().length > 0,
     sMaxAge: 30,
     staleWhileRevalidate: 120,
   });

@@ -54,12 +54,11 @@ async function hydrateCategories(
   }));
 }
 
-export const load: PageServerLoad = async ({ params, platform, setHeaders, locals, request, cookies }) => {
+export const load: PageServerLoad = async ({ params, platform, setHeaders, locals, request }) => {
   setPublicPageCache({
     setHeaders,
     request,
     isAuthenticated: Boolean(locals.user),
-    hasCookies: cookies.getAll().length > 0,
     sMaxAge: 120,
     staleWhileRevalidate: 600,
   });

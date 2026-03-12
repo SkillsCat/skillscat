@@ -276,7 +276,7 @@ function getAccessClientKey(request: Request, userId: string | null): string | u
  *
  * with unified slug format: owner/name...
  */
-export const load: PageServerLoad = async ({ params, platform, locals, request, fetch, setHeaders, cookies, isDataRequest }) => {
+export const load: PageServerLoad = async ({ params, platform, locals, request, fetch, setHeaders, isDataRequest }) => {
   const perfStart = performance.now();
   const serverTimings: Array<{ name: string; dur: number; desc?: string }> = [];
   let serverTimingFlushed = false;
@@ -326,7 +326,6 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     setHeaders,
     request,
     isAuthenticated: Boolean(locals.user),
-    hasCookies: cookies.getAll().length > 0,
     sMaxAge: 120,
     staleWhileRevalidate: 600,
   });
