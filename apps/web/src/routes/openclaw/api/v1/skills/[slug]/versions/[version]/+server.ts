@@ -6,11 +6,11 @@ import {
 } from '$lib/server/openclaw-registry';
 import { decodeClawHubCompatSlug, encodeClawHubCompatSlug } from '$lib/server/clawhub-compat';
 import { resolveSkillDetail } from '$lib/server/skill-detail';
-import { resolveSkillFiles } from '$lib/server/skill-files';
 import {
   resolveOpenClawFilesForVersion,
   resolveOpenClawVersionState,
 } from '$lib/server/openclaw-skill-state';
+import { resolveOpenClawBundleFiles } from '$lib/server/openclaw-bundle-files';
 
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const slug = decodeClawHubCompatSlug(params.slug);
@@ -67,15 +67,16 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
 
   const r2 = platform?.env?.R2;
   const githubToken = platform?.env?.GITHUB_TOKEN;
-  const fallbackFiles = await resolveSkillFiles(
-    { db, r2, githubToken, request, locals, waitUntil },
-    { slug }
-  );
+  const fallbackFiles = await resolveOpenClawBundleFiles({
+    skill: detail.data.skill,
+    r2,
+    githubToken,
+  });
   const versionFiles = await resolveOpenClawFilesForVersion({
     r2,
     compatSlug: params.slug,
     selectedVersion: versionState.selectedVersion,
-    fallbackFiles: fallbackFiles.data.files,
+    fallbackFiles,
   });
 
   return json(
@@ -95,8 +96,8 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     },
     {
       headers: buildOpenClawResponseHeaders({
-        cacheControl: fallbackFiles.cacheControl,
-        cacheStatus: fallbackFiles.cacheStatus,
+        cacheControl: detail.cacheControl,
+        cacheStatus: detail.cacheStatus,
       }),
     }
   );

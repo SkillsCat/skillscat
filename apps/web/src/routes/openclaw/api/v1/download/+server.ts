@@ -9,11 +9,11 @@ import {
   isSupportedOpenClawTag,
 } from '$lib/server/openclaw-registry';
 import { resolveSkillDetail } from '$lib/server/skill-detail';
-import { resolveSkillFiles } from '$lib/server/skill-files';
 import {
   resolveOpenClawFilesForVersion,
   resolveOpenClawVersionState,
 } from '$lib/server/openclaw-skill-state';
+import { resolveOpenClawBundleFiles } from '$lib/server/openclaw-bundle-files';
 
 export const GET: RequestHandler = async ({ url, platform, request, locals }) => {
   const slug = decodeClawHubCompatSlug(url.searchParams.get('slug') ?? '');
@@ -87,15 +87,16 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
   }
 
   try {
-    const fallbackFiles = await resolveSkillFiles(
-      { db, r2, githubToken, request, locals, waitUntil },
-      { slug }
-    );
+    const fallbackFiles = await resolveOpenClawBundleFiles({
+      skill: detail.data.skill,
+      r2,
+      githubToken,
+    });
     const files = await resolveOpenClawFilesForVersion({
       r2,
       compatSlug: url.searchParams.get('slug') ?? '',
       selectedVersion: versionState.selectedVersion,
-      fallbackFiles: fallbackFiles.data.files,
+      fallbackFiles,
     });
     const zipBuffer = createStoredZip(files);
 
@@ -114,8 +115,8 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
     return new Response(zipBuffer as unknown as BodyInit, {
       headers: {
         ...buildOpenClawResponseHeaders({
-          cacheControl: fallbackFiles.cacheControl,
-          cacheStatus: fallbackFiles.cacheStatus,
+          cacheControl: detail.cacheControl,
+          cacheStatus: detail.cacheStatus,
         }),
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${detail.data.skill.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase()}.zip"`,

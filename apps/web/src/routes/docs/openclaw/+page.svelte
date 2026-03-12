@@ -225,6 +225,7 @@ npx skillscat add &lt;owner&gt;/&lt;repo&gt; --agent openclaw</code></pre>
           <ul>
             <li><code>clawhub login --site https://skills.cat</code> 会打开 SkillsCat 的兼容授权页，并把 registry 固定回 <code>/openclaw</code>。</li>
             <li>如果你更喜欢手动 token，可以在 SkillsCat 的 <a href="/user/tokens">API tokens</a> 页面创建带 <code>read</code>、<code>write</code>、<code>publish</code> scope 的 token。</li>
+            <li>兼容层支持带认证的搜索和已知 slug 安装；如果你需要完整的 private 浏览、仓库级选择或更复杂的私有工作流，优先用原生 <code>skillscat</code> CLI。</li>
             <li><code>skillscat login</code> 只影响 SkillsCat CLI，不会改写 <code>clawhub</code> CLI 的 registry 配置。</li>
           </ul>
 
