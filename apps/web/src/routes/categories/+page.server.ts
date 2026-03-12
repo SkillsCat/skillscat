@@ -12,12 +12,11 @@ interface DynamicCategory {
   skillCount: number;
 }
 
-export const load: PageServerLoad = async ({ platform, setHeaders, locals, request, cookies }) => {
+export const load: PageServerLoad = async ({ platform, setHeaders, locals, request }) => {
   setPublicPageCache({
     setHeaders,
     request,
     isAuthenticated: Boolean(locals.user),
-    hasCookies: cookies.getAll().length > 0,
     sMaxAge: 300,
     staleWhileRevalidate: 900,
   });

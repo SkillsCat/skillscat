@@ -13,8 +13,17 @@
 
   let { items, title = 'TOC' }: Props = $props();
   const firstItemId = $derived(items[0]?.id ?? '');
+  const desktopBreakpoint = 1100;
+  const stickyTop = 96;
+  const activeHeadingOffset = 136;
   let activeId = $state('');
   let isProgrammaticHashUpdate = false;
+  let tocShell: HTMLDivElement | null = null;
+  let tocElement: HTMLElement | null = null;
+  let tocShellStyle = $state('');
+  let tocStyle = $state('');
+  let tocMode = $state<'static' | 'fixed' | 'bottom'>('static');
+  let scheduledFrame = 0;
 
   $effect(() => {
     if (!activeId && firstItemId) {
@@ -49,7 +58,6 @@
   function findBestActiveId() {
     if (typeof window === 'undefined' || items.length === 0) return firstItemId;
 
-    const anchorOffset = 136;
     let current = firstItemId;
     let nearestAboveTop = Number.NEGATIVE_INFINITY;
     let nearestBelowTop = Number.POSITIVE_INFINITY;
@@ -59,7 +67,7 @@
       const element = document.getElementById(item.id);
       if (!element) continue;
 
-      const top = element.getBoundingClientRect().top - anchorOffset;
+      const top = element.getBoundingClientRect().top - activeHeadingOffset;
       if (top <= 0 && top > nearestAboveTop) {
         nearestAboveTop = top;
         current = item.id;
@@ -88,62 +96,150 @@
     activeId = id;
   }
 
+  function resetStickyPosition() {
+    tocMode = 'static';
+    tocShellStyle = '';
+    tocStyle = '';
+  }
+
+  function resolveStickyBoundary(): HTMLElement | null {
+    if (!tocShell) return null;
+
+    const contentGrid = tocShell.closest('.docs-content-grid');
+    if (!(contentGrid instanceof HTMLElement)) return null;
+
+    const mainColumn = contentGrid.querySelector('.docs-main');
+    return mainColumn instanceof HTMLElement ? mainColumn : contentGrid;
+  }
+
+  function updateStickyPosition() {
+    if (typeof window === 'undefined' || !tocShell || !tocElement) return;
+
+    if (window.innerWidth < desktopBreakpoint) {
+      resetStickyPosition();
+      return;
+    }
+
+    const shellRect = tocShell.getBoundingClientRect();
+    const tocHeight = tocElement.offsetHeight;
+    const boundary = resolveStickyBoundary();
+    const boundaryRect = boundary?.getBoundingClientRect();
+
+    if (!shellRect.width || !tocHeight || !boundaryRect) {
+      resetStickyPosition();
+      return;
+    }
+
+    const scrollY = window.scrollY;
+    const shellTop = shellRect.top + scrollY;
+    const boundaryTop = boundaryRect.top + scrollY;
+    const boundaryBottom = boundaryTop + boundaryRect.height;
+    const fixedStart = shellTop - stickyTop;
+    const fixedEnd = boundaryBottom - stickyTop - tocHeight;
+
+    tocShellStyle = `position: relative; min-height: ${tocHeight}px;`;
+
+    if (scrollY <= fixedStart) {
+      tocMode = 'static';
+      tocStyle = '';
+      return;
+    }
+
+    if (scrollY >= fixedEnd) {
+      const absoluteTop = Math.max(0, boundaryBottom - shellTop - tocHeight);
+      tocMode = 'bottom';
+      tocStyle = `position: absolute; top: ${absoluteTop}px; left: 0; width: ${shellRect.width}px;`;
+      return;
+    }
+
+    tocMode = 'fixed';
+    tocStyle = `position: fixed; top: ${stickyTop}px; left: ${shellRect.left}px; width: ${shellRect.width}px;`;
+  }
+
+  function scheduleViewportSync() {
+    if (typeof window === 'undefined' || scheduledFrame) return;
+
+    scheduledFrame = window.requestAnimationFrame(() => {
+      scheduledFrame = 0;
+      updateStickyPosition();
+      updateActiveItem();
+    });
+  }
+
   onMount(() => {
     setActiveFromHash();
+    updateStickyPosition();
     updateActiveItem({ syncLocation: !getHashId() });
 
-    const handleScroll = () => updateActiveItem();
+    const handleScroll = () => scheduleViewportSync();
     const handleHashChange = () => {
       if (isProgrammaticHashUpdate) return;
       setActiveFromHash();
+      updateStickyPosition();
       updateActiveItem({ syncLocation: false });
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
+    document.addEventListener('scroll', handleScroll, { passive: true, capture: true });
     window.addEventListener('resize', handleScroll);
     window.addEventListener('hashchange', handleHashChange);
 
     return () => {
+      if (scheduledFrame) {
+        window.cancelAnimationFrame(scheduledFrame);
+        scheduledFrame = 0;
+      }
       window.removeEventListener('scroll', handleScroll);
+      document.removeEventListener('scroll', handleScroll, true);
       window.removeEventListener('resize', handleScroll);
       window.removeEventListener('hashchange', handleHashChange);
     };
   });
 </script>
 
-<aside class="card docs-toc" aria-labelledby="docs-toc-title">
-  <p id="docs-toc-title" class="docs-toc-title">{title}</p>
-  <nav aria-label="Table of contents">
-    <ul class="docs-toc-list">
-      {#each items as item}
-        <li>
-          <a
-            href={`#${encodeURIComponent(item.id)}`}
-            class="docs-toc-link"
-            data-active={activeId === item.id ? '' : undefined}
-            aria-current={activeId === item.id ? 'location' : undefined}
-            onclick={() => handleLinkClick(item.id)}
-          >
-            {item.label}
-          </a>
-        </li>
-      {/each}
-    </ul>
-  </nav>
-</aside>
+<div class="docs-toc-shell" bind:this={tocShell} style={tocShellStyle}>
+  <aside
+    class="card docs-toc"
+    bind:this={tocElement}
+    style={tocStyle}
+    data-mode={tocMode}
+    aria-labelledby="docs-toc-title"
+  >
+    <p id="docs-toc-title" class="docs-toc-title">{title}</p>
+    <nav aria-label="Table of contents">
+      <ul class="docs-toc-list">
+        {#each items as item}
+          <li>
+            <a
+              href={`#${encodeURIComponent(item.id)}`}
+              class="docs-toc-link"
+              data-active={activeId === item.id ? '' : undefined}
+              aria-current={activeId === item.id ? 'location' : undefined}
+              onclick={() => handleLinkClick(item.id)}
+            >
+              {item.label}
+            </a>
+          </li>
+        {/each}
+      </ul>
+    </nav>
+  </aside>
+</div>
 
 <style>
-  .docs-toc {
+  .docs-toc-shell {
     display: none;
   }
 
   @media (min-width: 1100px) {
+    .docs-toc-shell {
+      display: block;
+      position: relative;
+    }
+
     .docs-toc {
-      position: sticky;
-      top: 6rem;
       display: grid;
       gap: 0.9rem;
-      align-self: start;
       padding: 1.25rem;
       border-radius: 1.75rem;
       max-height: calc(100vh - 7rem);

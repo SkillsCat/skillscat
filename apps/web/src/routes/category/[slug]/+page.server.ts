@@ -18,12 +18,11 @@ function parsePage(raw: string | null): number {
   return parsed;
 }
 
-export const load: PageServerLoad = async ({ params, url, platform, setHeaders, locals, request, cookies }) => {
+export const load: PageServerLoad = async ({ params, url, platform, setHeaders, locals, request }) => {
   setPublicPageCache({
     setHeaders,
     request,
     isAuthenticated: Boolean(locals.user),
-    hasCookies: cookies.getAll().length > 0,
     sMaxAge: 120,
     staleWhileRevalidate: 600,
   });

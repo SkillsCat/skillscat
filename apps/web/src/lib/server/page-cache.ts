@@ -4,21 +4,20 @@ interface PageCacheOptions {
   setHeaders: (headers: Record<string, string>) => void;
   request: Request;
   isAuthenticated: boolean;
-  hasCookies?: boolean;
   sMaxAge: number;
   staleWhileRevalidate: number;
 }
 
 /**
  * Apply conservative HTML caching for public pages:
- * - Anonymous requests: edge-cacheable (cookies alone don't imply personalization)
+ * - Anonymous requests: edge-cacheable, but cookie-varied because the root layout
+ *   still includes auth-sensitive shell state (for example the navbar session state)
  * - Logged-in requests: private browser-cacheable (never shared-cache)
  */
 export function setPublicPageCache({
   setHeaders,
   request,
   isAuthenticated,
-  hasCookies = false,
   sMaxAge,
   staleWhileRevalidate,
 }: PageCacheOptions): void {
@@ -33,9 +32,16 @@ export function setPublicPageCache({
 
   const cookieHeader = request.headers.get('cookie') || '';
   const hasLocaleCookie = new RegExp(`(?:^|;\\s*)${LOCALE_COOKIE_NAME}=`).test(cookieHeader);
+  const varyValues = ['Cookie'];
+
+  // Locale still needs a secondary vary key when language is inferred from Accept-Language
+  // instead of the locale cookie.
+  if (!hasLocaleCookie) {
+    varyValues.push('Accept-Language');
+  }
 
   setHeaders({
     'Cache-Control': `public, max-age=0, s-maxage=${sMaxAge}, stale-while-revalidate=${staleWhileRevalidate}`,
-    Vary: hasLocaleCookie ? 'Cookie' : 'Accept-Language',
+    Vary: varyValues.join(', '),
   });
 }

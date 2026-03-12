@@ -58,3 +58,5 @@ apps/web/static/sw.js
 
 # ========== Private seeders (not open source) ==========
 scripts/private/
+
+baidu_verify*

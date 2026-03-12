@@ -9,6 +9,7 @@ import {
   isNavigationRequest,
   isSvelteKitDataRequest,
   isExplicitlyPublicResponse,
+  hasSessionCookie,
   getApiCacheConfig,
   cleanupOldCaches,
 } from './cache-strategies';
@@ -46,6 +47,16 @@ self.addEventListener('fetch', (event) => {
   }
 
   const isSameOrigin = url.origin === self.location.origin;
+  const isAuthenticatedDocumentRequest = isSameOrigin
+    && hasSessionCookie(request)
+    && (isNavigationRequest(request) || isSvelteKitDataRequest(url));
+
+  if (isAuthenticatedDocumentRequest) {
+    // Authenticated page shells and __data.json can differ from the anonymous version,
+    // so bypass both the browser HTTP cache and the SW page caches.
+    event.respondWith(fetch(request, { cache: 'no-store' }));
+    return;
+  }
 
   // Page navigations: Network First (cache only explicitly public responses)
   if (isSameOrigin && isNavigationRequest(request)) {

@@ -2,12 +2,17 @@
   import SEO from '$lib/components/common/SEO.svelte';
   import DocsProseCard from '$lib/components/docs/DocsProseCard.svelte';
   import DocsTableOfContents from '$lib/components/docs/DocsTableOfContents.svelte';
+  import { getDocsCopy } from '$lib/i18n/docs';
+  import { useI18n } from '$lib/i18n/runtime';
   import { buildOgImageUrl } from '$lib/seo/og';
   import { SITE_URL } from '$lib/seo/constants';
 
-  const title = 'SkillsCat OpenClaw Documentation';
-  const description =
-    'Use SkillsCat with OpenClaw through the native SkillsCat CLI or the ClawHub-compatible /openclaw registry endpoint for clawhub CLI.';
+  const i18n = useI18n();
+  const docsCopy = $derived(getDocsCopy(i18n.locale()));
+  const commonCopy = $derived(docsCopy.common);
+  const pageCopy = $derived(docsCopy.openclaw);
+  const title = $derived(pageCopy.title);
+  const description = $derived(pageCopy.description);
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'docs-openclaw' });
 
   const toc = [
@@ -32,7 +37,7 @@
     },
   ] as const;
 
-  const structuredData = [
+  const structuredData = $derived([
     {
       '@context': 'https://schema.org',
       '@type': 'HowTo',
@@ -42,18 +47,18 @@
       step: [
         {
           '@type': 'HowToStep',
-          name: 'Point OpenClaw or ClawHub to SkillsCat',
-          text: 'Set the site to https://skills.cat and the registry to https://skills.cat/openclaw so clawhub CLI uses the compatibility layer instead of the native SkillsCat registry.',
+          name: pageCopy.howToSteps.point.name,
+          text: pageCopy.howToSteps.point.text,
         },
         {
           '@type': 'HowToStep',
-          name: 'Search or inspect the skill',
-          text: 'Use clawhub search or the SkillsCat CLI to confirm the skill you want to install.',
+          name: pageCopy.howToSteps.inspect.name,
+          text: pageCopy.howToSteps.inspect.text,
         },
         {
           '@type': 'HowToStep',
-          name: 'Install into the OpenClaw layout',
-          text: 'Install with clawhub install or npx skillscat add --agent openclaw so the bundle lands in the correct skills directory.',
+          name: pageCopy.howToSteps.install.name,
+          text: pageCopy.howToSteps.install.text,
         },
       ],
     },
@@ -64,18 +69,18 @@
         {
           '@type': 'ListItem',
           position: 1,
-          name: 'Docs',
+          name: commonCopy.docsBreadcrumb,
           item: `${SITE_URL}/docs`,
         },
         {
           '@type': 'ListItem',
           position: 2,
-          name: 'OpenClaw',
+          name: pageCopy.breadcrumb,
           item: `${SITE_URL}/docs/openclaw`,
         },
       ],
     },
-  ];
+  ]);
 </script>
 
 <SEO
@@ -83,7 +88,7 @@
   {description}
   url="/docs/openclaw"
   image={ogImageUrl}
-  imageAlt="SkillsCat OpenClaw documentation preview"
+  imageAlt={pageCopy.imageAlt}
   keywords={[
     'openclaw skills',
     'openclaw docs',
@@ -103,7 +108,7 @@
     <section class="card docs-hero">
       <div class="docs-hero-copy">
         <div class="docs-hero-meta">
-          <a href="/docs" class="docs-back-link" aria-label="Back to docs">
+          <a href="/docs" class="docs-back-link" aria-label={commonCopy.backToDocsAriaLabel}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
               <path
                 d="M15 18l-6-6 6-6"
@@ -113,9 +118,9 @@
               />
             </svg>
           </a>
-          <p class="docs-eyebrow">OpenClaw Guide</p>
+          <p class="docs-eyebrow">{pageCopy.eyebrow}</p>
         </div>
-        <h1>Use SkillsCat inside OpenClaw</h1>
+        <h1>{pageCopy.heading}</h1>
         <p class="docs-summary">
           这页明确区分两套 CLI: <code>clawhub</code> CLI 走 <code>/openclaw</code> 兼容层，
           <code>skillscat</code> CLI 继续走 SkillsCat 原生 registry。
@@ -238,7 +243,7 @@ npx skillscat add &lt;owner&gt;/&lt;repo&gt; --agent openclaw</code></pre>
           </ul>
 
           <blockquote>
-            想看原生 <code>skillscat</code> CLI 命令细节，回到 <a href="/docs/cli">CLI docs</a>。这页主要负责把
+            想看原生 <code>skillscat</code> CLI 命令细节，回到 <a href="/docs/cli">{commonCopy.links.cliDocs}</a>。这页主要负责把
             <code>clawhub</code> CLI 兼容层和 OpenClaw 安装路径讲清楚。
           </blockquote>
         </DocsProseCard>
