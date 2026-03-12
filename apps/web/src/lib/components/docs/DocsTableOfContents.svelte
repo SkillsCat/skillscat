@@ -16,6 +16,9 @@
   const desktopBreakpoint = 1100;
   const stickyTop = 96;
   const activeHeadingOffset = 136;
+  const scrollIdleMs = 180;
+  const pageBottomThreshold = 4;
+  const activeRetainTolerance = 24;
   let activeId = $state('');
   let isProgrammaticHashUpdate = false;
   let tocShell: HTMLDivElement | null = null;
@@ -24,6 +27,8 @@
   let tocStyle = $state('');
   let tocMode = $state<'static' | 'fixed' | 'bottom'>('static');
   let scheduledFrame = 0;
+  let lockedActiveId = $state('');
+  let releaseLockTimer = 0;
 
   $effect(() => {
     if (!activeId && firstItemId) {
@@ -55,8 +60,89 @@
     }, 0);
   }
 
+  function isNearPageBottom(): boolean {
+    if (typeof window === 'undefined') return false;
+    const documentHeight = document.documentElement.scrollHeight;
+    return window.scrollY + window.innerHeight >= documentHeight - pageBottomThreshold;
+  }
+
+  function getItemIndex(id: string): number {
+    return items.findIndex((item) => item.id === id);
+  }
+
+  function clearReleaseLockTimer() {
+    if (typeof window === 'undefined' || !releaseLockTimer) return;
+    window.clearTimeout(releaseLockTimer);
+    releaseLockTimer = 0;
+  }
+
+  function unlockActiveId() {
+    clearReleaseLockTimer();
+    lockedActiveId = '';
+  }
+
+  function shouldKeepLockedActive(id: string): boolean {
+    if (typeof window === 'undefined' || !id) return false;
+
+    const element = document.getElementById(id);
+    if (!element) return false;
+
+    const rect = element.getBoundingClientRect();
+    const isVisible = rect.bottom > stickyTop && rect.top < window.innerHeight;
+    if (!isVisible) return false;
+
+    if (rect.top <= activeHeadingOffset + activeRetainTolerance) {
+      return true;
+    }
+
+    if (isNearPageBottom()) {
+      return true;
+    }
+
+    const itemIndex = getItemIndex(id);
+    const nextItem = itemIndex >= 0 ? items[itemIndex + 1] : null;
+    if (!nextItem) {
+      return true;
+    }
+
+    const nextElement = document.getElementById(nextItem.id);
+    if (!nextElement) {
+      return true;
+    }
+
+    return nextElement.getBoundingClientRect().top > activeHeadingOffset;
+  }
+
+  function scheduleActiveUnlock() {
+    if (typeof window === 'undefined' || !lockedActiveId) return;
+
+    clearReleaseLockTimer();
+    releaseLockTimer = window.setTimeout(() => {
+      const lockedId = lockedActiveId;
+      unlockActiveId();
+
+      if (lockedId && shouldKeepLockedActive(lockedId)) {
+        activeId = lockedId;
+        return;
+      }
+
+      updateActiveItem({ syncLocation: false, respectClickLock: false });
+    }, scrollIdleMs);
+  }
+
+  function lockActiveId(id: string) {
+    if (!id) return;
+    lockedActiveId = id;
+    activeId = id;
+    scheduleActiveUnlock();
+  }
+
   function findBestActiveId() {
     if (typeof window === 'undefined' || items.length === 0) return firstItemId;
+
+    if (isNearPageBottom()) {
+      return items[items.length - 1]?.id ?? firstItemId;
+    }
 
     let current = firstItemId;
     let nearestAboveTop = Number.NEGATIVE_INFINITY;
@@ -80,8 +166,16 @@
     return nearestAboveTop > Number.NEGATIVE_INFINITY ? current : fallbackBelow;
   }
 
-  function updateActiveItem({ syncLocation = true } = {}) {
+  function updateActiveItem({ syncLocation = true, respectClickLock = true } = {}) {
     if (typeof window === 'undefined' || items.length === 0) return;
+
+    if (respectClickLock && lockedActiveId) {
+      activeId = lockedActiveId;
+      if (syncLocation) {
+        syncHash(lockedActiveId);
+      }
+      return;
+    }
 
     const nextActiveId = findBestActiveId();
     if (!nextActiveId) return;
@@ -93,7 +187,7 @@
   }
 
   function handleLinkClick(id: string) {
-    activeId = id;
+    lockActiveId(id);
   }
 
   function resetStickyPosition() {
@@ -163,6 +257,7 @@
       scheduledFrame = 0;
       updateStickyPosition();
       updateActiveItem();
+      scheduleActiveUnlock();
     });
   }
 
@@ -174,7 +269,12 @@
     const handleScroll = () => scheduleViewportSync();
     const handleHashChange = () => {
       if (isProgrammaticHashUpdate) return;
-      setActiveFromHash();
+      const hashId = getHashId();
+      if (hashId && items.some((item) => item.id === hashId)) {
+        lockActiveId(hashId);
+      } else {
+        setActiveFromHash();
+      }
       updateStickyPosition();
       updateActiveItem({ syncLocation: false });
     };
@@ -189,6 +289,7 @@
         window.cancelAnimationFrame(scheduledFrame);
         scheduledFrame = 0;
       }
+      unlockActiveId();
       window.removeEventListener('scroll', handleScroll);
       document.removeEventListener('scroll', handleScroll, true);
       window.removeEventListener('resize', handleScroll);
