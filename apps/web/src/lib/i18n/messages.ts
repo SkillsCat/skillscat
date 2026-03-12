@@ -65,6 +65,7 @@ const en = {
   nav: {
     trending: 'Trending',
     categories: 'Categories',
+    docs: 'Docs',
     submit: 'Submit',
     searchSkills: 'Search skills...',
     toggleMenu: 'Toggle menu',
@@ -78,6 +79,7 @@ const en = {
     recentlyAdded: 'Recently Added',
     topRated: 'Top Rated',
     categories: 'Categories',
+    docs: 'Docs',
     privacyPolicy: 'Privacy Policy',
     termsOfService: 'Terms of Service',
     privacy: 'Privacy',
@@ -358,6 +360,7 @@ const zhCN: MessageCatalog = {
   nav: {
     trending: '热门',
     categories: '分类',
+    docs: '文档',
     submit: '提交',
     searchSkills: '搜索技能...',
     toggleMenu: '切换菜单',
@@ -371,6 +374,7 @@ const zhCN: MessageCatalog = {
     recentlyAdded: '最近新增',
     topRated: '最高评分',
     categories: '分类',
+    docs: '文档',
     privacyPolicy: '隐私政策',
     termsOfService: '服务条款',
     privacy: '隐私',
@@ -649,6 +653,7 @@ const ja: MessageCatalog = {
   nav: {
     trending: '人気',
     categories: 'カテゴリ',
+    docs: 'ドキュメント',
     submit: '投稿',
     searchSkills: 'スキルを検索...',
     toggleMenu: 'メニューを切り替え',
@@ -662,6 +667,7 @@ const ja: MessageCatalog = {
     recentlyAdded: '新着',
     topRated: '高評価',
     categories: 'カテゴリ',
+    docs: 'ドキュメント',
     privacyPolicy: 'プライバシーポリシー',
     termsOfService: '利用規約',
     privacy: 'プライバシー',
@@ -940,6 +946,7 @@ const ko: MessageCatalog = {
   nav: {
     trending: '인기',
     categories: '카테고리',
+    docs: '문서',
     submit: '제출',
     searchSkills: '스킬 검색...',
     toggleMenu: '메뉴 전환',
@@ -953,6 +960,7 @@ const ko: MessageCatalog = {
     recentlyAdded: '최근 추가',
     topRated: '최고 평점',
     categories: '카테고리',
+    docs: '문서',
     privacyPolicy: '개인정보 처리방침',
     termsOfService: '서비스 약관',
     privacy: '개인정보',

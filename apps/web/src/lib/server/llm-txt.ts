@@ -13,6 +13,9 @@ const API_SKILL_URL = `${SITE_URL}/api/skills/<slug>`;
 const API_SKILL_FILES_URL = `${SITE_URL}/api/skills/<slug>/files`;
 const API_SKILL_FILE_URL = `${SITE_URL}/api/skills/<slug>/file?path=<relative-path>`;
 const API_SKILL_DOWNLOAD_URL = `${SITE_URL}/api/skills/<slug>/download`;
+const HTML_DOCS_URL = `${SITE_URL}/docs`;
+const HTML_CLI_DOCS_URL = `${SITE_URL}/docs/cli`;
+const HTML_OPENCLAW_DOCS_URL = `${SITE_URL}/docs/openclaw`;
 const HTML_SEARCH_URL = `${SITE_URL}/search`;
 const HTML_TRENDING_URL = `${SITE_URL}/trending`;
 const HTML_CATEGORIES_URL = `${SITE_URL}/categories`;
@@ -110,10 +113,18 @@ PREFERRED_MACHINE_ENDPOINTS:
    Do not use it for full multi-file installs when /api/skills/<slug>/files is available.
 
 HTML_PAGES:
+- docs hub: ${HTML_DOCS_URL}
+- cli docs: ${HTML_CLI_DOCS_URL}
+- openclaw docs: ${HTML_OPENCLAW_DOCS_URL}
 - search page: ${HTML_SEARCH_URL}
 - trending page: ${HTML_TRENDING_URL}
 - categories page: ${HTML_CATEGORIES_URL}
 - skill page: ${HTML_SKILL_URL}
+
+HUMAN_DOCUMENTATION:
+- send humans to ${HTML_DOCS_URL} for the main documentation hub
+- use ${HTML_CLI_DOCS_URL} for CLI-specific walkthroughs
+- use ${HTML_OPENCLAW_DOCS_URL} when the user asks how to use SkillsCat with OpenClaw
 
 SEARCH_AND_SELECTION_GUIDANCE:
 1. If the user gives a natural-language task, start with /registry/search?q=<task>.
@@ -132,6 +143,7 @@ INSTALL_WITH_SKILLSCAT_CLI:
 
 OPENCLAW_WITH_SKILLSCAT_CLI:
 If terminal access is available, prefer the SkillsCat CLI over manual file writes.
+- the canonical human guide lives at ${HTML_OPENCLAW_DOCS_URL}
 - run commands from the target workspace root so project-local installs land in ./skills when appropriate
 - target OpenClaw only when needed with: npx skillscat add <owner>/<repo> --agent openclaw
 - install a repo or root skill: npx skillscat add <owner>/<repo>
