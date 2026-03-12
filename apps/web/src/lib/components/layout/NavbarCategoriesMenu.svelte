@@ -7,15 +7,19 @@
   interface Props {
     label: string;
     value?: string;
+    active?: boolean;
   }
 
-  let { label, value = $bindable('') }: Props = $props();
+  let { label, value = $bindable(''), active = false }: Props = $props();
 </script>
 
 <NavigationMenu.Root class="nav-menu-root" bind:value={value}>
   <NavigationMenu.List class="nav-menu-list">
     <NavigationMenu.Item value="categories">
-      <NavigationMenu.Trigger class="nav-link nav-trigger">
+      <NavigationMenu.Trigger
+        class="nav-link nav-trigger"
+        data-active={active ? '' : undefined}
+      >
         {label}
         <span class="nav-link-chevron">
           <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2} />

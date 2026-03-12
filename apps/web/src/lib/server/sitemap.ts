@@ -142,6 +142,9 @@ ${entries
 export function getCoreSitemapPages(): SitemapPage[] {
   const staticPages = [
     { url: '/', priority: '1.0', changefreq: 'daily' },
+    { url: '/docs', priority: '0.8', changefreq: 'weekly' },
+    { url: '/docs/cli', priority: '0.75', changefreq: 'weekly' },
+    { url: '/docs/openclaw', priority: '0.75', changefreq: 'weekly' },
     { url: '/trending', priority: '0.9', changefreq: 'hourly' },
     { url: '/recent', priority: '0.9', changefreq: 'hourly' },
     { url: '/top', priority: '0.9', changefreq: 'daily' },

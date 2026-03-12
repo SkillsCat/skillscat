@@ -20,6 +20,7 @@
     Cancel01Icon,
     Add01Icon,
     CodeIcon,
+    FileScriptIcon,
     Settings01Icon,
     Folder01Icon,
     SparklesIcon,
@@ -80,6 +81,13 @@
     mobileMenuOpen = !mobileMenuOpen;
   }
 
+  function matchesPath(basePath: string) {
+    return $page.url.pathname === basePath || $page.url.pathname.startsWith(`${basePath}/`);
+  }
+
+  function matchesCategoryPath() {
+    return $page.url.pathname === '/categories' || matchesPath('/category');
+  }
 </script>
 
 <nav class="navbar">
@@ -102,14 +110,27 @@
 
       <!-- Nav Links (Desktop) -->
       <div class="nav-links">
-        <a href="/trending" class="nav-link">
+        <a
+          href="/trending"
+          class="nav-link"
+          data-active={matchesPath('/trending') ? '' : undefined}
+        >
           {messages.nav.trending}
         </a>
 
         <NavbarCategoriesMenu
           label={messages.nav.categories}
           bind:value={categoriesMenuValue}
+          active={matchesCategoryPath()}
         />
+
+        <a
+          href="/docs"
+          class="nav-link"
+          data-active={matchesPath('/docs') ? '' : undefined}
+        >
+          {messages.nav.docs}
+        </a>
       </div>
 
       <!-- Right Side -->
@@ -192,13 +213,32 @@
               {messages.submitDialog.title}
             </button>
           {/if}
-          <a href="/trending" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+          <a
+            href="/trending"
+            class="mobile-link"
+            data-active={matchesPath('/trending') ? '' : undefined}
+            onclick={() => mobileMenuOpen = false}
+          >
             <HugeiconsIcon icon={SparklesIcon} size={16} strokeWidth={2} />
             {messages.nav.trending}
           </a>
-          <a href="/categories" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+          <a
+            href="/categories"
+            class="mobile-link"
+            data-active={matchesCategoryPath() ? '' : undefined}
+            onclick={() => mobileMenuOpen = false}
+          >
             <HugeiconsIcon icon={Folder01Icon} size={16} strokeWidth={2} />
             {messages.nav.categories}
+          </a>
+          <a
+            href="/docs"
+            class="mobile-link"
+            data-active={matchesPath('/docs') ? '' : undefined}
+            onclick={() => mobileMenuOpen = false}
+          >
+            <HugeiconsIcon icon={FileScriptIcon} size={16} strokeWidth={2} />
+            {messages.nav.docs}
           </a>
         </div>
 
@@ -646,7 +686,8 @@
     transition: all 0.15s ease;
   }
 
-  .mobile-link:hover {
+  .mobile-link:hover,
+  .mobile-link[data-active] {
     color: var(--primary);
     background-color: var(--primary-subtle);
   }

@@ -42,6 +42,9 @@
         <h4 class="font-semibold text-fg mb-3">{messages.footer.resources}</h4>
         <ul class="space-y-2 text-sm">
           <li>
+            <a href="/docs" class="text-fg-muted hover:text-fg transition-colors">{messages.footer.docs}</a>
+          </li>
+          <li>
             <a
               href="https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview"
               target="_blank"
@@ -95,6 +98,8 @@
           © {new Date().getFullYear()} SkillsCat. {messages.footer.openSourceNotice}
         </p>
         <div class="flex items-center gap-3 md:hidden text-sm">
+          <a href="/docs" class="text-fg-subtle hover:text-fg transition-colors">{messages.footer.docs}</a>
+          <span class="text-fg-subtle">·</span>
           <a href="/privacy" class="text-fg-subtle hover:text-fg transition-colors">{messages.footer.privacy}</a>
           <span class="text-fg-subtle">·</span>
           <a href="/terms" class="text-fg-subtle hover:text-fg transition-colors">{messages.footer.terms}</a>
