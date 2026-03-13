@@ -1,6 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middleware/auth';
+import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '$lib/server/skill-title';
 
 const MAX_PREVIEW_BODY_BYTES = 180000;
 
@@ -49,7 +50,7 @@ function parseSkillFrontmatter(content: string): { frontmatter: SkillFrontmatter
 
   // Parse name
   const nameMatch = yamlContent.match(/^name:\s*(.+)$/m);
-  if (nameMatch) frontmatter.name = nameMatch[1].trim();
+  if (nameMatch) frontmatter.name = stripYamlInlineComment(nameMatch[1]);
 
   // Parse description
   const descMatch = yamlContent.match(/^description:\s*(.+)$/m);
@@ -116,13 +117,13 @@ function validateSkillMd(content: string): {
   const { frontmatter, body } = parseSkillFrontmatter(content);
 
   // Use frontmatter name/description if available
-  let name = frontmatter?.name;
+  let name = frontmatter?.name ? normalizeExtractedSkillTitle(frontmatter.name) : undefined;
   let description = frontmatter?.description;
 
   // Fallback: extract from markdown content
   if (!name) {
     const titleMatch = body.match(/^#\s+(.+)$/m);
-    name = titleMatch ? titleMatch[1].trim() : undefined;
+    name = titleMatch ? normalizeExtractedSkillTitle(titleMatch[1]) : undefined;
   }
 
   if (!description) {

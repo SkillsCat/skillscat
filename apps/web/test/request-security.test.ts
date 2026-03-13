@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runRequestSecurity } from '../src/lib/server/request-security';
+import { runRequestSecurity, shouldNoIndexPath } from '../src/lib/server/request-security';
 
 function createEvent(options: {
   pathname: string;
@@ -87,6 +87,36 @@ describe('request security', () => {
     expect(response).toBeNull();
   });
 
+  it('allows OpenClaw user agents on protected skill endpoints', async () => {
+    const response = await runRequestSecurity(createEvent({
+      pathname: '/api/skills/testowner%2Fdemo/files',
+      routeId: '/api/skills/[slug]/files',
+      userAgent: 'OpenClaw/1.4.0',
+    }));
+
+    expect(response).toBeNull();
+  });
+
+  it('does not apply native UA protection to OpenClaw compat endpoints', async () => {
+    const response = await runRequestSecurity(createEvent({
+      pathname: '/openclaw/api/v1/search',
+      routeId: '/openclaw/api/v1/search',
+      userAgent: 'curl/8.7.1',
+    }));
+
+    expect(response).toBeNull();
+  });
+
+  it('does not gate public HTML pages for crawlers', async () => {
+    const response = await runRequestSecurity(createEvent({
+      pathname: '/skills/testowner/demo-skill',
+      routeId: '/skills/[owner]/[...name]',
+      userAgent: 'Googlebot/2.1',
+    }));
+
+    expect(response).toBeNull();
+  });
+
   it('blocks cross-origin browser requests to the MCP endpoint', async () => {
     const response = await runRequestSecurity(createEvent({
       pathname: '/mcp',
@@ -101,5 +131,17 @@ describe('request security', () => {
     await expect(response?.json()).resolves.toEqual({
       error: 'Invalid MCP request origin',
     });
+  });
+
+  it('keeps crawlable public pages indexable at the hook layer', () => {
+    expect(shouldNoIndexPath('/')).toBe(false);
+    expect(shouldNoIndexPath('/skills/testowner/demo-skill')).toBe(false);
+    expect(shouldNoIndexPath('/trending')).toBe(false);
+    expect(shouldNoIndexPath('/recent')).toBe(false);
+    expect(shouldNoIndexPath('/top')).toBe(false);
+    expect(shouldNoIndexPath('/categories')).toBe(false);
+    expect(shouldNoIndexPath('/category/seo')).toBe(false);
+    expect(shouldNoIndexPath('/u/backrunner')).toBe(false);
+    expect(shouldNoIndexPath('/org/skillscat')).toBe(false);
   });
 });

@@ -3,15 +3,35 @@ import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { building } from '$app/environment';
 import type { Handle, ResolveOptions } from '@sveltejs/kit';
 import { runRequestSecurity, shouldNoIndexPath } from '$lib/server/request-security';
-import { setCacheVersion } from '$lib/server/cache';
-import { getCanonicalSkillPathFromPathname, normalizeSkillOwner } from '$lib/skill-path';
+import { getCachedText, setCacheVersion } from '$lib/server/cache';
+import { getSkillBySlug } from '$lib/server/db/utils';
+import {
+  buildSkillSlug,
+  getCanonicalSkillPathFromPathname,
+  normalizeSkillName,
+  normalizeSkillOwner,
+} from '$lib/skill-path';
 import { getHtmlLang, resolveRequestLocale } from '$lib/i18n/resolve';
 import { LOCALE_COOKIE_NAME } from '$lib/i18n/config';
+import {
+  buildOpenClawHomeMarkdown,
+  buildOpenClawSkillMarkdown,
+  isOpenClawUserAgent,
+} from '$lib/server/openclaw-agent-markdown';
 
 const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
 const STATUS_OVERRIDE_HEADER = 'X-Skillscat-Status-Override';
 const AUTHOR_LINK_COOKIE = 'sc-author-linked';
 const AUTHOR_LINK_COOKIE_TTL_SECONDS = 24 * 60 * 60;
+const OPENCLAW_HOME_CACHE_KEY = 'ua:openclaw:home:v1';
+const OPENCLAW_HOME_CACHE_TTL_SECONDS = 3600;
+const OPENCLAW_SKILL_CACHE_TTL_SECONDS = 300;
+const LEGACY_OPENCLAW_API_PREFIX = '/api/v1';
+const OPENCLAW_API_PREFIX = '/openclaw/api/v1';
+type RuntimeEnv = AuthEnv & {
+  R2?: R2Bucket;
+  CACHE_VERSION?: string;
+};
 
 function applyHtmlLang(html: string, lang: string): string {
   return html.replace(/<html lang="[^"]*">/, `<html lang="${lang}">`);
@@ -148,6 +168,179 @@ async function resolveProfilePathForSkillOwner(db: D1Database, ownerSegment: str
   return null;
 }
 
+function buildMarkdownResponse(body: string | null, options: {
+  status?: number;
+  cacheControl: string;
+  vary: string;
+  cacheStatus?: 'HIT' | 'MISS' | 'BYPASS';
+}): Response {
+  const headers = new Headers({
+    'Content-Type': 'text/markdown; charset=utf-8',
+    'Cache-Control': options.cacheControl,
+    Vary: options.vary,
+  });
+
+  if (options.cacheStatus) {
+    headers.set('X-Cache', options.cacheStatus);
+  }
+
+  return new Response(body, {
+    status: options.status ?? 200,
+    headers,
+  });
+}
+
+function getLegacyOpenClawApiRedirectLocation(url: URL): string | null {
+  if (url.pathname === LEGACY_OPENCLAW_API_PREFIX) {
+    return `${OPENCLAW_API_PREFIX}${url.search}`;
+  }
+
+  if (!url.pathname.startsWith(`${LEGACY_OPENCLAW_API_PREFIX}/`)) {
+    return null;
+  }
+
+  const suffix = url.pathname.slice(LEGACY_OPENCLAW_API_PREFIX.length);
+  return `${OPENCLAW_API_PREFIX}${suffix}${url.search}`;
+}
+
+function buildPermanentRedirectResponse(location: string): Response {
+  return new Response(null, {
+    status: 308,
+    headers: {
+      Location: location,
+    },
+  });
+}
+
+function buildApiRedirectResponse(location: string): Response {
+  return new Response(null, {
+    status: 308,
+    headers: {
+      Location: location,
+      'Cache-Control': 'no-store',
+      'X-Robots-Tag': NO_INDEX_VALUE,
+    },
+  });
+}
+
+function getOpenClawSkillSlug(pathname: string): string | null {
+  const pathOnly = pathname.replace(/\/+$/, '') || '/';
+  const segments = pathOnly.split('/').filter(Boolean);
+  if (segments[0] !== 'skills' || segments.length < 3) {
+    return null;
+  }
+
+  const owner = normalizeSkillOwner(safeDecodeURIComponent(segments[1] || ''));
+  const name = normalizeSkillName(
+    segments.slice(2).map((segment) => safeDecodeURIComponent(segment)).join('/')
+  );
+
+  return owner && name ? buildSkillSlug(owner, name) : null;
+}
+
+async function maybeRespondWithOpenClawHomeMarkdown(event: Parameters<Handle>[0]['event']): Promise<Response | null> {
+  if (event.url.pathname !== '/') {
+    return null;
+  }
+
+  if (!isOpenClawUserAgent(event.request.headers.get('user-agent'))) {
+    return null;
+  }
+
+  if (event.request.method !== 'GET' && event.request.method !== 'HEAD') {
+    return null;
+  }
+
+  const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+  const { data, hit } = await getCachedText(
+    OPENCLAW_HOME_CACHE_KEY,
+    async () => buildOpenClawHomeMarkdown(),
+    OPENCLAW_HOME_CACHE_TTL_SECONDS,
+    { waitUntil }
+  );
+
+  return buildMarkdownResponse(event.request.method === 'HEAD' ? null : data, {
+    cacheControl: `public, max-age=${OPENCLAW_HOME_CACHE_TTL_SECONDS}, stale-while-revalidate=86400`,
+    vary: 'User-Agent',
+    cacheStatus: hit ? 'HIT' : 'MISS',
+  });
+}
+
+async function maybeRespondWithOpenClawSkillMarkdown(
+  event: Parameters<Handle>[0]['event'],
+  env: RuntimeEnv,
+  userId: string | null
+): Promise<Response | null> {
+  if (!isOpenClawUserAgent(event.request.headers.get('user-agent'))) {
+    return null;
+  }
+
+  if (event.request.method !== 'GET' && event.request.method !== 'HEAD') {
+    return null;
+  }
+
+  const slug = getOpenClawSkillSlug(event.url.pathname);
+  if (!slug) {
+    return null;
+  }
+
+  const skill = await getSkillBySlug(
+    {
+      DB: env.DB,
+      R2: env.R2,
+    },
+    slug,
+    userId
+  );
+
+  if (!skill) {
+    const body = [
+      '# Skill Not Found',
+      '',
+      'OpenClaw user agent detected.',
+      '',
+      `The skill \`${slug}\` was not found, or the current session does not have permission to view it.`,
+      '',
+      '- Search the registry from: https://skills.cat/',
+      '- Machine guide: https://skills.cat/llm.txt',
+      '- OpenClaw guide: https://skills.cat/docs/openclaw',
+    ].join('\n');
+
+    return buildMarkdownResponse(event.request.method === 'HEAD' ? null : body, {
+      status: 404,
+      cacheControl: 'no-store',
+      vary: 'User-Agent, Authorization, Cookie',
+      cacheStatus: 'BYPASS',
+    });
+  }
+
+  if (skill.visibility === 'public') {
+    const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+    const freshnessToken = skill.updatedAt || skill.indexedAt || skill.createdAt || 0;
+    const { data, hit } = await getCachedText(
+      `ua:openclaw:skill:${skill.id}:${freshnessToken}`,
+      async () => buildOpenClawSkillMarkdown(skill),
+      OPENCLAW_SKILL_CACHE_TTL_SECONDS,
+      { waitUntil }
+    );
+
+    return buildMarkdownResponse(event.request.method === 'HEAD' ? null : data, {
+      cacheControl: `public, max-age=${OPENCLAW_SKILL_CACHE_TTL_SECONDS}, stale-while-revalidate=600`,
+      vary: 'User-Agent',
+      cacheStatus: hit ? 'HIT' : 'MISS',
+    });
+  }
+
+  return buildMarkdownResponse(
+    event.request.method === 'HEAD' ? null : buildOpenClawSkillMarkdown(skill),
+    {
+      cacheControl: 'private, no-cache',
+      vary: 'User-Agent, Authorization, Cookie',
+      cacheStatus: 'BYPASS',
+    }
+  );
+}
+
 export const handle: Handle = async ({ event, resolve }) => {
   const resolvedLocale = resolveRequestLocale({
     cookieLocale: event.cookies.get(LOCALE_COOKIE_NAME),
@@ -160,10 +353,12 @@ export const handle: Handle = async ({ event, resolve }) => {
   const canonicalSkillPath = getCanonicalSkillPathFromPathname(event.url.pathname);
   if (canonicalSkillPath && canonicalSkillPath !== event.url.pathname) {
     const location = `${canonicalSkillPath}${event.url.search}`;
-    return new Response(null, {
-      status: 308,
-      headers: { Location: location },
-    });
+    return buildPermanentRedirectResponse(location);
+  }
+
+  const legacyOpenClawApiLocation = getLegacyOpenClawApiRedirectLocation(event.url);
+  if (legacyOpenClawApiLocation) {
+    return buildApiRedirectResponse(legacyOpenClawApiLocation);
   }
 
   setCacheVersion((event.platform?.env as { CACHE_VERSION?: string } | undefined)?.CACHE_VERSION);
@@ -173,7 +368,12 @@ export const handle: Handle = async ({ event, resolve }) => {
     return blocked;
   }
 
-  const env = event.platform?.env as AuthEnv | undefined;
+  const env = event.platform?.env as RuntimeEnv | undefined;
+
+  const openClawHomeResponse = await maybeRespondWithOpenClawHomeMarkdown(event);
+  if (openClawHomeResponse) {
+    return openClawHomeResponse;
+  }
 
   if (env?.DB) {
     const skillOwner = getSkillOwnerFromPathname(event.url.pathname);
@@ -181,10 +381,7 @@ export const handle: Handle = async ({ event, resolve }) => {
       const profilePath = await resolveProfilePathForSkillOwner(env.DB, skillOwner);
       if (profilePath) {
         const location = `${profilePath}${event.url.search}`;
-        return new Response(null, {
-          status: 308,
-          headers: { Location: location },
-        });
+        return buildPermanentRedirectResponse(location);
       }
     }
   }
@@ -264,6 +461,15 @@ export const handle: Handle = async ({ event, resolve }) => {
   } else {
     event.locals.session = null;
     event.locals.user = null;
+  }
+
+  const openClawSkillResponse = await maybeRespondWithOpenClawSkillMarkdown(
+    event,
+    env,
+    event.locals.user?.id ?? null
+  );
+  if (openClawSkillResponse) {
+    return openClawSkillResponse;
   }
 
   const response = await svelteKitHandler({

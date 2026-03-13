@@ -104,6 +104,7 @@ const BROWSER_OR_APP_UA = [
   /\bsafari\/\d/i,
   /\bfirefox\/\d/i,
   /\bedg\/\d/i,
+  /\bopenclaw(?:\/|\b)/i,
   /\bskillscat-cli\/\d/i,
   /\bskillscat\/\d/i,
 ];
@@ -132,6 +133,17 @@ const ALLOWED_CRAWLER_UA = [
 function isApiOrRegistryPath(pathname: string): boolean {
   if (pathname === '/mcp') {
     return true;
+  }
+
+  // Keep the ClawHub/OpenClaw compatibility surface outside this gate.
+  // Those routes have their own auth semantics and client mix (OpenClaw, clawhub CLI),
+  // and must not inherit the stricter native registry/tool UA policy by accident.
+  if (
+    pathname.startsWith('/openclaw/api/') ||
+    pathname === '/api/v1' ||
+    pathname.startsWith('/api/v1/')
+  ) {
+    return false;
   }
 
   if (pathname.startsWith('/api/')) {

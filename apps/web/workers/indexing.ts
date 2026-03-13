@@ -30,7 +30,6 @@ import {
   generateId,
   generateSlug,
   checkSlugCollision,
-  decodeBase64,
   createLogger,
   isTextFile,
   decodeBase64ToUtf8,
@@ -38,6 +37,7 @@ import {
 } from './shared/utils';
 import { githubRequest } from '../src/lib/server/github-request';
 import { markRecommendDirty } from '../src/lib/server/recommend-precompute';
+import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '../src/lib/server/skill-title';
 
 const log = createLogger('Indexing');
 
@@ -70,6 +70,11 @@ interface SkillFrontmatter {
 interface ParsedSkillMd {
   frontmatter: SkillFrontmatter | null;
   body: string;
+}
+
+interface ResolvedSkillMetadata {
+  name: string;
+  description: string | null;
 }
 
 function getLineIndent(line: string): number {
@@ -293,7 +298,7 @@ function parseYamlBlockScalar(yamlContent: string, key: string): string | null {
  *   categories: git, automation
  * ---
  */
-function parseSkillFrontmatter(content: string): ParsedSkillMd {
+export function parseSkillFrontmatter(content: string): ParsedSkillMd {
   const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!match) {
     return { frontmatter: null, body: content };
@@ -305,7 +310,7 @@ function parseSkillFrontmatter(content: string): ParsedSkillMd {
 
   // Parse name
   const nameMatch = yamlContent.match(/^name:\s*(.+)$/m);
-  if (nameMatch) frontmatter.name = nameMatch[1].trim();
+  if (nameMatch) frontmatter.name = stripYamlInlineComment(nameMatch[1]);
 
   // Parse description (supports multi-line block scalars)
   const blockDesc = parseYamlBlockScalar(yamlContent, 'description');
@@ -352,6 +357,32 @@ function parseSkillFrontmatter(content: string): ParsedSkillMd {
   }
 
   return { frontmatter, body };
+}
+
+export function resolveSkillMetadata(
+  repo: Pick<GitHubRepo, 'name' | 'description'>,
+  parsedSkillMd: ParsedSkillMd
+): ResolvedSkillMetadata {
+  let name = parsedSkillMd.frontmatter?.name
+    ? normalizeExtractedSkillTitle(parsedSkillMd.frontmatter.name)
+    : repo.name;
+  let description = parsedSkillMd.frontmatter?.description || repo.description || null;
+
+  if (!parsedSkillMd.frontmatter?.name) {
+    const titleMatch = parsedSkillMd.body.match(/^#\s+(.+)$/m);
+    if (titleMatch) {
+      name = normalizeExtractedSkillTitle(titleMatch[1]);
+    }
+  }
+
+  if (!parsedSkillMd.frontmatter?.description) {
+    const descMatch = parsedSkillMd.body.match(/^#.+\n+(.+?)(?:\n\n|\n#|$)/s);
+    if (descMatch) {
+      description = descMatch[1].trim().slice(0, 500);
+    }
+  }
+
+  return { name, description };
 }
 
 // ============================================
@@ -943,32 +974,14 @@ async function upsertAuthor(
 
 async function createSkill(
   repo: GitHubRepo,
-  skillMd: GitHubContent,
+  skillMetadata: ResolvedSkillMetadata,
   env: IndexingEnv,
   skillPath?: string,
   frontmatter?: SkillFrontmatter | null
 ): Promise<string> {
   const skillId = generateId();
   const now = Date.now();
-
-  // Use frontmatter name/description if available, fallback to repo data
-  let name = frontmatter?.name || repo.name;
-  let description = frontmatter?.description || repo.description;
-
-  // Fallback: extract from markdown content if no frontmatter
-  if (!frontmatter?.name && skillMd.content) {
-    const content = decodeBase64(skillMd.content);
-    const titleMatch = content.match(/^#\s+(.+)$/m);
-    if (titleMatch) {
-      name = titleMatch[1].trim();
-    }
-    if (!frontmatter?.description) {
-      const descMatch = content.match(/^#.+\n+(.+?)(?:\n\n|\n#|$)/s);
-      if (descMatch) {
-        description = descMatch[1].trim().slice(0, 500);
-      }
-    }
-  }
+  const { name, description } = skillMetadata;
 
   // Generate slug with collision handling
   const normalizedPath = skillPath || '';
@@ -1055,6 +1068,42 @@ async function createSkill(
 }
 
 async function updateSkill(
+  owner: string,
+  name: string,
+  skillPath: string | null,
+  repo: GitHubRepo,
+  skillMetadata: ResolvedSkillMetadata,
+  env: IndexingEnv
+): Promise<string | null> {
+  const now = Date.now();
+  const normalizedPath = skillPath || '';
+
+  const result = await env.DB.prepare(`
+    UPDATE skills SET
+      name = ?,
+      description = ?,
+      stars = ?,
+      forks = ?,
+      indexed_at = ?
+    WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, '') = ?
+    RETURNING id
+  `)
+    .bind(
+      skillMetadata.name,
+      skillMetadata.description,
+      repo.stargazers_count,
+      repo.forks_count,
+      now,
+      owner,
+      name,
+      normalizedPath,
+    )
+    .first<{ id: string }>();
+
+  return result?.id || null;
+}
+
+async function updateSkillMetricsOnly(
   owner: string,
   name: string,
   skillPath: string | null,
@@ -1248,7 +1297,13 @@ async function processMessage(
 
   // If skill exists and no content update needed, just update stars/forks
   if (exists && !shouldFetchContent) {
-    const updatedId = await updateSkill(canonicalRepoOwner, canonicalRepoName, skillPath || null, repo, env);
+    const updatedId = await updateSkillMetricsOnly(
+      canonicalRepoOwner,
+      canonicalRepoName,
+      skillPath || null,
+      repo,
+      env
+    );
     if (updatedId) {
       await syncRepoMetricsForGithubSkills(
         env.DB,
@@ -1295,7 +1350,7 @@ async function processMessage(
     // Fallback: just use SKILL.md content
     let skillMdContent = '';
     if (skillMd.content) {
-      skillMdContent = decodeBase64(skillMd.content);
+      skillMdContent = decodeBase64ToUtf8(skillMd.content);
     } else if (skillMd.download_url) {
       const response = await githubRequest(skillMd.download_url, {
         token: env.GITHUB_TOKEN,
@@ -1323,10 +1378,13 @@ async function processMessage(
   log.log(`SKILL.md content length: ${skillMdContent.length} chars`);
 
   // Step 6: Parse YAML frontmatter
-  const { frontmatter } = parseSkillFrontmatter(skillMdContent);
+  const parsedSkillMd = parseSkillFrontmatter(skillMdContent);
+  const { frontmatter } = parsedSkillMd;
   if (frontmatter) {
     log.log(`Frontmatter parsed: name=${frontmatter.name}, description=${frontmatter.description?.slice(0, 50)}..., tags=${frontmatter.metadata?.tags}`);
   }
+
+  const skillMetadata = resolveSkillMetadata(repo, parsedSkillMd);
 
   // Step 7: Anti-abuse check
   const fullHash = await computeHash(skillMdContent);
@@ -1344,7 +1402,14 @@ async function processMessage(
   let skillId: string;
 
   if (exists) {
-    const updatedId = await updateSkill(canonicalRepoOwner, canonicalRepoName, skillPath || null, repo, env);
+    const updatedId = await updateSkill(
+      canonicalRepoOwner,
+      canonicalRepoName,
+      skillPath || null,
+      repo,
+      skillMetadata,
+      env
+    );
     if (!updatedId) {
       log.error(`Failed to update skill: ${canonicalRepoOwner}/${canonicalRepoName}`);
       return;
@@ -1360,7 +1425,7 @@ async function processMessage(
     } else {
       const authorId = await upsertAuthor(repo, env);
       log.log(`Author upserted: ${authorId}`);
-      skillId = await createSkill(repo, skillMd, env, skillPath, frontmatter);
+      skillId = await createSkill(repo, skillMetadata, env, skillPath, frontmatter);
       log.log(`Created skill: ${skillId}`);
     }
   }

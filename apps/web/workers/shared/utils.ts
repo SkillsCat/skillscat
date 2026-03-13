@@ -2,6 +2,7 @@
  * Shared Utilities for Workers
  */
 import { githubRequest } from '../../src/lib/server/github-request';
+import { decodeBase64Utf8 } from '../../src/lib/server/text-codec';
 
 // ============================================
 // Text File Detection
@@ -34,13 +35,7 @@ export function isTextFile(path: string): boolean {
  * Decode base64 content to UTF-8 string (handles non-ASCII characters)
  */
 export function decodeBase64ToUtf8(base64: string): string {
-  const cleanBase64 = base64.replace(/\n/g, '');
-  const binaryString = atob(cleanBase64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return new TextDecoder('utf-8').decode(bytes);
+  return decodeBase64Utf8(base64);
 }
 
 // ============================================
