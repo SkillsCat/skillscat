@@ -4,6 +4,13 @@
    * 使用 marked 渲染 markdown 内容
    */
   import { marked } from 'marked';
+  import {
+    escapeAttr,
+    escapeHtml,
+    sanitizeImageSrc,
+    sanitizeMarkdownHref,
+    sanitizeRenderedHtml,
+  } from '$lib/markdown/sanitize';
 
   interface Props {
     content: string;
@@ -12,58 +19,12 @@
 
   let { content, class: className = '' }: Props = $props();
 
-  function escapeHtml(value: string): string {
-    return value
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
-  function escapeAttr(value: string): string {
-    return escapeHtml(value).replace(/`/g, '&#96;');
-  }
-
-  function sanitizeHref(rawHref: string): string | null {
-    const href = rawHref.trim();
-    if (!href) return null;
-
-    if (/^(javascript|data|vbscript|file):/i.test(href)) return null;
-    if (href.startsWith('//')) return null;
-
-    if (href.startsWith('#')) return href;
-    if (/^mailto:/i.test(href)) return href;
-    if (/^tel:/i.test(href)) return href;
-    if (/^https?:\/\//i.test(href)) return href;
-    if (href.startsWith('/') || href.startsWith('./') || href.startsWith('../')) return href;
-
-    // Allow bare relative paths like docs/intro.md
-    if (!/^[a-z][a-z0-9+.-]*:/i.test(href)) return href;
-
-    return null;
-  }
-
-  function sanitizeImageSrc(rawSrc: string): string | null {
-    const src = rawSrc.trim();
-    if (!src) return null;
-
-    if (/^(javascript|data|vbscript|file):/i.test(src)) return null;
-    if (src.startsWith('//')) return null;
-
-    if (/^https?:\/\//i.test(src)) return src;
-    if (src.startsWith('/') || src.startsWith('./') || src.startsWith('../')) return src;
-    if (!/^[a-z][a-z0-9+.-]*:/i.test(src)) return src;
-
-    return null;
-  }
-
   function createSafeRenderer() {
     const renderer = new marked.Renderer();
 
     renderer.link = ({ href, text, title }: { href?: string; text?: string; title?: string | null }) => {
       const safeText = escapeHtml(String(text ?? ''));
-      const safeHref = sanitizeHref(String(href ?? ''));
+      const safeHref = sanitizeMarkdownHref(String(href ?? ''));
       if (!safeHref) {
         return safeText;
       }
@@ -85,27 +46,18 @@
       return `<img src="${escapeAttr(safeSrc)}" alt="${alt}" loading="lazy"${titleAttr} />`;
     };
 
-    renderer.html = (token: unknown) => {
-      if (typeof token === 'string') {
-        return escapeHtml(token);
-      }
-      if (token && typeof token === 'object') {
-        const candidate = (token as { raw?: unknown; text?: unknown }).raw ?? (token as { text?: unknown }).text;
-        return escapeHtml(String(candidate ?? ''));
-      }
-      return '';
-    };
-
     return renderer;
   }
 
   const html = $derived(
-    marked.parse(content, {
-      gfm: true,
-      breaks: true,
-      renderer: createSafeRenderer(),
-      async: false,
-    }) as string
+    sanitizeRenderedHtml(
+      marked.parse(content, {
+        gfm: true,
+        breaks: true,
+        renderer: createSafeRenderer(),
+        async: false,
+      }) as string
+    )
   );
 </script>
 

@@ -1,4 +1,13 @@
 import { marked } from 'marked';
+import {
+  escapeAttr,
+  escapeHtml,
+  isRelativeMarkdownLink,
+  normalizeRelativeFilePath,
+  sanitizeImageSrc,
+  sanitizeMarkdownHref,
+  sanitizeRenderedHtml,
+} from '$lib/markdown/sanitize';
 
 const FENCE_EXTENSION_TO_LANG: Record<string, string> = {
   // JavaScript variants
@@ -71,50 +80,6 @@ function stripFrontmatter(content: string): string {
   return content.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, '');
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function escapeAttr(value: string): string {
-  return escapeHtml(value).replace(/`/g, '&#96;');
-}
-
-function normalizeRelativeFilePath(path: string): string {
-  return path.trim().replace(/^\.\/+/, '').replace(/^\/+/, '');
-}
-
-function isRelativeMarkdownLink(href: string): boolean {
-  const value = href.trim();
-  if (!value) return false;
-  if (value.startsWith('#')) return false;
-  if (value.startsWith('//')) return false;
-  if (/^https?:\/\//i.test(value)) return false;
-  if (/^mailto:/i.test(value)) return false;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
-  return true;
-}
-
-function sanitizeMarkdownHref(rawHref: string): string | null {
-  const href = rawHref.trim();
-  if (!href) return null;
-
-  if (/^(javascript|data|vbscript|file):/i.test(href)) return null;
-  if (href.startsWith('//')) return null;
-
-  if (href.startsWith('#')) return href;
-  if (/^mailto:/i.test(href) || /^tel:/i.test(href)) return href;
-  if (/^https?:\/\//i.test(href)) return href;
-  if (href.startsWith('/') || href.startsWith('./') || href.startsWith('../')) return href;
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(href)) return href;
-
-  return null;
-}
-
 function normalizeLanguage(value: string): string {
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9+.#_-]/g, '');
   return normalized || 'plaintext';
@@ -173,15 +138,13 @@ function createSafeMarkdownRenderer() {
     return `<a href="${escapeAttr(safeHref)}" target="_blank" rel="noopener noreferrer nofollow">${safeText}</a>`;
   };
 
-  renderer.html = (token: unknown) => {
-    if (typeof token === 'string') {
-      return escapeHtml(token);
-    }
-    if (token && typeof token === 'object') {
-      const candidate = (token as { raw?: unknown; text?: unknown }).raw ?? (token as { text?: unknown }).text;
-      return escapeHtml(String(candidate ?? ''));
-    }
-    return '';
+  renderer.image = ({ href, text, title }: { href?: string; text?: string; title?: string | null }) => {
+    const safeSrc = sanitizeImageSrc(String(href ?? ''));
+    if (!safeSrc) return '';
+
+    const alt = escapeAttr(String(text ?? ''));
+    const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
+    return `<img src="${escapeAttr(safeSrc)}" alt="${alt}" loading="lazy"${titleAttr}>`;
   };
 
   renderer.code = ({ text, lang }: { text: string; lang?: string }) => {
@@ -197,10 +160,11 @@ function createSafeMarkdownRenderer() {
 export function renderReadmeMarkdown(markdown: string | null | undefined): string {
   if (!markdown) return '';
   const stripped = stripFrontmatter(markdown);
-  return marked.parse(stripped, {
+  const rendered = marked.parse(stripped, {
     renderer: createSafeMarkdownRenderer(),
     gfm: true,
     breaks: true,
     async: false,
   }) as string;
+  return sanitizeRenderedHtml(rendered);
 }
