@@ -11,6 +11,8 @@ interface SubmitResponse {
   success: boolean;
   message?: string;
   error?: string;
+  code?: string;
+  retryAfterSeconds?: number;
   existingSlug?: string;
   multipleFound?: boolean;
   skills?: Array<{ path: string; skillPath: string; depth: number }>;
@@ -323,21 +325,29 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
     }
 
     if (response.status === 400) {
-      console.error(pc.red(`Submission failed: ${result.error || 'Invalid request'}`));
-      if (result.error?.includes('SKILL.md')) {
+      const submitError = result.error || result.message || 'Invalid request';
+      console.error(pc.red(`Submission failed: ${submitError}`));
+      if (result.code === 'no_skill_md_found') {
         console.log();
         console.log(pc.dim('Make sure your repository has a SKILL.md file in the root directory.'));
         console.log(pc.dim('Learn more: https://skillscat.com/docs/skill-format'));
       }
-      if (result.error?.includes('fork') || result.error?.includes('Fork')) {
+      if (result.code === 'fork_no_unique_commits') {
         console.log();
-        console.log(pc.dim('Please submit the original repository instead of a fork.'));
+        console.log(pc.dim('Please submit the original repository, or add your own commits to the fork first.'));
+      }
+      if (result.code === 'fork_behind_upstream') {
+        console.log();
+        console.log(pc.dim('Please sync your fork with upstream before submitting it.'));
       }
       process.exit(1);
     }
 
     if (!response.ok || !result.success) {
       console.error(pc.red(`Submission failed: ${result.error || result.message || 'Unknown error'}`));
+      if (result.code === 'github_rate_limited' && result.retryAfterSeconds) {
+        console.log(pc.dim(`Try again in about ${result.retryAfterSeconds} seconds.`));
+      }
       process.exit(1);
     }
 

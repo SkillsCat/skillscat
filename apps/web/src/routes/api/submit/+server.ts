@@ -1,6 +1,11 @@
-import { json, error } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { createLogger } from '$lib';
+import {
+  formatSubmitApiMessage,
+  resolveSubmitApiLocale,
+  type SubmitApiMessageDescriptor,
+} from '$lib/i18n/submit-api';
 import type { SkillMdLocation, ScanResult } from '$lib/types';
 import { githubRequest } from '$lib/server/github-request';
 import { getCached } from '$lib/server/cache';
@@ -28,6 +33,7 @@ type GitHubUpstreamErrorCode = 'github_rate_limited' | 'github_upstream_failure'
 type GitHubRequestMode = 'default' | 'submit_fast_fail';
 const ANON_CLI_SUBMIT_HEADER = 'x-skillscat-background-submit';
 const ANON_CLI_SUBMIT_SENTINEL = 'anonymous_cli';
+const SUBMIT_LOCALE_HEADER = 'x-skillscat-locale';
 
 class GitHubUpstreamError extends Error {
   readonly code: GitHubUpstreamErrorCode;
@@ -53,10 +59,123 @@ class GitHubUpstreamError extends Error {
   }
 }
 
-function hasStatus(errorValue: unknown): errorValue is { status: number } {
-  if (typeof errorValue !== 'object' || errorValue === null) return false;
-  if (!('status' in errorValue)) return false;
-  return typeof (errorValue as { status: unknown }).status === 'number';
+class SubmitRouteError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly descriptor: SubmitApiMessageDescriptor;
+  readonly extraBody: Record<string, string | number | boolean | null | undefined>;
+
+  constructor({
+    status,
+    code,
+    descriptor,
+    extraBody = {},
+  }: {
+    status: number;
+    code: string;
+    descriptor: SubmitApiMessageDescriptor;
+    extraBody?: Record<string, string | number | boolean | null | undefined>;
+  }) {
+    super(code);
+    this.name = 'SubmitRouteError';
+    this.status = status;
+    this.code = code;
+    this.descriptor = descriptor;
+    this.extraBody = extraBody;
+  }
+}
+
+function isSubmitRouteError(errorValue: unknown): errorValue is SubmitRouteError {
+  return errorValue instanceof SubmitRouteError;
+}
+
+function buildSubmitErrorResponse(
+  locale: App.Locals['locale'],
+  err: SubmitRouteError,
+  forValidation: boolean
+): Response {
+  const body: Record<string, string | number | boolean | null | undefined> = {
+    code: err.code,
+    error: formatSubmitApiMessage(locale, err.descriptor),
+    ...err.extraBody,
+  };
+
+  if (forValidation) {
+    body.valid = false;
+  } else {
+    body.success = false;
+  }
+
+  return json(body, {
+    status: err.status,
+    headers: {
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
+function buildSubmitCheckResponseHeaders(): Headers {
+  return new Headers({
+    'Cache-Control': `private, max-age=${SUBMIT_CHECK_CACHE_TTL_SECONDS}`,
+    Vary: `${SUBMIT_LOCALE_HEADER}, Accept-Language, Cookie`,
+  });
+}
+
+function localizeDescriptor(
+  locale: App.Locals['locale'],
+  descriptor: SubmitApiMessageDescriptor | undefined
+): string | undefined {
+  if (!descriptor) return undefined;
+  return formatSubmitApiMessage(locale, descriptor);
+}
+
+function buildSubmitMultipleMessage(
+  locale: App.Locals['locale'],
+  queued: number,
+  existing: number,
+  truncated: boolean
+): string {
+  const parts = [
+    formatSubmitApiMessage(locale, {
+      key: 'skillsQueued',
+      values: { count: queued },
+    }),
+  ];
+
+  if (existing > 0) {
+    parts.push(formatSubmitApiMessage(locale, {
+      key: 'skillsAlreadyExist',
+      values: { count: existing },
+    }));
+  }
+
+  if (truncated) {
+    parts.push(formatSubmitApiMessage(locale, { key: 'skillsSkippedDueToLimit' }));
+  }
+
+  return parts.join(' ');
+}
+
+function localizeSubmitCheckPayload(
+  locale: App.Locals['locale'],
+  payload: SubmitCheckPayload
+): SubmitCheckPayload {
+  const localized: SubmitCheckPayload = { ...payload };
+  const errorText = localizeDescriptor(locale, payload.errorDescriptor);
+  const messageText = localizeDescriptor(locale, payload.messageDescriptor);
+
+  if (errorText) {
+    localized.error = errorText;
+  }
+
+  if (messageText) {
+    localized.message = messageText;
+  }
+
+  delete localized.errorDescriptor;
+  delete localized.messageDescriptor;
+
+  return localized;
 }
 
 function isSkillscatCliUserAgent(ua: string | null): boolean {
@@ -105,12 +224,11 @@ function isGitHubRateLimited(response: Response): boolean {
 function toGitHubUpstreamError(response: Response, context: string): GitHubUpstreamError {
   if (isGitHubRateLimited(response)) {
     const retryAfterSeconds = parseRetryAfterSeconds(response.headers);
-    const retryHint = retryAfterSeconds !== null ? ` Retry after ${retryAfterSeconds} seconds.` : '';
 
     return new GitHubUpstreamError({
       code: 'github_rate_limited',
       status: 429,
-      message: `GitHub API rate limit reached while ${context}.${retryHint}`,
+      message: `GitHub rate limit hit while ${context}.`,
       retryAfterSeconds,
     });
   }
@@ -119,11 +237,15 @@ function toGitHubUpstreamError(response: Response, context: string): GitHubUpstr
   return new GitHubUpstreamError({
     code: 'github_upstream_failure',
     status,
-    message: `GitHub API request failed while ${context} (GitHub status ${response.status}). Please retry later.`,
+    message: `GitHub request failed while ${context}.`,
   });
 }
 
-function buildGitHubUpstreamResponse(err: GitHubUpstreamError, forValidation: boolean): Response {
+function buildGitHubUpstreamResponse(
+  locale: App.Locals['locale'],
+  err: GitHubUpstreamError,
+  forValidation: boolean
+): Response {
   const headers = new Headers({
     'Cache-Control': 'no-store',
   });
@@ -135,12 +257,26 @@ function buildGitHubUpstreamResponse(err: GitHubUpstreamError, forValidation: bo
   const body: Record<string, string | number | boolean> = forValidation
     ? {
       valid: false,
-      error: err.message,
+      error: formatSubmitApiMessage(locale, err.retryAfterSeconds !== null
+        ? {
+          key: 'githubRateLimitedWithRetryAfter',
+          values: { retryAfterSeconds: err.retryAfterSeconds },
+        }
+        : {
+          key: err.code === 'github_rate_limited' ? 'githubRateLimited' : 'githubUpstreamFailure',
+        }),
       code: err.code,
     }
     : {
       success: false,
-      error: err.message,
+      error: formatSubmitApiMessage(locale, err.retryAfterSeconds !== null
+        ? {
+          key: 'githubRateLimitedWithRetryAfter',
+          values: { retryAfterSeconds: err.retryAfterSeconds },
+        }
+        : {
+          key: err.code === 'github_rate_limited' ? 'githubRateLimited' : 'githubUpstreamFailure',
+        }),
       code: err.code,
     };
 
@@ -173,7 +309,7 @@ async function githubRequestForSubmit(
     throw new GitHubUpstreamError({
       code: 'github_upstream_failure',
       status: 503,
-      message: 'GitHub API request failed due to an upstream network issue. Please retry later.',
+      message: 'GitHub request failed due to an upstream network issue.',
     });
   }
 }
@@ -194,13 +330,21 @@ async function readLimitedJsonBody(request: Request, maxBytes: number): Promise<
   if (contentLength) {
     const parsed = Number(contentLength);
     if (Number.isFinite(parsed) && parsed > maxBytes) {
-      throw error(413, 'Request body too large');
+      throw new SubmitRouteError({
+        status: 413,
+        code: 'request_body_too_large',
+        descriptor: { key: 'requestBodyTooLarge' },
+      });
     }
   }
 
   const body = request.body;
   if (!body) {
-    throw error(400, 'Request body is required');
+    throw new SubmitRouteError({
+      status: 400,
+      code: 'request_body_required',
+      descriptor: { key: 'requestBodyRequired' },
+    });
   }
 
   const reader = body.getReader();
@@ -215,7 +359,11 @@ async function readLimitedJsonBody(request: Request, maxBytes: number): Promise<
     totalBytes += value.byteLength;
     if (totalBytes > maxBytes) {
       reader.cancel().catch(() => {});
-      throw error(413, 'Request body too large');
+      throw new SubmitRouteError({
+        status: 413,
+        code: 'request_body_too_large',
+        descriptor: { key: 'requestBodyTooLarge' },
+      });
     }
 
     chunks.push(value);
@@ -231,7 +379,11 @@ async function readLimitedJsonBody(request: Request, maxBytes: number): Promise<
   try {
     return JSON.parse(new TextDecoder().decode(merged)) as unknown;
   } catch {
-    throw error(400, 'Invalid JSON body');
+    throw new SubmitRouteError({
+      status: 400,
+      code: 'invalid_json_body',
+      descriptor: { key: 'invalidJsonBody' },
+    });
   }
 }
 
@@ -557,6 +709,13 @@ interface ParsedRepoUrl {
   refPath?: string;
 }
 
+interface ForkParentInfo {
+  owner: string;
+  repo: string;
+  defaultBranch: string;
+  fullName: string;
+}
+
 interface RepoInfo {
   owner: string;
   repo: string;
@@ -565,6 +724,19 @@ interface RepoInfo {
   description?: string;
   stars?: number;
   fork?: boolean;
+  parent?: ForkParentInfo | null;
+}
+
+interface ForkCompareInfo {
+  status: 'ahead' | 'behind' | 'identical' | 'diverged';
+  aheadBy: number;
+  behindBy: number;
+}
+
+interface SubmitValidationFailure {
+  status: number;
+  code: string;
+  descriptor: SubmitApiMessageDescriptor;
 }
 
 /**
@@ -623,20 +795,33 @@ function parseRepoUrl(url: string): ParsedRepoUrl | null {
 /**
  * Resolve submitted path from parsed URL and enforce default-branch-only policy.
  */
-function resolveSubmittedPath(parsedUrl: ParsedRepoUrl, defaultBranch: string): { path: string } | { error: string } {
+function resolveSubmittedPath(
+  parsedUrl: ParsedRepoUrl,
+  defaultBranch: string
+): { path: string } | SubmitValidationFailure {
   if (!parsedUrl.refType) {
     return { path: parsedUrl.path };
   }
 
   if (!parsedUrl.refPath) {
     return {
-      error: `Invalid GitHub URL format. Please use the repository root or the default branch (${defaultBranch}).`,
+      status: 400,
+      code: 'invalid_github_url_format',
+      descriptor: {
+        key: 'invalidGitHubUrlFormat',
+        values: { defaultBranch },
+      },
     };
   }
 
   if (parsedUrl.refType === 'commit') {
     return {
-      error: `Commit-specific URLs are not supported. Please submit using the repository root or the default branch (${defaultBranch}).`,
+      status: 400,
+      code: 'commit_specific_url_not_supported',
+      descriptor: {
+        key: 'commitSpecificUrlNotSupported',
+        values: { defaultBranch },
+      },
     };
   }
 
@@ -646,7 +831,12 @@ function resolveSubmittedPath(parsedUrl: ParsedRepoUrl, defaultBranch: string): 
 
   if (!matchesDefaultBranch) {
     return {
-      error: `Only the default branch (${defaultBranch}) is supported for submission.`,
+      status: 400,
+      code: 'default_branch_only_supported',
+      descriptor: {
+        key: 'defaultBranchOnlySupported',
+        values: { defaultBranch },
+      },
     };
   }
 
@@ -692,7 +882,18 @@ async function fetchGitHubRepo(
     stargazers_count?: number;
     fork?: boolean;
     default_branch?: string;
+    parent?: {
+      name?: string;
+      default_branch?: string;
+      owner?: {
+        login?: string;
+      };
+      full_name?: string;
+    } | null;
   };
+
+  const parentOwner = data.parent?.owner?.login;
+  const parentRepo = data.parent?.name;
 
   return {
     owner,
@@ -701,8 +902,101 @@ async function fetchGitHubRepo(
     name: data.name,
     description: data.description || undefined,
     stars: data.stargazers_count,
-    fork: data.fork
+    fork: data.fork,
+    parent: parentOwner && parentRepo
+      ? {
+        owner: parentOwner,
+        repo: parentRepo,
+        defaultBranch: data.parent?.default_branch || 'main',
+        fullName: data.parent?.full_name || `${parentOwner}/${parentRepo}`,
+      }
+      : null,
   };
+}
+
+async function fetchForkCompareInfo(
+  repo: RepoInfo,
+  token?: string,
+  mode: GitHubRequestMode = 'default'
+): Promise<ForkCompareInfo | null> {
+  if (!repo.parent) {
+    return null;
+  }
+
+  const basehead = `${repo.parent.owner}:${repo.parent.defaultBranch}...${repo.owner}:${repo.defaultBranch}`;
+  const response = await githubRequestForSubmit(
+    `${GITHUB_API_BASE}/repos/${repo.parent.owner}/${repo.parent.repo}/compare/${encodeURIComponent(basehead)}`,
+    token,
+    mode
+  );
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw toGitHubUpstreamError(response, `comparing fork ${repo.owner}/${repo.repo} with upstream ${repo.parent.fullName}`);
+  }
+
+  const data = await response.json() as {
+    status?: 'ahead' | 'behind' | 'identical' | 'diverged';
+    ahead_by?: number;
+    behind_by?: number;
+  };
+
+  return {
+    status: data.status || 'identical',
+    aheadBy: data.ahead_by ?? 0,
+    behindBy: data.behind_by ?? 0,
+  };
+}
+
+async function validateForkSubmission(
+  repo: RepoInfo,
+  token?: string,
+  mode: GitHubRequestMode = 'default'
+): Promise<SubmitValidationFailure | null> {
+  if (!repo.fork) {
+    return null;
+  }
+
+  const compareInfo = await fetchForkCompareInfo(repo, token, mode);
+  if (!compareInfo || !repo.parent) {
+    return {
+      status: 503,
+      code: 'fork_verification_failed',
+      descriptor: { key: 'forkVerificationFailed' },
+    };
+  }
+
+  if (compareInfo.behindBy > 0 || compareInfo.status === 'behind' || compareInfo.status === 'diverged') {
+    return {
+      status: 400,
+      code: 'fork_behind_upstream',
+      descriptor: {
+        key: 'forkBehindUpstream',
+        values: {
+          upstream: repo.parent.fullName,
+          behind: compareInfo.behindBy,
+        },
+      },
+    };
+  }
+
+  if (compareInfo.aheadBy <= 0 || compareInfo.status === 'identical') {
+    return {
+      status: 400,
+      code: 'fork_no_unique_commits',
+      descriptor: {
+        key: 'forkNoUniqueCommits',
+        values: {
+          upstream: repo.parent.fullName,
+        },
+      },
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -741,13 +1035,19 @@ async function checkGitHubSkillMd(
  * POST /api/submit - Submit a Skill
  */
 export const POST: RequestHandler = async ({ locals, platform, request }) => {
+  const locale = resolveSubmitApiLocale(request, locals.locale);
+
   try {
     const db = platform?.env?.DB;
     const queue = platform?.env?.INDEXING_QUEUE;
     const githubToken = platform?.env?.GITHUB_TOKEN;
 
     if (!db) {
-      throw error(500, 'Database not available');
+      throw new SubmitRouteError({
+        status: 500,
+        code: 'database_unavailable',
+        descriptor: { key: 'databaseNotAvailable' },
+      });
     }
 
     // Support authenticated submissions and anonymous CLI background submissions.
@@ -759,7 +1059,11 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       requireSubmitPublishScope(auth);
       submitterUserId = auth.userId;
     } else if (!anonymousCliBackgroundSubmit) {
-      throw error(401, 'Please sign in to submit a skill');
+      throw new SubmitRouteError({
+        status: 401,
+        code: 'auth_required',
+        descriptor: { key: 'authRequired' },
+      });
     }
 
     const githubRequestMode: GitHubRequestMode = 'submit_fast_fail';
@@ -768,13 +1072,21 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     const { url, skillPath: explicitSkillPath } = body;
 
     if (!url) {
-      throw error(400, 'Repository URL is required');
+      throw new SubmitRouteError({
+        status: 400,
+        code: 'repository_url_required',
+        descriptor: { key: 'repositoryUrlRequired' },
+      });
     }
 
     // Parse URL
     const repoInfo = parseRepoUrl(url);
     if (!repoInfo) {
-      throw error(400, 'Invalid repository URL. Only GitHub repositories are supported.');
+      throw new SubmitRouteError({
+        status: 400,
+        code: 'invalid_repository_url',
+        descriptor: { key: 'invalidRepositoryUrl' },
+      });
     }
 
     const { owner, repo } = repoInfo;
@@ -782,16 +1094,21 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     // Fetch repository info first
     const repoData = await fetchGitHubRepo(owner, repo, githubToken, githubRequestMode);
     if (!repoData) {
-      throw error(404, 'Repository not found');
+      throw new SubmitRouteError({
+        status: 404,
+        code: 'repository_not_found',
+        descriptor: { key: 'repositoryNotFound' },
+      });
     }
 
-    if (repoData.fork) {
-      throw error(400, 'Forked repositories are not accepted. Please submit the original repository.');
+    const forkValidation = await validateForkSubmission(repoData, githubToken, githubRequestMode);
+    if (forkValidation) {
+      throw new SubmitRouteError(forkValidation);
     }
 
     const resolvedPath = resolveSubmittedPath(repoInfo, repoData.defaultBranch);
-    if ('error' in resolvedPath) {
-      throw error(400, resolvedPath.error);
+    if ('descriptor' in resolvedPath) {
+      throw new SubmitRouteError(resolvedPath);
     }
 
     // Use explicit skillPath if provided, otherwise use path from URL
@@ -800,7 +1117,11 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     // Reject dot-folder submissions from repos with insufficient stars
     const allowDotFolders = (repoData.stars ?? 0) >= DOT_FOLDER_MIN_STARS;
     if (path && isInDotFolder(path) && !allowDotFolders) {
-      throw error(400, 'Skills from IDE-specific folders are only accepted from repositories with 500+ stars.');
+      throw new SubmitRouteError({
+        status: 400,
+        code: 'dot_folder_requires_stars',
+        descriptor: { key: 'dotFolderRequiresStars' },
+      });
     }
 
     // First, check if SKILL.md exists at the submitted path (or root if no path)
@@ -816,6 +1137,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
         db,
         queue,
         platform,
+        locale,
       });
     }
 
@@ -823,7 +1145,11 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders, githubRequestMode);
 
     if (scanResult.found.length === 0) {
-      throw error(400, 'No SKILL.md file found in the repository');
+      throw new SubmitRouteError({
+        status: 400,
+        code: 'no_skill_md_found',
+        descriptor: { key: 'noSkillMdFound' },
+      });
     }
 
     // Auto-submit all found skills
@@ -836,16 +1162,33 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       db,
       queue,
       platform,
+      locale,
     });
   } catch (err: unknown) {
     if (err instanceof GitHubUpstreamError) {
       log.warn('GitHub upstream error while submitting skill:', err.message);
-      return buildGitHubUpstreamResponse(err, false);
+      return buildGitHubUpstreamResponse(locale, err, false);
+    }
+
+    if (isSubmitRouteError(err)) {
+      log.warn('Submit validation failed:', {
+        code: err.code,
+        status: err.status,
+      });
+      return buildSubmitErrorResponse(locale, err, false);
     }
 
     log.error('Error submitting skill:', err);
-    if (hasStatus(err)) throw err;
-    throw error(500, 'Failed to submit skill');
+    return json({
+      success: false,
+      code: 'submit_failed',
+      error: formatSubmitApiMessage(locale, { key: 'submitFailed' }),
+    }, {
+      status: 500,
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    });
   }
 };
 
@@ -861,6 +1204,7 @@ async function submitMultipleSkills({
   db,
   queue,
   platform,
+  locale,
 }: {
   owner: string;
   repo: string;
@@ -870,10 +1214,15 @@ async function submitMultipleSkills({
   db: D1Database | undefined;
   queue: Queue | undefined;
   platform: App.Platform | undefined;
+  locale: App.Locals['locale'];
 }): Promise<Response> {
   if (!queue) {
     log.error(`INDEXING_QUEUE not available for ${owner}/${repo}`);
-    throw error(500, 'Indexing queue not configured');
+    throw new SubmitRouteError({
+      status: 500,
+      code: 'indexing_queue_not_configured',
+      descriptor: { key: 'indexingQueueNotConfigured' },
+    });
   }
 
   const results: { path: string; status: 'queued' | 'exists' | 'failed'; slug?: string }[] = [];
@@ -944,7 +1293,7 @@ async function submitMultipleSkills({
     failed,
     truncated,
     results,
-    message: `Submitted ${queued} skill${queued !== 1 ? 's' : ''} for processing.${existing > 0 ? ` ${existing} already exist.` : ''}${truncated ? ' Some skills were not included due to limits.' : ''}`,
+    message: buildSubmitMultipleMessage(locale, queued, existing, truncated),
   });
 }
 
@@ -959,6 +1308,7 @@ async function submitSingleSkill({
   db,
   queue,
   platform,
+  locale,
 }: {
   owner: string;
   repo: string;
@@ -967,6 +1317,7 @@ async function submitSingleSkill({
   db: D1Database | undefined;
   queue: Queue | undefined;
   platform: App.Platform | undefined;
+  locale: App.Locals['locale'];
 }): Promise<Response> {
   // Check if already exists (include skill_path in uniqueness check)
   if (db) {
@@ -985,14 +1336,15 @@ async function submitSingleSkill({
         if (resurrected) {
           return json({
             success: true,
-            message: 'Skill has been resurrected and is now available.',
+            message: formatSubmitApiMessage(locale, { key: 'skillResurrected' }),
             slug: existing.slug,
           });
         }
         // If resurrection failed, still return the existing slug
         return json({
           success: false,
-          error: 'This skill is archived but could not be resurrected',
+          code: 'skill_archived_resurrection_failed',
+          error: formatSubmitApiMessage(locale, { key: 'skillArchivedResurrectionFailed' }),
           existingSlug: existing.slug,
         }, { status: 409 });
       }
@@ -1000,7 +1352,8 @@ async function submitSingleSkill({
       return json(
         {
           success: false,
-          error: 'This skill already exists',
+          code: 'skill_already_exists',
+          error: formatSubmitApiMessage(locale, { key: 'skillAlreadyExists' }),
           existingSlug: existing.slug,
         },
         { status: 409 }
@@ -1024,11 +1377,19 @@ async function submitSingleSkill({
       log.log(`Successfully queued for indexing: ${owner}/${repo}, user: ${userId ?? ANON_CLI_SUBMIT_SENTINEL}`);
     } catch (queueError) {
       log.error(`Failed to send to indexing queue: ${owner}/${repo}`, queueError);
-      throw error(500, 'Failed to queue skill for processing');
+      throw new SubmitRouteError({
+        status: 500,
+        code: 'failed_to_queue_skill',
+        descriptor: { key: 'failedToQueueSkill' },
+      });
     }
   } else {
     log.error(`INDEXING_QUEUE not available for ${owner}/${repo}`);
-    throw error(500, 'Indexing queue not configured');
+    throw new SubmitRouteError({
+      status: 500,
+      code: 'indexing_queue_not_configured',
+      descriptor: { key: 'indexingQueueNotConfigured' },
+    });
   }
 
   // Record user action
@@ -1043,7 +1404,7 @@ async function submitSingleSkill({
 
   return json({
     success: true,
-    message: 'Skill submitted successfully. It will appear in our catalog once processed.',
+    message: formatSubmitApiMessage(locale, { key: 'skillSubmitted' }),
   });
 }
 
@@ -1053,13 +1414,16 @@ function buildSubmitCheckCacheKey(repoUrl: string): string {
 
 interface SubmitCheckPayload {
   valid: boolean;
+  code?: string;
   error?: string;
+  errorDescriptor?: SubmitApiMessageDescriptor;
   owner?: string;
   repo?: string;
   path?: string;
   archived?: boolean;
   existingSlug?: string;
   message?: string;
+  messageDescriptor?: SubmitApiMessageDescriptor;
   multipleFound?: boolean;
   skills?: SkillMdLocation[];
   truncated?: boolean;
@@ -1090,7 +1454,7 @@ async function refreshSubmitCheckExistingState(
     .first<ExistingSkillRow>();
 
   if (!existing) {
-    if (payload.error === 'This skill already exists' || payload.archived) {
+    if (payload.code === 'skill_already_exists' || payload.archived) {
       return {
         valid: true,
         owner: payload.owner,
@@ -1112,7 +1476,8 @@ async function refreshSubmitCheckExistingState(
       path: payload.path,
       archived: true,
       existingSlug: existing.slug,
-      message: 'This skill is archived and will be resurrected upon submission.',
+      code: 'archived_will_be_resurrected',
+      messageDescriptor: { key: 'archivedWillBeResurrected' },
       repoName: payload.repoName,
       description: payload.description,
       stars: payload.stars,
@@ -1121,7 +1486,8 @@ async function refreshSubmitCheckExistingState(
 
   return {
     valid: false,
-    error: 'This skill already exists',
+    code: 'skill_already_exists',
+    errorDescriptor: { key: 'skillAlreadyExists' },
     existingSlug: existing.slug,
   };
 }
@@ -1129,11 +1495,17 @@ async function refreshSubmitCheckExistingState(
 /**
  * GET /api/submit/check - Check if URL is valid
  */
-export const GET: RequestHandler = async ({ platform, url }) => {
+export const GET: RequestHandler = async ({ locals, platform, request, url }) => {
+  const locale = resolveSubmitApiLocale(request, locals.locale);
+
   try {
     const repoUrl = url.searchParams.get('url');
     if (!repoUrl) {
-      throw error(400, 'URL is required');
+      throw new SubmitRouteError({
+        status: 400,
+        code: 'repository_url_required',
+        descriptor: { key: 'repositoryUrlRequired' },
+      });
     }
     const cacheKey = buildSubmitCheckCacheKey(repoUrl);
     const { data } = await getCached(
@@ -1142,7 +1514,11 @@ export const GET: RequestHandler = async ({ platform, url }) => {
         // Parse URL
         const repoInfo = parseRepoUrl(repoUrl);
         if (!repoInfo) {
-          return { valid: false, error: 'Invalid repository URL. Only GitHub repositories are supported.' };
+          return {
+            valid: false,
+            code: 'invalid_repository_url',
+            errorDescriptor: { key: 'invalidRepositoryUrl' },
+          } satisfies SubmitCheckPayload;
         }
 
         const { owner, repo } = repoInfo;
@@ -1153,16 +1529,29 @@ export const GET: RequestHandler = async ({ platform, url }) => {
         // Fetch repository info first
         const repoData = await fetchGitHubRepo(owner, repo, githubToken, 'submit_fast_fail');
         if (!repoData) {
-          return { valid: false, error: 'Repository not found' };
+          return {
+            valid: false,
+            code: 'repository_not_found',
+            errorDescriptor: { key: 'repositoryNotFound' },
+          } satisfies SubmitCheckPayload;
         }
 
-        if (repoData.fork) {
-          return { valid: false, error: 'Forked repositories are not accepted' };
+        const forkValidation = await validateForkSubmission(repoData, githubToken, 'submit_fast_fail');
+        if (forkValidation) {
+          return {
+            valid: false,
+            code: forkValidation.code,
+            errorDescriptor: forkValidation.descriptor,
+          } satisfies SubmitCheckPayload;
         }
 
         const resolvedPath = resolveSubmittedPath(repoInfo, repoData.defaultBranch);
-        if ('error' in resolvedPath) {
-          return { valid: false, error: resolvedPath.error };
+        if ('descriptor' in resolvedPath) {
+          return {
+            valid: false,
+            code: resolvedPath.code,
+            errorDescriptor: resolvedPath.descriptor,
+          } satisfies SubmitCheckPayload;
         }
 
         const path = resolvedPath.path;
@@ -1192,17 +1581,19 @@ export const GET: RequestHandler = async ({ platform, url }) => {
                   repo,
                   path,
                   archived: true,
+                  code: 'archived_will_be_resurrected',
                   existingSlug: existing.slug,
-                  message: 'This skill is archived and will be resurrected upon submission.',
+                  messageDescriptor: { key: 'archivedWillBeResurrected' },
                   repoName: repoData.name,
                   description: repoData.description,
                   stars: repoData.stars,
-                };
+                } satisfies SubmitCheckPayload;
               }
 
               return {
                 valid: false,
-                error: 'This skill already exists',
+                code: 'skill_already_exists',
+                errorDescriptor: { key: 'skillAlreadyExists' },
                 owner,
                 repo,
                 path,
@@ -1210,7 +1601,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
                 repoName: repoData.name,
                 description: repoData.description,
                 stars: repoData.stars,
-              };
+              } satisfies SubmitCheckPayload;
             }
           }
 
@@ -1222,14 +1613,18 @@ export const GET: RequestHandler = async ({ platform, url }) => {
             repoName: repoData.name,
             description: repoData.description,
             stars: repoData.stars,
-          };
+          } satisfies SubmitCheckPayload;
         }
 
         // No SKILL.md at submitted path - scan for SKILL.md files as fallback
         const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders, 'submit_fast_fail');
 
         if (scanResult.found.length === 0) {
-          return { valid: false, error: 'No SKILL.md file found in the repository' };
+          return {
+            valid: false,
+            code: 'no_skill_md_found',
+            errorDescriptor: { key: 'noSkillMdFound' },
+          } satisfies SubmitCheckPayload;
         }
 
         if (scanResult.found.length > 1) {
@@ -1244,7 +1639,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
             repoName: repoData.name,
             description: repoData.description,
             stars: repoData.stars,
-          };
+          } satisfies SubmitCheckPayload;
         }
 
         // Single SKILL.md found - check if it already exists
@@ -1266,17 +1661,19 @@ export const GET: RequestHandler = async ({ platform, url }) => {
                 repo,
                 path: singlePath,
                 archived: true,
+                code: 'archived_will_be_resurrected',
                 existingSlug: existing.slug,
-                message: 'This skill is archived and will be resurrected upon submission.',
+                messageDescriptor: { key: 'archivedWillBeResurrected' },
                 repoName: repoData.name,
                 description: repoData.description,
                 stars: repoData.stars,
-              };
+              } satisfies SubmitCheckPayload;
             }
 
             return {
               valid: false,
-              error: 'This skill already exists',
+              code: 'skill_already_exists',
+              errorDescriptor: { key: 'skillAlreadyExists' },
               owner,
               repo,
               path: singlePath,
@@ -1284,7 +1681,7 @@ export const GET: RequestHandler = async ({ platform, url }) => {
               repoName: repoData.name,
               description: repoData.description,
               stars: repoData.stars,
-            };
+            } satisfies SubmitCheckPayload;
           }
         }
 
@@ -1296,25 +1693,40 @@ export const GET: RequestHandler = async ({ platform, url }) => {
           repoName: repoData.name,
           description: repoData.description,
           stars: repoData.stars,
-        };
+        } satisfies SubmitCheckPayload;
       },
       SUBMIT_CHECK_CACHE_TTL_SECONDS
     );
 
-    const responsePayload = await refreshSubmitCheckExistingState(data as SubmitCheckPayload, platform?.env?.DB);
+    const responsePayload = localizeSubmitCheckPayload(
+      locale,
+      await refreshSubmitCheckExistingState(data as SubmitCheckPayload, platform?.env?.DB)
+    );
 
     return json(responsePayload, {
-      headers: {
-        'Cache-Control': `public, max-age=${SUBMIT_CHECK_CACHE_TTL_SECONDS}`
-      }
+      headers: buildSubmitCheckResponseHeaders(),
     });
   } catch (err: unknown) {
     if (err instanceof GitHubUpstreamError) {
       log.warn('GitHub upstream error while checking URL:', err.message);
-      return buildGitHubUpstreamResponse(err, true);
+      return buildGitHubUpstreamResponse(locale, err, true);
+    }
+
+    if (isSubmitRouteError(err)) {
+      log.warn('Submit check validation failed:', {
+        code: err.code,
+        status: err.status,
+      });
+      return buildSubmitErrorResponse(locale, err, true);
     }
 
     log.error('Error checking URL:', err);
-    return json({ valid: false, error: 'Failed to validate URL' });
+    return json({
+      valid: false,
+      code: 'failed_to_validate_url',
+      error: formatSubmitApiMessage(locale, { key: 'failedToValidateUrl' }),
+    }, {
+      headers: buildSubmitCheckResponseHeaders(),
+    });
   }
 };
