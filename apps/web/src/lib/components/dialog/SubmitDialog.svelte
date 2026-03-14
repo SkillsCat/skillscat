@@ -37,14 +37,10 @@
   // Form state
   let githubUrl = $state('');
   let isSubmitting = $state(false);
-  let isChecking = $state(false);
   let error = $state<string | null>(null);
-  let checkMessage = $state<string | null>(null);
   let success = $state(false);
   let successMessage = $state<string | null>(null);
   let existingSkillSlug = $state<string | null>(null);
-  let checkedUrl = $state('');
-  let precheckState = $state<'idle' | 'valid' | 'invalid'>('idle');
 
   // Result state for multi-skill submission
   let submitResults = $state<SubmitResult[]>([]);
@@ -67,123 +63,13 @@
       return false;
     }
   });
-  const normalizedGithubUrl = $derived(githubUrl.trim());
-  const isPrecheckFresh = $derived(
-    normalizedGithubUrl.length > 0
-    && checkedUrl === normalizedGithubUrl
-    && precheckState !== 'idle'
-  );
-  const canSubmit = $derived(
-    isValidUrl
-    && !isSubmitting
-    && !isChecking
-    && isPrecheckFresh
-    && precheckState !== 'invalid'
-  );
-
-  $effect(() => {
-    const url = normalizedGithubUrl;
-    const locale = i18n.locale();
-
-    if (!isOpen || !url) {
-      isChecking = false;
-      precheckState = 'idle';
-      checkedUrl = '';
-      checkMessage = null;
-      existingSkillSlug = null;
-      if (!isSubmitting) {
-        error = null;
-      }
-      return;
-    }
-
-    if (!isValidUrl) {
-      isChecking = false;
-      precheckState = 'idle';
-      checkedUrl = '';
-      checkMessage = null;
-      existingSkillSlug = null;
-      if (!isSubmitting) {
-        error = null;
-      }
-      return;
-    }
-
-    error = null;
-    checkMessage = null;
-    existingSkillSlug = null;
-    checkedUrl = '';
-    precheckState = 'idle';
-
-    const controller = new AbortController();
-    let disposed = false;
-
-    const timer = setTimeout(async () => {
-      isChecking = true;
-
-      try {
-        const params = new URLSearchParams({ url });
-        const response = await fetch(`/api/submit/check?${params.toString()}`, {
-          headers: {
-            'X-Skillscat-Locale': locale,
-          },
-          signal: controller.signal,
-        });
-
-        const contentType = response.headers.get('content-type') || '';
-        const data = (contentType.includes('application/json')
-          ? await response.json()
-          : { error: await response.text(), valid: false }) as SubmitCheckResponse;
-
-        if (disposed || normalizedGithubUrl !== url) return;
-
-        checkedUrl = url;
-        existingSkillSlug = data.existingSlug || null;
-
-        if (!response.ok || data.valid === false) {
-          precheckState = 'invalid';
-          error = data.error || data.message || messages.submitDialog.failedToSubmit;
-          checkMessage = null;
-          return;
-        }
-
-        precheckState = 'valid';
-        error = null;
-        checkMessage = data.message || null;
-      } catch (err: unknown) {
-        if (err instanceof DOMException && err.name === 'AbortError') {
-          return;
-        }
-
-        if (disposed || normalizedGithubUrl !== url) return;
-
-        checkedUrl = url;
-        precheckState = 'invalid';
-        error = err instanceof Error && err.message
-          ? err.message
-          : messages.submitDialog.occurredError;
-        checkMessage = null;
-        existingSkillSlug = null;
-      } finally {
-        if (!disposed && normalizedGithubUrl === url) {
-          isChecking = false;
-        }
-      }
-    }, 350);
-
-    return () => {
-      disposed = true;
-      clearTimeout(timer);
-      controller.abort();
-    };
-  });
+  const canSubmit = $derived(isValidUrl && !isSubmitting);
 
   async function handleSubmit() {
-    if (!canSubmit) return;
+    if (!isValidUrl || isSubmitting) return;
 
     isSubmitting = true;
     error = null;
-    checkMessage = null;
     success = false;
     successMessage = null;
     existingSkillSlug = null;
@@ -192,6 +78,24 @@
     existingCount = 0;
 
     try {
+      const checkParams = new URLSearchParams({ url: githubUrl.trim() });
+      const checkResponse = await fetch(`/api/submit?${checkParams.toString()}`, {
+        headers: {
+          'X-Skillscat-Locale': i18n.locale(),
+        },
+      });
+
+      const checkContentType = checkResponse.headers.get('content-type') || '';
+      const checkData = (checkContentType.includes('application/json')
+        ? await checkResponse.json()
+        : { error: await checkResponse.text(), valid: false }) as SubmitCheckResponse;
+
+      if (!checkResponse.ok || checkData.valid === false) {
+        existingSkillSlug = checkData.existingSlug || null;
+        error = checkData.error || checkData.message || messages.submitDialog.failedToSubmit;
+        return;
+      }
+
       const response = await fetch('/api/submit', {
         method: 'POST',
         headers: {
@@ -253,13 +157,9 @@
     if (!open) {
       githubUrl = '';
       error = null;
-      checkMessage = null;
       success = false;
       successMessage = null;
       existingSkillSlug = null;
-      checkedUrl = '';
-      precheckState = 'idle';
-      isChecking = false;
       submitResults = [];
       submittedCount = 0;
       existingCount = 0;
@@ -270,13 +170,9 @@
   function handleDone() {
     githubUrl = '';
     error = null;
-    checkMessage = null;
     success = false;
     successMessage = null;
     existingSkillSlug = null;
-    checkedUrl = '';
-    precheckState = 'idle';
-    isChecking = false;
     submitResults = [];
     submittedCount = 0;
     existingCount = 0;
@@ -368,23 +264,6 @@
                       {messages.submitDialog.formHint}
                     </p>
                   </div>
-
-                  {#if isChecking}
-                    <div class="info-message">
-                      <p>{messages.submitDialog.checkingRepository}</p>
-                    </div>
-                  {/if}
-
-                  {#if checkMessage && !error}
-                    <div class="info-message">
-                      <p>{checkMessage}</p>
-                      {#if existingSkillSlug}
-                        <a href={buildSkillPath(existingSkillSlug)} class="info-link">
-                          {messages.submitDialog.viewExistingSkill}
-                        </a>
-                      {/if}
-                    </div>
-                  {/if}
 
                   {#if error}
                     <div class="error-message">
@@ -537,16 +416,6 @@
     font-size: 0.875rem;
   }
 
-  .info-message {
-    margin-bottom: 1rem;
-    padding: 0.75rem 1rem;
-    background-color: rgba(59, 130, 246, 0.08);
-    border: 1px solid rgba(59, 130, 246, 0.22);
-    border-radius: 0.5rem;
-    color: var(--foreground);
-    font-size: 0.875rem;
-  }
-
   .error-link {
     display: inline-block;
     margin-top: 0.5rem;
@@ -554,18 +423,7 @@
     text-decoration: none;
   }
 
-  .info-link {
-    display: inline-block;
-    margin-top: 0.5rem;
-    color: var(--primary);
-    text-decoration: none;
-  }
-
   .error-link:hover {
-    text-decoration: underline;
-  }
-
-  .info-link:hover {
     text-decoration: underline;
   }
 
