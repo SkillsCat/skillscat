@@ -86,12 +86,12 @@ describe('submit route', () => {
           GITHUB_TOKEN: 'test-token',
         },
       },
-      request: new Request('https://skills.cat/api/submit/check?url=https://github.com/forker/toolbox', {
+      request: new Request('https://skills.cat/api/submit?url=https://github.com/forker/toolbox', {
         headers: {
           'x-skillscat-locale': 'zh-CN',
         },
       }),
-      url: new URL('https://skills.cat/api/submit/check?url=https://github.com/forker/toolbox'),
+      url: new URL('https://skills.cat/api/submit?url=https://github.com/forker/toolbox'),
     } as never);
 
     const payload = await response.json() as {
@@ -295,8 +295,8 @@ describe('submit route', () => {
           GITHUB_TOKEN: 'test-token',
         },
       },
-      request: new Request('https://skills.cat/api/submit/check?url=https://github.com/forker/toolbox'),
-      url: new URL('https://skills.cat/api/submit/check?url=https://github.com/forker/toolbox'),
+      request: new Request('https://skills.cat/api/submit?url=https://github.com/forker/toolbox'),
+      url: new URL('https://skills.cat/api/submit?url=https://github.com/forker/toolbox'),
     } as never);
 
     const payload = await response.json() as {

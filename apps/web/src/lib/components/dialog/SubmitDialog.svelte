@@ -39,7 +39,6 @@
   let isSubmitting = $state(false);
   let error = $state<string | null>(null);
   let success = $state(false);
-  let successMessage = $state<string | null>(null);
   let existingSkillSlug = $state<string | null>(null);
 
   // Result state for multi-skill submission
@@ -49,19 +48,9 @@
 
   // Validate GitHub URL
   const isValidUrl = $derived.by(() => {
-    const value = githubUrl.trim();
-    if (!value) return false;
-
-    try {
-      const parsed = new URL(value);
-      if (!['github.com', 'www.github.com'].includes(parsed.hostname.toLowerCase())) {
-        return false;
-      }
-
-      return parsed.pathname.split('/').filter(Boolean).length >= 2;
-    } catch {
-      return false;
-    }
+    if (!githubUrl) return false;
+    const pattern = /^https:\/\/github\.com\/[\w-]+\/[\w.-]+(?:\/tree\/[\w.-]+)?(?:\/[\w.-/]+)?$/;
+    return pattern.test(githubUrl);
   });
   const canSubmit = $derived(isValidUrl && !isSubmitting);
 
@@ -71,7 +60,6 @@
     isSubmitting = true;
     error = null;
     success = false;
-    successMessage = null;
     existingSkillSlug = null;
     submitResults = [];
     submittedCount = 0;
@@ -92,7 +80,9 @@
 
       if (!checkResponse.ok || checkData.valid === false) {
         existingSkillSlug = checkData.existingSlug || null;
-        error = checkData.error || checkData.message || messages.submitDialog.failedToSubmit;
+        error = checkData.existingSlug
+          ? messages.submitDialog.alreadyExists
+          : (checkData.error || checkData.message || messages.submitDialog.failedToSubmit);
         return;
       }
 
@@ -110,6 +100,7 @@
         ? await response.json()
         : { error: await response.text() }) as {
         success?: boolean;
+        code?: string;
         error?: string;
         existingSlug?: string;
         submitted?: number;
@@ -119,10 +110,11 @@
       };
 
       if (!response.ok) {
-        if (data.existingSlug) {
+        if (data.existingSlug && data.code === 'skill_already_exists') {
           existingSkillSlug = data.existingSlug;
-          error = data.error || data.message || messages.submitDialog.alreadyExists;
+          error = messages.submitDialog.alreadyExists;
         } else {
+          existingSkillSlug = data.existingSlug || null;
           throw new Error(data.error || data.message || messages.submitDialog.failedToSubmit);
         }
         return;
@@ -141,7 +133,6 @@
         existingCount = data.existing || 0;
       }
 
-      successMessage = data.message || null;
       success = true;
       githubUrl = '';
     } catch (err: unknown) {
@@ -158,7 +149,6 @@
       githubUrl = '';
       error = null;
       success = false;
-      successMessage = null;
       existingSkillSlug = null;
       submitResults = [];
       submittedCount = 0;
@@ -171,7 +161,6 @@
     githubUrl = '';
     error = null;
     success = false;
-    successMessage = null;
     existingSkillSlug = null;
     submitResults = [];
     submittedCount = 0;
@@ -217,9 +206,7 @@
                     {/if}
                   </h3>
                   <Dialog.Description class="success-text">
-                    {#if successMessage}
-                      {successMessage}
-                    {:else if submittedCount > 1}
+                    {#if submittedCount > 1}
                       {messages.submitDialog.successMultiDescription}
                     {:else}
                       {messages.submitDialog.successSingleDescription}

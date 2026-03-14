@@ -1493,7 +1493,7 @@ async function refreshSubmitCheckExistingState(
 }
 
 /**
- * GET /api/submit/check - Check if URL is valid
+ * GET /api/submit - Check if URL is valid
  */
 export const GET: RequestHandler = async ({ locals, platform, request, url }) => {
   const locale = resolveSubmitApiLocale(request, locals.locale);
