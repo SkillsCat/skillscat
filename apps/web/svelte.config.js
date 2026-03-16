@@ -1,9 +1,13 @@
 import adapter from '@sveltejs/adapter-cloudflare';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+import UnocssSveltePreprocess from '@unocss/svelte-scoped/preprocess';
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
-  preprocess: vitePreprocess(),
+  preprocess: [
+    vitePreprocess(),
+    UnocssSveltePreprocess()
+  ],
 
   kit: {
     adapter: adapter({

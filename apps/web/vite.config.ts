@@ -22,6 +22,7 @@ export default defineConfig({
   },
   plugins: [
     UnoCSS({
+      onlyGlobal: true,
       injectReset: '@unocss/reset/tailwind.css'
     }),
     sveltekit()
