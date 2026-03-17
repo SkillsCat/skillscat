@@ -57,6 +57,30 @@ function getPenaltyTtlSeconds(
   return ttlLevel3;
 }
 
+function normalizeHeaderIp(value: string | null): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function getForwardedForIp(value: string | null): string | null {
+  if (!value) return null;
+  const first = value.split(',')[0]?.trim();
+  return first || null;
+}
+
+function isPseudoIpv4(value: string | null): boolean {
+  if (!value) return false;
+  const match = value.match(/^(\d{1,3})(?:\.(\d{1,3})){3}$/);
+  if (!match) return false;
+
+  const octets = value.split('.').map((part) => Number.parseInt(part, 10));
+  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+
+  return octets[0] >= 240;
+}
+
 /**
  * Check and update rate limit for a given key
  */
@@ -181,12 +205,24 @@ export async function checkRateLimit(
  * Get rate limit key from request
  */
 export function getRateLimitKey(request: Request): string {
-  // Use CF-Connecting-IP if available, otherwise fall back to X-Forwarded-For
-  const cfIp = request.headers.get('cf-connecting-ip');
-  const forwardedFor = request.headers.get('x-forwarded-for');
-  const ip = cfIp || forwardedFor?.split(',')[0]?.trim() || 'unknown';
+  const cfIp = normalizeHeaderIp(request.headers.get('cf-connecting-ip'));
+  const cfIpv6 = normalizeHeaderIp(request.headers.get('cf-connecting-ipv6'));
+  const trueClientIp = normalizeHeaderIp(request.headers.get('true-client-ip'));
 
-  return ip;
+  if (cfIp && !(isPseudoIpv4(cfIp) && cfIpv6)) {
+    return cfIp;
+  }
+
+  if (cfIpv6) {
+    return cfIpv6;
+  }
+
+  if (trueClientIp) {
+    return trueClientIp;
+  }
+
+  const forwardedFor = getForwardedForIp(request.headers.get('x-forwarded-for'));
+  return forwardedFor || 'unknown';
 }
 
 /**

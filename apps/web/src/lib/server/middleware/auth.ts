@@ -11,6 +11,9 @@ import { validateApiToken, type TokenInfo } from '../api-auth';
 
 export interface AuthContext {
   userId: string | null;
+  orgId: string | null;
+  principalType: 'user' | 'org' | null;
+  principalId: string | null;
   user: {
     id: string;
     name?: string | null;
@@ -55,7 +58,10 @@ export async function getAuthContext(
     if (tokenInfo) {
       return {
         userId: tokenInfo.userId,
-        user: { id: tokenInfo.userId },
+        orgId: tokenInfo.orgId,
+        principalType: tokenInfo.principalType,
+        principalId: tokenInfo.principalId,
+        user: tokenInfo.userId ? { id: tokenInfo.userId } : null,
         authMethod: 'token',
         tokenInfo,
         scopes: tokenInfo.scopes,
@@ -69,6 +75,9 @@ export async function getAuthContext(
     if (session?.user) {
       return {
         userId: session.user.id,
+        orgId: null,
+        principalType: 'user',
+        principalId: session.user.id,
         user: session.user,
         authMethod: 'session',
         tokenInfo: null,
@@ -79,6 +88,9 @@ export async function getAuthContext(
 
   return {
     userId: null,
+    orgId: null,
+    principalType: null,
+    principalId: null,
     user: null,
     authMethod: null,
     tokenInfo: null,
