@@ -1,4 +1,4 @@
-import type { SkillFile } from '$lib/server/skill-files';
+import type { SkillFile } from '$lib/server/skill/files';
 import { buildSkillSlug, normalizeSkillSlug, parseSkillSlug } from '$lib/skill-path';
 
 const CLAWHUB_SLUG_SEPARATOR = '~';
@@ -79,7 +79,26 @@ export async function buildClawHubCompatFingerprint(files: SkillFile[]): Promise
   return sha256Hex(new TextEncoder().encode(payload));
 }
 
-export function createStoredZip(files: Array<{ path: string; content: string }>): Uint8Array {
+function getZipTimestamp(modifiedAt: Date | number | undefined): Date {
+  const timestamp =
+    modifiedAt instanceof Date
+      ? modifiedAt.getTime()
+      : typeof modifiedAt === 'number'
+        ? modifiedAt
+        : Date.now();
+  const date = new Date(timestamp);
+
+  if (Number.isNaN(date.getTime()) || date.getFullYear() < 1980) {
+    return new Date(Date.UTC(1980, 0, 1, 0, 0, 0));
+  }
+
+  return date;
+}
+
+export function createStoredZip(
+  files: Array<{ path: string; content: string }>,
+  options?: { modifiedAt?: Date | number }
+): Uint8Array {
   const normalizedEntries = files
     .map((file) => ({
       path: file.path.replace(/^\/+/, ''),
@@ -87,11 +106,17 @@ export function createStoredZip(files: Array<{ path: string; content: string }>)
     }))
     .filter((file) => Boolean(file.path) && !file.path.includes('..') && !file.path.includes('\\'));
 
-  const now = new Date();
+  const zipTimestamp = getZipTimestamp(options?.modifiedAt);
   const dosTime =
-    ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xffff;
+    ((zipTimestamp.getUTCHours() << 11) |
+      (zipTimestamp.getUTCMinutes() << 5) |
+      (zipTimestamp.getUTCSeconds() >> 1)) &
+    0xffff;
   const dosDate =
-    (((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()) & 0xffff;
+    (((zipTimestamp.getUTCFullYear() - 1980) << 9) |
+      ((zipTimestamp.getUTCMonth() + 1) << 5) |
+      zipTimestamp.getUTCDate()) &
+    0xffff;
 
   const localParts: Uint8Array[] = [];
   const centralParts: Uint8Array[] = [];

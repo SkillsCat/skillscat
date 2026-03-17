@@ -3,14 +3,19 @@ import type { RequestHandler } from './$types';
 import {
   buildOpenClawResponseHeaders,
   buildOpenClawVersionFiles,
-} from '$lib/server/openclaw-registry';
+} from '$lib/server/openclaw/registry';
 import { decodeClawHubCompatSlug, encodeClawHubCompatSlug } from '$lib/server/clawhub-compat';
-import { resolveSkillDetail } from '$lib/server/skill-detail';
+import { resolveSkillDetail } from '$lib/server/skill/detail';
 import {
   resolveOpenClawFilesForVersion,
   resolveOpenClawVersionState,
-} from '$lib/server/openclaw-skill-state';
-import { resolveOpenClawBundleFiles } from '$lib/server/openclaw-bundle-files';
+} from '$lib/server/openclaw/skill-state';
+import { resolveOpenClawBundleFiles } from '$lib/server/openclaw/bundle-files';
+import {
+  buildOpenClawVersionDetailCacheKey,
+  getOpenClawSelectedVersionMetadataToken,
+  resolveOpenClawJsonCache,
+} from '$lib/server/openclaw/cache';
 
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const slug = decodeClawHubCompatSlug(params.slug);
@@ -43,12 +48,13 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
       }
     );
   }
+  const skill = detail.data.skill;
 
   const versionState = await resolveOpenClawVersionState({
     r2: platform?.env?.R2,
     compatSlug: params.slug,
-    updatedAt: detail.data.skill.updatedAt,
-    createdAt: detail.data.skill.createdAt,
+    updatedAt: skill.updatedAt,
+    createdAt: skill.createdAt,
     requestedVersion: params.version,
   });
 
@@ -64,41 +70,53 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
       }
     );
   }
+  const selectedVersion = versionState.selectedVersion;
 
   const r2 = platform?.env?.R2;
   const githubToken = platform?.env?.GITHUB_TOKEN;
-  const fallbackFiles = await resolveOpenClawBundleFiles({
-    skill: detail.data.skill,
-    r2,
-    githubToken,
-  });
-  const versionFiles = await resolveOpenClawFilesForVersion({
-    r2,
-    compatSlug: params.slug,
-    selectedVersion: versionState.selectedVersion,
-    fallbackFiles,
-  });
+  const buildPayload = async () => {
+    const fallbackFiles = await resolveOpenClawBundleFiles({
+      skill,
+      r2,
+      githubToken,
+    });
+    const versionFiles = await resolveOpenClawFilesForVersion({
+      r2,
+      compatSlug: params.slug,
+      selectedVersion,
+      fallbackFiles,
+    });
 
-  return json(
-    {
+    return {
       version: {
-        version: versionState.selectedVersion.version,
-        createdAt: versionState.selectedVersion.createdAt,
-        changelog: versionState.selectedVersion.changelog,
-        changelogSource: versionState.selectedVersion.changelogSource,
-        license: versionState.selectedVersion.license,
+        version: selectedVersion.version,
+        createdAt: selectedVersion.createdAt,
+        changelog: selectedVersion.changelog,
+        changelogSource: selectedVersion.changelogSource,
+        license: selectedVersion.license,
         files: await buildOpenClawVersionFiles(versionFiles),
       },
       skill: {
-        slug: encodeClawHubCompatSlug(detail.data.skill.slug),
-        displayName: detail.data.skill.name,
+        slug: encodeClawHubCompatSlug(skill.slug),
+        displayName: skill.name,
       },
-    },
-    {
-      headers: buildOpenClawResponseHeaders({
-        cacheControl: detail.cacheControl,
-        cacheStatus: detail.cacheStatus,
-      }),
-    }
-  );
+    };
+  };
+
+  const cached = await resolveOpenClawJsonCache({
+    cacheKey: buildOpenClawVersionDetailCacheKey({
+      compatSlug: params.slug,
+      skillUpdatedAt: skill.updatedAt,
+      selectedVersionMetadataToken: getOpenClawSelectedVersionMetadataToken(versionState),
+    }),
+    load: buildPayload,
+    waitUntil,
+    immutable: true,
+    cacheControl: detail.cacheControl,
+    cacheStatus: detail.cacheStatus,
+  });
+
+  return json(cached.data, {
+    headers: cached.headers,
+  });
 };

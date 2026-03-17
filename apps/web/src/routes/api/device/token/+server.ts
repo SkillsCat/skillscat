@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { pollDeviceToken } from '$lib/server/device-auth';
+import { pollDeviceToken } from '$lib/server/auth/device';
 
 /**
  * POST /api/device/token - Poll for token after device authorization

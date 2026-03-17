@@ -20,6 +20,9 @@ declare global {
         GITHUB_TOKEN?: string;
         WORKER_SECRET?: string;
         CACHE_VERSION?: string;
+        AI_MODEL?: string;
+        CLASSIFICATION_PAID_MODEL?: string;
+        FREE_MODELS?: string;
         SECURITY_FREE_MODEL?: string;
         SECURITY_FREE_MODELS?: string;
         SECURITY_PREMIUM_MODEL?: string;

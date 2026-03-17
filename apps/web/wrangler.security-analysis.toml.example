@@ -39,7 +39,7 @@ id = "<your-kv-namespace-id>"
 
 [vars]
 SECURITY_FREE_MODEL = "openrouter/free"
-SECURITY_PREMIUM_MODEL = "openai/gpt-4.1-mini"
+SECURITY_PREMIUM_MODEL = "openai/gpt-5.4-nano"
 SECURITY_MAX_AI_FILES = "8"
 SECURITY_MAX_AI_TEXT_BYTES = "48000"
 SECURITY_STABILITY_ROUNDS = "2"
@@ -73,7 +73,7 @@ id = "<your-production-kv-namespace-id>"
 
 [env.production.vars]
 SECURITY_FREE_MODEL = "openrouter/free"
-SECURITY_PREMIUM_MODEL = "openai/gpt-4.1-mini"
+SECURITY_PREMIUM_MODEL = "openai/gpt-5.4-nano"
 SECURITY_MAX_AI_FILES = "8"
 SECURITY_MAX_AI_TEXT_BYTES = "48000"
 SECURITY_STABILITY_ROUNDS = "2"

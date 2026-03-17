@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { authorizeDeviceCode } from '$lib/server/device-auth';
+import { authorizeDeviceCode } from '$lib/server/auth/device';
 
 /**
  * POST /api/device/authorize - Authorize or deny a device code

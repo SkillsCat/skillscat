@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { revokeOrgApiToken } from '$lib/server/api-auth';
+import { revokeOrgApiToken } from '$lib/server/auth/api';
 
 /**
  * DELETE /api/orgs/[slug]/tokens/[id] - Revoke organization token

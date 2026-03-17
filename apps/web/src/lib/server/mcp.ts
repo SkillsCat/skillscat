@@ -1,8 +1,8 @@
 import { normalizeSkillSlug } from '$lib/skill-path';
-import { parseRegistryRepoInput, resolveRegistryRepo } from '$lib/server/registry-repo';
-import { parseRegistrySearchInput, resolveRegistrySearch } from '$lib/server/registry-search';
-import { resolveSkillDetail } from '$lib/server/skill-detail';
-import { parseSkillFilesInput, resolveSkillFiles } from '$lib/server/skill-files';
+import { parseRegistryRepoInput, resolveRegistryRepo } from '$lib/server/registry/repo';
+import { parseRegistrySearchInput, resolveRegistrySearch } from '$lib/server/registry/search';
+import { resolveSkillDetail } from '$lib/server/skill/detail';
+import { parseSkillFilesInput, resolveSkillFiles } from '$lib/server/skill/files';
 
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
 const LEGACY_HTTP_PROTOCOL_VERSION = '2025-03-26';

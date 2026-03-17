@@ -4,13 +4,13 @@ import { error as httpError } from '@sveltejs/kit';
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('../src/lib/server/registry-repo');
-  vi.unmock('../src/lib/server/registry-search');
+  vi.unmock('../src/lib/server/registry/repo');
+  vi.unmock('../src/lib/server/registry/search');
 });
 
 describe('registry route error handling', () => {
   it('preserves 403 for registry repo scope failures', async () => {
-    vi.doMock('../src/lib/server/registry-repo', () => ({
+    vi.doMock('../src/lib/server/registry/repo', () => ({
       parseRegistryRepoInput: () => ({ owner: 'testowner', repo: 'testrepo', pathFilter: null }),
       resolveRegistryRepo: async () => {
         throw httpError(403, "Scope 'read' required");
@@ -34,7 +34,7 @@ describe('registry route error handling', () => {
   });
 
   it('preserves 403 for registry search scope failures', async () => {
-    vi.doMock('../src/lib/server/registry-search', () => ({
+    vi.doMock('../src/lib/server/registry/search', () => ({
       parseRegistrySearchInput: () => ({
         query: 'Public',
         category: '',

@@ -37,13 +37,13 @@ import {
 } from './shared/utils';
 import { githubRequest } from '../src/lib/server/github-request';
 import { markRecommendDirty } from '../src/lib/server/recommend-precompute';
-import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '../src/lib/server/skill-title';
+import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '../src/lib/server/skill/title';
 import { buildSecurityContentFingerprint } from '../src/lib/server/security';
 import {
   buildSecurityAnalysisMessage,
   markSkillSecurityDirty,
   queueSecurityAnalysis,
-} from '../src/lib/server/security-state';
+} from '../src/lib/server/security/state';
 
 const log = createLogger('Indexing');
 

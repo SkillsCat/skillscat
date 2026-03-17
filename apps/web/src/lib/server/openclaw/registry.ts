@@ -1,4 +1,4 @@
-import type { SkillFile } from '$lib/server/skill-files';
+import type { SkillFile } from '$lib/server/skill/files';
 import { buildClawHubCompatVersion } from '$lib/server/clawhub-compat';
 
 export const OPENCLAW_REGISTRY_BASE_PATH = '/openclaw';

@@ -1,4 +1,4 @@
-import type { DirectoryFile } from '../../../workers/shared/types';
+import type { DirectoryFile } from '../../../../workers/shared/types';
 
 export const SECURITY_DIMENSIONS = [
   'prompt_injection',

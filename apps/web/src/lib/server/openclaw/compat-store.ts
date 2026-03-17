@@ -1,5 +1,5 @@
 import type { FileNode } from '$lib/types';
-import type { SkillFile } from '$lib/server/skill-files';
+import type { SkillFile } from '$lib/server/skill/files';
 import { buildUploadSkillR2Key, buildUploadSkillR2Prefix } from '$lib/skill-path';
 
 export interface OpenClawCompatVersionEntry {

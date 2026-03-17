@@ -2,16 +2,16 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
   buildOpenClawResponseHeaders,
-} from '$lib/server/openclaw-registry';
+} from '$lib/server/openclaw/registry';
 import {
   parseRegistrySearchInput,
   resolveRegistrySearch,
-} from '$lib/server/registry-search';
+} from '$lib/server/registry/search';
 import {
   buildClawHubCompatScore,
   encodeClawHubCompatSlug,
 } from '$lib/server/clawhub-compat';
-import { resolveOpenClawVersionState } from '$lib/server/openclaw-skill-state';
+import { resolveOpenClawVersionState } from '$lib/server/openclaw/skill-state';
 
 export const GET: RequestHandler = async ({ url, platform, request, locals }) => {
   const query = url.searchParams.get('q')?.trim() ?? '';

@@ -3,17 +3,22 @@ import type { RequestHandler } from './$types';
 import {
   buildOpenClawResponseHeaders,
   buildOpenClawStats,
-} from '$lib/server/openclaw-registry';
+} from '$lib/server/openclaw/registry';
 import {
   decodeClawHubCompatSlug,
   encodeClawHubCompatSlug,
 } from '$lib/server/clawhub-compat';
-import { resolveSkillDetail } from '$lib/server/skill-detail';
-import { resolveOpenClawVersionState } from '$lib/server/openclaw-skill-state';
-import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { resolveSkillDetail } from '$lib/server/skill/detail';
+import { resolveOpenClawVersionState } from '$lib/server/openclaw/skill-state';
+import {
+  buildOpenClawSkillDetailCacheKey,
+  getOpenClawVersionsStateToken,
+  invalidateOpenClawSkillCaches,
+  resolveOpenClawJsonCache,
+} from '$lib/server/openclaw/cache';
+import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { canWriteSkill } from '$lib/server/permissions';
-import { invalidateCache } from '$lib/server/cache';
-import { readOpenClawManifest, writeOpenClawManifest } from '$lib/server/openclaw-compat-store';
+import { readOpenClawManifest, writeOpenClawManifest } from '$lib/server/openclaw/compat-store';
 
 interface SkillStatsRow {
   stars: number | null;
@@ -25,22 +30,6 @@ interface SkillDeleteRow {
   id: string;
   slug: string;
   sourceType: string;
-}
-
-async function invalidateOpenClawSkillCaches(skillId: string, nativeSlug: string): Promise<void> {
-  const cacheKeys = [
-    `api:skill:${nativeSlug}`,
-    `api:skill-files:${nativeSlug}`,
-    `skill:${skillId}`,
-    `recommend:${skillId}`,
-    'page:home:v1',
-    'page:trending:v1:1',
-    'page:recent:v1:1',
-    'page:top:v1:1',
-    'page:categories:v1',
-  ];
-
-  await Promise.all(cacheKeys.map((cacheKey) => invalidateCache(cacheKey)));
 }
 
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
@@ -76,8 +65,18 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     );
   }
 
-  const statsRow = await db
-    ?.prepare(`
+  const skill = resolved.data.skill;
+  const compatSlug = encodeClawHubCompatSlug(skill.slug);
+  const versionState = await resolveOpenClawVersionState({
+    r2,
+    compatSlug,
+    updatedAt: skill.updatedAt,
+    createdAt: skill.createdAt,
+  });
+
+  const buildPayload = async () => {
+    const statsRow = await db
+      ?.prepare(`
       SELECT
         stars,
         download_count_30d as downloadCount30d,
@@ -86,21 +85,12 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
       WHERE slug = ?
       LIMIT 1
     `)
-    .bind(slug)
-    .first<SkillStatsRow>();
+      .bind(slug)
+      .first<SkillStatsRow>();
 
-  const skill = resolved.data.skill;
-  const versionState = await resolveOpenClawVersionState({
-    r2,
-    compatSlug: params.slug,
-    updatedAt: skill.updatedAt,
-    createdAt: skill.createdAt,
-  });
-
-  return json(
-    {
+    return {
       skill: {
-        slug: encodeClawHubCompatSlug(skill.slug),
+        slug: compatSlug,
         displayName: skill.name,
         summary: skill.description || null,
         tags: versionState.tags,
@@ -119,14 +109,24 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
         image: skill.authorAvatar || null,
       },
       moderation: null,
-    },
-    {
-      headers: buildOpenClawResponseHeaders({
-        cacheControl: resolved.cacheControl,
-        cacheStatus: resolved.cacheStatus,
-      }),
-    }
-  );
+    };
+  };
+
+  const cached = await resolveOpenClawJsonCache({
+    cacheKey: buildOpenClawSkillDetailCacheKey({
+      compatSlug,
+      skillUpdatedAt: skill.updatedAt,
+      versionsStateToken: getOpenClawVersionsStateToken(versionState),
+    }),
+    load: buildPayload,
+    waitUntil,
+    cacheControl: resolved.cacheControl,
+    cacheStatus: resolved.cacheStatus,
+  });
+
+  return json(cached.data, {
+    headers: cached.headers,
+  });
 };
 
 export const DELETE: RequestHandler = async ({ params, platform, request, locals }) => {

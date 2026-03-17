@@ -2,9 +2,9 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
   buildOpenClawResponseHeaders,
-} from '$lib/server/openclaw-registry';
+} from '$lib/server/openclaw/registry';
 import { decodeClawHubCompatSlug } from '$lib/server/clawhub-compat';
-import { resolveSkillDetail } from '$lib/server/skill-detail';
+import { resolveSkillDetail } from '$lib/server/skill/detail';
 
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const slug = decodeClawHubCompatSlug(params.slug);

@@ -240,11 +240,41 @@ export function rateLimitHeaders(result: RateLimitResult): Record<string, string
 
 // Default rate limit configs for different endpoints
 export const RATE_LIMITS = {
-  // Registry search: 120 requests per minute
+  // Cache-backed registry and compat search reads.
   search: {
-    limit: 120,
+    limit: 600,
     windowSeconds: 60,
     prefix: 'rl:search'
+  },
+  // Cache-backed autocomplete / suggestion reads.
+  autocomplete: {
+    limit: 1200,
+    windowSeconds: 60,
+    prefix: 'rl:autocomplete'
+  },
+  // Cache-backed public skill detail reads.
+  detail: {
+    limit: 600,
+    windowSeconds: 60,
+    prefix: 'rl:detail'
+  },
+  // Cache-backed public bundle/file list reads.
+  bundle: {
+    limit: 300,
+    windowSeconds: 60,
+    prefix: 'rl:bundle'
+  },
+  // Cache-backed public repo lookups.
+  repo: {
+    limit: 300,
+    windowSeconds: 60,
+    prefix: 'rl:repo'
+  },
+  // Cache-backed public browse/list endpoints.
+  browse: {
+    limit: 600,
+    windowSeconds: 60,
+    prefix: 'rl:browse'
   },
   // Skill fetch: 240 requests per minute
   skill: {

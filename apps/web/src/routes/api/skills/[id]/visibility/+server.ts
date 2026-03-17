@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { invalidateCache } from '$lib/server/cache';
-import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middleware/auth';
+import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import { isSkillOwner } from '$lib/server/permissions';
 import { getRepo } from '$lib/server/github-client/rest';
 

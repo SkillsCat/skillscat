@@ -9,6 +9,13 @@ import type {
 import type { D1Database } from '@cloudflare/workers-types';
 import { createLogger, generateId } from './shared/utils';
 import {
+  getOpenRouterFreePauseUntil,
+  isOpenRouterFreePauseError,
+  OpenRouterApiError,
+  parseOpenRouterRetryAfterMs,
+  pauseOpenRouterFreeModels,
+} from './shared/openrouter';
+import {
   buildSkillBundleFiles,
   getSkillDirectoryFiles,
   loadSecuritySkill,
@@ -32,7 +39,7 @@ import {
   markSkillSecurityPremiumDue,
   refreshSkillSecurityReportSummary,
   tryClaimSkillSecurityAnalysis,
-} from '../src/lib/server/security-state';
+} from '../src/lib/server/security/state';
 
 const log = createLogger('SecurityAnalysis');
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -300,7 +307,12 @@ async function callOpenRouter(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
+    throw new OpenRouterApiError({
+      model,
+      status: response.status,
+      retryAfterMs: parseOpenRouterRetryAfterMs(response.headers),
+      message: `OpenRouter API error: ${response.status} - ${errorText}`,
+    });
   }
 
   const payload = await response.json() as OpenRouterResponse;
@@ -447,6 +459,9 @@ async function runAiPipeline(
       }
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+      if (tier === 'free' && isOpenRouterFreePauseError(error)) {
+        throw error;
+      }
       log.error(`AI security analysis failed for model ${model}:`, error);
     }
   }
@@ -992,6 +1007,69 @@ async function updateStateAfterFailure(
     .run();
 }
 
+async function deferSecurityAnalysisForOpenRouterFreePause(
+  db: D1Database,
+  params: {
+    skillId: string;
+    contentFingerprint: string;
+    reportCount: number;
+    reportRiskLevel: string;
+    premiumDueReason: string | null;
+    premiumRequestedFingerprint: string | null;
+    premiumLastAnalyzedFingerprint: string | null;
+    nextAttemptAt: number;
+    now: number;
+  }
+): Promise<void> {
+  await db.prepare(`
+    INSERT INTO skill_security_state (
+      skill_id,
+      content_fingerprint,
+      dirty,
+      next_update_at,
+      status,
+      open_security_report_count,
+      report_risk_level,
+      premium_due_reason,
+      premium_requested_fingerprint,
+      premium_last_analyzed_fingerprint,
+      fail_count,
+      last_error,
+      last_error_at,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, 1, ?, 'pending', ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?)
+    ON CONFLICT(skill_id) DO UPDATE SET
+      content_fingerprint = excluded.content_fingerprint,
+      dirty = 1,
+      next_update_at = excluded.next_update_at,
+      status = excluded.status,
+      open_security_report_count = excluded.open_security_report_count,
+      report_risk_level = excluded.report_risk_level,
+      premium_due_reason = excluded.premium_due_reason,
+      premium_requested_fingerprint = excluded.premium_requested_fingerprint,
+      premium_last_analyzed_fingerprint = excluded.premium_last_analyzed_fingerprint,
+      fail_count = 0,
+      last_error = NULL,
+      last_error_at = NULL,
+      updated_at = excluded.updated_at
+  `)
+    .bind(
+      params.skillId,
+      params.contentFingerprint,
+      params.nextAttemptAt,
+      params.reportCount,
+      params.reportRiskLevel,
+      params.premiumDueReason,
+      params.premiumRequestedFingerprint,
+      params.premiumLastAnalyzedFingerprint,
+      params.now,
+      params.now,
+    )
+    .run();
+}
+
 async function processSecurityMessage(message: SecurityAnalysisMessage, env: SecurityAnalysisEnv): Promise<void> {
   const now = Date.now();
   const { skill, state } = await loadSecuritySkill(env.DB, message.skillId);
@@ -1151,6 +1229,25 @@ async function processSecurityMessage(message: SecurityAnalysisMessage, env: Sec
   const aiFiles = aiEligible ? selectFilesForAi(securityFiles, heuristic.fileScores, env) : [];
   let aiResult: AiAssessmentResult | null = null;
   let executedTier: SecurityAnalysisTier = 'free';
+  let freePauseUntil = aiEligible && aiFiles.length > 0
+    ? await getOpenRouterFreePauseUntil(env.KV, now)
+    : null;
+
+  if (requestedTier === 'free' && freePauseUntil) {
+    await deferSecurityAnalysisForOpenRouterFreePause(env.DB, {
+      skillId: skill.id,
+      contentFingerprint,
+      reportCount: reportSummary.openSecurityReportCount,
+      reportRiskLevel: reportSummary.reportRiskLevel,
+      premiumDueReason,
+      premiumRequestedFingerprint,
+      premiumLastAnalyzedFingerprint,
+      nextAttemptAt: freePauseUntil,
+      now,
+    });
+    log.log(`Deferred free security AI for ${skill.id} until ${new Date(freePauseUntil).toISOString()}`);
+    return;
+  }
 
   if (requestedTier === 'premium' && canRunPremiumAnalysis(env) && aiEligible && aiFiles.length > 0) {
     try {
@@ -1183,9 +1280,45 @@ async function processSecurityMessage(message: SecurityAnalysisMessage, env: Sec
   }
 
   if (executedTier === 'free' && aiEligible && aiFiles.length > 0) {
+    freePauseUntil = freePauseUntil ?? await getOpenRouterFreePauseUntil(env.KV, now);
+    if (freePauseUntil) {
+      await deferSecurityAnalysisForOpenRouterFreePause(env.DB, {
+        skillId: skill.id,
+        contentFingerprint,
+        reportCount: reportSummary.openSecurityReportCount,
+        reportRiskLevel: reportSummary.reportRiskLevel,
+        premiumDueReason,
+        premiumRequestedFingerprint,
+        premiumLastAnalyzedFingerprint,
+        nextAttemptAt: freePauseUntil,
+        now,
+      });
+      log.log(`Deferred free security AI fallback for ${skill.id} until ${new Date(freePauseUntil).toISOString()}`);
+      return;
+    }
+
     try {
       aiResult = await runAiPipeline(aiFiles, heuristic, 'free', env);
     } catch (aiError) {
+      if (isOpenRouterFreePauseError(aiError)) {
+        freePauseUntil = await pauseOpenRouterFreeModels(env.KV, {
+          now,
+          retryAfterMs: aiError.retryAfterMs,
+        });
+        await deferSecurityAnalysisForOpenRouterFreePause(env.DB, {
+          skillId: skill.id,
+          contentFingerprint,
+          reportCount: reportSummary.openSecurityReportCount,
+          reportRiskLevel: reportSummary.reportRiskLevel,
+          premiumDueReason,
+          premiumRequestedFingerprint,
+          premiumLastAnalyzedFingerprint,
+          nextAttemptAt: freePauseUntil,
+          now,
+        });
+        log.log(`Paused free security AI for ${skill.id} until ${new Date(freePauseUntil).toISOString()}`);
+        return;
+      }
       log.error(`AI pipeline degraded to heuristic-only for ${skill.id}:`, aiError);
     }
   }

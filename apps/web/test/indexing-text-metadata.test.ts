@@ -3,7 +3,7 @@ import { Buffer } from 'node:buffer';
 import { describe, expect, it } from 'vitest';
 
 import { decodeBase64Utf8, looksLikeGarbledUnicode, looksLikeUtf8Mojibake, repairUtf8Mojibake } from '../src/lib/server/text-codec';
-import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '../src/lib/server/skill-title';
+import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '../src/lib/server/skill/title';
 import { parseSkillFrontmatter, resolveSkillMetadata } from '../workers/indexing';
 
 describe('text-codec', () => {

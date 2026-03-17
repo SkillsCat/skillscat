@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { decodeClawHubCompatSlug } from '$lib/server/clawhub-compat';
-import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/permissions';
 
 interface SkillRow {

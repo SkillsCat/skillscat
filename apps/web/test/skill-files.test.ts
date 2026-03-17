@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseSkillFilesInput } from '../src/lib/server/skill-files';
+import { parseSkillFilesInput } from '../src/lib/server/skill/files';
 
 describe('parseSkillFilesInput', () => {
   it('normalizes valid slugs', () => {

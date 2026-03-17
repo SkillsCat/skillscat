@@ -2,7 +2,7 @@ import { createAuth, linkAuthorToUser, type AuthEnv } from '$lib/server/auth';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { building } from '$app/environment';
 import type { Handle, ResolveOptions } from '@sveltejs/kit';
-import { runRequestSecurity, shouldNoIndexPath } from '$lib/server/request-security';
+import { runRequestSecurity, shouldNoIndexPath } from '$lib/server/security/request';
 import { getCachedText, setCacheVersion } from '$lib/server/cache';
 import { getSkillBySlug } from '$lib/server/db/utils';
 import {
@@ -17,7 +17,7 @@ import {
   buildOpenClawHomeMarkdown,
   buildOpenClawSkillMarkdown,
   isOpenClawUserAgent,
-} from '$lib/server/openclaw-agent-markdown';
+} from '$lib/server/openclaw/agent-markdown';
 
 const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
 const STATUS_OVERRIDE_HEADER = 'X-Skillscat-Status-Override';

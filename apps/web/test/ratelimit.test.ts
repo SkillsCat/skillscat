@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getRateLimitKey } from '../src/lib/server/ratelimit';
+import { getRateLimitKey } from '../src/lib/server/security/ratelimit';
 
 describe('ratelimit client IP extraction', () => {
   it('uses cf-connecting-ip when Cloudflare provides a direct client IP', () => {

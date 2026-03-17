@@ -26,6 +26,8 @@ OPENROUTER_API_KEY=
 
 # 可选: 主模型（默认 openrouter/free，会自动路由到可用免费模型）
 AI_MODEL=openrouter/free
+# 可选: classification 的付费兜底模型
+# CLASSIFICATION_PAID_MODEL=openai/gpt-5.4-nano
 
 # 可选: 免费模型池，逗号分隔 (用于 fallback)
 # FREE_MODELS=google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free
@@ -39,7 +41,7 @@ DEEPSEEK_API_KEY=
 # 默认 free 模型: openrouter/free; trending / 举报升级后可切到 premium 模型
 # SECURITY_FREE_MODEL=openrouter/free
 # SECURITY_FREE_MODELS=google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free
-# SECURITY_PREMIUM_MODEL=openai/gpt-4.1-mini
+# SECURITY_PREMIUM_MODEL=openai/gpt-5.4-nano
 # SECURITY_PREMIUM_TOP_N=50
 # SECURITY_MAX_AI_FILES=8
 # SECURITY_MAX_AI_TEXT_BYTES=48000

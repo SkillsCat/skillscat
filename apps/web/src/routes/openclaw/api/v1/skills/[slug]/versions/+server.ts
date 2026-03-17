@@ -1,9 +1,14 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { buildOpenClawResponseHeaders } from '$lib/server/openclaw-registry';
+import { buildOpenClawResponseHeaders } from '$lib/server/openclaw/registry';
 import { decodeClawHubCompatSlug } from '$lib/server/clawhub-compat';
-import { resolveSkillDetail } from '$lib/server/skill-detail';
-import { resolveOpenClawVersionState } from '$lib/server/openclaw-skill-state';
+import { resolveSkillDetail } from '$lib/server/skill/detail';
+import { resolveOpenClawVersionState } from '$lib/server/openclaw/skill-state';
+import {
+  buildOpenClawVersionsListCacheKey,
+  getOpenClawVersionsStateToken,
+  resolveOpenClawJsonCache,
+} from '$lib/server/openclaw/cache';
 
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
   const slug = decodeClawHubCompatSlug(params.slug);
@@ -45,21 +50,28 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     createdAt: resolved.data.skill.createdAt,
   });
 
-  return json(
-    {
-      items: versionState.versions.map((entry) => ({
-        version: entry.version,
-        createdAt: entry.createdAt,
-        changelog: entry.changelog,
-        changelogSource: entry.changelogSource,
-      })),
-      nextCursor: null,
-    },
-    {
-      headers: buildOpenClawResponseHeaders({
-        cacheControl: resolved.cacheControl,
-        cacheStatus: resolved.cacheStatus,
-      }),
-    }
-  );
+  const buildPayload = () => ({
+    items: versionState.versions.map((entry) => ({
+      version: entry.version,
+      createdAt: entry.createdAt,
+      changelog: entry.changelog,
+      changelogSource: entry.changelogSource,
+    })),
+    nextCursor: null,
+  });
+
+  const cached = await resolveOpenClawJsonCache({
+    cacheKey: buildOpenClawVersionsListCacheKey({
+      compatSlug: params.slug,
+      versionsStateToken: getOpenClawVersionsStateToken(versionState),
+    }),
+    load: async () => buildPayload(),
+    waitUntil,
+    cacheControl: resolved.cacheControl,
+    cacheStatus: resolved.cacheStatus,
+  });
+
+  return json(cached.data, {
+    headers: cached.headers,
+  });
 };

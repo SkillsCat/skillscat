@@ -7,7 +7,7 @@
 
 import type { D1Database } from '@cloudflare/workers-types';
 import { error as httpError } from '@sveltejs/kit';
-import { validateApiToken, type TokenInfo } from '../api-auth';
+import { validateApiToken, type TokenInfo } from './api';
 
 export interface AuthContext {
   userId: string | null;

@@ -2,7 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { ApiResponse, SkillCardData } from '$lib/types';
 import { getCached, invalidateCache } from '$lib/server/cache';
-import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/permissions';
 import { getRecommendedSkills } from '$lib/server/db/utils';
 import { buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';

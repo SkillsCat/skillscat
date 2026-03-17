@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { getDeviceCodeByUserCode } from '$lib/server/device-auth';
+import { getDeviceCodeByUserCode } from '$lib/server/auth/device';
 
 export const load: PageServerLoad = async ({ url, platform, locals }) => {
   const session = await locals.auth?.();

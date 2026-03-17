@@ -2,9 +2,9 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { ApiResponse } from '$lib/types';
 import { invalidateCache } from '$lib/server/cache';
-import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { isSkillOwner } from '$lib/server/permissions';
-import { resolveSkillDetail } from '$lib/server/skill-detail';
+import { resolveSkillDetail } from '$lib/server/skill/detail';
 import { buildUploadSkillR2Key, normalizeSkillSlug, parseSkillSlug } from '$lib/skill-path';
 
 function responseHeaders(opts: { cacheControl: string; cacheStatus: 'HIT' | 'MISS' | 'BYPASS' }): Record<string, string> {

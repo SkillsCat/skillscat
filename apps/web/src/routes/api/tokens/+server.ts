@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createApiToken, listUserTokens } from '$lib/server/api-auth';
+import { createApiToken, listUserTokens } from '$lib/server/auth/api';
 
 const VALID_SCOPES = ['read', 'write', 'publish'];
 

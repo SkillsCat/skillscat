@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runRequestSecurity, shouldNoIndexPath } from '../src/lib/server/request-security';
+import { runRequestSecurity, shouldNoIndexPath } from '../src/lib/server/security/request';
 
 function createEvent(options: {
   pathname: string;

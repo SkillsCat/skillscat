@@ -1,7 +1,7 @@
 import { getBlob, getRepo, getTreeRecursive } from '$lib/server/github-client/rest';
 import { buildUploadSkillR2Prefix } from '$lib/skill-path';
 import type { SkillDetail } from '$lib/types';
-import type { SkillFile } from '$lib/server/skill-files';
+import type { SkillFile } from '$lib/server/skill/files';
 
 interface GitHubRepoInfo {
   default_branch: string;

@@ -3,17 +3,24 @@ import type { RequestHandler } from './$types';
 import {
   createStoredZip,
   decodeClawHubCompatSlug,
+  encodeClawHubCompatSlug,
 } from '$lib/server/clawhub-compat';
 import {
   buildOpenClawResponseHeaders,
   isSupportedOpenClawTag,
-} from '$lib/server/openclaw-registry';
-import { resolveSkillDetail } from '$lib/server/skill-detail';
+} from '$lib/server/openclaw/registry';
+import { resolveSkillDetail } from '$lib/server/skill/detail';
 import {
   resolveOpenClawFilesForVersion,
   resolveOpenClawVersionState,
-} from '$lib/server/openclaw-skill-state';
-import { resolveOpenClawBundleFiles } from '$lib/server/openclaw-bundle-files';
+} from '$lib/server/openclaw/skill-state';
+import { resolveOpenClawBundleFiles } from '$lib/server/openclaw/bundle-files';
+import {
+  buildOpenClawDownloadCacheKey,
+  getOpenClawSelectedVersionContentToken,
+  isOpenClawImmutableVersionRequest,
+  resolveOpenClawBinaryCache,
+} from '$lib/server/openclaw/cache';
 
 export const GET: RequestHandler = async ({ url, platform, request, locals }) => {
   const slug = decodeClawHubCompatSlug(url.searchParams.get('slug') ?? '');
@@ -63,12 +70,15 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
       }
     );
   }
+  const skill = detail.data.skill;
+  const database = db!;
 
+  const compatSlug = encodeClawHubCompatSlug(skill.slug);
   const versionState = await resolveOpenClawVersionState({
     r2,
-    compatSlug: url.searchParams.get('slug') ?? '',
-    updatedAt: detail.data.skill.updatedAt,
-    createdAt: detail.data.skill.createdAt,
+    compatSlug,
+    updatedAt: skill.updatedAt,
+    createdAt: skill.createdAt,
     requestedVersion: version,
     requestedTag: tag,
   });
@@ -85,41 +95,65 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
       }
     );
   }
+  const selectedVersion = versionState.selectedVersion;
 
-  try {
-    const fallbackFiles = await resolveOpenClawBundleFiles({
-      skill: detail.data.skill,
-      r2,
-      githubToken,
-    });
-    const files = await resolveOpenClawFilesForVersion({
-      r2,
-      compatSlug: url.searchParams.get('slug') ?? '',
-      selectedVersion: versionState.selectedVersion,
-      fallbackFiles,
-    });
-    const zipBuffer = createStoredZip(files);
-
-    try {
-      await db
-        ?.prepare(`
+  const recordDownload = () => {
+    const telemetryWrite = database
+      .prepare(`
           INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
           VALUES (?, NULL, ?, 'download', ?)
         `)
-        .bind(crypto.randomUUID(), detail.data.skill.id, Date.now())
-        .run();
-    } catch {
-      // non-critical compatibility telemetry
+      .bind(crypto.randomUUID(), skill.id, Date.now())
+      .run()
+      .catch(() => {
+        // non-critical compatibility telemetry
+      });
+
+    if (waitUntil) {
+      waitUntil(telemetryWrite);
+      return;
     }
 
-    return new Response(zipBuffer as unknown as BodyInit, {
+    void telemetryWrite;
+  };
+
+  try {
+    const buildZipBuffer = async () => {
+      const fallbackFiles = await resolveOpenClawBundleFiles({
+        skill,
+        r2,
+        githubToken,
+      });
+      const files = await resolveOpenClawFilesForVersion({
+        r2,
+        compatSlug,
+        selectedVersion,
+        fallbackFiles,
+      });
+
+      return createStoredZip(files, { modifiedAt: selectedVersion.createdAt });
+    };
+    const fileName = `${skill.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase()}.zip`;
+    const cached = await resolveOpenClawBinaryCache({
+      cacheKey: buildOpenClawDownloadCacheKey({
+        compatSlug,
+        selectedVersionContentToken: getOpenClawSelectedVersionContentToken(versionState),
+      }),
+      load: buildZipBuffer,
+      waitUntil,
+      immutable: isOpenClawImmutableVersionRequest(version),
+      cacheControl: detail.cacheControl,
+      cacheStatus: detail.cacheStatus,
+      contentType: 'application/zip',
+    });
+
+    recordDownload();
+
+    return new Response(cached.data as unknown as BodyInit, {
       headers: {
-        ...buildOpenClawResponseHeaders({
-          cacheControl: detail.cacheControl,
-          cacheStatus: detail.cacheStatus,
-        }),
+        ...cached.headers,
         'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="${detail.data.skill.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase()}.zip"`,
+        'Content-Disposition': `attachment; filename="${fileName}"`,
       },
     });
   } catch (err) {

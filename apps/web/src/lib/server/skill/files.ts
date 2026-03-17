@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/permissions';
 import { getCached } from '$lib/server/cache';
 import { getBlob, getCommitByRef, getRepo, getTreeRecursive } from '$lib/server/github-client/rest';

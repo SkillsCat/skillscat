@@ -18,6 +18,14 @@ import type {
 } from './shared/types';
 import { KNOWN_ORGS } from './shared/types';
 import { CATEGORIES, getCategorySlugs } from './shared/categories';
+import {
+  getOpenRouterFreePauseUntil,
+  isOpenRouterFreeModel,
+  isOpenRouterFreePauseError,
+  OpenRouterApiError,
+  parseOpenRouterRetryAfterMs,
+  pauseOpenRouterFreeModels,
+} from './shared/openrouter';
 import { createLogger } from './shared/utils';
 import { markRecommendDirty } from '../src/lib/server/recommend-precompute';
 import { markSearchDirty } from '../src/lib/server/search-precompute';
@@ -27,6 +35,7 @@ const log = createLogger('Classification');
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 // OpenRouter free router auto-selects a currently available free model.
 const DEFAULT_OPENROUTER_MODEL = 'openrouter/free';
+const DEFAULT_CLASSIFICATION_PAID_MODEL = 'openai/gpt-5.4-nano';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_MODEL = 'deepseek-chat';
 const KEYWORD_SCORE_CAP_PER_KEYWORD = 3;
@@ -188,7 +197,12 @@ async function callOpenRouter(
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`OpenRouter API error: ${response.status} - ${error}`);
+    throw new OpenRouterApiError({
+      model,
+      status: response.status,
+      retryAfterMs: parseOpenRouterRetryAfterMs(response.headers),
+      message: `OpenRouter API error: ${response.status} - ${error}`,
+    });
   }
 
   const data = await response.json() as Record<string, unknown>;
@@ -399,8 +413,9 @@ export function classifyByKeywords(content: string, tags?: string[]): Classifica
  * 1. Try primary model on OpenRouter (AI_MODEL env var, defaults to openrouter/free)
  * 2. Retry primary model once
  * 3. Try random fallback model from FREE_MODELS pool
- * 4. Try DeepSeek as final AI fallback
- * 5. Fall back to keyword classification
+ * 4. Try paid OpenRouter fallback for higher-priority classification throughput
+ * 5. Try DeepSeek as final AI fallback
+ * 6. Fall back to keyword classification
  */
 async function classifyWithAI(
   skillMdContent: string,
@@ -410,40 +425,80 @@ async function classifyWithAI(
   const prompt = buildClassificationPrompt(skillMdContent, tags);
   const freeModels = getFreeModels(env);
   const primaryModel = env.AI_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
+  const paidModel = env.CLASSIFICATION_PAID_MODEL?.trim() || DEFAULT_CLASSIFICATION_PAID_MODEL;
+  const now = Date.now();
+  const freePausedUntil = await getOpenRouterFreePauseUntil(env.KV, now);
+  const primaryIsFree = isOpenRouterFreeModel(primaryModel);
+  const canAttemptPrimary = Boolean(env.OPENROUTER_API_KEY) && (!primaryIsFree || !freePausedUntil);
+  let freeRateLimited = false;
 
-  // 1. Try OpenRouter (if API key is available)
-  if (env.OPENROUTER_API_KEY) {
+  // 1. Try OpenRouter primary path when available.
+  if (canAttemptPrimary && env.OPENROUTER_API_KEY) {
     // 1a. Primary model - first attempt
     try {
       console.log(`[OpenRouter] Trying primary model: ${primaryModel}`);
       return await callOpenRouter(prompt, primaryModel, env.OPENROUTER_API_KEY);
     } catch (error) {
       console.error(`[OpenRouter] Primary model failed:`, error);
+      if (isOpenRouterFreePauseError(error)) {
+        await pauseOpenRouterFreeModels(env.KV, {
+          now,
+          retryAfterMs: error.retryAfterMs,
+        });
+        freeRateLimited = true;
+      }
     }
 
     // 1b. Primary model - retry
-    try {
-      console.log(`[OpenRouter] Retrying primary model: ${primaryModel}`);
-      return await callOpenRouter(prompt, primaryModel, env.OPENROUTER_API_KEY);
-    } catch (error) {
-      console.error(`[OpenRouter] Primary model retry failed:`, error);
+    if (!freeRateLimited) {
+      try {
+        console.log(`[OpenRouter] Retrying primary model: ${primaryModel}`);
+        return await callOpenRouter(prompt, primaryModel, env.OPENROUTER_API_KEY);
+      } catch (error) {
+        console.error(`[OpenRouter] Primary model retry failed:`, error);
+        if (isOpenRouterFreePauseError(error)) {
+          await pauseOpenRouterFreeModels(env.KV, {
+            now,
+            retryAfterMs: error.retryAfterMs,
+          });
+          freeRateLimited = true;
+        }
+      }
     }
 
     // 1c. Random fallback model from pool (if configured)
-    const fallbackModel = pickRandomModel(freeModels, primaryModel);
-    if (fallbackModel) {
+    const fallbackModel = primaryIsFree ? pickRandomModel(freeModels, primaryModel) : null;
+    if (!freeRateLimited && fallbackModel && env.OPENROUTER_API_KEY) {
       try {
         console.log(`[OpenRouter] Trying fallback model: ${fallbackModel}`);
         return await callOpenRouter(prompt, fallbackModel, env.OPENROUTER_API_KEY);
       } catch (error) {
         console.error(`[OpenRouter] Fallback model failed:`, error);
+        if (isOpenRouterFreePauseError(error)) {
+          await pauseOpenRouterFreeModels(env.KV, {
+            now,
+            retryAfterMs: error.retryAfterMs,
+          });
+        }
       }
     }
   } else if (!env.OPENROUTER_API_KEY) {
     console.log('[OpenRouter] No API key configured');
+  } else if (freePausedUntil) {
+    console.log(`[OpenRouter] Free classification models paused until ${new Date(freePausedUntil).toISOString()}`);
   }
 
-  // 2. DeepSeek fallback
+  // 2. Paid OpenRouter fallback for higher-priority classification.
+  if (env.OPENROUTER_API_KEY) {
+    try {
+      console.log(`[OpenRouter] Trying paid fallback model: ${paidModel}`);
+      return await callOpenRouter(prompt, paidModel, env.OPENROUTER_API_KEY);
+    } catch (error) {
+      console.error(`[OpenRouter] Paid fallback model failed:`, error);
+    }
+  }
+
+  // 3. DeepSeek fallback
   if (env.DEEPSEEK_API_KEY) {
     try {
       console.log(`[DeepSeek] Trying ${DEEPSEEK_MODEL} as fallback`);
@@ -453,7 +508,7 @@ async function classifyWithAI(
     }
   }
 
-  // 3. Final fallback to keyword classification
+  // 4. Final fallback to keyword classification
   console.log('[Fallback] All AI providers failed, using keyword classification');
   return classifyByKeywords(skillMdContent, tags);
 }

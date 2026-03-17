@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { parseSkillFilesInput, resolveSkillFiles } from '$lib/server/skill-files';
+import { parseSkillFilesInput, resolveSkillFiles } from '$lib/server/skill/files';
 
 function responseHeaders(opts: { cacheControl: string; cacheStatus?: 'HIT' | 'MISS' | 'BYPASS' }): Record<string, string> {
   const headers: Record<string, string> = {

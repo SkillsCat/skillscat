@@ -3,10 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('../src/lib/server/registry-search');
-  vi.unmock('../src/lib/server/registry-repo');
-  vi.unmock('../src/lib/server/skill-detail');
-  vi.unmock('../src/lib/server/skill-files');
+  vi.unmock('../src/lib/server/registry/search');
+  vi.unmock('../src/lib/server/registry/repo');
+  vi.unmock('../src/lib/server/skill/detail');
+  vi.unmock('../src/lib/server/skill/files');
 });
 
 describe('mcp route', () => {
@@ -121,7 +121,7 @@ describe('mcp route', () => {
       cacheStatus: 'MISS' as const,
     }));
 
-    vi.doMock('../src/lib/server/skill-files', () => ({
+    vi.doMock('../src/lib/server/skill/files', () => ({
       parseSkillFilesInput: () => ({ slug: 'testowner/testrepo' }),
       resolveSkillFiles,
     }));

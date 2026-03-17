@@ -16,6 +16,7 @@ declare const caches: CacheStorage & { default: Cache };
 let activeCacheVersion = DEFAULT_CACHE_VERSION;
 const pendingJsonFetches = new Map<string, Promise<unknown>>();
 const pendingTextFetches = new Map<string, Promise<string>>();
+const pendingBinaryFetches = new Map<string, Promise<Uint8Array>>();
 
 function normalizeCacheVersion(version: string | undefined | null): string {
   const normalized = (version || '').trim();
@@ -202,6 +203,78 @@ export async function getCachedText(
     return { data, hit: false };
   } finally {
     pendingTextFetches.delete(versionedKey);
+  }
+}
+
+/**
+ * Get cached binary data (for zip downloads or other non-text payloads).
+ */
+export async function getCachedBinary(
+  cacheKey: string,
+  fetcher: () => Promise<Uint8Array>,
+  ttl: number,
+  options?: {
+    waitUntil?: WaitUntilFn;
+    contentType?: string;
+  }
+): Promise<{ data: Uint8Array; hit: boolean }> {
+  const versionedKey = getVersionedCacheKey(cacheKey);
+
+  try {
+    const cache = caches.default;
+    const versionedRequest = buildCacheRequest(versionedKey);
+    const legacyRequest = buildCacheRequest(cacheKey);
+
+    const cached = await cache.match(versionedRequest);
+    if (cached) {
+      const data = new Uint8Array(await cached.arrayBuffer());
+      return { data, hit: true };
+    }
+
+    const legacyCached = await cache.match(legacyRequest);
+    if (legacyCached) {
+      const promoted = legacyCached.clone();
+      const data = new Uint8Array(await legacyCached.arrayBuffer());
+      scheduleCacheWrite(cache.put(versionedRequest, promoted), options?.waitUntil);
+      return { data, hit: true };
+    }
+  } catch {
+    // Cache API not available or error
+  }
+
+  const inFlight = pendingBinaryFetches.get(versionedKey);
+  if (inFlight) {
+    const data = await inFlight;
+    return { data, hit: false };
+  }
+
+  const fetchPromise = (async (): Promise<Uint8Array> => {
+    const data = await fetcher();
+
+    try {
+      const cache = caches.default;
+      const cacheUrl = buildCacheRequest(versionedKey);
+      const response = new Response(data.slice(), {
+        headers: {
+          'Cache-Control': `public, max-age=${ttl}`,
+          'Content-Type': options?.contentType || 'application/octet-stream',
+        },
+      });
+      scheduleCacheWrite(cache.put(cacheUrl, response), options?.waitUntil);
+    } catch {
+      // Ignore cache write errors
+    }
+
+    return data;
+  })();
+
+  pendingBinaryFetches.set(versionedKey, fetchPromise);
+
+  try {
+    const data = await fetchPromise;
+    return { data, hit: false };
+  } finally {
+    pendingBinaryFetches.delete(versionedKey);
   }
 }
 

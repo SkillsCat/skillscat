@@ -9,7 +9,7 @@ import {
 import type { SkillMdLocation, ScanResult } from '$lib/types';
 import { githubRequest } from '$lib/server/github-request';
 import { getCached } from '$lib/server/cache';
-import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middleware/auth';
+import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 
 const log = createLogger('Submit');
 

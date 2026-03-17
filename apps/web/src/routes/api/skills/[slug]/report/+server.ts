@@ -2,14 +2,14 @@ import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { D1Database } from '@cloudflare/workers-types';
 
-import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/permissions';
 import { normalizeSkillSlug } from '$lib/skill-path';
 import {
   buildSecurityAnalysisMessage,
   queueSecurityAnalysis,
   refreshSkillSecurityReportSummary,
-} from '$lib/server/security-state';
+} from '$lib/server/security/state';
 import type { SecurityReportReason } from '$lib/server/security';
 
 const MAX_DETAILS_LENGTH = 2_000;

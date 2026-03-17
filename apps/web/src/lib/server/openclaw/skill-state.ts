@@ -1,4 +1,4 @@
-import type { SkillFile } from '$lib/server/skill-files';
+import type { SkillFile } from '$lib/server/skill/files';
 import {
   getOpenClawManifestLatestVersion,
   getOpenClawManifestVersion,
@@ -6,8 +6,8 @@ import {
   readOpenClawVersionFiles,
   type OpenClawCompatManifest,
   type OpenClawCompatVersionEntry,
-} from '$lib/server/openclaw-compat-store';
-import { buildOpenClawLatestVersion, buildOpenClawTags } from '$lib/server/openclaw-registry';
+} from '$lib/server/openclaw/compat-store';
+import { buildOpenClawLatestVersion, buildOpenClawTags } from '$lib/server/openclaw/registry';
 
 export interface OpenClawResolvedVersionState {
   manifest: OpenClawCompatManifest | null;

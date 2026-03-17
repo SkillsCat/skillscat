@@ -4,7 +4,7 @@ import {
   buildOpenClawHomeMarkdown,
   buildOpenClawSkillMarkdown,
   isOpenClawUserAgent,
-} from '../src/lib/server/openclaw-agent-markdown';
+} from '../src/lib/server/openclaw/agent-markdown';
 
 const sampleSkill: SkillDetail = {
   id: 'skill-1',

@@ -1,7 +1,7 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import type { FileNode, SkillCardData, SkillDetail } from '$lib/types';
 import { getCached } from '$lib/server/cache';
-import { getAuthContext } from '$lib/server/middleware/auth';
+import { getAuthContext } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/permissions';
 
 const PUBLIC_CACHE_TTL_SECONDS = 300;

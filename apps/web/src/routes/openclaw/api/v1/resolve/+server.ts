@@ -8,10 +8,15 @@ import {
 import {
   buildOpenClawLatestVersion,
   buildOpenClawResponseHeaders,
-} from '$lib/server/openclaw-registry';
-import { resolveSkillDetail } from '$lib/server/skill-detail';
-import { resolveOpenClawVersionState } from '$lib/server/openclaw-skill-state';
-import { resolveOpenClawBundleFiles } from '$lib/server/openclaw-bundle-files';
+} from '$lib/server/openclaw/registry';
+import { resolveSkillDetail } from '$lib/server/skill/detail';
+import { resolveOpenClawVersionState } from '$lib/server/openclaw/skill-state';
+import { resolveOpenClawBundleFiles } from '$lib/server/openclaw/bundle-files';
+import {
+  buildOpenClawResolveCacheKey,
+  getOpenClawVersionsStateToken,
+  resolveOpenClawJsonCache,
+} from '$lib/server/openclaw/cache';
 
 function isSha256Hex(value: string): boolean {
   return /^[a-f0-9]{64}$/i.test(value);
@@ -64,57 +69,61 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
       }
     );
   }
+  const skill = detail.data.skill;
 
   try {
-    const compatSlug = url.searchParams.get('slug') ?? '';
+    const compatSlug = encodeClawHubCompatSlug(skill.slug);
     const versionState = await resolveOpenClawVersionState({
       r2,
       compatSlug,
-      updatedAt: detail.data.skill.updatedAt,
-      createdAt: detail.data.skill.createdAt,
+      updatedAt: skill.updatedAt,
+      createdAt: skill.createdAt,
     });
 
-    const manifestMatch = versionState.versions.find((entry) => entry.fingerprint === hash) || null;
-    if (manifestMatch) {
-      return json(
-        {
-          slug: encodeClawHubCompatSlug(detail.data.skill.slug),
+    const buildPayload = async () => {
+      const manifestMatch = versionState.versions.find((entry) => entry.fingerprint === hash) || null;
+      if (manifestMatch) {
+        return {
+          slug: compatSlug,
           match: { version: manifestMatch.version },
           latestVersion: { version: versionState.latestVersion.version },
-        },
-        {
-          headers: buildOpenClawResponseHeaders({
-            cacheControl: 'public, max-age=300, stale-while-revalidate=900',
-            cacheStatus: 'MISS',
-          }),
-        }
-      );
-    }
+        };
+      }
 
-    const files = await resolveOpenClawBundleFiles({
-      skill: detail.data.skill,
-      r2,
-      githubToken,
-    });
-    const fingerprint = await buildClawHubCompatFingerprint(files);
-    const latestVersion = versionState.latestVersion || buildOpenClawLatestVersion({
-      updatedAt: detail.data.skill.updatedAt,
-      createdAt: detail.data.skill.updatedAt,
-    });
+      const files = await resolveOpenClawBundleFiles({
+        skill,
+        r2,
+        githubToken,
+      });
+      const fingerprint = await buildClawHubCompatFingerprint(files);
+      const latestVersion = versionState.latestVersion || buildOpenClawLatestVersion({
+        updatedAt: skill.updatedAt,
+        createdAt: skill.updatedAt,
+      });
 
-    return json(
-      {
-        slug: encodeClawHubCompatSlug(detail.data.skill.slug),
+      return {
+        slug: compatSlug,
         match: fingerprint === hash ? { version: latestVersion.version } : null,
         latestVersion: { version: latestVersion.version },
-        },
-        {
-          headers: buildOpenClawResponseHeaders({
-            cacheControl: detail.cacheControl,
-            cacheStatus: detail.cacheStatus,
-          }),
-        }
-      );
+      };
+    };
+
+    const cached = await resolveOpenClawJsonCache({
+      cacheKey: buildOpenClawResolveCacheKey({
+        compatSlug,
+        hash,
+        skillUpdatedAt: skill.updatedAt,
+        versionsStateToken: getOpenClawVersionsStateToken(versionState),
+      }),
+      load: buildPayload,
+      waitUntil,
+      cacheControl: detail.cacheControl,
+      cacheStatus: detail.cacheStatus,
+    });
+
+    return json(cached.data, {
+      headers: cached.headers,
+    });
   } catch (err) {
     const message =
       err && typeof err === 'object' && 'message' in err && typeof err.message === 'string'

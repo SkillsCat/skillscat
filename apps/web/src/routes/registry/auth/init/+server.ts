@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createCliAuthSession, type ClientInfo, type PKCEParams } from '$lib/server/cli-auth';
+import { createCliAuthSession, type ClientInfo, type PKCEParams } from '$lib/server/auth/cli';
 
 /**
  * POST /api/auth/cli/init - Initialize a CLI auth session

@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext } from '$lib/server/middleware/auth';
+import { getAuthContext } from '$lib/server/auth/middleware';
 
 interface UserRow {
   id: string;

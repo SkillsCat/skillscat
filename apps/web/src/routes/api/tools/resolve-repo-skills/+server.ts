@@ -4,7 +4,7 @@ import {
   parseRegistryRepoInput,
   resolveRegistryRepo,
   type RegistryRepoResult,
-} from '$lib/server/registry-repo';
+} from '$lib/server/registry/repo';
 
 function corsHeaders(): Record<string, string> {
   return {

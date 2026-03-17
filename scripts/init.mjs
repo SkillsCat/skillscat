@@ -637,6 +637,10 @@ bucket_name = "skillscat-storage"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
+
+[env.production.vars]
+AI_MODEL = "openrouter/free"
+CLASSIFICATION_PAID_MODEL = "openai/gpt-5.4-nano"
 `.trim(),
   'wrangler.security-analysis.toml': `
 [env.production]
@@ -667,7 +671,7 @@ id = "<your-production-kv-namespace-id>"
 
 [env.production.vars]
 SECURITY_FREE_MODEL = "openrouter/free"
-SECURITY_PREMIUM_MODEL = "openai/gpt-4.1-mini"
+SECURITY_PREMIUM_MODEL = "openai/gpt-5.4-nano"
 SECURITY_MAX_AI_FILES = "8"
 SECURITY_MAX_AI_TEXT_BYTES = "48000"
 SECURITY_STABILITY_ROUNDS = "2"

@@ -1,32 +1,16 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { decodeClawHubCompatSlug } from '$lib/server/clawhub-compat';
-import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { canWriteSkill } from '$lib/server/permissions';
-import { invalidateCache } from '$lib/server/cache';
-import { buildOpenClawResponseHeaders } from '$lib/server/openclaw-registry';
-import { readOpenClawManifest, writeOpenClawManifest } from '$lib/server/openclaw-compat-store';
+import { buildOpenClawResponseHeaders } from '$lib/server/openclaw/registry';
+import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
+import { readOpenClawManifest, writeOpenClawManifest } from '$lib/server/openclaw/compat-store';
 
 interface SkillRow {
   id: string;
   slug: string;
   sourceType: string;
-}
-
-async function invalidateOpenClawSkillCaches(skillId: string, nativeSlug: string): Promise<void> {
-  const cacheKeys = [
-    `api:skill:${nativeSlug}`,
-    `api:skill-files:${nativeSlug}`,
-    `skill:${skillId}`,
-    `recommend:${skillId}`,
-    'page:home:v1',
-    'page:trending:v1:1',
-    'page:recent:v1:1',
-    'page:top:v1:1',
-    'page:categories:v1',
-  ];
-
-  await Promise.all(cacheKeys.map((cacheKey) => invalidateCache(cacheKey)));
 }
 
 export const POST: RequestHandler = async ({ params, platform, request, locals }) => {

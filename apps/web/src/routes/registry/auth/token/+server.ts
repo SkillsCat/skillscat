@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { exchangeCliAuthCode } from '$lib/server/cli-auth';
+import { exchangeCliAuthCode } from '$lib/server/auth/cli';
 
 /**
  * POST /api/auth/cli/token - Exchange auth code for tokens

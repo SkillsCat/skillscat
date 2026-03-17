@@ -29,7 +29,7 @@ import {
   buildSecurityAnalysisMessage,
   markSkillSecurityPremiumDue,
   queueSecurityAnalysis,
-} from '../src/lib/server/security-state';
+} from '../src/lib/server/security/state';
 
 const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs

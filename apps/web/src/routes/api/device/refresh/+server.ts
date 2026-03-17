@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { refreshAccessToken } from '$lib/server/device-auth';
+import { refreshAccessToken } from '$lib/server/auth/device';
 
 /**
  * POST /api/device/refresh - Refresh an access token

@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { parseSkillFilesInput, resolveSkillFiles } from '$lib/server/skill-files';
+import { parseSkillFilesInput, resolveSkillFiles } from '$lib/server/skill/files';
 
 function corsHeaders(): Record<string, string> {
   return {

@@ -4,7 +4,7 @@ import {
   parseRegistrySearchInput,
   resolveRegistrySearch,
   type RegistrySearchResult,
-} from '$lib/server/registry-search';
+} from '$lib/server/registry/search';
 
 function baseCorsHeaders(): Record<string, string> {
   return {

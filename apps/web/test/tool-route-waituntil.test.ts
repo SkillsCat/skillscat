@@ -3,9 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('../src/lib/server/registry-search');
-  vi.unmock('../src/lib/server/registry-repo');
-  vi.unmock('../src/lib/server/skill-files');
+  vi.unmock('../src/lib/server/registry/search');
+  vi.unmock('../src/lib/server/registry/repo');
+  vi.unmock('../src/lib/server/skill/files');
 });
 
 describe('tool route waitUntil wiring', () => {
@@ -17,7 +17,7 @@ describe('tool route waitUntil wiring', () => {
       cacheStatus: 'MISS' as const,
     }));
 
-    vi.doMock('../src/lib/server/registry-search', () => ({
+    vi.doMock('../src/lib/server/registry/search', () => ({
       parseRegistrySearchInput: () => ({ query: '', category: '', limit: 20, offset: 0, includePrivate: false }),
       resolveRegistrySearch,
     }));
@@ -45,7 +45,7 @@ describe('tool route waitUntil wiring', () => {
       cacheStatus: 'MISS' as const,
     }));
 
-    vi.doMock('../src/lib/server/registry-repo', () => ({
+    vi.doMock('../src/lib/server/registry/repo', () => ({
       parseRegistryRepoInput: () => ({ owner: 'testowner', repo: 'testrepo', pathFilter: null }),
       resolveRegistryRepo,
     }));
@@ -73,7 +73,7 @@ describe('tool route waitUntil wiring', () => {
       cacheStatus: 'MISS' as const,
     }));
 
-    vi.doMock('../src/lib/server/skill-files', () => ({
+    vi.doMock('../src/lib/server/skill/files', () => ({
       parseSkillFilesInput: () => ({ slug: 'testowner/testrepo' }),
       resolveSkillFiles,
     }));

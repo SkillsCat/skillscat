@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext, hasScope } from '$lib/server/middleware/auth';
+import { getAuthContext, hasScope } from '$lib/server/auth/middleware';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;

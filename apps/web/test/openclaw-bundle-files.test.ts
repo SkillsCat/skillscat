@@ -67,7 +67,7 @@ afterEach(() => {
 
 describe('resolveOpenClawBundleFiles', () => {
   it('reads all upload bundle files from paginated R2 listings', async () => {
-    const { resolveOpenClawBundleFiles } = await import('../src/lib/server/openclaw-bundle-files');
+    const { resolveOpenClawBundleFiles } = await import('../src/lib/server/openclaw/bundle-files');
     const files = await resolveOpenClawBundleFiles({
       skill: createSkillDetail({
         slug: 'demo-owner/demo-skill',
@@ -123,7 +123,7 @@ describe('resolveOpenClawBundleFiles', () => {
       })),
     }));
 
-    const { resolveOpenClawBundleFiles } = await import('../src/lib/server/openclaw-bundle-files');
+    const { resolveOpenClawBundleFiles } = await import('../src/lib/server/openclaw/bundle-files');
     const files = await resolveOpenClawBundleFiles({
       skill: createSkillDetail({
         sourceType: 'github',

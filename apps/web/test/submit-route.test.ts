@@ -37,7 +37,7 @@ afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   vi.unmock('../src/lib/server/github-request');
-  vi.unmock('../src/lib/server/middleware/auth');
+  vi.unmock('../src/lib/server/auth/middleware');
 });
 
 describe('submit route', () => {
@@ -69,7 +69,7 @@ describe('submit route', () => {
     });
 
     vi.doMock('../src/lib/server/github-request', () => ({ githubRequest }));
-    vi.doMock('../src/lib/server/middleware/auth', () => ({
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({
         userId: 'user_1',
         user: { id: 'user_1' },
@@ -134,7 +134,7 @@ describe('submit route', () => {
     });
 
     vi.doMock('../src/lib/server/github-request', () => ({ githubRequest }));
-    vi.doMock('../src/lib/server/middleware/auth', () => ({
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({
         userId: 'user_1',
         user: { id: 'user_1' },
@@ -203,7 +203,7 @@ describe('submit route', () => {
     });
 
     vi.doMock('../src/lib/server/github-request', () => ({ githubRequest }));
-    vi.doMock('../src/lib/server/middleware/auth', () => ({
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({
         userId: 'user_1',
         user: { id: 'user_1' },
@@ -278,7 +278,7 @@ describe('submit route', () => {
     });
 
     vi.doMock('../src/lib/server/github-request', () => ({ githubRequest }));
-    vi.doMock('../src/lib/server/middleware/auth', () => ({
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({
         userId: 'user_1',
         user: { id: 'user_1' },
@@ -354,7 +354,7 @@ describe('submit route', () => {
     });
 
     vi.doMock('../src/lib/server/github-request', () => ({ githubRequest }));
-    vi.doMock('../src/lib/server/middleware/auth', () => ({
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({
         userId: 'user_1',
         user: { id: 'user_1' },

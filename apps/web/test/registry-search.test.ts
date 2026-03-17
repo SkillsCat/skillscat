@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectRegistrySkillPlatform, parseRegistrySearchInput } from '../src/lib/server/registry-search';
+import { detectRegistrySkillPlatform, parseRegistrySearchInput } from '../src/lib/server/registry/search';
 
 describe('parseRegistrySearchInput', () => {
   it('normalizes cli-style and tool-style inputs', () => {

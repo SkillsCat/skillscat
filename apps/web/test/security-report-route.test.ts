@@ -38,13 +38,13 @@ function createDbMock(steps: Step[]) {
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('$lib/server/middleware/auth');
+  vi.unmock('$lib/server/auth/middleware');
   vi.unmock('$lib/server/permissions');
 });
 
 describe('skill report route', () => {
   it('rejects unauthenticated users', async () => {
-    vi.doMock('$lib/server/middleware/auth', () => ({
+    vi.doMock('$lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({ userId: null })),
       requireScope: vi.fn(),
     }));
@@ -84,7 +84,7 @@ describe('skill report route', () => {
     ]);
     const queueSend = vi.fn(async () => undefined);
 
-    vi.doMock('$lib/server/middleware/auth', () => ({
+    vi.doMock('$lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({ userId: 'user_1' })),
       requireScope: vi.fn(),
     }));
@@ -148,7 +148,7 @@ describe('skill report route', () => {
     ]);
     const queueSend = vi.fn(async () => undefined);
 
-    vi.doMock('$lib/server/middleware/auth', () => ({
+    vi.doMock('$lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({ userId: 'user_1' })),
       requireScope: vi.fn(),
     }));

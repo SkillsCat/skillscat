@@ -9,13 +9,19 @@ import {
   parseOpenClawLimit,
   buildOpenClawStats,
   isValidOpenClawSemver,
-} from '$lib/server/openclaw-registry';
+} from '$lib/server/openclaw/registry';
+import {
+  buildOpenClawBrowseListCacheKey,
+  getOpenClawRouteCachePolicy,
+  invalidateOpenClawSkillCaches,
+  resolveOpenClawJsonCache,
+} from '$lib/server/openclaw/cache';
 import {
   buildClawHubCompatFingerprint,
   decodeClawHubCompatSlug,
   encodeClawHubCompatSlug,
 } from '$lib/server/clawhub-compat';
-import { resolveOpenClawVersionState } from '$lib/server/openclaw-skill-state';
+import { resolveOpenClawVersionState } from '$lib/server/openclaw/skill-state';
 import {
   buildOpenClawFileTree,
   findOpenClawReadme,
@@ -24,12 +30,11 @@ import {
   snapshotOpenClawVersionFiles,
   writeOpenClawManifest,
   type OpenClawCompatManifest,
-} from '$lib/server/openclaw-compat-store';
-import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middleware/auth';
+} from '$lib/server/openclaw/compat-store';
+import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import { canWriteSkill } from '$lib/server/permissions';
 import { parseSkillSlug } from '$lib/skill-path';
-import { invalidateCache } from '$lib/server/cache';
-import { resolveOpenClawOwnerContext } from '$lib/server/openclaw-identity';
+import { resolveOpenClawOwnerContext } from '$lib/server/openclaw/identity';
 
 interface SkillListRow {
   id: string;
@@ -58,6 +63,26 @@ interface ExistingSkillRow {
   orgId: string | null;
   sourceType: string;
   createdAt: number;
+}
+
+interface OpenClawSkillListResponse {
+  items: Array<{
+    slug: string;
+    displayName: string;
+    summary: string | null;
+    tags: Record<string, string>;
+    stats: Record<string, number>;
+    createdAt: number;
+    updatedAt: number;
+    latestVersion: {
+      version: string;
+      createdAt: number;
+      changelog: string;
+      changelogSource: 'auto' | 'user';
+      license: 'MIT-0' | null;
+    };
+  }>;
+  nextCursor: string | null;
 }
 
 function normalizeUploadPath(value: string): string {
@@ -137,20 +162,78 @@ async function collectUploadedFiles(formData: FormData): Promise<Array<{ path: s
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-async function invalidateOpenClawSkillCaches(skillId: string, nativeSlug: string): Promise<void> {
-  const cacheKeys = [
-    `api:skill:${nativeSlug}`,
-    `api:skill-files:${nativeSlug}`,
-    `skill:${skillId}`,
-    `recommend:${skillId}`,
-    'page:home:v1',
-    'page:trending:v1:1',
-    'page:recent:v1:1',
-    'page:top:v1:1',
-    'page:categories:v1',
-  ];
+async function fetchOpenClawSkillListPage(input: {
+  db: D1Database;
+  r2: R2Bucket | undefined;
+  limit: number;
+  offset: number;
+  sort: ReturnType<typeof normalizeOpenClawSort>;
+}): Promise<OpenClawSkillListResponse> {
+  const orderBySql = getOpenClawSortSql(input.sort);
+  const queryLimit = input.offset === 0 ? input.limit + 1 : input.limit;
 
-  await Promise.all(cacheKeys.map((cacheKey) => invalidateCache(cacheKey)));
+  const result = await input.db
+    .prepare(`
+      SELECT
+        s.id,
+        s.name,
+        s.slug,
+        s.description,
+        s.stars,
+        s.download_count_30d as downloadCount30d,
+        s.download_count_90d as downloadCount90d,
+        s.created_at as createdAt,
+        COALESCE(s.last_commit_at, s.updated_at) as updatedAt
+      FROM skills s
+      WHERE s.visibility = 'public'
+      ORDER BY ${orderBySql}
+      LIMIT ? OFFSET ?
+    `)
+    .bind(queryLimit, input.offset)
+    .all<SkillListRow>();
+
+  const hasMoreOnFirstPage = input.offset === 0 && result.results.length > input.limit;
+  const pageRows = hasMoreOnFirstPage ? result.results.slice(0, input.limit) : result.results;
+
+  let total: number;
+  if (input.offset === 0 && !hasMoreOnFirstPage) {
+    total = pageRows.length;
+  } else {
+    const countResult = await input.db
+      .prepare(`
+        SELECT COUNT(*) as total
+        FROM skills
+        WHERE visibility = 'public'
+      `)
+      .first<{ total: number }>();
+    total = countResult?.total || 0;
+  }
+
+  return {
+    items: await Promise.all(
+      pageRows.map(async (row) => {
+        const compatSlug = encodeClawHubCompatSlug(row.slug);
+        const versionState = await resolveOpenClawVersionState({
+          r2: input.r2,
+          compatSlug,
+          updatedAt: row.updatedAt,
+          createdAt: row.createdAt,
+        });
+
+        return {
+          slug: compatSlug,
+          displayName: row.name,
+          summary: row.description || null,
+          tags: versionState.tags,
+          stats: buildOpenClawStats(row),
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          latestVersion: versionState.latestVersion,
+        };
+      })
+    ),
+    nextCursor: buildOpenClawNextCursor(input.offset, input.limit, total),
+  };
 }
 
 export const GET: RequestHandler = async ({ url, platform }) => {
@@ -172,79 +255,20 @@ export const GET: RequestHandler = async ({ url, platform }) => {
   const limit = parseOpenClawLimit(url.searchParams.get('limit'));
   const offset = parseOpenClawCursor(url.searchParams.get('cursor'));
   const sort = normalizeOpenClawSort(url.searchParams.get('sort'));
-  const orderBySql = getOpenClawSortSql(sort);
-  const queryLimit = offset === 0 ? limit + 1 : limit;
+  const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
+  const cachePolicy = getOpenClawRouteCachePolicy();
+  const cacheKey = buildOpenClawBrowseListCacheKey({ sort, limit, offset });
+  const cached = await resolveOpenClawJsonCache({
+    cacheKey,
+    load: () => fetchOpenClawSkillListPage({ db, r2, limit, offset, sort }),
+    waitUntil,
+    cacheControl: cachePolicy.cacheControl,
+    cacheStatus: 'MISS',
+  });
 
-  const result = await db
-    .prepare(`
-      SELECT
-        s.id,
-        s.name,
-        s.slug,
-        s.description,
-        s.stars,
-        s.download_count_30d as downloadCount30d,
-        s.download_count_90d as downloadCount90d,
-        s.created_at as createdAt,
-        COALESCE(s.last_commit_at, s.updated_at) as updatedAt
-      FROM skills s
-      WHERE s.visibility = 'public'
-      ORDER BY ${orderBySql}
-      LIMIT ? OFFSET ?
-    `)
-    .bind(queryLimit, offset)
-    .all<SkillListRow>();
-
-  const hasMoreOnFirstPage = offset === 0 && result.results.length > limit;
-  const pageRows = hasMoreOnFirstPage ? result.results.slice(0, limit) : result.results;
-
-  let total: number;
-  if (offset === 0 && !hasMoreOnFirstPage) {
-    total = pageRows.length;
-  } else {
-    const countResult = await db
-      .prepare(`
-        SELECT COUNT(*) as total
-        FROM skills
-        WHERE visibility = 'public'
-      `)
-      .first<{ total: number }>();
-    total = countResult?.total || 0;
-  }
-
-  return json(
-    {
-      items: await Promise.all(
-        pageRows.map(async (row) => {
-          const compatSlug = encodeClawHubCompatSlug(row.slug);
-          const versionState = await resolveOpenClawVersionState({
-            r2,
-            compatSlug,
-            updatedAt: row.updatedAt,
-            createdAt: row.createdAt,
-          });
-
-          return {
-            slug: compatSlug,
-            displayName: row.name,
-            summary: row.description || null,
-            tags: versionState.tags,
-            stats: buildOpenClawStats(row),
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-            latestVersion: versionState.latestVersion,
-          };
-        })
-      ),
-      nextCursor: buildOpenClawNextCursor(offset, limit, total),
-    },
-    {
-      headers: buildOpenClawResponseHeaders({
-        cacheControl: 'public, max-age=300, stale-while-revalidate=900',
-        cacheStatus: 'MISS',
-      }),
-    }
-  );
+  return json(cached.data, {
+    headers: cached.headers,
+  });
 };
 
 export const POST: RequestHandler = async ({ request, platform, locals }) => {

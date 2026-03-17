@@ -1,17 +1,22 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
-  buildOpenClawResponseHeaders,
   guessOpenClawTextContentType,
   isSupportedOpenClawTag,
-} from '$lib/server/openclaw-registry';
-import { decodeClawHubCompatSlug } from '$lib/server/clawhub-compat';
-import { resolveSkillDetail } from '$lib/server/skill-detail';
+} from '$lib/server/openclaw/registry';
+import { decodeClawHubCompatSlug, encodeClawHubCompatSlug } from '$lib/server/clawhub-compat';
+import { resolveSkillDetail } from '$lib/server/skill/detail';
 import {
   resolveOpenClawFilesForVersion,
   resolveOpenClawVersionState,
-} from '$lib/server/openclaw-skill-state';
-import { resolveOpenClawBundleFiles } from '$lib/server/openclaw-bundle-files';
+} from '$lib/server/openclaw/skill-state';
+import { resolveOpenClawBundleFiles } from '$lib/server/openclaw/bundle-files';
+import {
+  buildOpenClawFileCacheKey,
+  getOpenClawSelectedVersionContentToken,
+  isOpenClawImmutableVersionRequest,
+  resolveOpenClawTextCache,
+} from '$lib/server/openclaw/cache';
 
 export const GET: RequestHandler = async ({ params, platform, request, locals, url }) => {
   const slug = decodeClawHubCompatSlug(params.slug);
@@ -40,11 +45,12 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
   if (!detail.data) {
     throw error(detail.status, detail.error || 'Skill not found.');
   }
+  const skill = detail.data.skill;
   const versionState = await resolveOpenClawVersionState({
     r2,
-    compatSlug: params.slug,
-    updatedAt: detail.data.skill.updatedAt,
-    createdAt: detail.data.skill.createdAt,
+    compatSlug: encodeClawHubCompatSlug(skill.slug),
+    updatedAt: skill.updatedAt,
+    createdAt: skill.createdAt,
     requestedVersion: version,
     requestedTag: tag,
   });
@@ -52,32 +58,49 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
   if (!versionState.selectedVersion) {
     throw error(404, 'Requested version is not available.');
   }
+  const selectedVersion = versionState.selectedVersion;
 
-  const githubToken = platform?.env?.GITHUB_TOKEN;
-  const fallbackFiles = await resolveOpenClawBundleFiles({
-    skill: detail.data.skill,
-    r2,
-    githubToken,
+  const compatSlug = encodeClawHubCompatSlug(skill.slug);
+  const contentType = guessOpenClawTextContentType(path);
+  const buildFileContent = async () => {
+    const githubToken = platform?.env?.GITHUB_TOKEN;
+    const fallbackFiles = await resolveOpenClawBundleFiles({
+      skill,
+      r2,
+      githubToken,
+    });
+    const files = await resolveOpenClawFilesForVersion({
+      r2,
+      compatSlug,
+      selectedVersion,
+      fallbackFiles,
+    });
+
+    const matched = files.find((file) => file.path === path);
+    if (!matched) {
+      throw error(404, 'File not found.');
+    }
+
+    return matched.content;
+  };
+
+  const cached = await resolveOpenClawTextCache({
+    cacheKey: buildOpenClawFileCacheKey({
+      compatSlug,
+      path,
+      selectedVersionContentToken: getOpenClawSelectedVersionContentToken(versionState),
+    }),
+    load: buildFileContent,
+    waitUntil,
+    immutable: isOpenClawImmutableVersionRequest(version),
+    cacheControl: detail.cacheControl,
+    cacheStatus: detail.cacheStatus,
   });
-  const files = await resolveOpenClawFilesForVersion({
-    r2,
-    compatSlug: params.slug,
-    selectedVersion: versionState.selectedVersion,
-    fallbackFiles,
-  });
 
-  const matched = files.find((file) => file.path === path);
-  if (!matched) {
-    throw error(404, 'File not found.');
-  }
-
-  return new Response(matched.content, {
+  return new Response(cached.data, {
     headers: {
-      ...buildOpenClawResponseHeaders({
-        cacheControl: detail.cacheControl,
-        cacheStatus: detail.cacheStatus,
-      }),
-      'Content-Type': guessOpenClawTextContentType(matched.path),
+      ...cached.headers,
+      'Content-Type': contentType,
     },
   });
 };

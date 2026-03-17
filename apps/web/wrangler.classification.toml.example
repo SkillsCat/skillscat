@@ -3,11 +3,12 @@
 # 消费 classification 队列，使用 AI 对 skill 进行分类
 #
 # AI 分类 Fallback 策略:
-# 1. 使用配置的主模型调用 OpenRouter
+# 1. 默认使用 openrouter/free
 # 2. 失败后在同一模型上重试一次
 # 3. 从免费模型池中随机选择另一个模型重试
-# 4. 使用 DeepSeek 官方 API (deepseek-chat) 作为兜底
-# 5. 最终降级到关键词分类
+# 4. 免费额度受限时切到付费兜底模型 openai/gpt-5.4-nano
+# 5. 使用 DeepSeek 官方 API (deepseek-chat) 作为兜底
+# 6. 最终降级到关键词分类
 #
 # 注意: 推荐使用 OpenRouter 免费模型，无需付费
 
@@ -48,10 +49,10 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-kv-namespace-id>"
 
-# 可选: 覆盖主模型（默认 openrouter/free，会自动路由到可用免费模型）
-# 查看可用免费模型: https://openrouter.ai/models?q=:free
-# [vars]
-# AI_MODEL = "openrouter/free"
+[vars]
+AI_MODEL = "openrouter/free"
+CLASSIFICATION_PAID_MODEL = "openai/gpt-5.4-nano"
+# 可选: 额外免费模型池（仍然只应填免费模型）
 # FREE_MODELS = "google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free"
 
 [env.production]
@@ -76,3 +77,7 @@ bucket_name = "skillscat-storage"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
+
+[env.production.vars]
+AI_MODEL = "openrouter/free"
+CLASSIFICATION_PAID_MODEL = "openai/gpt-5.4-nano"

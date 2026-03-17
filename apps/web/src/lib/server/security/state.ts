@@ -5,7 +5,7 @@ import {
   getSecurityReportRiskLevel,
   shouldRequestPremiumByReports,
   type SecurityAnalysisTier,
-} from './security';
+} from './index';
 
 export type SecurityAnalysisTrigger =
   | 'content_update'

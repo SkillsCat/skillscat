@@ -1,6 +1,6 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext, requireScope } from '$lib/server/middleware/auth';
+import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/permissions';
 import { githubRequest } from '$lib/server/github-request';
 import { buildUploadSkillR2Key, normalizeSkillSlug } from '$lib/skill-path';

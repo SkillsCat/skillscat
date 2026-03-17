@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { tryClaimSkillSecurityAnalysis } from '../src/lib/server/security-state';
+import { tryClaimSkillSecurityAnalysis } from '../src/lib/server/security/state';
+import {
+  getOpenRouterFreePauseUntil,
+  isOpenRouterFreePauseError,
+  OpenRouterApiError,
+  pauseOpenRouterFreeModels,
+} from '../workers/shared/openrouter';
 import { getTierModelCandidates } from '../workers/security-analysis';
 
 describe('security analysis worker helpers', () => {
@@ -58,5 +64,30 @@ describe('security analysis worker helpers', () => {
     })).toBe(false);
 
     expect(runs[0]).toEqual(['skill-1', 'fp-1', 6_000, 1_000, 1_000, 1_000]);
+  });
+
+  it('shares OpenRouter free pause state across workers', async () => {
+    const store = new Map<string, string>();
+    const kv = {
+      get: async (key: string) => store.get(key) ?? null,
+      put: async (key: string, value: string) => {
+        store.set(key, value);
+      },
+    };
+
+    const pauseUntil = await pauseOpenRouterFreeModels(kv as never, {
+      now: 10_000,
+      retryAfterMs: 30_000,
+    });
+
+    expect(pauseUntil).toBe(40_000);
+    expect(await getOpenRouterFreePauseUntil(kv as never, 20_000)).toBe(40_000);
+    expect(await getOpenRouterFreePauseUntil(kv as never, 50_000)).toBeNull();
+    expect(isOpenRouterFreePauseError(new OpenRouterApiError({
+      model: 'openrouter/free',
+      status: 429,
+      retryAfterMs: 30_000,
+      message: 'rate limited',
+    }))).toBe(true);
   });
 });

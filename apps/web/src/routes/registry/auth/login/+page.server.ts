@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { getCliAuthSession } from '$lib/server/cli-auth';
+import { getCliAuthSession } from '$lib/server/auth/cli';
 
 export const load: PageServerLoad = async ({ url, platform, locals }) => {
   const session = await locals.auth?.();

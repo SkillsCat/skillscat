@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middleware/auth';
-import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '$lib/server/skill-title';
+import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
+import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '$lib/server/skill/title';
 
 const MAX_PREVIEW_BODY_BYTES = 180000;
 

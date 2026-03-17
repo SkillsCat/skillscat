@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createOrgApiToken, listOrgTokens } from '$lib/server/api-auth';
+import { createOrgApiToken, listOrgTokens } from '$lib/server/auth/api';
 
 /**
  * GET /api/orgs/[slug]/tokens - List organization tokens

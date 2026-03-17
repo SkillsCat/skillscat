@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createDeviceCode, type ClientInfo } from '$lib/server/device-auth';
+import { createDeviceCode, type ClientInfo } from '$lib/server/auth/device';
 
 /**
  * POST /api/device/code - Generate a new device code for CLI authentication

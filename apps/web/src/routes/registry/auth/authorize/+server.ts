@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { authorizeCliSession } from '$lib/server/cli-auth';
+import { authorizeCliSession } from '$lib/server/auth/cli';
 
 /**
  * POST /api/auth/cli/authorize - Authorize or deny a CLI auth session

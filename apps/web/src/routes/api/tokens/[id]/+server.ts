@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { revokeApiToken } from '$lib/server/api-auth';
+import { revokeApiToken } from '$lib/server/auth/api';
 
 /**
  * DELETE /api/tokens/[id] - Revoke an API token

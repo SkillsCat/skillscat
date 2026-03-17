@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRegistryRepoInput } from '../src/lib/server/registry-repo';
+import { parseRegistryRepoInput } from '../src/lib/server/registry/repo';
 
 describe('parseRegistryRepoInput', () => {
   it('normalizes repo tool input and preserves explicit empty path', () => {

@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext } from '$lib/server/middleware/auth';
-import { resolveOpenClawUserHandle } from '$lib/server/openclaw-identity';
+import { getAuthContext } from '$lib/server/auth/middleware';
+import { resolveOpenClawUserHandle } from '$lib/server/openclaw/identity';
 
 interface UserRow {
   id: string;

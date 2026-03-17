@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildClawHubCompatFingerprint,
   buildClawHubCompatVersion,
+  createStoredZip,
   decodeClawHubCompatSlug,
   encodeClawHubCompatSlug,
 } from '../src/lib/server/clawhub-compat';
@@ -36,5 +37,17 @@ describe('clawhub compatibility helpers', () => {
 
   it('derives a deterministic compatibility version from updatedAt', () => {
     expect(buildClawHubCompatVersion(1710000000000)).toBe('0.0.1710000000');
+  });
+
+  it('builds deterministic zip bytes when a version timestamp is provided', () => {
+    const files = [
+      { path: 'SKILL.md', content: '# Skill' },
+      { path: 'prompts/system.txt', content: 'hello' },
+    ];
+
+    const zipA = createStoredZip(files, { modifiedAt: 1710000000000 });
+    const zipB = createStoredZip(files, { modifiedAt: 1710000000000 });
+
+    expect(Array.from(zipA)).toEqual(Array.from(zipB));
   });
 });
