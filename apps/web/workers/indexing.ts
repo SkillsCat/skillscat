@@ -38,6 +38,12 @@ import {
 import { githubRequest } from '../src/lib/server/github-request';
 import { markRecommendDirty } from '../src/lib/server/recommend-precompute';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '../src/lib/server/skill-title';
+import { buildSecurityContentFingerprint } from '../src/lib/server/security';
+import {
+  buildSecurityAnalysisMessage,
+  markSkillSecurityDirty,
+  queueSecurityAnalysis,
+} from '../src/lib/server/security-state';
 
 const log = createLogger('Indexing');
 
@@ -735,8 +741,6 @@ async function fetchDirectoryFiles(
       if (!item.path.startsWith(prefix)) continue;
       relativePath = item.path.slice(prefix.length);
     } else {
-      // Root skill: only include SKILL.md
-      if (item.path !== 'SKILL.md' && item.path !== 'skill.md') continue;
       relativePath = item.path;
     }
 
@@ -1510,11 +1514,16 @@ async function processMessage(
     files: directoryFiles,
     fileTree: buildFileTree(directoryFiles),
   };
+  const securityContentFingerprint = await buildSecurityContentFingerprint(directoryFiles);
 
   await updateSkillMetadata(skillId, latestCommit.sha, fileStructure, lastCommitAt, env);
 
   // Mark recommend candidates dirty after content/tags/metadata updates.
   await markRecommendDirty(env.DB, skillId);
+  await markSkillSecurityDirty(env.DB, {
+    skillId,
+    contentFingerprint: securityContentFingerprint,
+  });
 
   // Step 12: Send to classification queue
   const classificationMessage: ClassificationMessage & { tags?: string[] } = {
@@ -1542,6 +1551,17 @@ async function processMessage(
   } catch (classificationError) {
     log.error(`Failed to send to classification queue: ${skillId}`, classificationError);
     throw classificationError;
+  }
+
+  try {
+    await queueSecurityAnalysis(
+      env.SECURITY_ANALYSIS_QUEUE,
+      buildSecurityAnalysisMessage(skillId, 'content_update', 'free')
+    );
+    log.log(`Successfully queued security analysis for: ${skillId}`);
+  } catch (securityError) {
+    log.error(`Failed to queue security analysis: ${skillId}`, securityError);
+    throw securityError;
   }
 }
 

@@ -42,6 +42,10 @@ queue = "skillscat-indexing"
 binding = "CLASSIFICATION_QUEUE"
 queue = "skillscat-classification"
 
+[[queues.producers]]
+binding = "SECURITY_ANALYSIS_QUEUE"
+queue = "skillscat-security-analysis"
+
 # Environment Variables (set via Cloudflare dashboard or wrangler secret)
 [vars]
 PUBLIC_APP_URL = "http://localhost:3000"
@@ -75,6 +79,10 @@ queue = "skillscat-indexing"
 [[env.production.queues.producers]]
 binding = "CLASSIFICATION_QUEUE"
 queue = "skillscat-classification"
+
+[[env.production.queues.producers]]
+binding = "SECURITY_ANALYSIS_QUEUE"
+queue = "skillscat-security-analysis"
 
 [env.production.vars]
 PUBLIC_APP_URL = "https://your-domain.com"

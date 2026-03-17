@@ -38,7 +38,9 @@ const PRODUCTION_WORKER_NAMES = {
   'wrangler.github-events.toml': 'skillscat-github-events-production',
   'wrangler.indexing.toml': 'skillscat-indexing-production',
   'wrangler.classification.toml': 'skillscat-classification-production',
+  'wrangler.security-analysis.toml': 'skillscat-security-analysis-production',
   'wrangler.trending.toml': 'skillscat-trending-production',
+  'wrangler.virustotal.toml': 'skillscat-virustotal-production',
   'wrangler.search-precompute.toml': 'skillscat-search-precompute-production',
   'wrangler.tier-recalc.toml': 'skillscat-tier-recalc-production',
   'wrangler.archive.toml': 'skillscat-archive-production',
@@ -51,7 +53,9 @@ const CONFIG_FILES = [
   'wrangler.github-events.toml',
   'wrangler.indexing.toml',
   'wrangler.classification.toml',
+  'wrangler.security-analysis.toml',
   'wrangler.trending.toml',
+  'wrangler.virustotal.toml',
   'wrangler.search-precompute.toml',
   'wrangler.tier-recalc.toml',
   'wrangler.archive.toml',
@@ -63,7 +67,9 @@ const R2_REQUIRED_WORKERS = new Set([
   'github-events',
   'indexing',
   'classification',
+  'security-analysis',
   'trending',
+  'virustotal',
   'tier-recalc',
   'archive',
   'resurrection',
@@ -74,7 +80,9 @@ const KV_REQUIRED_WORKERS = new Set([
   'github-events',
   'indexing',
   'classification',
+  'security-analysis',
   'trending',
+  'virustotal',
   'tier-recalc',
   'archive',
   'resurrection',
@@ -85,6 +93,8 @@ const QUEUE_REQUIRED_WORKERS = new Set([
   'github-events',
   'indexing',
   'classification',
+  'security-analysis',
+  'trending',
 ]);
 
 const REQUIRED_SECRETS_BY_WORKER = {
@@ -92,7 +102,9 @@ const REQUIRED_SECRETS_BY_WORKER = {
   'github-events': ['GITHUB_TOKEN'],
   indexing: ['GITHUB_TOKEN'],
   classification: [],
+  'security-analysis': ['GITHUB_TOKEN'],
   trending: ['GITHUB_TOKEN'],
+  virustotal: ['GITHUB_TOKEN'],
   'search-precompute': ['WORKER_SECRET'],
   'tier-recalc': [],
   archive: [],
@@ -104,7 +116,9 @@ const OPTIONAL_SECRETS_BY_WORKER = {
   'github-events': [],
   indexing: [],
   classification: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY'],
+  'security-analysis': ['OPENROUTER_API_KEY'],
   trending: [],
+  virustotal: ['VIRUSTOTAL_API_KEY'],
   'search-precompute': [],
   'tier-recalc': [],
   archive: [],
@@ -529,6 +543,10 @@ queue = "skillscat-indexing"
 binding = "CLASSIFICATION_QUEUE"
 queue = "skillscat-classification"
 
+[[env.production.queues.producers]]
+binding = "SECURITY_ANALYSIS_QUEUE"
+queue = "skillscat-security-analysis"
+
 [env.production.vars]
 PUBLIC_APP_URL = "https://your-domain.com"
 CACHE_VERSION = "v1"
@@ -589,6 +607,10 @@ id = "<your-production-kv-namespace-id>"
 binding = "CLASSIFICATION_QUEUE"
 queue = "skillscat-classification"
 
+[[env.production.queues.producers]]
+binding = "SECURITY_ANALYSIS_QUEUE"
+queue = "skillscat-security-analysis"
+
 [env.production.vars]
 GITHUB_API_VERSION = "2022-11-28"
 `.trim(),
@@ -616,6 +638,41 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
 `.trim(),
+  'wrangler.security-analysis.toml': `
+[env.production]
+name = "skillscat-security-analysis-production"
+
+[env.production.triggers]
+crons = ["*/15 * * * *"]
+
+[[env.production.queues.consumers]]
+queue = "skillscat-security-analysis"
+max_batch_size = 5
+max_batch_timeout = 60
+max_retries = 3
+dead_letter_queue = "skillscat-security-analysis-dlq"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "<your-production-kv-namespace-id>"
+
+[env.production.vars]
+SECURITY_FREE_MODEL = "openrouter/free"
+SECURITY_PREMIUM_MODEL = "openai/gpt-4.1-mini"
+SECURITY_MAX_AI_FILES = "8"
+SECURITY_MAX_AI_TEXT_BYTES = "48000"
+SECURITY_STABILITY_ROUNDS = "2"
+SECURITY_HEURISTIC_THRESHOLD = "4.5"
+`.trim(),
   'wrangler.trending.toml': `
 [env.production]
 name = "skillscat-trending-production"
@@ -636,12 +693,43 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
 
+[[env.production.queues.producers]]
+binding = "SECURITY_ANALYSIS_QUEUE"
+queue = "skillscat-security-analysis"
+
 [env.production.vars]
 TRENDING_DECAY_HOURS = "72"
 TRENDING_STAR_WEIGHT = "1.0"
 TRENDING_FORK_WEIGHT = "2.0"
 TRENDING_VIEW_WEIGHT = "0.1"
 CACHE_VERSION = "v1"
+SECURITY_PREMIUM_TOP_N = "50"
+`.trim(),
+  'wrangler.virustotal.toml': `
+[env.production]
+name = "skillscat-virustotal-production"
+
+[env.production.triggers]
+crons = ["* * * * *"]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "<your-production-kv-namespace-id>"
+
+[env.production.vars]
+VT_ENABLED = "1"
+VT_DAILY_REQUEST_BUDGET = "300"
+VT_MINUTE_REQUEST_BUDGET = "4"
+VT_UPLOAD_MAX_BYTES = "33554432"
 `.trim(),
   'wrangler.search-precompute.toml': `
 [env.production]
@@ -1506,6 +1594,7 @@ async function main() {
   const needsGitHubToken = requiredSecretKeys.has('GITHUB_TOKEN');
   const needsOpenRouter = optionalSecretKeys.has('OPENROUTER_API_KEY');
   const needsDeepSeek = optionalSecretKeys.has('DEEPSEEK_API_KEY');
+  const needsVirusTotal = optionalSecretKeys.has('VIRUSTOTAL_API_KEY');
   const needsGeneratedSecrets = needsBetterAuthSecret || needsWorkerSecret;
   const includePreviewWorker = !hasWorkerSelection || selectedWorkerKeys.includes('preview');
   const includeSearchPrecomputeWorker = !hasWorkerSelection || selectedWorkerKeys.includes('search-precompute');
@@ -1515,6 +1604,7 @@ async function main() {
     || needsGitHubToken
     || needsOpenRouter
     || needsDeepSeek
+    || needsVirusTotal
     || (isProduction && needsProductionAppUrl);
   DRY_RUN = dryRun;
 
@@ -1590,7 +1680,7 @@ ${colors.cyan}╔═════════════════════
         logInfo('- KV: skillscat-kv');
       }
       if (requiredResources.needsQueues) {
-        logInfo('- Queues: skillscat-indexing, skillscat-classification, skillscat-indexing-dlq, skillscat-classification-dlq');
+        logInfo('- Queues: skillscat-indexing, skillscat-classification, skillscat-security-analysis, skillscat-indexing-dlq, skillscat-classification-dlq, skillscat-security-analysis-dlq');
       }
 
       if (requiredResources.needsD1) {
@@ -1632,8 +1722,10 @@ ${colors.cyan}╔═════════════════════
         const queues = [
           'skillscat-indexing',
           'skillscat-classification',
+          'skillscat-security-analysis',
           'skillscat-indexing-dlq',
           'skillscat-classification-dlq',
+          'skillscat-security-analysis-dlq',
         ];
 
         for (const queue of queues) {
@@ -1764,6 +1856,7 @@ ${colors.cyan}╔═════════════════════
     let githubToken = '';
     let openrouterApiKey = '';
     let deepseekApiKey = '';
+    let virusTotalApiKey = '';
     let productionAppUrl = '';
 
     if (!needsEnvInput && !needsSecretSetup) {
@@ -1783,6 +1876,9 @@ ${colors.cyan}╔═════════════════════
       }
       if (needsDeepSeek) {
         lines.push('- DeepSeek: https://platform.deepseek.com/api_keys (可选，AI 分类兜底)');
+      }
+      if (needsVirusTotal) {
+        lines.push('- VirusTotal: https://www.virustotal.com/gui/join-us (可选，public API 需要 API Key)');
       }
       if (lines.length > 0) {
         console.log(`\n${colors.gray}以下变量需要手动配置:\n${lines.join('\n')}${colors.reset}\n`);
@@ -1805,6 +1901,9 @@ ${colors.cyan}╔═════════════════════
         if (needsDeepSeek) {
           deepseekApiKey = existingVars.DEEPSEEK_API_KEY || '';
         }
+        if (needsVirusTotal) {
+          virusTotalApiKey = existingVars.VIRUSTOTAL_API_KEY || '';
+        }
         productionAppUrl = (isProduction && needsProductionAppUrl) ? 'https://your-domain.com' : '';
       } else {
         if (needsGitHubClientId) {
@@ -1821,6 +1920,9 @@ ${colors.cyan}╔═════════════════════
         }
         if (needsDeepSeek) {
           deepseekApiKey = existingVars.DEEPSEEK_API_KEY || await ask(rl, 'DeepSeek API Key (可选，兜底策略)', '');
+        }
+        if (needsVirusTotal) {
+          virusTotalApiKey = existingVars.VIRUSTOTAL_API_KEY || await ask(rl, 'VirusTotal API Key (可选，public API)', '');
         }
         if (isProduction && needsProductionAppUrl) {
           productionAppUrl = await ask(rl, 'Production PUBLIC_APP_URL', 'https://your-domain.com');
@@ -1872,6 +1974,7 @@ ${colors.cyan}╔═════════════════════
             if (needsGitHubToken) secrets.GITHUB_TOKEN = githubToken;
             if (needsOpenRouter && openrouterApiKey) secrets.OPENROUTER_API_KEY = openrouterApiKey;
             if (needsDeepSeek && deepseekApiKey) secrets.DEEPSEEK_API_KEY = deepseekApiKey;
+            if (needsVirusTotal && virusTotalApiKey) secrets.VIRUSTOTAL_API_KEY = virusTotalApiKey;
 
             const secretErrors = [];
             for (const worker of selectedProductionWorkers) {
@@ -1922,6 +2025,9 @@ ${colors.cyan}╔═════════════════════
         }
         if (needsDeepSeek) {
           devVars.DEEPSEEK_API_KEY = deepseekApiKey || '';
+        }
+        if (needsVirusTotal) {
+          devVars.VIRUSTOTAL_API_KEY = virusTotalApiKey || '';
         }
 
         const devVarsResult = createDevVars(devVars, force);
@@ -2005,8 +2111,16 @@ ${colors.cyan}╔═════════════════════
                 logError(`Failed to create classification queue: ${classificationQueueResult.error}`);
               }
 
+              const securityAnalysisQueueResult = await createQueue('skillscat-security-analysis');
+              if (securityAnalysisQueueResult.success) {
+                logSuccess('Queue created: skillscat-security-analysis');
+              } else {
+                logError(`Failed to create security analysis queue: ${securityAnalysisQueueResult.error}`);
+              }
+
               await createQueue('skillscat-indexing-dlq');
               await createQueue('skillscat-classification-dlq');
+              await createQueue('skillscat-security-analysis-dlq');
             }
 
             // 更新 wrangler 配置文件

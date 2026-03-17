@@ -4,6 +4,12 @@ import { getAuthContext, requireSubmitPublishScope } from '$lib/server/middlewar
 import { buildUploadSkillR2Key } from '$lib/skill-path';
 import { decodeBase64Utf8 } from '$lib/server/text-codec';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '$lib/server/skill-title';
+import { buildSecurityContentFingerprint } from '$lib/server/security';
+import {
+  buildSecurityAnalysisMessage,
+  markSkillSecurityDirty,
+  queueSecurityAnalysis,
+} from '$lib/server/security-state';
 
 /**
  * Compute SHA-256 hash of content
@@ -437,6 +443,26 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       console.error(`Rollback failed for uploaded skill ${skillId}:`, rollbackErr);
     }
     throw error(500, 'Failed to store skill content');
+  }
+
+  try {
+    const securityFingerprint = await buildSecurityContentFingerprint([{
+      path: 'SKILL.md',
+      sha: contentHash,
+      size: new TextEncoder().encode(skillMdContent).byteLength,
+      type: 'text',
+    }]);
+
+    await markSkillSecurityDirty(db, {
+      skillId,
+      contentFingerprint: securityFingerprint,
+    });
+    await queueSecurityAnalysis(
+      platform?.env?.SECURITY_ANALYSIS_QUEUE,
+      buildSecurityAnalysisMessage(skillId, 'content_update', 'free')
+    );
+  } catch (securityError) {
+    console.error(`Failed to enqueue security analysis for uploaded skill ${skillId}:`, securityError);
   }
 
   return json({

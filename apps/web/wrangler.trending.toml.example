@@ -35,12 +35,17 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-kv-namespace-id>"
 
+[[queues.producers]]
+binding = "SECURITY_ANALYSIS_QUEUE"
+queue = "skillscat-security-analysis"
+
 [vars]
 TRENDING_DECAY_HOURS = "72"
 TRENDING_STAR_WEIGHT = "1.0"
 TRENDING_FORK_WEIGHT = "2.0"
 TRENDING_VIEW_WEIGHT = "0.1"
 CACHE_VERSION = "v1"
+SECURITY_PREMIUM_TOP_N = "50"
 
 [env.production]
 name = "skillscat-trending-production"
@@ -61,9 +66,14 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
 
+[[env.production.queues.producers]]
+binding = "SECURITY_ANALYSIS_QUEUE"
+queue = "skillscat-security-analysis"
+
 [env.production.vars]
 TRENDING_DECAY_HOURS = "72"
 TRENDING_STAR_WEIGHT = "1.0"
 TRENDING_FORK_WEIGHT = "2.0"
 TRENDING_VIEW_WEIGHT = "0.1"
 CACHE_VERSION = "v1"
+SECURITY_PREMIUM_TOP_N = "50"

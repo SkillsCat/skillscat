@@ -25,12 +25,22 @@ import { getSkillRefreshSelectColumns, resolveRefreshRepoMetrics } from './share
 import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
 import { buildRecentActivitySortSql, getNonlinearStarScore, buildTopRatedSortScoreSql } from '../src/lib/server/ranking';
 import { markSearchDirtyBatch } from '../src/lib/server/search-precompute';
+import {
+  buildSecurityAnalysisMessage,
+  markSkillSecurityPremiumDue,
+  queueSecurityAnalysis,
+} from '../src/lib/server/security-state';
 
 const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
 const AI_CLASSIFICATION_THRESHOLD = 100; // Stars threshold for AI classification
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 const SKILL_REFRESH_SELECT_COLUMNS = getSkillRefreshSelectColumns();
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(raw || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 function getListCachePaths(listName: string, cacheVersion?: string): string[] {
   const normalizedVersion = (cacheVersion || '').trim();
@@ -744,6 +754,45 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   console.log('Cache lists regenerated');
 }
 
+export async function queueTrendingHeadSecurityPremium(env: TrendingEnv): Promise<number> {
+  if (!env.SECURITY_ANALYSIS_QUEUE) {
+    return 0;
+  }
+
+  const limit = parsePositiveInt(env.SECURITY_PREMIUM_TOP_N, 50);
+  const rows = await env.DB.prepare(`
+    SELECT s.id, ss.content_fingerprint AS contentFingerprint
+    FROM skills s
+    LEFT JOIN skill_security_state ss ON ss.skill_id = s.id
+    WHERE s.visibility = 'public'
+      AND ss.content_fingerprint IS NOT NULL
+      AND (
+        ss.premium_last_analyzed_fingerprint IS NULL
+        OR ss.premium_last_analyzed_fingerprint != ss.content_fingerprint
+      )
+    ORDER BY s.trending_score DESC
+    LIMIT ?
+  `)
+    .bind(limit)
+    .all<{ id: string; contentFingerprint: string }>();
+
+  let queued = 0;
+  for (const row of rows.results || []) {
+    await markSkillSecurityPremiumDue(env.DB, {
+      skillId: row.id,
+      contentFingerprint: row.contentFingerprint,
+      reason: 'trending_head',
+    });
+    await queueSecurityAnalysis(
+      env.SECURITY_ANALYSIS_QUEUE,
+      buildSecurityAnalysisMessage(row.id, 'trending_head', 'premium')
+    );
+    queued += 1;
+  }
+
+  return queued;
+}
+
 /**
  * Record cost metrics to KV for monitoring
  */
@@ -824,6 +873,12 @@ export default {
 
     // 7. Regenerate list caches
     await regenerateListCaches(env);
+
+    // 7b. Queue premium security reanalysis for trending head skills.
+    const premiumSecurityQueued = await queueTrendingHeadSecurityPremium(env);
+    if (premiumSecurityQueued > 0) {
+      console.log(`Queued ${premiumSecurityQueued} trending-head skills for premium security analysis`);
+    }
 
     // 8. Record metrics
     const totalBatches = Math.ceil((markedUpdates + hotResult.count + warmResult.count + coolResult.count) / BATCH_SIZE);

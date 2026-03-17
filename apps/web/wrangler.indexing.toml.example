@@ -44,6 +44,10 @@ id = "<your-kv-namespace-id>"
 binding = "CLASSIFICATION_QUEUE"
 queue = "skillscat-classification"
 
+[[queues.producers]]
+binding = "SECURITY_ANALYSIS_QUEUE"
+queue = "skillscat-security-analysis"
+
 [vars]
 GITHUB_API_VERSION = "2022-11-28"
 
@@ -73,6 +77,10 @@ id = "<your-production-kv-namespace-id>"
 [[env.production.queues.producers]]
 binding = "CLASSIFICATION_QUEUE"
 queue = "skillscat-classification"
+
+[[env.production.queues.producers]]
+binding = "SECURITY_ANALYSIS_QUEUE"
+queue = "skillscat-security-analysis"
 
 [env.production.vars]
 GITHUB_API_VERSION = "2022-11-28"

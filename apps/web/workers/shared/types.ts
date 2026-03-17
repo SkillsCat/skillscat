@@ -75,6 +75,7 @@ export interface GithubEventsEnv extends BaseEnv {
 
 export interface IndexingEnv extends BaseEnv {
   CLASSIFICATION_QUEUE: Queue<ClassificationMessage>;
+  SECURITY_ANALYSIS_QUEUE?: Queue<SecurityAnalysisMessage>;
   GITHUB_API_VERSION?: string;
 }
 
@@ -91,6 +92,8 @@ export interface TrendingEnv extends BaseEnv {
   TRENDING_FORK_WEIGHT?: string;
   TRENDING_VIEW_WEIGHT?: string;
   CLASSIFICATION_QUEUE?: Queue<ClassificationMessage>; // For reclassification
+  SECURITY_ANALYSIS_QUEUE?: Queue<SecurityAnalysisMessage>;
+  SECURITY_PREMIUM_TOP_N?: string;
 }
 
 export interface SearchPrecomputeEnv {
@@ -110,6 +113,27 @@ export interface SearchPrecomputeEnv {
   SEARCH_PRECOMPUTE_ALGO_VERSION?: string;
   SEARCH_MISSING_STATE_SCAN_HOUR_UTC?: string;
   SEARCH_MISSING_STATE_SCAN_LIMIT?: string;
+}
+
+export interface SecurityAnalysisEnv extends BaseEnv {
+  OPENROUTER_API_KEY?: string;
+  SECURITY_FREE_MODEL?: string;
+  SECURITY_FREE_MODELS?: string;
+  SECURITY_PREMIUM_MODEL?: string;
+  SECURITY_MAX_AI_FILES?: string;
+  SECURITY_MAX_AI_TEXT_BYTES?: string;
+  SECURITY_STABILITY_ROUNDS?: string;
+  SECURITY_HEURISTIC_THRESHOLD?: string;
+  VIRUSTOTAL_DAILY_REQUEST_BUDGET?: string;
+}
+
+export interface VirusTotalEnv extends BaseEnv {
+  VIRUSTOTAL_API_KEY?: string;
+  VT_ENABLED?: string;
+  VT_DAILY_REQUEST_BUDGET?: string;
+  VT_MINUTE_REQUEST_BUDGET?: string;
+  VT_UPLOAD_MAX_BYTES?: string;
+  GITHUB_API_VERSION?: string;
 }
 
 // ============================================
@@ -186,6 +210,13 @@ export interface ClassificationMessage {
   repoName: string;
   skillMdPath: string;
   frontmatterCategories?: string[];  // Direct categories from frontmatter for cost optimization
+}
+
+export interface SecurityAnalysisMessage {
+  type: 'analyze_security';
+  skillId: string;
+  trigger: 'content_update' | 'report' | 'trending_head' | 'manual';
+  requestedTier?: 'free' | 'premium' | 'auto';
 }
 
 // ============================================
@@ -371,6 +402,7 @@ export interface OpenRouterResponse {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    cost?: number;
   };
 }
 

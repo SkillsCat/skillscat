@@ -1,0 +1,80 @@
+# Security Analysis Worker 配置
+# 复制此文件为 wrangler.security-analysis.toml 并填入你的配置
+# 消费 security-analysis 队列，并定时回补 dirty / missing 的安全分析状态
+
+name = "skillscat-security-analysis"
+main = "workers/security-analysis.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[[queues.consumers]]
+queue = "skillscat-security-analysis"
+max_batch_size = 5
+max_batch_timeout = 60
+max_retries = 3
+dead_letter_queue = "skillscat-security-analysis-dlq"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-database-id>"
+
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "<your-kv-namespace-id>"
+
+[vars]
+SECURITY_FREE_MODEL = "openrouter/free"
+SECURITY_PREMIUM_MODEL = "openai/gpt-4.1-mini"
+SECURITY_MAX_AI_FILES = "8"
+SECURITY_MAX_AI_TEXT_BYTES = "48000"
+SECURITY_STABILITY_ROUNDS = "2"
+SECURITY_HEURISTIC_THRESHOLD = "4.5"
+
+[env.production]
+name = "skillscat-security-analysis-production"
+
+[env.production.triggers]
+crons = ["*/15 * * * *"]
+
+[[env.production.queues.consumers]]
+queue = "skillscat-security-analysis"
+max_batch_size = 5
+max_batch_timeout = 60
+max_retries = 3
+dead_letter_queue = "skillscat-security-analysis-dlq"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "<your-production-kv-namespace-id>"
+
+[env.production.vars]
+SECURITY_FREE_MODEL = "openrouter/free"
+SECURITY_PREMIUM_MODEL = "openai/gpt-4.1-mini"
+SECURITY_MAX_AI_FILES = "8"
+SECURITY_MAX_AI_TEXT_BYTES = "48000"
+SECURITY_STABILITY_ROUNDS = "2"
+SECURITY_HEURISTIC_THRESHOLD = "4.5"

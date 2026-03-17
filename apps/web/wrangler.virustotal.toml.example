@@ -1,0 +1,62 @@
+# VirusTotal Worker 配置
+# 复制此文件为 wrangler.virustotal.toml 并填入你的配置
+# 按分钟预算轮询 VirusTotal public API，不走专用 queue
+
+name = "skillscat-virustotal"
+main = "workers/virustotal.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-database-id>"
+
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "<your-kv-namespace-id>"
+
+[vars]
+VT_ENABLED = "1"
+VT_DAILY_REQUEST_BUDGET = "300"
+VT_MINUTE_REQUEST_BUDGET = "4"
+VT_UPLOAD_MAX_BYTES = "33554432"
+
+[env.production]
+name = "skillscat-virustotal-production"
+
+[env.production.triggers]
+crons = ["* * * * *"]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "<your-production-kv-namespace-id>"
+
+[env.production.vars]
+VT_ENABLED = "1"
+VT_DAILY_REQUEST_BUDGET = "300"
+VT_MINUTE_REQUEST_BUDGET = "4"
+VT_UPLOAD_MAX_BYTES = "33554432"

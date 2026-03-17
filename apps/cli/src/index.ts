@@ -15,6 +15,7 @@ import { logout } from './commands/logout';
 import { whoami } from './commands/whoami';
 import { publish } from './commands/publish';
 import { submit } from './commands/submit';
+import { report } from './commands/report';
 import { unpublishSkill } from './commands/unpublish';
 import { configSet, configGet, configList, configDelete } from './commands/config';
 import { setVerbose } from './utils/core/verbose';
@@ -143,6 +144,13 @@ program
   .command('submit [url]')
   .description('Submit a GitHub repository to SkillsCat registry')
   .action(submit);
+
+program
+  .command('report <slug>')
+  .description('Report a skill for security or copyright concerns')
+  .option('-r, --reason <reason>', 'Report reason (security or copyright)')
+  .option('-d, --details <details>', 'Optional report details')
+  .action(report);
 
 // Unpublish command
 program

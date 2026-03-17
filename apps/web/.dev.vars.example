@@ -35,6 +35,25 @@ AI_MODEL=openrouter/free
 # 当 OpenRouter 所有模型都失败时，使用 DeepSeek 作为最后兜底
 DEEPSEEK_API_KEY=
 
+# ========== Security Analysis (可选调参) ==========
+# 默认 free 模型: openrouter/free; trending / 举报升级后可切到 premium 模型
+# SECURITY_FREE_MODEL=openrouter/free
+# SECURITY_FREE_MODELS=google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free
+# SECURITY_PREMIUM_MODEL=openai/gpt-4.1-mini
+# SECURITY_PREMIUM_TOP_N=50
+# SECURITY_MAX_AI_FILES=8
+# SECURITY_MAX_AI_TEXT_BYTES=48000
+# SECURITY_STABILITY_ROUNDS=2
+# SECURITY_HEURISTIC_THRESHOLD=4.5
+
+# ========== VirusTotal Public API (可选) ==========
+# Public API 需要 API Key，默认按 4 req/min 与 300 req/day 预算设计
+VIRUSTOTAL_API_KEY=
+# VT_ENABLED=1
+# VT_MINUTE_REQUEST_BUDGET=4
+# VT_DAILY_REQUEST_BUDGET=300
+# VT_UPLOAD_MAX_BYTES=33554432
+
 # ========== Rate Limit Adaptive Penalty (可选) ==========
 # 仅在需要调参时设置，不设置则使用系统默认:
 # BURST_WINDOW=120s, BURST_THRESHOLD=3, MAX_LEVEL=3, TTL(1/2/3)=300/900/1800s

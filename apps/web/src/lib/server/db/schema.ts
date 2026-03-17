@@ -262,6 +262,129 @@ export const skillSearchTerms = sqliteTable('skill_search_terms', {
   index('skill_search_terms_term_weight_idx').on(table.term, table.weight)
 ]);
 
+// ========== Skill Security State (one row per skill) ==========
+export const skillSecurityState = sqliteTable('skill_security_state', {
+  skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  contentFingerprint: text('content_fingerprint'),
+  dirty: integer('dirty').notNull().default(1),
+  nextUpdateAt: integer('next_update_at', { mode: 'timestamp_ms' }),
+  status: text('status').notNull().default('pending'),
+  lastAnalyzedAt: integer('last_analyzed_at', { mode: 'timestamp_ms' }),
+  currentTotalScore: real('current_total_score'),
+  currentRiskLevel: text('current_risk_level'),
+  currentFreeScanId: text('current_free_scan_id'),
+  currentPremiumScanId: text('current_premium_scan_id'),
+  openSecurityReportCount: integer('open_security_report_count').notNull().default(0),
+  reportRiskLevel: text('report_risk_level').notNull().default('low'),
+  premiumDueReason: text('premium_due_reason'),
+  premiumRequestedAt: integer('premium_requested_at', { mode: 'timestamp_ms' }),
+  premiumRequestedFingerprint: text('premium_requested_fingerprint'),
+  premiumLastAnalyzedFingerprint: text('premium_last_analyzed_fingerprint'),
+  vtEligibility: text('vt_eligibility').notNull().default('unknown'),
+  vtPriority: integer('vt_priority').notNull().default(0),
+  vtBundleSha256: text('vt_bundle_sha256'),
+  vtBundleSize: integer('vt_bundle_size'),
+  vtStatus: text('vt_status').notNull().default('pending'),
+  vtAnalysisId: text('vt_analysis_id'),
+  vtLastStats: text('vt_last_stats'),
+  vtNextAttemptAt: integer('vt_next_attempt_at', { mode: 'timestamp_ms' }),
+  vtLastAttemptAt: integer('vt_last_attempt_at', { mode: 'timestamp_ms' }),
+  vtLastSubmittedAt: integer('vt_last_submitted_at', { mode: 'timestamp_ms' }),
+  vtLastCompletedAt: integer('vt_last_completed_at', { mode: 'timestamp_ms' }),
+  failCount: integer('fail_count').notNull().default(0),
+  lastError: text('last_error'),
+  lastErrorAt: integer('last_error_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  primaryKey({ columns: [table.skillId] }),
+  index('skill_security_state_dirty_due_idx').on(table.dirty, table.nextUpdateAt),
+  index('skill_security_state_status_due_idx').on(table.status, table.nextUpdateAt),
+  index('skill_security_state_report_level_idx').on(table.reportRiskLevel, table.openSecurityReportCount),
+  index('skill_security_state_premium_due_idx').on(table.premiumDueReason, table.premiumRequestedAt),
+  index('skill_security_state_vt_due_idx').on(table.vtStatus, table.vtNextAttemptAt),
+  index('skill_security_state_vt_priority_idx').on(table.vtPriority, table.vtNextAttemptAt),
+  index('skill_security_state_vt_sha_idx').on(table.vtBundleSha256)
+]);
+
+// ========== Skill Security Scans ==========
+export const skillSecurityScans = sqliteTable('skill_security_scans', {
+  id: text('id').primaryKey(),
+  skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  contentFingerprint: text('content_fingerprint').notNull(),
+  analysisTier: text('analysis_tier').notNull(),
+  status: text('status').notNull().default('completed'),
+  provider: text('provider'),
+  model: text('model'),
+  totalScore: real('total_score'),
+  riskLevel: text('risk_level'),
+  summary: text('summary'),
+  findings: text('findings'),
+  rounds: integer('rounds').notNull().default(0),
+  promptTokens: integer('prompt_tokens'),
+  completionTokens: integer('completion_tokens'),
+  totalTokens: integer('total_tokens'),
+  estimatedCostUsd: real('estimated_cost_usd'),
+  analyzedAt: integer('analyzed_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  uniqueIndex('skill_security_scans_unique_idx').on(table.skillId, table.contentFingerprint, table.analysisTier),
+  index('skill_security_scans_skill_tier_idx').on(table.skillId, table.analysisTier, table.analyzedAt),
+  index('skill_security_scans_level_idx').on(table.riskLevel, table.totalScore)
+]);
+
+// ========== Skill Security Scan Dimensions ==========
+export const skillSecurityScanDimensions = sqliteTable('skill_security_scan_dimensions', {
+  id: text('id').primaryKey(),
+  scanId: text('scan_id').notNull().references(() => skillSecurityScans.id, { onDelete: 'cascade' }),
+  dimension: text('dimension').notNull(),
+  score: real('score').notNull(),
+  reason: text('reason'),
+  findingCount: integer('finding_count').notNull().default(0),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  uniqueIndex('skill_security_scan_dimensions_unique_idx').on(table.scanId, table.dimension),
+  index('skill_security_scan_dimensions_dimension_idx').on(table.dimension, table.score)
+]);
+
+// ========== Skill Security File Scores ==========
+export const skillSecurityFileScores = sqliteTable('skill_security_file_scores', {
+  id: text('id').primaryKey(),
+  scanId: text('scan_id').notNull().references(() => skillSecurityScans.id, { onDelete: 'cascade' }),
+  filePath: text('file_path').notNull(),
+  fileKind: text('file_kind').notNull(),
+  source: text('source').notNull().default('heuristic'),
+  dimension: text('dimension').notNull(),
+  score: real('score').notNull(),
+  reason: text('reason'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  uniqueIndex('skill_security_file_scores_unique_idx').on(table.scanId, table.filePath, table.dimension, table.source),
+  index('skill_security_file_scores_scan_file_idx').on(table.scanId, table.filePath),
+  index('skill_security_file_scores_dimension_idx').on(table.dimension, table.score)
+]);
+
+// ========== Skill Reports ==========
+export const skillReports = sqliteTable('skill_reports', {
+  id: text('id').primaryKey(),
+  skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  reporterUserId: text('reporter_user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  reason: text('reason').notNull(),
+  details: text('details'),
+  source: text('source').notNull().default('cli'),
+  status: text('status').notNull().default('open'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  resolvedAt: integer('resolved_at', { mode: 'timestamp_ms' })
+}, (table) => [
+  uniqueIndex('skill_reports_open_unique_idx')
+    .on(table.skillId, table.reporterUserId, table.reason)
+    .where(sql`${table.status} = 'open'`),
+  index('skill_reports_skill_reason_status_idx').on(table.skillId, table.reason, table.status, table.createdAt),
+  index('skill_reports_reporter_idx').on(table.reporterUserId, table.reason, table.createdAt)
+]);
+
 // ========== Authors ==========
 export const authors = sqliteTable('authors', {
   id: text('id').primaryKey(),
@@ -470,6 +593,16 @@ export type OrgMember = typeof orgMembers.$inferSelect;
 export type NewOrgMember = typeof orgMembers.$inferInsert;
 export type Skill = typeof skills.$inferSelect;
 export type NewSkill = typeof skills.$inferInsert;
+export type SkillSecurityState = typeof skillSecurityState.$inferSelect;
+export type NewSkillSecurityState = typeof skillSecurityState.$inferInsert;
+export type SkillSecurityScan = typeof skillSecurityScans.$inferSelect;
+export type NewSkillSecurityScan = typeof skillSecurityScans.$inferInsert;
+export type SkillSecurityScanDimension = typeof skillSecurityScanDimensions.$inferSelect;
+export type NewSkillSecurityScanDimension = typeof skillSecurityScanDimensions.$inferInsert;
+export type SkillSecurityFileScore = typeof skillSecurityFileScores.$inferSelect;
+export type NewSkillSecurityFileScore = typeof skillSecurityFileScores.$inferInsert;
+export type SkillReport = typeof skillReports.$inferSelect;
+export type NewSkillReport = typeof skillReports.$inferInsert;
 export type Author = typeof authors.$inferSelect;
 export type NewAuthor = typeof authors.$inferInsert;
 export type SkillPermission = typeof skillPermissions.$inferSelect;
