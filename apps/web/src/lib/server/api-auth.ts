@@ -8,10 +8,17 @@ import type { D1Database } from '@cloudflare/workers-types';
 
 export interface TokenInfo {
   id: string;
-  userId: string;
+  userId: string | null;
+  orgId: string | null;
+  principalType: 'user' | 'org';
+  principalId: string;
   name: string;
   scopes: string[];
   expiresAt: number | null;
+}
+
+interface ValidateApiTokenOptions {
+  updateLastUsedAt?: boolean;
 }
 
 /**
@@ -68,17 +75,19 @@ export async function createApiToken(
  */
 export async function validateApiToken(
   token: string,
-  db: D1Database
+  db: D1Database,
+  options: ValidateApiTokenOptions = {}
 ): Promise<TokenInfo | null> {
   if (!token.startsWith('sk_')) {
     return null;
   }
 
+  const updateLastUsedAt = options.updateLastUsedAt ?? true;
   const tokenHash = await hashToken(token);
   const now = Date.now();
 
   const result = await db.prepare(`
-    SELECT id, user_id, name, scopes, expires_at
+    SELECT id, user_id, org_id, name, scopes, expires_at
     FROM api_tokens
     WHERE token_hash = ?
       AND revoked_at IS NULL
@@ -87,7 +96,8 @@ export async function validateApiToken(
     .bind(tokenHash, now)
     .first<{
       id: string;
-      user_id: string;
+      user_id: string | null;
+      org_id: string | null;
       name: string;
       scopes: string;
       expires_at: number | null;
@@ -97,16 +107,28 @@ export async function validateApiToken(
     return null;
   }
 
-  // Update last_used_at
-  await db.prepare(`
-    UPDATE api_tokens SET last_used_at = ? WHERE id = ?
-  `)
-    .bind(now, result.id)
-    .run();
+  const userId = result.user_id || null;
+  const orgId = result.org_id || null;
+  const principalId = userId || orgId;
+
+  if (!principalId) {
+    return null;
+  }
+
+  if (updateLastUsedAt) {
+    await db.prepare(`
+      UPDATE api_tokens SET last_used_at = ? WHERE id = ?
+    `)
+      .bind(now, result.id)
+      .run();
+  }
 
   return {
     id: result.id,
-    userId: result.user_id,
+    userId,
+    orgId,
+    principalType: userId ? 'user' : 'org',
+    principalId,
     name: result.name,
     scopes: JSON.parse(result.scopes),
     expiresAt: result.expires_at,
