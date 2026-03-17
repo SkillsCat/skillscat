@@ -10,7 +10,7 @@
  */
 
 import type { ExecutionContext, ScheduledController, SearchPrecomputeEnv } from './shared/types';
-import { normalizeRecommendAlgoVersion } from '../src/lib/server/recommend-precompute';
+import { normalizeRecommendAlgoVersion } from '../src/lib/server/ranking/recommend-precompute';
 import {
   buildSearchTermEntries,
   computeSearchScore,
@@ -18,7 +18,7 @@ import {
   replaceSearchTermsForSkill,
   upsertSearchStateFailure,
   upsertSearchStateSuccess,
-} from '../src/lib/server/search-precompute';
+} from '../src/lib/server/ranking/search-precompute';
 
 const DEFAULT_RECOMMEND_PRECOMPUTE_MAX_PER_RUN = 200;
 const DEFAULT_RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = 15_000;

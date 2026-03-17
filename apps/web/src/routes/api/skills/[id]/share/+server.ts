@@ -6,7 +6,7 @@ import {
   grantSkillPermission,
   revokeSkillPermission,
   listSkillPermissions,
-} from '$lib/server/permissions';
+} from '$lib/server/auth/permissions';
 
 /**
  * POST /api/skills/[id]/share - Add a share permission

@@ -36,7 +36,7 @@ function buildDbMock() {
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('../src/lib/server/github-request');
+  vi.unmock('../src/lib/server/github-client/request');
   vi.unmock('../src/lib/server/auth/middleware');
 });
 
@@ -68,7 +68,7 @@ describe('submit route', () => {
       throw new Error(`Unexpected GitHub request: ${url}`);
     });
 
-    vi.doMock('../src/lib/server/github-request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
     vi.doMock('../src/lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({
         userId: 'user_1',
@@ -133,7 +133,7 @@ describe('submit route', () => {
       throw new Error(`Unexpected GitHub request: ${url}`);
     });
 
-    vi.doMock('../src/lib/server/github-request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
     vi.doMock('../src/lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({
         userId: 'user_1',
@@ -202,7 +202,7 @@ describe('submit route', () => {
       throw new Error(`Unexpected GitHub request: ${url}`);
     });
 
-    vi.doMock('../src/lib/server/github-request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
     vi.doMock('../src/lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({
         userId: 'user_1',
@@ -277,7 +277,7 @@ describe('submit route', () => {
       throw new Error(`Unexpected GitHub request: ${url}`);
     });
 
-    vi.doMock('../src/lib/server/github-request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
     vi.doMock('../src/lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({
         userId: 'user_1',
@@ -353,7 +353,7 @@ describe('submit route', () => {
       throw new Error(`Unexpected GitHub request: ${url}`);
     });
 
-    vi.doMock('../src/lib/server/github-request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
     vi.doMock('../src/lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({
         userId: 'user_1',

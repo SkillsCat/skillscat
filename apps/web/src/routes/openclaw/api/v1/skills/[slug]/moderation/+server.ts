@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import {
   buildOpenClawResponseHeaders,
 } from '$lib/server/openclaw/registry';
-import { decodeClawHubCompatSlug } from '$lib/server/clawhub-compat';
+import { decodeClawHubCompatSlug } from '$lib/server/openclaw/clawhub-compat';
 import { resolveSkillDetail } from '$lib/server/skill/detail';
 
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {

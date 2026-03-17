@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { checkSkillAccess } from '$lib/server/permissions';
+import { checkSkillAccess } from '$lib/server/auth/permissions';
 
 interface FavoriteSkillRow {
   id: string;

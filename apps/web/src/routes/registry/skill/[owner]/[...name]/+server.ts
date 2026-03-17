@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getCached } from '$lib/server/cache';
 import { getAuthContext } from '$lib/server/auth/middleware';
-import { checkSkillAccess } from '$lib/server/permissions';
+import { checkSkillAccess } from '$lib/server/auth/permissions';
 import {
   buildSkillSlug,
   buildUploadSkillR2Key,

@@ -2,7 +2,7 @@ import type { PageServerLoad } from './$types';
 import { getCategoryBySlug, type Category } from '$lib/constants/categories';
 import { getSkillsByCategoryPaginated } from '$lib/server/db/utils';
 import { getCached } from '$lib/server/cache';
-import { setPublicPageCache } from '$lib/server/page-cache';
+import { setPublicPageCache } from '$lib/server/cache/page';
 
 const ITEMS_PER_PAGE = 24;
 

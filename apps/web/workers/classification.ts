@@ -17,7 +17,7 @@ import type {
   ClassificationMethod,
 } from './shared/types';
 import { KNOWN_ORGS } from './shared/types';
-import { CATEGORIES, getCategorySlugs } from './shared/categories';
+import { CATEGORIES, getCategorySlugs } from './shared/classification/categories';
 import {
   getOpenRouterFreePauseUntil,
   isOpenRouterFreeModel,
@@ -25,10 +25,10 @@ import {
   OpenRouterApiError,
   parseOpenRouterRetryAfterMs,
   pauseOpenRouterFreeModels,
-} from './shared/openrouter';
+} from './shared/ai/openrouter';
 import { createLogger } from './shared/utils';
-import { markRecommendDirty } from '../src/lib/server/recommend-precompute';
-import { markSearchDirty } from '../src/lib/server/search-precompute';
+import { markRecommendDirty } from '../src/lib/server/ranking/recommend-precompute';
+import { markSearchDirty } from '../src/lib/server/ranking/search-precompute';
 
 const log = createLogger('Classification');
 

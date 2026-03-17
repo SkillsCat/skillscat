@@ -10,7 +10,7 @@
 
 import type { BaseEnv, SkillTier } from './shared/types';
 import { TIER_CONFIG } from './shared/types';
-import { getNextRecommendUpdateAt } from '../src/lib/server/recommend-precompute';
+import { getNextRecommendUpdateAt } from '../src/lib/server/ranking/recommend-precompute';
 
 interface TierRecalcEnv extends BaseEnv {}
 

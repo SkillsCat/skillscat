@@ -10,7 +10,7 @@ import {
 import {
   buildClawHubCompatScore,
   encodeClawHubCompatSlug,
-} from '$lib/server/clawhub-compat';
+} from '$lib/server/openclaw/clawhub-compat';
 import { resolveOpenClawVersionState } from '$lib/server/openclaw/skill-state';
 
 export const GET: RequestHandler = async ({ url, platform, request, locals }) => {

@@ -4,7 +4,7 @@ import {
   guessOpenClawTextContentType,
   isSupportedOpenClawTag,
 } from '$lib/server/openclaw/registry';
-import { decodeClawHubCompatSlug, encodeClawHubCompatSlug } from '$lib/server/clawhub-compat';
+import { decodeClawHubCompatSlug, encodeClawHubCompatSlug } from '$lib/server/openclaw/clawhub-compat';
 import { resolveSkillDetail } from '$lib/server/skill/detail';
 import {
   resolveOpenClawFilesForVersion,

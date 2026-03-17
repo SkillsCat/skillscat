@@ -1,4 +1,4 @@
-import type { GitHubRequestOptions } from '../github-request';
+import type { GitHubRequestOptions } from './request';
 import { GitHubGraphqlError, GitHubRateLimitError, githubGraphqlRequest } from './graphql';
 
 export type GitHubEndpointId =

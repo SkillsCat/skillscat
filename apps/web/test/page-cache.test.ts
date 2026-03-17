@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { LOCALE_COOKIE_NAME } from '$lib/i18n/config';
-import { setPublicPageCache } from '$lib/server/page-cache';
+import { setPublicPageCache } from '$lib/server/cache/page';
 
 describe('setPublicPageCache', () => {
   it('marks authenticated page responses as private and cookie-bound', () => {

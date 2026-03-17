@@ -20,7 +20,7 @@ import {
   buildClawHubCompatFingerprint,
   decodeClawHubCompatSlug,
   encodeClawHubCompatSlug,
-} from '$lib/server/clawhub-compat';
+} from '$lib/server/openclaw/clawhub-compat';
 import { resolveOpenClawVersionState } from '$lib/server/openclaw/skill-state';
 import {
   buildOpenClawFileTree,
@@ -32,7 +32,7 @@ import {
   type OpenClawCompatManifest,
 } from '$lib/server/openclaw/compat-store';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
-import { canWriteSkill } from '$lib/server/permissions';
+import { canWriteSkill } from '$lib/server/auth/permissions';
 import { parseSkillSlug } from '$lib/skill-path';
 import { resolveOpenClawOwnerContext } from '$lib/server/openclaw/identity';
 

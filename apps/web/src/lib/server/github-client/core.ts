@@ -1,4 +1,4 @@
-import type { GitHubRequestOptions } from '../github-request';
+import type { GitHubRequestOptions } from './request';
 
 export const DEFAULT_API_VERSION = '2022-11-28';
 export const DEFAULT_USER_AGENT = 'SkillsCat/1.0';

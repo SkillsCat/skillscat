@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { CATEGORIES } from '$lib/constants';
 import type { ApiResponse } from '$lib/types';
 import { getCached } from '$lib/server/cache';
-import { computeSearchScore, normalizeSearchText } from '$lib/server/search-precompute';
+import { computeSearchScore, normalizeSearchText } from '$lib/server/ranking/search-precompute';
 
 const MIN_QUERY_LENGTH = 2;
 const MAX_QUERY_LENGTH = 120;

@@ -2,7 +2,7 @@ import { buildSkillPath, encodeSkillSlugForPath } from '$lib/skill-path';
 import { buildSkillscatInstallCommand, type SkillInstallTarget } from '$lib/skill-install';
 import { SITE_URL } from '$lib/seo/constants';
 import type { SkillDetail } from '$lib/types';
-import { buildLlmTxt } from '$lib/server/llm-txt';
+import { buildLlmTxt } from '$lib/server/agent/llm-txt';
 
 const OPENCLAW_UA_PATTERN = /\bopenclaw(?:[\/\s-]|$)/i;
 

@@ -1,4 +1,4 @@
-import { sendGitHubRequestThroughGateway } from './github-client/gateway';
+import { sendGitHubRequestThroughGateway } from './gateway';
 
 export interface GitHubRequestOptions extends Omit<RequestInit, 'headers' | 'cache'> {
   token?: string;

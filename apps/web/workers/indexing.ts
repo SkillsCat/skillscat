@@ -35,8 +35,8 @@ import {
   decodeBase64ToUtf8,
   buildFileTree,
 } from './shared/utils';
-import { githubRequest } from '../src/lib/server/github-request';
-import { markRecommendDirty } from '../src/lib/server/recommend-precompute';
+import { githubRequest } from '../src/lib/server/github-client/request';
+import { markRecommendDirty } from '../src/lib/server/ranking/recommend-precompute';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '../src/lib/server/skill/title';
 import { buildSecurityContentFingerprint } from '../src/lib/server/security';
 import {

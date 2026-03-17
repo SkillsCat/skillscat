@@ -1,6 +1,6 @@
 import type { RequestHandler } from './$types';
 import { getCachedText } from '$lib/server/cache';
-import { buildLlmTxt } from '$lib/server/llm-txt';
+import { buildLlmTxt } from '$lib/server/agent/llm-txt';
 
 const CACHE_CONTROL = 'public, max-age=3600, stale-while-revalidate=86400';
 const CACHE_TTL_SECONDS = 3600;

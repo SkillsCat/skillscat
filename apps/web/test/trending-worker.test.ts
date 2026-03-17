@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getSkillRefreshSelectColumns, resolveRefreshRepoMetrics } from '../workers/shared/trending-refresh';
+import { getSkillRefreshSelectColumns, resolveRefreshRepoMetrics } from '../workers/shared/trending/refresh';
 import { queueTrendingHeadSecurityPremium } from '../workers/trending';
 import type { SkillRecord } from '../workers/shared/types';
 

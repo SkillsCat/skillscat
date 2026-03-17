@@ -1,6 +1,6 @@
 import { getCached } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
-import { getAccessibleSkillIds } from '$lib/server/permissions';
+import { getAccessibleSkillIds } from '$lib/server/auth/permissions';
 
 const MAX_PATH_LENGTH = 512;
 const MAX_OWNER_LENGTH = 100;

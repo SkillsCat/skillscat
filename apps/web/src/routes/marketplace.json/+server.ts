@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { resolveClaudeMarketplace } from '$lib/server/claude-marketplace';
+import { resolveClaudeMarketplace } from '$lib/server/marketplace/claude';
 
 function responseHeaders(opts: {
   cacheControl: string;

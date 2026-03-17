@@ -1,4 +1,4 @@
-import type { GitHubGraphQLRepoData, SkillRecord } from './types';
+import type { GitHubGraphQLRepoData, SkillRecord } from '../types';
 
 const SKILL_REFRESH_SELECT_COLUMNS = `
   id, repo_owner, repo_name, stars, forks, star_snapshots, indexed_at, last_commit_at,

@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import type { ApiResponse, SkillCardData } from '$lib/types';
 import { getCached, invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
-import { checkSkillAccess } from '$lib/server/permissions';
+import { checkSkillAccess } from '$lib/server/auth/permissions';
 import { getRecommendedSkills } from '$lib/server/db/utils';
 import { buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
 import {
@@ -13,7 +13,7 @@ import {
   upsertRecommendStateFailure,
   upsertRecommendStateSuccess,
   writeRecommendPrecomputedPayload,
-} from '$lib/server/recommend-precompute';
+} from '$lib/server/ranking/recommend-precompute';
 
 const RECOMMEND_RESPONSE_LIMIT = 6;
 const RECOMMEND_CACHE_LIMIT = 10;

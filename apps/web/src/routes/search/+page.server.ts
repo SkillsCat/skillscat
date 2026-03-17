@@ -2,7 +2,7 @@ import type { PageServerLoad } from './$types';
 import { CATEGORIES } from '$lib/constants';
 import { searchSkills } from '$lib/server/db/utils';
 import { getCached } from '$lib/server/cache';
-import { setPublicPageCache } from '$lib/server/page-cache';
+import { setPublicPageCache } from '$lib/server/cache/page';
 
 export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, request }) => {
   setPublicPageCache({

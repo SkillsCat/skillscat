@@ -5,7 +5,7 @@ import {
   createStoredZip,
   decodeClawHubCompatSlug,
   encodeClawHubCompatSlug,
-} from '../src/lib/server/clawhub-compat';
+} from '../src/lib/server/openclaw/clawhub-compat';
 
 describe('clawhub compatibility helpers', () => {
   it('encodes and decodes flat skill slugs', () => {

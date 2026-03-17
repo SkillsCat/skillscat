@@ -4,7 +4,7 @@ import {
   buildClawHubCompatFingerprint,
   decodeClawHubCompatSlug,
   encodeClawHubCompatSlug,
-} from '$lib/server/clawhub-compat';
+} from '$lib/server/openclaw/clawhub-compat';
 import {
   buildOpenClawLatestVersion,
   buildOpenClawResponseHeaders,

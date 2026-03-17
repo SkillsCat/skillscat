@@ -1,4 +1,4 @@
-import { githubRequest, type GitHubRequestOptions } from '../github-request';
+import { githubRequest, type GitHubRequestOptions } from './request';
 
 export interface GitHubClientRequestOptions extends GitHubRequestOptions {}
 

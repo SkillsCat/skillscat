@@ -1,8 +1,8 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { decodeClawHubCompatSlug } from '$lib/server/clawhub-compat';
+import { decodeClawHubCompatSlug } from '$lib/server/openclaw/clawhub-compat';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
-import { canWriteSkill } from '$lib/server/permissions';
+import { canWriteSkill } from '$lib/server/auth/permissions';
 import { buildOpenClawResponseHeaders } from '$lib/server/openclaw/registry';
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 import { readOpenClawManifest, writeOpenClawManifest } from '$lib/server/openclaw/compat-store';

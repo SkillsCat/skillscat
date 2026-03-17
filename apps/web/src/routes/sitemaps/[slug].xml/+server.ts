@@ -13,7 +13,7 @@ import {
   loadOrgsSitemapPage,
   loadProfilesSitemapPage,
   loadSkillsSitemapPage,
-} from '$lib/server/sitemap';
+} from '$lib/server/seo/sitemap';
 
 const DYNAMIC_KIND_PATTERN = /^(skills|profiles|orgs)-([1-9]\d*)$/;
 

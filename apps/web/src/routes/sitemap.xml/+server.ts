@@ -6,7 +6,7 @@ import {
   buildSitemapIndexXml,
   createCachedSitemapResponse,
   getDynamicSitemapStats,
-} from '$lib/server/sitemap';
+} from '$lib/server/seo/sitemap';
 
 export const GET: RequestHandler = async ({ platform }) => {
   const db = platform?.env?.DB;

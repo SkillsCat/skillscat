@@ -14,7 +14,7 @@ import {
   OpenRouterApiError,
   parseOpenRouterRetryAfterMs,
   pauseOpenRouterFreeModels,
-} from './shared/openrouter';
+} from './shared/ai/openrouter';
 import {
   buildSkillBundleFiles,
   getSkillDirectoryFiles,

@@ -4,7 +4,7 @@ import {
   MCP_PROTOCOL_VERSION,
   handleMcpRequest,
   isSupportedMcpProtocolVersion,
-} from '$lib/server/mcp';
+} from '$lib/server/agent/mcp';
 
 function responseHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return {

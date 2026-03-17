@@ -3,12 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('../src/lib/server/claude-marketplace');
+  vi.unmock('../src/lib/server/marketplace/claude');
 });
 
 describe('claude marketplace mapping', () => {
   it('builds stable plugin names from skill slugs', async () => {
-    const { buildClaudeMarketplacePluginName } = await import('../src/lib/server/claude-marketplace');
+    const { buildClaudeMarketplacePluginName } = await import('../src/lib/server/marketplace/claude');
     const rootName = buildClaudeMarketplacePluginName('test-owner/demo-skill');
     const nestedName = buildClaudeMarketplacePluginName('test-owner/demo-skill/nested');
 
@@ -19,7 +19,7 @@ describe('claude marketplace mapping', () => {
   });
 
   it('maps root GitHub skills to github sources', async () => {
-    const { buildClaudeMarketplacePluginSource } = await import('../src/lib/server/claude-marketplace');
+    const { buildClaudeMarketplacePluginSource } = await import('../src/lib/server/marketplace/claude');
 
     expect(
       buildClaudeMarketplacePluginSource({
@@ -37,7 +37,7 @@ describe('claude marketplace mapping', () => {
   });
 
   it('maps nested git sources to git-subdir entries and publishes the skill root', async () => {
-    const { buildClaudeMarketplacePlugin } = await import('../src/lib/server/claude-marketplace');
+    const { buildClaudeMarketplacePlugin } = await import('../src/lib/server/marketplace/claude');
     const plugin = buildClaudeMarketplacePlugin({
       slug: 'test-owner/demo-skill/nested',
       name: 'Nested Demo',
@@ -67,7 +67,7 @@ describe('claude marketplace mapping', () => {
 
 describe('marketplace route', () => {
   it('returns marketplace payload with cache headers', async () => {
-    vi.doMock('../src/lib/server/claude-marketplace', () => ({
+    vi.doMock('../src/lib/server/marketplace/claude', () => ({
       resolveClaudeMarketplace: async () => ({
         data: {
           name: 'SkillsCat Marketplace',
@@ -94,7 +94,7 @@ describe('marketplace route', () => {
   });
 
   it('surfaces resolver failures as json errors', async () => {
-    vi.doMock('../src/lib/server/claude-marketplace', () => ({
+    vi.doMock('../src/lib/server/marketplace/claude', () => ({
       resolveClaudeMarketplace: async () => ({
         data: null,
         cacheControl: 'no-store',

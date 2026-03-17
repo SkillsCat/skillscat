@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderReadmeMarkdown } from '../src/lib/server/markdown';
+import { renderReadmeMarkdown } from '../src/lib/server/text/markdown';
 
 describe('renderReadmeMarkdown', () => {
   it('preserves safe raw HTML while stripping dangerous tags and attributes', () => {

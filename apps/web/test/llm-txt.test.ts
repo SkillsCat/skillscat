@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildLlmTxt } from '../src/lib/server/llm-txt';
-import { getCoreSitemapPages } from '../src/lib/server/sitemap';
+import { buildLlmTxt } from '../src/lib/server/agent/llm-txt';
+import { getCoreSitemapPages } from '../src/lib/server/seo/sitemap';
 
 describe('buildLlmTxt', () => {
   it('documents the canonical machine endpoints and install guidance', () => {

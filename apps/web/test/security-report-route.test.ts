@@ -39,7 +39,7 @@ afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   vi.unmock('$lib/server/auth/middleware');
-  vi.unmock('$lib/server/permissions');
+  vi.unmock('$lib/server/auth/permissions');
 });
 
 describe('skill report route', () => {
@@ -48,7 +48,7 @@ describe('skill report route', () => {
       getAuthContext: vi.fn(async () => ({ userId: null })),
       requireScope: vi.fn(),
     }));
-    vi.doMock('$lib/server/permissions', () => ({
+    vi.doMock('$lib/server/auth/permissions', () => ({
       checkSkillAccess: vi.fn(),
     }));
 
@@ -88,7 +88,7 @@ describe('skill report route', () => {
       getAuthContext: vi.fn(async () => ({ userId: 'user_1' })),
       requireScope: vi.fn(),
     }));
-    vi.doMock('$lib/server/permissions', () => ({
+    vi.doMock('$lib/server/auth/permissions', () => ({
       checkSkillAccess: vi.fn(async () => true),
     }));
 
@@ -152,7 +152,7 @@ describe('skill report route', () => {
       getAuthContext: vi.fn(async () => ({ userId: 'user_1' })),
       requireScope: vi.fn(),
     }));
-    vi.doMock('$lib/server/permissions', () => ({
+    vi.doMock('$lib/server/auth/permissions', () => ({
       checkSkillAccess: vi.fn(async () => true),
     }));
 

@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import type { ApiResponse } from '$lib/types';
 import { invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
-import { isSkillOwner } from '$lib/server/permissions';
+import { isSkillOwner } from '$lib/server/auth/permissions';
 import { resolveSkillDetail } from '$lib/server/skill/detail';
 import { buildUploadSkillR2Key, normalizeSkillSlug, parseSkillSlug } from '$lib/skill-path';
 

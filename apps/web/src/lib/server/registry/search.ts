@@ -1,6 +1,6 @@
 import { getCached } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
-import { getAccessibleSkillIds } from '$lib/server/permissions';
+import { getAccessibleSkillIds } from '$lib/server/auth/permissions';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;

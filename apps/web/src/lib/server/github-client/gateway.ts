@@ -1,4 +1,4 @@
-import type { GitHubRequestOptions } from '../github-request';
+import type { GitHubRequestOptions } from './request';
 import {
   buildGitHubRequestHeaders,
   getUrlHost,

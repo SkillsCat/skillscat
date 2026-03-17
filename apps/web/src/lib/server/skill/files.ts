@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
-import { checkSkillAccess } from '$lib/server/permissions';
+import { checkSkillAccess } from '$lib/server/auth/permissions';
 import { getCached } from '$lib/server/cache';
 import { getBlob, getCommitByRef, getRepo, getTreeRecursive } from '$lib/server/github-client/rest';
 import { buildUploadSkillR2Prefix, normalizeSkillSlug } from '$lib/skill-path';

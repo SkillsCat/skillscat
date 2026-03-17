@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import type { D1Database } from '@cloudflare/workers-types';
 
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
-import { checkSkillAccess } from '$lib/server/permissions';
+import { checkSkillAccess } from '$lib/server/auth/permissions';
 import { normalizeSkillSlug } from '$lib/skill-path';
 import {
   buildSecurityAnalysisMessage,

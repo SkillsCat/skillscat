@@ -3,7 +3,7 @@
  * Synced with frontend: apps/web/src/lib/constants/categories.ts
  */
 
-import type { Category } from './types';
+import type { Category } from '../types';
 
 export const CATEGORIES: Category[] = [
   // ===== Development =====

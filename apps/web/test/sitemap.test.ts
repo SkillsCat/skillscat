@@ -4,7 +4,7 @@ import {
   MAX_CORE_CATEGORY_SITEMAP_PAGES,
   MAX_CORE_LIST_SITEMAP_PAGES,
   PUBLIC_LIST_PAGE_SIZE,
-} from '../src/lib/server/sitemap';
+} from '../src/lib/server/seo/sitemap';
 
 interface MockRow {
   count?: number;

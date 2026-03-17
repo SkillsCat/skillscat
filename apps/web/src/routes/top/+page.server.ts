@@ -1,7 +1,7 @@
 import type { PageServerLoad } from './$types';
 import { getTopSkillsPaginated } from '$lib/server/db/utils';
 import { getCached } from '$lib/server/cache';
-import { setPublicPageCache } from '$lib/server/page-cache';
+import { setPublicPageCache } from '$lib/server/cache/page';
 
 const ITEMS_PER_PAGE = 24;
 function parsePage(raw: string | null): number {

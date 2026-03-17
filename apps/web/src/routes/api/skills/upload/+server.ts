@@ -2,7 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import { buildUploadSkillR2Key } from '$lib/skill-path';
-import { decodeBase64Utf8 } from '$lib/server/text-codec';
+import { decodeBase64Utf8 } from '$lib/server/text/codec';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '$lib/server/skill/title';
 import { buildSecurityContentFingerprint } from '$lib/server/security';
 import {

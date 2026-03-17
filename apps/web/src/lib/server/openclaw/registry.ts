@@ -1,5 +1,5 @@
 import type { SkillFile } from '$lib/server/skill/files';
-import { buildClawHubCompatVersion } from '$lib/server/clawhub-compat';
+import { buildClawHubCompatVersion } from '$lib/server/openclaw/clawhub-compat';
 
 export const OPENCLAW_REGISTRY_BASE_PATH = '/openclaw';
 export const OPENCLAW_DEFAULT_LIMIT = 25;

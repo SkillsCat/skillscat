@@ -6,7 +6,7 @@ import {
   getStats,
 } from '$lib/server/db/utils';
 import { getCached } from '$lib/server/cache';
-import { setPublicPageCache } from '$lib/server/page-cache';
+import { setPublicPageCache } from '$lib/server/cache/page';
 
 export const load: PageServerLoad = async ({ platform, setHeaders, locals, request }) => {
   setPublicPageCache({

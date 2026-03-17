@@ -7,7 +7,7 @@ import {
   type SubmitApiMessageDescriptor,
 } from '$lib/i18n/submit-api';
 import type { SkillMdLocation, ScanResult } from '$lib/types';
-import { githubRequest } from '$lib/server/github-request';
+import { githubRequest } from '$lib/server/github-client/request';
 import { getCached } from '$lib/server/cache';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 

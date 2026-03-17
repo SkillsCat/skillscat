@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { setPublicPageCache } from '$lib/server/page-cache';
+import { setPublicPageCache } from '$lib/server/cache/page';
 
 const CACHE_TTL = 300;
 const CACHE_TTL_NOT_FOUND = 60;

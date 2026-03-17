@@ -6,7 +6,7 @@ import {
   isOpenRouterFreePauseError,
   OpenRouterApiError,
   pauseOpenRouterFreeModels,
-} from '../workers/shared/openrouter';
+} from '../workers/shared/ai/openrouter';
 import { getTierModelCandidates } from '../workers/security-analysis';
 
 describe('security analysis worker helpers', () => {

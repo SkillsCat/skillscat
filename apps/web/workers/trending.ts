@@ -21,10 +21,10 @@ import type {
   ClassificationMessage,
 } from './shared/types';
 import { TIER_CONFIG } from './shared/types';
-import { getSkillRefreshSelectColumns, resolveRefreshRepoMetrics } from './shared/trending-refresh';
+import { getSkillRefreshSelectColumns, resolveRefreshRepoMetrics } from './shared/trending/refresh';
 import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
 import { buildRecentActivitySortSql, getNonlinearStarScore, buildTopRatedSortScoreSql } from '../src/lib/server/ranking';
-import { markSearchDirtyBatch } from '../src/lib/server/search-precompute';
+import { markSearchDirtyBatch } from '../src/lib/server/ranking/search-precompute';
 import {
   buildSecurityAnalysisMessage,
   markSkillSecurityPremiumDue,

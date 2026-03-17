@@ -7,7 +7,7 @@ import {
 import {
   decodeClawHubCompatSlug,
   encodeClawHubCompatSlug,
-} from '$lib/server/clawhub-compat';
+} from '$lib/server/openclaw/clawhub-compat';
 import { resolveSkillDetail } from '$lib/server/skill/detail';
 import { resolveOpenClawVersionState } from '$lib/server/openclaw/skill-state';
 import {
@@ -17,7 +17,7 @@ import {
   resolveOpenClawJsonCache,
 } from '$lib/server/openclaw/cache';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
-import { canWriteSkill } from '$lib/server/permissions';
+import { canWriteSkill } from '$lib/server/auth/permissions';
 import { readOpenClawManifest, writeOpenClawManifest } from '$lib/server/openclaw/compat-store';
 
 interface SkillStatsRow {
