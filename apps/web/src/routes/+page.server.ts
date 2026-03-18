@@ -7,6 +7,12 @@ import {
 } from '$lib/server/db/utils';
 import { getCached } from '$lib/server/cache';
 import { setPublicPageCache } from '$lib/server/cache/page';
+import {
+  HOME_CRITICAL_CACHE_KEY,
+  PUBLIC_SKILLS_STATS_CACHE_KEY,
+} from '$lib/server/cache/keys';
+
+const PUBLIC_SKILLS_STATS_TTL_SECONDS = 120;
 
 export const load: PageServerLoad = async ({ platform, setHeaders, locals, request }) => {
   setPublicPageCache({
@@ -24,10 +30,14 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
   };
 
   const { data: critical } = await getCached(
-    'page:home:critical:v1',
+    HOME_CRITICAL_CACHE_KEY,
     async () => {
       const [stats, trending] = await Promise.all([
-        getStats(env),
+        getCached(
+          PUBLIC_SKILLS_STATS_CACHE_KEY,
+          () => getStats(env),
+          PUBLIC_SKILLS_STATS_TTL_SECONDS
+        ).then(({ data }) => data),
         getTrendingSkills(env, 12),
       ]);
 

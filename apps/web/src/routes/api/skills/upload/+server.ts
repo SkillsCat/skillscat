@@ -1,6 +1,8 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
+import { invalidateCache } from '$lib/server/cache';
+import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '$lib/server/cache/keys';
 import { buildUploadSkillR2Key } from '$lib/skill-path';
 import { decodeBase64Utf8 } from '$lib/server/text/codec';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '$lib/server/skill/title';
@@ -463,6 +465,16 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     );
   } catch (securityError) {
     console.error(`Failed to enqueue security analysis for uploaded skill ${skillId}:`, securityError);
+  }
+
+  if (visibility === 'public') {
+    try {
+      await Promise.all(
+        PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS.map((cacheKey) => invalidateCache(cacheKey))
+      );
+    } catch (cacheError) {
+      console.error(`Failed to invalidate public discovery caches for uploaded skill ${skillId}:`, cacheError);
+    }
   }
 
   return json({

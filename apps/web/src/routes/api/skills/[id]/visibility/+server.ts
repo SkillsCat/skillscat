@@ -1,6 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { invalidateCache } from '$lib/server/cache';
+import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '$lib/server/cache/keys';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import { isSkillOwner } from '$lib/server/auth/permissions';
 import { getRepo } from '$lib/server/github-client/rest';
@@ -160,11 +161,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
     `api:skill-files:${skill.slug}`,
     `skill:${skillId}`,
     `recommend:${skillId}`,
-    'page:home:v1',
-    'page:trending:v1:1',
-    'page:recent:v1:1',
-    'page:top:v1:1',
-    'page:categories:v1',
+    ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
   ]);
 
   for (const row of categoryRows.results || []) {
