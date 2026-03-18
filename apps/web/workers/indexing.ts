@@ -36,6 +36,8 @@ import {
   buildFileTree,
 } from './shared/utils';
 import { githubRequest } from '../src/lib/server/github-client/request';
+import { invalidateCache } from '../src/lib/server/cache';
+import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '../src/lib/server/cache/keys';
 import { markRecommendDirty } from '../src/lib/server/ranking/recommend-precompute';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '../src/lib/server/skill/title';
 import { buildSecurityContentFingerprint } from '../src/lib/server/security';
@@ -55,6 +57,16 @@ const MAX_FILES = 50;              // 最大文件数
 const MAX_FILE_SIZE = 512 * 1024;  // 单文件最大 512KB
 const MAX_TOTAL_SIZE = 5 * 1024 * 1024; // 总大小最大 5MB
 const INDEXING_RECENT_SUCCESS_TTL_SECONDS = 5 * 60;
+
+async function invalidatePublicDiscoveryCaches(reason: string): Promise<void> {
+  try {
+    await Promise.all(
+      PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS.map((cacheKey) => invalidateCache(cacheKey))
+    );
+  } catch (error) {
+    log.error(`Failed to invalidate public discovery caches after ${reason}`, error);
+  }
+}
 
 // ============================================
 // YAML Frontmatter Parsing
@@ -1426,11 +1438,13 @@ async function processMessage(
     if (curationResult.converted && curationResult.skillId) {
       skillId = curationResult.skillId;
       log.log(`Curation: Converted private skill to public: ${curationResult.slug} (${skillId})`);
+      await invalidatePublicDiscoveryCaches(`curation publish ${curationResult.slug || skillId}`);
     } else {
       const authorId = await upsertAuthor(repo, env);
       log.log(`Author upserted: ${authorId}`);
       skillId = await createSkill(repo, skillMetadata, env, skillPath, frontmatter);
       log.log(`Created skill: ${skillId}`);
+      await invalidatePublicDiscoveryCaches(`github publish ${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`);
     }
   }
 
