@@ -2,6 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { ApiResponse } from '$lib/types';
 import { invalidateCache } from '$lib/server/cache';
+import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '$lib/server/cache/keys';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { isSkillOwner } from '$lib/server/auth/permissions';
 import { resolveSkillDetail } from '$lib/server/skill/detail';
@@ -187,11 +188,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
       `api:skill-files:${skill.slug}`,
       `skill:${skill.id}`,
       `recommend:${skill.id}`,
-      'page:home:v1',
-      'page:trending:v1:1',
-      'page:recent:v1:1',
-      'page:top:v1:1',
-      'page:categories:v1',
+      ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
     ]);
 
     for (const categorySlug of categorySlugs) {

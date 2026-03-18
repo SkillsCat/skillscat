@@ -10,6 +10,7 @@ import {
   getCachedText,
   invalidateCache,
 } from '$lib/server/cache';
+import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '$lib/server/cache/keys';
 
 export interface OpenClawRouteCachePolicy {
   ttlSeconds: number;
@@ -339,11 +340,7 @@ export async function invalidateOpenClawSkillCaches(skillId: string, nativeSlug:
     `api:skill-files:${nativeSlug}`,
     `skill:${skillId}`,
     `recommend:${skillId}`,
-    'page:home:v1',
-    'page:trending:v1:1',
-    'page:recent:v1:1',
-    'page:top:v1:1',
-    'page:categories:v1',
+    ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
     ...OPENCLAW_BROWSE_INVALIDATION_SORTS.map((sort) =>
       buildOpenClawBrowseListCacheKey({
         sort,
