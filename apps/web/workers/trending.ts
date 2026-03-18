@@ -670,7 +670,7 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
 async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   const now = Date.now();
   const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
-  const recentActivitySortSql = buildRecentActivitySortSql('s.last_commit_at', 's.updated_at');
+  const recentActivitySortSql = buildRecentActivitySortSql('last_commit_at', 'updated_at');
 
   const trending = await env.DB.prepare(`
     SELECT s.id, s.name, s.slug, s.description,
@@ -695,28 +695,31 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   );
 
   const top = await env.DB.prepare(`
-    SELECT s.id, s.name, s.slug, s.description,
-           s.repo_owner as repoOwner,
-           s.repo_name as repoName,
-           s.stars, s.forks,
-           s.trending_score as trendingScore,
-           COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-           a.avatar_url as authorAvatar
-    FROM skills s
-    LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE s.visibility = 'public'
-      AND (
-        s.skill_path IS NULL
-        OR s.skill_path = ''
-        OR (
-          s.skill_path NOT LIKE '.%'
-          AND s.skill_path NOT LIKE '%/.%'
+    WITH ranked AS (
+      SELECT id, name, slug, description,
+             repo_owner as repoOwner,
+             repo_name as repoName,
+             stars, forks,
+             trending_score as trendingScore,
+             COALESCE(last_commit_at, updated_at) as updatedAt
+      FROM skills INDEXED BY skills_top_public_rank_expr_idx
+      WHERE visibility = 'public'
+        AND (
+          skill_path IS NULL
+          OR skill_path = ''
+          OR (
+            skill_path NOT LIKE '.%'
+            AND skill_path NOT LIKE '%/.%'
+          )
         )
-      )
-    ORDER BY ${topRatedSortScoreSql} DESC, s.download_count_90d DESC, s.download_count_30d DESC,
-             s.stars DESC, s.trending_score DESC,
-             ${recentActivitySortSql} DESC
-    LIMIT 100
+      ORDER BY ${topRatedSortScoreSql} DESC, download_count_90d DESC, download_count_30d DESC,
+               stars DESC, trending_score DESC,
+               ${recentActivitySortSql} DESC
+      LIMIT 100
+    )
+    SELECT ranked.*, a.avatar_url as authorAvatar
+    FROM ranked
+    LEFT JOIN authors a ON ranked.repoOwner = a.username
   `).all<SkillListItem>();
 
   const topPayload = JSON.stringify({ data: top.results, generatedAt: now });

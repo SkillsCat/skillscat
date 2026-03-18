@@ -37,20 +37,72 @@ async function findArchiveCandidates(env: ArchiveEnv): Promise<SkillToArchive[]>
   const now = Date.now();
   const oneYearAgo = now - 365 * 24 * 60 * 60 * 1000;
   const twoYearsAgo = now - 2 * 365 * 24 * 60 * 60 * 1000;
+  const perTierLimit = 250;
 
   const result = await env.DB.prepare(`
-    SELECT id, name, slug, description, repo_owner, repo_name, stars, forks,
-           star_snapshots, trending_score, last_commit_at, last_accessed_at,
-           created_at, indexed_at
-    FROM skills
-    WHERE visibility = 'public'
-      AND tier != 'archived'
-      AND stars < 5
-      AND (last_accessed_at IS NULL OR last_accessed_at < ?)
-      AND (last_commit_at IS NULL OR last_commit_at < ?)
+    WITH candidates AS (
+      SELECT * FROM (
+        SELECT id, name, slug, description, repo_owner, repo_name, stars, forks,
+               star_snapshots, trending_score, last_commit_at, last_accessed_at,
+               created_at, indexed_at
+        FROM skills INDEXED BY skills_public_archive_candidates_idx
+        WHERE visibility = 'public'
+          AND tier = 'hot'
+          AND stars < 5
+          AND CASE WHEN last_accessed_at IS NULL THEN 0 ELSE last_accessed_at END < ?
+          AND CASE WHEN last_commit_at IS NULL THEN 0 ELSE last_commit_at END < ?
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT * FROM (
+        SELECT id, name, slug, description, repo_owner, repo_name, stars, forks,
+               star_snapshots, trending_score, last_commit_at, last_accessed_at,
+               created_at, indexed_at
+        FROM skills INDEXED BY skills_public_archive_candidates_idx
+        WHERE visibility = 'public'
+          AND tier = 'warm'
+          AND stars < 5
+          AND CASE WHEN last_accessed_at IS NULL THEN 0 ELSE last_accessed_at END < ?
+          AND CASE WHEN last_commit_at IS NULL THEN 0 ELSE last_commit_at END < ?
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT * FROM (
+        SELECT id, name, slug, description, repo_owner, repo_name, stars, forks,
+               star_snapshots, trending_score, last_commit_at, last_accessed_at,
+               created_at, indexed_at
+        FROM skills INDEXED BY skills_public_archive_candidates_idx
+        WHERE visibility = 'public'
+          AND tier = 'cool'
+          AND stars < 5
+          AND CASE WHEN last_accessed_at IS NULL THEN 0 ELSE last_accessed_at END < ?
+          AND CASE WHEN last_commit_at IS NULL THEN 0 ELSE last_commit_at END < ?
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT * FROM (
+        SELECT id, name, slug, description, repo_owner, repo_name, stars, forks,
+               star_snapshots, trending_score, last_commit_at, last_accessed_at,
+               created_at, indexed_at
+        FROM skills INDEXED BY skills_public_archive_candidates_idx
+        WHERE visibility = 'public'
+          AND tier = 'cold'
+          AND stars < 5
+          AND CASE WHEN last_accessed_at IS NULL THEN 0 ELSE last_accessed_at END < ?
+          AND CASE WHEN last_commit_at IS NULL THEN 0 ELSE last_commit_at END < ?
+        LIMIT ?
+      )
+    )
+    SELECT *
+    FROM candidates
     LIMIT 1000
   `)
-    .bind(oneYearAgo, twoYearsAgo)
+    .bind(
+      oneYearAgo, twoYearsAgo, perTierLimit,
+      oneYearAgo, twoYearsAgo, perTierLimit,
+      oneYearAgo, twoYearsAgo, perTierLimit,
+      oneYearAgo, twoYearsAgo, perTierLimit,
+    )
     .all<SkillToArchive>();
 
   return result.results;

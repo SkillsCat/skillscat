@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import {
   buildOpenClawNextCursor,
   buildOpenClawResponseHeaders,
+  getOpenClawIndexHint,
   getOpenClawSortSql,
   normalizeOpenClawSort,
   parseOpenClawCursor,
@@ -170,7 +171,8 @@ async function fetchOpenClawSkillListPage(input: {
   sort: ReturnType<typeof normalizeOpenClawSort>;
 }): Promise<OpenClawSkillListResponse> {
   const orderBySql = getOpenClawSortSql(input.sort);
-  const queryLimit = input.offset === 0 ? input.limit + 1 : input.limit;
+  const indexHint = getOpenClawIndexHint(input.sort);
+  const queryLimit = input.limit + 1;
 
   const result = await input.db
     .prepare(`
@@ -184,7 +186,7 @@ async function fetchOpenClawSkillListPage(input: {
         s.download_count_90d as downloadCount90d,
         s.created_at as createdAt,
         COALESCE(s.last_commit_at, s.updated_at) as updatedAt
-      FROM skills s
+      FROM skills s INDEXED BY ${indexHint}
       WHERE s.visibility = 'public'
       ORDER BY ${orderBySql}
       LIMIT ? OFFSET ?
@@ -192,22 +194,8 @@ async function fetchOpenClawSkillListPage(input: {
     .bind(queryLimit, input.offset)
     .all<SkillListRow>();
 
-  const hasMoreOnFirstPage = input.offset === 0 && result.results.length > input.limit;
-  const pageRows = hasMoreOnFirstPage ? result.results.slice(0, input.limit) : result.results;
-
-  let total: number;
-  if (input.offset === 0 && !hasMoreOnFirstPage) {
-    total = pageRows.length;
-  } else {
-    const countResult = await input.db
-      .prepare(`
-        SELECT COUNT(*) as total
-        FROM skills
-        WHERE visibility = 'public'
-      `)
-      .first<{ total: number }>();
-    total = countResult?.total || 0;
-  }
+  const hasMore = result.results.length > input.limit;
+  const pageRows = hasMore ? result.results.slice(0, input.limit) : result.results;
 
   return {
     items: await Promise.all(
@@ -232,7 +220,7 @@ async function fetchOpenClawSkillListPage(input: {
         };
       })
     ),
-    nextCursor: buildOpenClawNextCursor(input.offset, input.limit, total),
+    nextCursor: buildOpenClawNextCursor(input.offset, input.limit, hasMore),
   };
 }
 

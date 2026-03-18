@@ -4,6 +4,7 @@ import { CATEGORIES } from '$lib/constants';
 import type { ApiResponse } from '$lib/types';
 import { getCached } from '$lib/server/cache';
 import { computeSearchScore, normalizeSearchText } from '$lib/server/ranking/search-precompute';
+import { buildPrefixRange, type PrefixRange } from '$lib/server/text/prefix-range';
 
 const MIN_QUERY_LENGTH = 2;
 const MAX_QUERY_LENGTH = 120;
@@ -11,7 +12,7 @@ const MAX_CATEGORY_LENGTH = 64;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 20;
 const SEARCH_CACHE_TTL_SECONDS = 45;
-const SEARCH_CACHE_KEY_VERSION = 'v7';
+const SEARCH_CACHE_KEY_VERSION = 'v8';
 const TERM_CANDIDATE_LIMIT_MULTIPLIER = 4;
 const PREFIX_CANDIDATE_LIMIT_MULTIPLIER = 3;
 const CATEGORY_CANDIDATE_LIMIT_MULTIPLIER = 2;
@@ -19,6 +20,9 @@ const MAX_CANDIDATE_LIMIT = 80;
 const MAX_MATCHED_CATEGORIES = 4;
 const MAX_QUERY_TOKENS = 8;
 const MIN_QUERY_TOKEN_LENGTH = 2;
+const MIN_TEXT_FUZZY_HEAD_SCAN = 96;
+const MAX_TEXT_FUZZY_HEAD_SCAN = 320;
+const TEXT_FUZZY_HEAD_SCAN_MULTIPLIER = 24;
 const TOKEN_SPLIT_REGEX = /[^\p{L}\p{N}]+/u;
 
 let hasSkillSearchStateTable: boolean | null = null;
@@ -51,6 +55,7 @@ interface SearchCandidateRow {
   id: string;
   name: string;
   slug: string;
+  description?: string | null;
   repoOwner: string | null;
   repoName: string | null;
   stars: number | null;
@@ -114,6 +119,36 @@ function splitQueryTokens(query: string): string[] {
 
 function getCandidateLimit(limit: number, multiplier: number): number {
   return Math.min(MAX_CANDIDATE_LIMIT, Math.max(limit, Math.ceil(limit * multiplier)));
+}
+
+function buildLowerPrefixPredicate(columnSql: string, range: PrefixRange): string {
+  const lowerExpr = `LOWER(${columnSql})`;
+  if (range.end) {
+    return `${lowerExpr} >= ? AND ${lowerExpr} < ? AND ${lowerExpr} LIKE ?`;
+  }
+  return `${lowerExpr} >= ? AND ${lowerExpr} LIKE ?`;
+}
+
+function buildLowerPrefixParams(range: PrefixRange): string[] {
+  const likePattern = `${range.start}%`;
+  if (range.end) {
+    return [range.start, range.end, likePattern];
+  }
+  return [range.start, likePattern];
+}
+
+function buildPrefixRangePredicate(columnSql: string, range: PrefixRange): string {
+  if (range.end) {
+    return `${columnSql} >= ? AND ${columnSql} < ?`;
+  }
+  return `${columnSql} >= ?`;
+}
+
+function buildPrefixRangeParams(range: PrefixRange): string[] {
+  if (range.end) {
+    return [range.start, range.end];
+  }
+  return [range.start];
 }
 
 function buildExclusionClause(ids: string[], column: string): { sql: string; params: string[] } {
@@ -240,6 +275,16 @@ function toSuggestionSkill(row: SearchCandidateRow): SearchSuggestionSkill {
   };
 }
 
+function matchesFuzzyTextCandidate(row: SearchCandidateRow, query: string): boolean {
+  return (
+    normalizeText(row.name).includes(query)
+    || normalizeText(row.slug).includes(query)
+    || normalizeText(row.description).includes(query)
+    || normalizeText(row.repoOwner).includes(query)
+    || normalizeText(row.repoName).includes(query)
+  );
+}
+
 function rankCandidates(
   query: string,
   queryTokens: string[],
@@ -319,6 +364,7 @@ async function fetchTermCandidates(
     `
     : '';
   const categoryParams = category ? [category] : [];
+  const tokenRanges = queryTokens.map((token) => buildPrefixRange(token));
 
   const tokenPlaceholders = queryTokens.map(() => '?').join(',');
 
@@ -337,6 +383,7 @@ async function fetchTermCandidates(
       s.id,
       s.name,
       s.slug,
+      s.description,
       s.repo_owner as repoOwner,
       s.repo_name as repoName,
       s.stars,
@@ -364,7 +411,7 @@ async function fetchTermCandidates(
       s.trending_score DESC
     LIMIT ?
   `)
-    .bind(...queryTokens, ...categoryParams, exactLimit)
+    .bind(...categoryParams, ...queryTokens, exactLimit)
     .all<SearchCandidateRow>();
 
   const merged = new Map<string, SearchCandidateRow>();
@@ -377,19 +424,33 @@ async function fetchTermCandidates(
     return Array.from(merged.values());
   }
 
-  const prefixPredicates = queryTokens.map(() => 'st.term LIKE ?').join(' OR ');
   const exclusion = buildExclusionClause(Array.from(merged.keys()), 's.id');
-
-  const prefixRows = await db.prepare(`
-    WITH matched_terms AS (
+  const prefixUnionSql = tokenRanges
+    .map((range) => `
       SELECT
         st.skill_id as skillId,
-        COUNT(*) as matchedTermCount,
-        MAX(st.weight) as matchedTermWeight
-      FROM skill_search_terms st
+        st.weight as weight
+      FROM skill_search_terms st INDEXED BY skill_search_terms_term_weight_idx
       ${categoryJoinSql}
-      WHERE (${prefixPredicates})
-      GROUP BY st.skill_id
+      WHERE ${buildPrefixRangePredicate('st.term', range)}
+    `)
+    .join('\n      UNION ALL\n');
+  const prefixParams = tokenRanges.flatMap((range) => [
+    ...categoryParams,
+    ...buildPrefixRangeParams(range),
+  ]);
+
+  const prefixRows = await db.prepare(`
+    WITH term_prefix_matches AS (
+      ${prefixUnionSql}
+    ),
+    matched_terms AS (
+      SELECT
+        skillId,
+        COUNT(*) as matchedTermCount,
+        MAX(weight) as matchedTermWeight
+      FROM term_prefix_matches
+      GROUP BY skillId
     )
     SELECT
       s.id,
@@ -423,7 +484,7 @@ async function fetchTermCandidates(
       s.trending_score DESC
     LIMIT ?
   `)
-    .bind(...queryTokens.map((token) => `${token}%`), ...categoryParams, ...exclusion.params, remaining)
+    .bind(...prefixParams, ...exclusion.params, remaining)
     .all<SearchCandidateRow>();
 
   for (const row of prefixRows.results || []) {
@@ -443,8 +504,7 @@ async function fetchTextCandidates(
   excludedIds: string[],
   category: string
 ): Promise<SearchCandidateRow[]> {
-  const prefixQuery = `${query}%`;
-  const fuzzyQuery = `%${query}%`;
+  const prefixRange = buildPrefixRange(query);
 
   const prefixLimit = getCandidateLimit(limit, PREFIX_CANDIDATE_LIMIT_MULTIPLIER);
   const fuzzyLimit = limit;
@@ -465,41 +525,44 @@ async function fetchTextCandidates(
     `
     : '';
   const categoryParams = category ? [category] : [];
+  const prefixParams = buildLowerPrefixParams(prefixRange);
+  const exactQuery = query;
+  const prefixLike = `${query}%`;
 
   const prefixRows = await db.prepare(`
     WITH prefix_ids AS (
       SELECT id FROM (
         SELECT id
-        FROM skills s INDEXED BY skills_visibility_name_idx
+        FROM skills s INDEXED BY skills_visibility_lower_name_idx
         WHERE s.visibility = 'public'
-          AND s.name LIKE ?
+          AND ${buildLowerPrefixPredicate('s.name', prefixRange)}
           ${categorySql}
         LIMIT ?
       )
       UNION ALL
       SELECT id FROM (
         SELECT id
-        FROM skills s INDEXED BY skills_visibility_slug_idx
+        FROM skills s INDEXED BY skills_visibility_lower_slug_idx
         WHERE s.visibility = 'public'
-          AND s.slug LIKE ?
+          AND ${buildLowerPrefixPredicate('s.slug', prefixRange)}
           ${categorySql}
         LIMIT ?
       )
       UNION ALL
       SELECT id FROM (
         SELECT id
-        FROM skills s INDEXED BY skills_visibility_repo_owner_idx
+        FROM skills s INDEXED BY skills_visibility_lower_repo_owner_idx
         WHERE s.visibility = 'public'
-          AND s.repo_owner LIKE ?
+          AND ${buildLowerPrefixPredicate('s.repo_owner', prefixRange)}
           ${categorySql}
         LIMIT ?
       )
       UNION ALL
       SELECT id FROM (
         SELECT id
-        FROM skills s INDEXED BY skills_visibility_repo_name_idx
+        FROM skills s INDEXED BY skills_visibility_lower_repo_name_idx
         WHERE s.visibility = 'public'
-          AND s.repo_name LIKE ?
+          AND ${buildLowerPrefixPredicate('s.repo_name', prefixRange)}
           ${categorySql}
         LIMIT ?
       )
@@ -534,42 +597,42 @@ async function fetchTextCandidates(
       ${prefixExclusion.sql}
     ORDER BY
       CASE
-        WHEN s.name = ? THEN 0
-        WHEN s.slug = ? THEN 1
-        WHEN s.repo_owner = ? THEN 2
-        WHEN s.repo_name = ? THEN 3
-        WHEN s.name LIKE ? THEN 4
-        WHEN s.slug LIKE ? THEN 5
-        WHEN s.repo_owner LIKE ? THEN 6
-        WHEN s.repo_name LIKE ? THEN 7
+        WHEN LOWER(s.name) = ? THEN 0
+        WHEN LOWER(s.slug) = ? THEN 1
+        WHEN LOWER(s.repo_owner) = ? THEN 2
+        WHEN LOWER(s.repo_name) = ? THEN 3
+        WHEN LOWER(s.name) LIKE ? THEN 4
+        WHEN LOWER(s.slug) LIKE ? THEN 5
+        WHEN LOWER(s.repo_owner) LIKE ? THEN 6
+        WHEN LOWER(s.repo_name) LIKE ? THEN 7
         ELSE 8
       END ASC,
       ${searchScoreOrderSql}
       s.trending_score DESC
     LIMIT ?
   `).bind(
-    prefixQuery,
+    ...prefixParams,
     ...categoryParams,
     prefixPerColumnLimit,
-    prefixQuery,
+    ...prefixParams,
     ...categoryParams,
     prefixPerColumnLimit,
-    prefixQuery,
+    ...prefixParams,
     ...categoryParams,
     prefixPerColumnLimit,
-    prefixQuery,
+    ...prefixParams,
     ...categoryParams,
     prefixPerColumnLimit,
     prefixLimit,
     ...prefixExclusion.params,
-    query,
-    query,
-    query,
-    query,
-    prefixQuery,
-    prefixQuery,
-    prefixQuery,
-    prefixQuery,
+    exactQuery,
+    exactQuery,
+    exactQuery,
+    exactQuery,
+    prefixLike,
+    prefixLike,
+    prefixLike,
+    prefixLike,
     prefixLimit
   ).all<SearchCandidateRow>();
 
@@ -590,12 +653,17 @@ async function fetchTextCandidates(
     [...excludedIds, ...Array.from(merged.keys())],
     's.id'
   );
+  const fuzzyHeadLimit = Math.min(
+    MAX_TEXT_FUZZY_HEAD_SCAN,
+    Math.max(MIN_TEXT_FUZZY_HEAD_SCAN, fuzzyBudget * TEXT_FUZZY_HEAD_SCAN_MULTIPLIER)
+  );
 
-  const fuzzyRows = await db.prepare(`
+  const fuzzyHeadRows = await db.prepare(`
     SELECT
       s.id,
       s.name,
       s.slug,
+      s.description,
       s.repo_owner as repoOwner,
       s.repo_name as repoName,
       s.stars,
@@ -613,31 +681,23 @@ async function fetchTextCandidates(
     ${searchStateJoinSql}
     WHERE s.visibility = 'public'
       ${categorySql}
-      AND (
-        s.name LIKE ?
-        OR s.slug LIKE ?
-        OR s.repo_owner LIKE ?
-        OR s.repo_name LIKE ?
-      )
       ${fuzzyExclusion.sql}
     ORDER BY
-      ${searchScoreOrderSql}
       s.trending_score DESC
     LIMIT ?
   `).bind(
     ...categoryParams,
-    fuzzyQuery,
-    fuzzyQuery,
-    fuzzyQuery,
-    fuzzyQuery,
     ...fuzzyExclusion.params,
-    fuzzyBudget
+    fuzzyHeadLimit
   ).all<SearchCandidateRow>();
 
-  for (const row of fuzzyRows.results || []) {
+  const fuzzyTargetSize = merged.size + fuzzyBudget;
+  for (const row of fuzzyHeadRows.results || []) {
+    if (!matchesFuzzyTextCandidate(row, query)) continue;
     if (!merged.has(row.id)) {
       merged.set(row.id, row);
     }
+    if (merged.size >= fuzzyTargetSize) break;
   }
 
   return Array.from(merged.values());

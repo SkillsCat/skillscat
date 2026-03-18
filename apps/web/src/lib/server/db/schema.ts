@@ -136,9 +136,13 @@ export const skills = sqliteTable('skills', {
   index('skills_visibility_idx').on(table.visibility),
   index('skills_visibility_id_idx').on(table.visibility, table.id),
   index('skills_visibility_name_idx').on(table.visibility, table.name),
+  index('skills_visibility_lower_name_idx').on(table.visibility, sql.raw('LOWER(name)')),
   index('skills_visibility_repo_owner_idx').on(table.visibility, table.repoOwner),
+  index('skills_visibility_lower_repo_owner_idx').on(table.visibility, sql.raw('LOWER(repo_owner)')),
   index('skills_visibility_repo_name_idx').on(table.visibility, table.repoName),
+  index('skills_visibility_lower_repo_name_idx').on(table.visibility, sql.raw('LOWER(repo_name)')),
   index('skills_visibility_slug_idx').on(table.visibility, table.slug),
+  index('skills_visibility_lower_slug_idx').on(table.visibility, sql.raw('LOWER(slug)')),
   index('skills_visibility_org_idx').on(table.visibility, table.orgId),
   index('skills_visibility_trending_desc_idx').on(table.visibility, table.trendingScore),
   index('skills_visibility_stars_desc_idx').on(table.visibility, table.stars),
@@ -182,6 +186,55 @@ export const skills = sqliteTable('skills', {
         AND skill_path NOT LIKE '%/.%'
       )
     )`)),
+  index('skills_public_openclaw_updated_slug_idx')
+    .on(
+      sql.raw('CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC'),
+      table.slug
+    )
+    .where(sql`${table.visibility} = 'public'`),
+  index('skills_public_openclaw_trending_rank_idx')
+    .on(
+      sql.raw('trending_score DESC'),
+      sql.raw('download_count_30d DESC'),
+      sql.raw('CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC'),
+      table.slug
+    )
+    .where(sql`${table.visibility} = 'public'`),
+  index('skills_public_openclaw_stars_rank_idx')
+    .on(
+      sql.raw('stars DESC'),
+      sql.raw('download_count_90d DESC'),
+      sql.raw('download_count_30d DESC'),
+      sql.raw('CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC'),
+      table.slug
+    )
+    .where(sql`${table.visibility} = 'public'`),
+  index('skills_public_openclaw_downloads_rank_idx')
+    .on(
+      sql.raw('download_count_90d DESC'),
+      sql.raw('download_count_30d DESC'),
+      sql.raw('stars DESC'),
+      sql.raw('CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC'),
+      table.slug
+    )
+    .where(sql`${table.visibility} = 'public'`),
+  index('skills_public_openclaw_installs_current_rank_idx')
+    .on(
+      sql.raw('download_count_30d DESC'),
+      sql.raw('download_count_90d DESC'),
+      sql.raw('stars DESC'),
+      sql.raw('CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC'),
+      table.slug
+    )
+    .where(sql`${table.visibility} = 'public'`),
+  index('skills_public_archive_candidates_idx')
+    .on(
+      table.tier,
+      table.stars,
+      sql.raw('CASE WHEN last_accessed_at IS NULL THEN 0 ELSE last_accessed_at END'),
+      sql.raw('CASE WHEN last_commit_at IS NULL THEN 0 ELSE last_commit_at END')
+    )
+    .where(sql`${table.visibility} = 'public'`),
   // Unique constraint for multi-skill repos (same repo can have multiple skills with different paths)
   uniqueIndex('skills_repo_path_unique').on(
     table.repoOwner,

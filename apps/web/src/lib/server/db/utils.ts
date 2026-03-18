@@ -5,6 +5,8 @@
 import type { FileNode, SkillCardData, SkillDetail } from '$lib/types';
 import { buildUploadSkillR2Key, parseSkillSlug } from '$lib/skill-path';
 import { buildRecentActivitySortSql, buildTopRatedSortScoreSql } from '$lib/server/ranking';
+import { normalizeSearchText } from '$lib/server/ranking/search-precompute';
+import { buildPrefixRange } from '$lib/server/text/prefix-range';
 import { CATEGORIES } from '$lib/constants/categories';
 
 export interface DbEnv {
@@ -19,6 +21,9 @@ export interface DbEnv {
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 const LIST_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const PREDEFINED_CATEGORY_SLUGS = CATEGORIES.map((category) => category.slug);
+const SEARCH_PAGE_MIN_FUZZY_HEAD_SCAN = 80;
+const SEARCH_PAGE_MAX_FUZZY_HEAD_SCAN = 240;
+const SEARCH_PAGE_FUZZY_HEAD_SCAN_MULTIPLIER = 12;
 
 interface CachedSkillCardRaw {
   id: string;
@@ -574,7 +579,7 @@ export async function getTopSkills(
   limit: number = 12
 ): Promise<SkillCardData[]> {
   const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
-  const recentActivitySortSql = buildRecentActivitySortSql('s.last_commit_at', 's.updated_at');
+  const recentActivitySortSql = buildRecentActivitySortSql('last_commit_at', 'updated_at');
   // 先尝试从 R2 缓存读取
   const cached = await getCachedList(env.R2, 'top', env.CACHE_VERSION, {
     maxAgeMs: LIST_CACHE_MAX_AGE_MS,
@@ -589,33 +594,36 @@ export async function getTopSkills(
   if (!env.DB) return [];
 
   const result = await env.DB.prepare(`
-    SELECT
-      s.id,
-      s.name,
-      s.slug,
-      s.description,
-      s.repo_owner as repoOwner,
-      s.repo_name as repoName,
-      s.stars,
-      s.forks,
-      s.trending_score as trendingScore,
-      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-      a.avatar_url as authorAvatar
-    FROM skills s
-    LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE s.visibility = 'public'
-      AND (
-        s.skill_path IS NULL
-        OR s.skill_path = ''
-        OR (
-          s.skill_path NOT LIKE '.%'
-          AND s.skill_path NOT LIKE '%/.%'
+    WITH ranked AS (
+      SELECT
+        id,
+        name,
+        slug,
+        description,
+        repo_owner as repoOwner,
+        repo_name as repoName,
+        stars,
+        forks,
+        trending_score as trendingScore,
+        COALESCE(last_commit_at, updated_at) as updatedAt
+      FROM skills INDEXED BY skills_top_public_rank_expr_idx
+      WHERE visibility = 'public'
+        AND (
+          skill_path IS NULL
+          OR skill_path = ''
+          OR (
+            skill_path NOT LIKE '.%'
+            AND skill_path NOT LIKE '%/.%'
+          )
         )
-      )
-    ORDER BY ${topRatedSortScoreSql} DESC, s.download_count_90d DESC, s.download_count_30d DESC,
-             s.stars DESC, s.trending_score DESC,
-             ${recentActivitySortSql} DESC
-    LIMIT ?
+      ORDER BY ${topRatedSortScoreSql} DESC, download_count_90d DESC, download_count_30d DESC,
+               stars DESC, trending_score DESC,
+               ${recentActivitySortSql} DESC
+      LIMIT ?
+    )
+    SELECT ranked.*, a.avatar_url as authorAvatar
+    FROM ranked
+    LEFT JOIN authors a ON ranked.repoOwner = a.username
   `)
     .bind(limit)
     .all<SkillListRow>();
@@ -636,36 +644,39 @@ export async function getTopSkillsPaginated(
   const offset = (page - 1) * limit;
   const queryLimit = offset === 0 ? limit + 1 : limit;
   const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
-  const recentActivitySortSql = buildRecentActivitySortSql('s.last_commit_at', 's.updated_at');
+  const recentActivitySortSql = buildRecentActivitySortSql('last_commit_at', 'updated_at');
 
   const result = await env.DB.prepare(`
-    SELECT
-      s.id,
-      s.name,
-      s.slug,
-      s.description,
-      s.repo_owner as repoOwner,
-      s.repo_name as repoName,
-      s.stars,
-      s.forks,
-      s.trending_score as trendingScore,
-      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-      a.avatar_url as authorAvatar
-    FROM skills s
-    LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE s.visibility = 'public'
-      AND (
-        s.skill_path IS NULL
-        OR s.skill_path = ''
-        OR (
-          s.skill_path NOT LIKE '.%'
-          AND s.skill_path NOT LIKE '%/.%'
+    WITH ranked AS (
+      SELECT
+        id,
+        name,
+        slug,
+        description,
+        repo_owner as repoOwner,
+        repo_name as repoName,
+        stars,
+        forks,
+        trending_score as trendingScore,
+        COALESCE(last_commit_at, updated_at) as updatedAt
+      FROM skills INDEXED BY skills_top_public_rank_expr_idx
+      WHERE visibility = 'public'
+        AND (
+          skill_path IS NULL
+          OR skill_path = ''
+          OR (
+            skill_path NOT LIKE '.%'
+            AND skill_path NOT LIKE '%/.%'
+          )
         )
-      )
-    ORDER BY ${topRatedSortScoreSql} DESC, s.download_count_90d DESC, s.download_count_30d DESC,
-             s.stars DESC, s.trending_score DESC,
-             ${recentActivitySortSql} DESC
-    LIMIT ? OFFSET ?
+      ORDER BY ${topRatedSortScoreSql} DESC, download_count_90d DESC, download_count_30d DESC,
+               stars DESC, trending_score DESC,
+               ${recentActivitySortSql} DESC
+      LIMIT ? OFFSET ?
+    )
+    SELECT ranked.*, a.avatar_url as authorAvatar
+    FROM ranked
+    LEFT JOIN authors a ON ranked.repoOwner = a.username
   `)
     .bind(queryLimit, offset)
     .all<SkillListRow>();
@@ -800,37 +811,56 @@ export async function searchSkills(
 ): Promise<SkillCardData[]> {
   if (!env.DB || !query) return [];
 
-  const prefixTerm = `${query}%`;
-  const fuzzyTerm = `%${query}%`;
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) return [];
+
+  const prefixRange = buildPrefixRange(normalizedQuery);
+  const prefixTerm = `${normalizedQuery}%`;
+  const fuzzyTerm = `%${normalizedQuery}%`;
   const prefixPerColumnLimit = Math.max(limit, Math.ceil(limit / 2));
+  const prefixParams = prefixRange.end
+    ? [prefixRange.start, prefixRange.end, prefixTerm]
+    : [prefixRange.start, prefixTerm];
 
   const prefixResult = await env.DB.prepare(`
     WITH prefix_ids AS (
       SELECT id FROM (
         SELECT id
-        FROM skills INDEXED BY skills_visibility_name_idx
-        WHERE visibility = 'public' AND name LIKE ?
+        FROM skills INDEXED BY skills_visibility_lower_name_idx
+        WHERE visibility = 'public'
+          AND LOWER(name) >= ?
+          ${prefixRange.end ? 'AND LOWER(name) < ?' : ''}
+          AND LOWER(name) LIKE ?
         LIMIT ?
       )
       UNION ALL
       SELECT id FROM (
         SELECT id
-        FROM skills INDEXED BY skills_visibility_slug_idx
-        WHERE visibility = 'public' AND slug LIKE ?
+        FROM skills INDEXED BY skills_visibility_lower_slug_idx
+        WHERE visibility = 'public'
+          AND LOWER(slug) >= ?
+          ${prefixRange.end ? 'AND LOWER(slug) < ?' : ''}
+          AND LOWER(slug) LIKE ?
         LIMIT ?
       )
       UNION ALL
       SELECT id FROM (
         SELECT id
-        FROM skills INDEXED BY skills_visibility_repo_owner_idx
-        WHERE visibility = 'public' AND repo_owner LIKE ?
+        FROM skills INDEXED BY skills_visibility_lower_repo_owner_idx
+        WHERE visibility = 'public'
+          AND LOWER(repo_owner) >= ?
+          ${prefixRange.end ? 'AND LOWER(repo_owner) < ?' : ''}
+          AND LOWER(repo_owner) LIKE ?
         LIMIT ?
       )
       UNION ALL
       SELECT id FROM (
         SELECT id
-        FROM skills INDEXED BY skills_visibility_repo_name_idx
-        WHERE visibility = 'public' AND repo_name LIKE ?
+        FROM skills INDEXED BY skills_visibility_lower_repo_name_idx
+        WHERE visibility = 'public'
+          AND LOWER(repo_name) >= ?
+          ${prefixRange.end ? 'AND LOWER(repo_name) < ?' : ''}
+          AND LOWER(repo_name) LIKE ?
         LIMIT ?
       )
     ),
@@ -858,33 +888,33 @@ export async function searchSkills(
     WHERE s.id = d.id
     ORDER BY
       CASE
-        WHEN s.name = ? THEN 0
-        WHEN s.slug = ? THEN 1
-        WHEN s.repo_owner = ? THEN 2
-        WHEN s.repo_name = ? THEN 3
-        WHEN s.name LIKE ? THEN 4
-        WHEN s.slug LIKE ? THEN 5
-        WHEN s.repo_owner LIKE ? THEN 6
-        WHEN s.repo_name LIKE ? THEN 7
+        WHEN LOWER(s.name) = ? THEN 0
+        WHEN LOWER(s.slug) = ? THEN 1
+        WHEN LOWER(s.repo_owner) = ? THEN 2
+        WHEN LOWER(s.repo_name) = ? THEN 3
+        WHEN LOWER(s.name) LIKE ? THEN 4
+        WHEN LOWER(s.slug) LIKE ? THEN 5
+        WHEN LOWER(s.repo_owner) LIKE ? THEN 6
+        WHEN LOWER(s.repo_name) LIKE ? THEN 7
         ELSE 8
       END ASC,
       s.trending_score DESC
     LIMIT ?
   `)
     .bind(
-      prefixTerm,
+      ...prefixParams,
       prefixPerColumnLimit,
-      prefixTerm,
+      ...prefixParams,
       prefixPerColumnLimit,
-      prefixTerm,
+      ...prefixParams,
       prefixPerColumnLimit,
-      prefixTerm,
+      ...prefixParams,
       prefixPerColumnLimit,
       limit,
-      query,
-      query,
-      query,
-      query,
+      normalizedQuery,
+      normalizedQuery,
+      normalizedQuery,
+      normalizedQuery,
       prefixTerm,
       prefixTerm,
       prefixTerm,
@@ -908,6 +938,10 @@ export async function searchSkills(
     const exclusionSql = excludedIds.length > 0
       ? `AND s.id NOT IN (${excludedIds.map(() => '?').join(',')})`
       : '';
+    const fuzzyHeadLimit = Math.min(
+      SEARCH_PAGE_MAX_FUZZY_HEAD_SCAN,
+      Math.max(SEARCH_PAGE_MIN_FUZZY_HEAD_SCAN, fuzzyBudget * SEARCH_PAGE_FUZZY_HEAD_SCAN_MULTIPLIER)
+    );
 
     const fuzzyResult = await env.DB.prepare(`
       SELECT
@@ -925,31 +959,93 @@ export async function searchSkills(
       FROM skills s
       LEFT JOIN authors a ON s.repo_owner = a.username
       WHERE s.visibility = 'public'
-        AND (
-          s.name LIKE ?
-          OR s.slug LIKE ?
-          OR s.repo_owner LIKE ?
-          OR s.repo_name LIKE ?
-          OR s.description LIKE ?
-        )
         ${exclusionSql}
       ORDER BY s.trending_score DESC
       LIMIT ?
     `)
       .bind(
-        fuzzyTerm,
-        fuzzyTerm,
-        fuzzyTerm,
-        fuzzyTerm,
-        fuzzyTerm,
         ...excludedIds,
-        fuzzyBudget
+        fuzzyHeadLimit
       )
       .all<SkillListRow>();
 
+    const fuzzyTargetSize = merged.size + fuzzyBudget;
     for (const row of fuzzyResult.results || []) {
+      const name = normalizeSearchText(row.name);
+      const slug = normalizeSearchText(row.slug);
+      const owner = normalizeSearchText(row.repoOwner);
+      const repo = normalizeSearchText(row.repoName);
+      const description = normalizeSearchText(row.description);
+
+      if (
+        !name.includes(normalizedQuery)
+        && !slug.includes(normalizedQuery)
+        && !owner.includes(normalizedQuery)
+        && !repo.includes(normalizedQuery)
+        && !description.includes(normalizedQuery)
+      ) {
+        continue;
+      }
+
       if (!merged.has(row.id)) {
         merged.set(row.id, row);
+      }
+      if (merged.size >= fuzzyTargetSize) break;
+    }
+  }
+
+  if (merged.size < limit) {
+    const excludedIds = Array.from(merged.keys());
+    const exclusionSql = excludedIds.length > 0
+      ? `AND s.id NOT IN (${excludedIds.map(() => '?').join(',')})`
+      : '';
+    const remaining = Math.max(0, limit - merged.size);
+
+    if (remaining > 0) {
+      // The full search page is query-by-query cached and user-driven, so we keep
+      // a deeper fuzzy fallback here to preserve long-tail recall.
+      const deepFuzzyResult = await env.DB.prepare(`
+        SELECT
+          s.id,
+          s.name,
+          s.slug,
+          s.description,
+          s.repo_owner as repoOwner,
+          s.repo_name as repoName,
+          s.stars,
+          s.forks,
+          s.trending_score as trendingScore,
+          COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
+          a.avatar_url as authorAvatar
+        FROM skills s
+        LEFT JOIN authors a ON s.repo_owner = a.username
+        WHERE s.visibility = 'public'
+          AND (
+            LOWER(s.name) LIKE ?
+            OR LOWER(s.slug) LIKE ?
+            OR LOWER(s.repo_owner) LIKE ?
+            OR LOWER(s.repo_name) LIKE ?
+            OR LOWER(COALESCE(s.description, '')) LIKE ?
+          )
+          ${exclusionSql}
+        ORDER BY s.trending_score DESC
+        LIMIT ?
+      `)
+        .bind(
+          fuzzyTerm,
+          fuzzyTerm,
+          fuzzyTerm,
+          fuzzyTerm,
+          fuzzyTerm,
+          ...excludedIds,
+          remaining
+        )
+        .all<SkillListRow>();
+
+      for (const row of deepFuzzyResult.results || []) {
+        if (!merged.has(row.id)) {
+          merged.set(row.id, row);
+        }
       }
     }
   }

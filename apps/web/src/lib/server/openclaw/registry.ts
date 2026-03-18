@@ -48,9 +48,9 @@ export function parseOpenClawCursor(raw: string | null | undefined): number {
   return parsed;
 }
 
-export function buildOpenClawNextCursor(offset: number, limit: number, total: number): string | null {
-  const nextOffset = offset + limit;
-  return nextOffset < total ? String(nextOffset) : null;
+export function buildOpenClawNextCursor(offset: number, limit: number, hasMore: boolean): string | null {
+  if (!hasMore) return null;
+  return String(offset + limit);
 }
 
 export function normalizeOpenClawSort(raw: string | null | undefined): OpenClawSort {
@@ -84,23 +84,40 @@ export function normalizeOpenClawSort(raw: string | null | undefined): OpenClawS
   return 'updated';
 }
 
-export function getOpenClawSortSql(sort: OpenClawSort, alias: string = 's'): string {
-  const updatedExpr = `COALESCE(${alias}.last_commit_at, ${alias}.updated_at)`;
+export function getOpenClawSortSql(sort: OpenClawSort): string {
+  const updatedExpr = 'CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END';
 
   switch (sort) {
     case 'downloads':
-      return `${alias}.download_count_90d DESC, ${alias}.download_count_30d DESC, ${updatedExpr} DESC, ${alias}.slug ASC`;
+      return `download_count_90d DESC, download_count_30d DESC, stars DESC, ${updatedExpr} DESC, slug ASC`;
     case 'stars':
-      return `${alias}.stars DESC, ${alias}.download_count_90d DESC, ${updatedExpr} DESC, ${alias}.slug ASC`;
+      return `stars DESC, download_count_90d DESC, download_count_30d DESC, ${updatedExpr} DESC, slug ASC`;
     case 'installsCurrent':
-      return `${alias}.download_count_30d DESC, ${alias}.download_count_90d DESC, ${updatedExpr} DESC, ${alias}.slug ASC`;
+      return `download_count_30d DESC, download_count_90d DESC, stars DESC, ${updatedExpr} DESC, slug ASC`;
     case 'installsAllTime':
-      return `${alias}.download_count_90d DESC, ${alias}.download_count_30d DESC, ${alias}.stars DESC, ${updatedExpr} DESC, ${alias}.slug ASC`;
+      return `download_count_90d DESC, download_count_30d DESC, stars DESC, ${updatedExpr} DESC, slug ASC`;
     case 'trending':
-      return `${alias}.trending_score DESC, ${alias}.download_count_30d DESC, ${updatedExpr} DESC, ${alias}.slug ASC`;
+      return `trending_score DESC, download_count_30d DESC, ${updatedExpr} DESC, slug ASC`;
     case 'updated':
     default:
-      return `${updatedExpr} DESC, ${alias}.slug ASC`;
+      return `${updatedExpr} DESC, slug ASC`;
+  }
+}
+
+export function getOpenClawIndexHint(sort: OpenClawSort): string {
+  switch (sort) {
+    case 'downloads':
+    case 'installsAllTime':
+      return 'skills_public_openclaw_downloads_rank_idx';
+    case 'installsCurrent':
+      return 'skills_public_openclaw_installs_current_rank_idx';
+    case 'stars':
+      return 'skills_public_openclaw_stars_rank_idx';
+    case 'trending':
+      return 'skills_public_openclaw_trending_rank_idx';
+    case 'updated':
+    default:
+      return 'skills_public_openclaw_updated_slug_idx';
   }
 }
 

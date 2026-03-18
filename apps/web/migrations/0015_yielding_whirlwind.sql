@@ -1,0 +1,10 @@
+CREATE INDEX `skills_visibility_lower_name_idx` ON `skills` (`visibility`,LOWER(name));--> statement-breakpoint
+CREATE INDEX `skills_visibility_lower_repo_owner_idx` ON `skills` (`visibility`,LOWER(repo_owner));--> statement-breakpoint
+CREATE INDEX `skills_visibility_lower_repo_name_idx` ON `skills` (`visibility`,LOWER(repo_name));--> statement-breakpoint
+CREATE INDEX `skills_visibility_lower_slug_idx` ON `skills` (`visibility`,LOWER(slug));--> statement-breakpoint
+CREATE INDEX `skills_public_openclaw_updated_slug_idx` ON `skills` (CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC,`slug`) WHERE "skills"."visibility" = 'public';--> statement-breakpoint
+CREATE INDEX `skills_public_openclaw_trending_rank_idx` ON `skills` (trending_score DESC,download_count_30d DESC,CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC,`slug`) WHERE "skills"."visibility" = 'public';--> statement-breakpoint
+CREATE INDEX `skills_public_openclaw_stars_rank_idx` ON `skills` (stars DESC,download_count_90d DESC,download_count_30d DESC,CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC,`slug`) WHERE "skills"."visibility" = 'public';--> statement-breakpoint
+CREATE INDEX `skills_public_openclaw_downloads_rank_idx` ON `skills` (download_count_90d DESC,download_count_30d DESC,stars DESC,CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC,`slug`) WHERE "skills"."visibility" = 'public';--> statement-breakpoint
+CREATE INDEX `skills_public_openclaw_installs_current_rank_idx` ON `skills` (download_count_30d DESC,download_count_90d DESC,stars DESC,CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC,`slug`) WHERE "skills"."visibility" = 'public';--> statement-breakpoint
+CREATE INDEX `skills_public_archive_candidates_idx` ON `skills` (`tier`,`stars`,CASE WHEN last_accessed_at IS NULL THEN 0 ELSE last_accessed_at END,CASE WHEN last_commit_at IS NULL THEN 0 ELSE last_commit_at END) WHERE "skills"."visibility" = 'public';
