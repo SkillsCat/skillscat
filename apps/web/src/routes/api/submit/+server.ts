@@ -133,14 +133,17 @@ function buildSubmitMultipleMessage(
   locale: App.Locals['locale'],
   queued: number,
   existing: number,
+  refreshQueued: number,
   truncated: boolean
 ): string {
-  const parts = [
-    formatSubmitApiMessage(locale, {
+  const parts: string[] = [];
+
+  if (queued > 0) {
+    parts.push(formatSubmitApiMessage(locale, {
       key: 'skillsQueued',
       values: { count: queued },
-    }),
-  ];
+    }));
+  }
 
   if (existing > 0) {
     parts.push(formatSubmitApiMessage(locale, {
@@ -149,11 +152,114 @@ function buildSubmitMultipleMessage(
     }));
   }
 
+  if (refreshQueued > 0) {
+    parts.push(formatSubmitApiMessage(locale, {
+      key: 'skillsRefreshQueued',
+      values: { count: refreshQueued },
+    }));
+  }
+
   if (truncated) {
     parts.push(formatSubmitApiMessage(locale, { key: 'skillsSkippedDueToLimit' }));
   }
 
+  if (parts.length === 0) {
+    return formatSubmitApiMessage(locale, { key: 'failedToQueueSkill' });
+  }
+
   return parts.join(' ');
+}
+
+const SUBMIT_ON_DEMAND_REFRESH_INTERVALS = {
+  hot: 6 * 60 * 60 * 1000,
+  warm: 24 * 60 * 60 * 1000,
+  cool: 7 * 24 * 60 * 60 * 1000,
+  cold: 30 * 24 * 60 * 60 * 1000,
+  archived: 0,
+} as const;
+
+type SubmitRefreshTier = keyof typeof SUBMIT_ON_DEMAND_REFRESH_INTERVALS;
+
+interface ExistingSkillState {
+  id?: string;
+  slug: string;
+  tier: string;
+  next_update_at?: number | null;
+  indexed_at?: number | null;
+}
+
+interface SubmitResultEntry {
+  path: string;
+  status: 'queued' | 'exists' | 'failed';
+  slug?: string;
+  refreshQueued?: boolean;
+}
+
+function normalizeSubmitRefreshTier(tier: string | null | undefined): SubmitRefreshTier {
+  if (tier === 'hot' || tier === 'warm' || tier === 'cool' || tier === 'cold' || tier === 'archived') {
+    return tier;
+  }
+  return 'cold';
+}
+
+function shouldQueueExistingSkillRefreshOnSubmit(
+  existing: Pick<ExistingSkillState, 'tier' | 'next_update_at' | 'indexed_at'>,
+  now: number = Date.now()
+): boolean {
+  const tier = normalizeSubmitRefreshTier(existing.tier);
+  if (tier === 'archived') {
+    return false;
+  }
+
+  const interval = SUBMIT_ON_DEMAND_REFRESH_INTERVALS[tier];
+  if (!interval) {
+    return false;
+  }
+
+  if (typeof existing.next_update_at === 'number') {
+    return existing.next_update_at <= now;
+  }
+
+  if (typeof existing.indexed_at !== 'number') {
+    return true;
+  }
+
+  return now - existing.indexed_at >= interval;
+}
+
+function buildSubmitQueueMessage(
+  owner: string,
+  repo: string,
+  skillPath: string,
+  userId: string | null
+) {
+  return {
+    type: 'check_skill' as const,
+    repoOwner: owner,
+    repoName: repo,
+    skillPath,
+    submittedBy: userId ?? ANON_CLI_SUBMIT_SENTINEL,
+    submittedAt: new Date().toISOString(),
+  };
+}
+
+async function tryQueueExistingSkillRefresh(
+  queue: Queue | undefined,
+  owner: string,
+  repo: string,
+  skillPath: string,
+  userId: string | null
+): Promise<boolean> {
+  if (!queue) return false;
+
+  try {
+    await queue.send(buildSubmitQueueMessage(owner, repo, skillPath, userId));
+    log.log(`Queued refresh check for existing skill: ${owner}/${repo}/${skillPath || '(root)'}`);
+    return true;
+  } catch (queueError) {
+    log.error(`Failed to queue refresh check for existing skill: ${owner}/${repo}/${skillPath || '(root)'}`, queueError);
+    return false;
+  }
 }
 
 function localizeSubmitCheckPayload(
@@ -1225,7 +1331,8 @@ async function submitMultipleSkills({
     });
   }
 
-  const results: { path: string; status: 'queued' | 'exists' | 'failed'; slug?: string }[] = [];
+  const results: SubmitResultEntry[] = [];
+  const now = Date.now();
 
   for (let i = 0; i < skills.length; i++) {
     const skill = skills[i];
@@ -1235,15 +1342,24 @@ async function submitMultipleSkills({
       // Check if already exists
       if (db) {
         const existing = await db.prepare(`
-          SELECT slug, tier FROM skills
+          SELECT slug, tier, next_update_at, indexed_at FROM skills
           WHERE repo_owner = ? AND repo_name = ?
           AND COALESCE(skill_path, '') = ?
         `)
           .bind(owner, repo, skillPath || '')
-          .first<{ slug: string; tier: string }>();
+          .first<ExistingSkillState>();
 
         if (existing && existing.tier !== 'archived') {
-          results.push({ path: skill.path, status: 'exists', slug: existing.slug });
+          const refreshQueued = shouldQueueExistingSkillRefreshOnSubmit(existing, now)
+            ? await tryQueueExistingSkillRefresh(queue, owner, repo, skillPath, userId)
+            : false;
+
+          results.push({
+            path: skill.path,
+            status: 'exists',
+            slug: existing.slug,
+            refreshQueued,
+          });
           continue;
         }
 
@@ -1251,18 +1367,9 @@ async function submitMultipleSkills({
       }
 
       // Send to indexing queue with delay
-      const queueMessage = {
-        type: 'check_skill',
-        repoOwner: owner,
-        repoName: repo,
-        skillPath: skillPath,
-        submittedBy: userId ?? ANON_CLI_SUBMIT_SENTINEL,
-        submittedAt: new Date().toISOString(),
-      };
-
       // Use delaySeconds for staggered processing (Cloudflare Queues supports this)
       const delaySeconds = i * Math.ceil(QUEUE_DELAY_MS / 1000);
-      await queue.send(queueMessage, { delaySeconds });
+      await queue.send(buildSubmitQueueMessage(owner, repo, skillPath, userId), { delaySeconds });
 
       results.push({ path: skill.path, status: 'queued' });
       log.log(`Queued skill ${i + 1}/${skills.length}: ${owner}/${repo}/${skillPath || '(root)'}`);
@@ -1284,16 +1391,18 @@ async function submitMultipleSkills({
 
   const queued = results.filter(r => r.status === 'queued').length;
   const existing = results.filter(r => r.status === 'exists').length;
+  const refreshQueued = results.filter(r => r.refreshQueued).length;
   const failed = results.filter(r => r.status === 'failed').length;
 
   return json({
-    success: queued > 0,
+    success: queued > 0 || existing > 0,
     submitted: queued,
     existing,
+    refreshQueued,
     failed,
     truncated,
     results,
-    message: buildSubmitMultipleMessage(locale, queued, existing, truncated),
+    message: buildSubmitMultipleMessage(locale, queued, existing, refreshQueued, truncated),
   });
 }
 
@@ -1319,19 +1428,31 @@ async function submitSingleSkill({
   platform: App.Platform | undefined;
   locale: App.Locals['locale'];
 }): Promise<Response> {
+  const resultPath = path ? `${path}/SKILL.md` : 'SKILL.md';
+  const now = Date.now();
+
   // Check if already exists (include skill_path in uniqueness check)
   if (db) {
     const existing = await db.prepare(`
-      SELECT id, slug, tier FROM skills
+      SELECT id, slug, tier, next_update_at, indexed_at FROM skills
       WHERE repo_owner = ? AND repo_name = ?
       AND COALESCE(skill_path, '') = ?
     `)
       .bind(owner, repo, path || '')
-      .first<{ id: string; slug: string; tier: string }>();
+      .first<ExistingSkillState>();
 
     if (existing) {
       // If archived, trigger resurrection (user submit = strong signal, no threshold)
       if (existing.tier === 'archived') {
+        if (!existing.id) {
+          return json({
+            success: false,
+            code: 'skill_archived_resurrection_failed',
+            error: formatSubmitApiMessage(locale, { key: 'skillArchivedResurrectionFailed' }),
+            existingSlug: existing.slug,
+          }, { status: 409 });
+        }
+
         const resurrected = await triggerDirectResurrection(db, platform?.env?.R2, existing.id);
         if (resurrected) {
           return json({
@@ -1349,28 +1470,30 @@ async function submitSingleSkill({
         }, { status: 409 });
       }
 
+      const refreshQueued = shouldQueueExistingSkillRefreshOnSubmit(existing, now)
+        ? await tryQueueExistingSkillRefresh(queue, owner, repo, path, userId)
+        : false;
+
       return json(
         {
-          success: false,
-          code: 'skill_already_exists',
-          error: formatSubmitApiMessage(locale, { key: 'skillAlreadyExists' }),
+          success: true,
+          submitted: 0,
+          existing: 1,
+          refreshQueued: refreshQueued ? 1 : 0,
+          failed: 0,
+          results: [{ path: resultPath, status: 'exists', slug: existing.slug, refreshQueued }],
+          message: formatSubmitApiMessage(locale, {
+            key: refreshQueued ? 'skillAlreadyExistsRefreshQueued' : 'skillAlreadyExists',
+          }),
           existingSlug: existing.slug,
-        },
-        { status: 409 }
+        }
       );
     }
   }
 
   // Send to indexing queue
   if (queue) {
-    const queueMessage = {
-      type: 'check_skill',
-      repoOwner: owner,
-      repoName: repo,
-      skillPath: path,
-      submittedBy: userId ?? ANON_CLI_SUBMIT_SENTINEL,
-      submittedAt: new Date().toISOString(),
-    };
+    const queueMessage = buildSubmitQueueMessage(owner, repo, path, userId);
     log.log(`Sending to indexing queue: ${owner}/${repo}`, queueMessage);
     try {
       await queue.send(queueMessage);
@@ -1404,6 +1527,11 @@ async function submitSingleSkill({
 
   return json({
     success: true,
+    submitted: 1,
+    existing: 0,
+    refreshQueued: 0,
+    failed: 0,
+    results: [{ path: resultPath, status: 'queued' }],
     message: formatSubmitApiMessage(locale, { key: 'skillSubmitted' }),
   });
 }
@@ -1485,10 +1613,16 @@ async function refreshSubmitCheckExistingState(
   }
 
   return {
-    valid: false,
+    valid: true,
     code: 'skill_already_exists',
-    errorDescriptor: { key: 'skillAlreadyExists' },
+    messageDescriptor: { key: 'skillAlreadyExists' },
+    owner: payload.owner,
+    repo: payload.repo,
+    path: payload.path,
     existingSlug: existing.slug,
+    repoName: payload.repoName,
+    description: payload.description,
+    stars: payload.stars,
   };
 }
 
@@ -1591,9 +1725,9 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
               }
 
               return {
-                valid: false,
+                valid: true,
                 code: 'skill_already_exists',
-                errorDescriptor: { key: 'skillAlreadyExists' },
+                messageDescriptor: { key: 'skillAlreadyExists' },
                 owner,
                 repo,
                 path,
@@ -1671,9 +1805,9 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
             }
 
             return {
-              valid: false,
+              valid: true,
               code: 'skill_already_exists',
-              errorDescriptor: { key: 'skillAlreadyExists' },
+              messageDescriptor: { key: 'skillAlreadyExists' },
               owner,
               repo,
               path: singlePath,

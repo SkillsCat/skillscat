@@ -19,6 +19,7 @@
     path: string;
     status: 'queued' | 'exists' | 'failed';
     slug?: string;
+    refreshQueued?: boolean;
   }
 
   interface SubmitCheckResponse {
@@ -30,6 +31,18 @@
     multipleFound?: boolean;
   }
 
+  interface SubmitPostResponse {
+    success?: boolean;
+    code?: string;
+    error?: string;
+    existingSlug?: string;
+    submitted?: number;
+    existing?: number;
+    refreshQueued?: number;
+    results?: SubmitResult[];
+    message?: string;
+  }
+
   let { isOpen = false, onClose }: Props = $props();
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
@@ -39,12 +52,25 @@
   let isSubmitting = $state(false);
   let error = $state<string | null>(null);
   let success = $state(false);
+  let successMessage = $state<string | null>(null);
   let existingSkillSlug = $state<string | null>(null);
 
   // Result state for multi-skill submission
   let submitResults = $state<SubmitResult[]>([]);
   let submittedCount = $state(0);
   let existingCount = $state(0);
+  const isExistingOnlySuccess = $derived(success && submittedCount === 0 && existingCount > 0);
+
+  function resetDialogState() {
+    githubUrl = '';
+    error = null;
+    success = false;
+    successMessage = null;
+    existingSkillSlug = null;
+    submitResults = [];
+    submittedCount = 0;
+    existingCount = 0;
+  }
 
   // Validate GitHub URL
   const isValidUrl = $derived.by(() => {
@@ -58,12 +84,7 @@
     if (!isValidUrl || isSubmitting) return;
 
     isSubmitting = true;
-    error = null;
-    success = false;
-    existingSkillSlug = null;
-    submitResults = [];
-    submittedCount = 0;
-    existingCount = 0;
+    resetDialogState();
 
     try {
       const checkParams = new URLSearchParams({ url: githubUrl.trim() });
@@ -98,16 +119,7 @@
       const contentType = response.headers.get('content-type') || '';
       const data = (contentType.includes('application/json')
         ? await response.json()
-        : { error: await response.text() }) as {
-        success?: boolean;
-        code?: string;
-        error?: string;
-        existingSlug?: string;
-        submitted?: number;
-        existing?: number;
-        results?: SubmitResult[];
-        message?: string;
-      };
+        : { error: await response.text() }) as SubmitPostResponse;
 
       if (!response.ok) {
         if (data.existingSlug && data.code === 'skill_already_exists') {
@@ -126,12 +138,13 @@
         return;
       }
 
-      // Handle results
-      if (data.results && data.results.length > 0) {
-        submitResults = data.results;
-        submittedCount = data.submitted || 0;
-        existingCount = data.existing || 0;
-      }
+      successMessage = data.message || null;
+      existingSkillSlug = data.existingSlug
+        || data.results?.find((result) => result.status === 'exists')?.slug
+        || null;
+      submitResults = data.results || [];
+      submittedCount = data.submitted || 0;
+      existingCount = data.existing || 0;
 
       success = true;
       githubUrl = '';
@@ -146,25 +159,13 @@
 
   function handleOpenChange(open: boolean) {
     if (!open) {
-      githubUrl = '';
-      error = null;
-      success = false;
-      existingSkillSlug = null;
-      submitResults = [];
-      submittedCount = 0;
-      existingCount = 0;
+      resetDialogState();
       onClose?.();
     }
   }
 
   function handleDone() {
-    githubUrl = '';
-    error = null;
-    success = false;
-    existingSkillSlug = null;
-    submitResults = [];
-    submittedCount = 0;
-    existingCount = 0;
+    resetDialogState();
     onClose?.();
   }
 </script>
@@ -199,29 +200,31 @@
                     <span class="success-icon">🎉</span>
                   </div>
                   <h3 class="success-title">
-                    {#if submittedCount > 1}
+                    {#if isExistingOnlySuccess}
+                      {messages.submitDialog.successCompleteTitle}
+                    {:else if submittedCount > 1}
                       {i18n.t(messages.submitDialog.successMultiTitle, { count: submittedCount })}
                     {:else}
                       {messages.submitDialog.successSingleTitle}
                     {/if}
                   </h3>
                   <Dialog.Description class="success-text">
-                    {#if submittedCount > 1}
+                    {#if successMessage}
+                      {successMessage}
+                    {:else if submittedCount > 1}
                       {messages.submitDialog.successMultiDescription}
                     {:else}
                       {messages.submitDialog.successSingleDescription}
                     {/if}
                   </Dialog.Description>
 
-                  {#if submitResults.length > 1}
+                  {#if existingCount > 0}
                     <div class="results-summary">
-                      {#if existingCount > 0}
-                        <p class="results-note">
-                          {existingCount === 1
-                            ? i18n.t(messages.submitDialog.existingSummary, { count: existingCount })
-                            : i18n.t(messages.submitDialog.existingSummaryPlural, { count: existingCount })}
-                        </p>
-                      {/if}
+                      <p class="results-note">
+                        {existingCount === 1
+                          ? i18n.t(messages.submitDialog.existingSummary, { count: existingCount })
+                          : i18n.t(messages.submitDialog.existingSummaryPlural, { count: existingCount })}
+                      </p>
                     </div>
                   {/if}
 

@@ -23,25 +23,25 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
     CACHE_VERSION: platform?.env?.CACHE_VERSION,
   };
 
-  const { data } = await getCached(
-    'page:home:v1',
+  const { data: critical } = await getCached(
+    'page:home:critical:v1',
     async () => {
-      const [stats, trending, recent, top] = await Promise.all([
+      const [stats, trending] = await Promise.all([
         getStats(env),
         getTrendingSkills(env, 12),
-        getRecentSkills(env, 12),
-        getTopSkills(env, 12),
       ]);
 
       return {
         stats,
         trending,
-        recent,
-        top,
       };
     },
     30
   );
 
-  return data;
+  return {
+    ...critical,
+    recent: getRecentSkills(env, 12).catch(() => []),
+    top: getTopSkills(env, 12).catch(() => []),
+  };
 };
