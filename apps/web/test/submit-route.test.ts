@@ -9,13 +9,42 @@ function jsonResponse(body: unknown, status: number = 200): Response {
   });
 }
 
-function buildDbMock() {
+interface MockExistingSkill {
+  id?: string;
+  slug: string;
+  tier: string;
+}
+
+function buildDbMock(existingByPath: Record<string, MockExistingSkill> = {}) {
   return {
     prepare: vi.fn((sql: string) => {
       if (sql.includes('SELECT id, slug, tier FROM skills')) {
         return {
-          bind: () => ({
-            first: vi.fn(async () => null),
+          bind: (_owner: string, _repo: string, skillPath: string) => ({
+            first: vi.fn(async () => {
+              const existing = existingByPath[skillPath];
+              if (!existing) return null;
+              return {
+                id: existing.id ?? 'skill_existing',
+                slug: existing.slug,
+                tier: existing.tier,
+              };
+            }),
+          }),
+        };
+      }
+
+      if (sql.includes('SELECT slug, tier FROM skills')) {
+        return {
+          bind: (_owner: string, _repo: string, skillPath: string) => ({
+            first: vi.fn(async () => {
+              const existing = existingByPath[skillPath];
+              if (!existing) return null;
+              return {
+                slug: existing.slug,
+                tier: existing.tier,
+              };
+            }),
           }),
         };
       }
@@ -311,6 +340,296 @@ describe('submit route', () => {
     expect(payload.owner).toBe('forker');
     expect(payload.repo).toBe('toolbox');
     expect(payload.path).toBe('');
+  });
+
+  it('treats existing skills as valid during submit precheck', async () => {
+    const db = buildDbMock({
+      '': {
+        slug: 'forker/toolbox',
+        tier: 'warm',
+      },
+    });
+
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          default_branch: 'main',
+          fork: true,
+          parent: {
+            name: 'toolbox',
+            full_name: 'upstream/toolbox',
+            default_branch: 'main',
+            owner: { login: 'upstream' },
+          },
+        });
+      }
+
+      if (url === 'https://api.github.com/repos/upstream/toolbox/compare/upstream%3Amain...forker%3Amain') {
+        return jsonResponse({
+          status: 'ahead',
+          ahead_by: 2,
+          behind_by: 0,
+        });
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
+        return jsonResponse({
+          name: 'SKILL.md',
+          path: 'SKILL.md',
+          type: 'file',
+        });
+      }
+
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const { GET } = await import('../src/routes/api/submit/+server');
+    const response = await GET({
+      locals: { locale: 'zh-CN' },
+      platform: {
+        env: {
+          DB: db,
+          GITHUB_TOKEN: 'test-token',
+        },
+      },
+      request: new Request('https://skills.cat/api/submit?url=https://github.com/forker/toolbox'),
+      url: new URL('https://skills.cat/api/submit?url=https://github.com/forker/toolbox'),
+    } as never);
+
+    const payload = await response.json() as {
+      valid: boolean;
+      code?: string;
+      message?: string;
+      existingSlug?: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.valid).toBe(true);
+    expect(payload.code).toBe('skill_already_exists');
+    expect(payload.message).toContain('已经存在');
+    expect(payload.existingSlug).toBe('forker/toolbox');
+  });
+
+  it('returns success when a single submitted skill already exists', async () => {
+    const queue = {
+      send: vi.fn(async () => undefined),
+    };
+    const db = buildDbMock({
+      '': {
+        id: 'skill_existing',
+        slug: 'forker/toolbox',
+        tier: 'warm',
+      },
+    });
+
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          default_branch: 'main',
+          fork: true,
+          parent: {
+            name: 'toolbox',
+            full_name: 'upstream/toolbox',
+            default_branch: 'main',
+            owner: { login: 'upstream' },
+          },
+        });
+      }
+
+      if (url === 'https://api.github.com/repos/upstream/toolbox/compare/upstream%3Amain...forker%3Amain') {
+        return jsonResponse({
+          status: 'ahead',
+          ahead_by: 2,
+          behind_by: 0,
+        });
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
+        return jsonResponse({
+          name: 'SKILL.md',
+          path: 'SKILL.md',
+          type: 'file',
+        });
+      }
+
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const { POST } = await import('../src/routes/api/submit/+server');
+    const response = await POST({
+      locals: { locale: 'zh-CN' },
+      platform: {
+        env: {
+          DB: db,
+          GITHUB_TOKEN: 'test-token',
+          INDEXING_QUEUE: queue,
+        },
+      },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: 'https://github.com/forker/toolbox',
+        }),
+      }),
+    } as never);
+
+    const payload = await response.json() as {
+      success: boolean;
+      submitted: number;
+      existing: number;
+      existingSlug?: string;
+      results: Array<{ status: string; slug?: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(payload.submitted).toBe(0);
+    expect(payload.existing).toBe(1);
+    expect(payload.existingSlug).toBe('forker/toolbox');
+    expect(payload.results).toEqual([
+      {
+        path: 'SKILL.md',
+        status: 'exists',
+        slug: 'forker/toolbox',
+      },
+    ]);
+    expect(queue.send).not.toHaveBeenCalled();
+  });
+
+  it('returns success when every discovered skill already exists', async () => {
+    const queue = {
+      send: vi.fn(async () => undefined),
+    };
+    const db = buildDbMock({
+      'skills/alpha': {
+        slug: 'forker/alpha-skill',
+        tier: 'warm',
+      },
+      'skills/beta': {
+        slug: 'forker/beta-skill',
+        tier: 'hot',
+      },
+    });
+
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          default_branch: 'main',
+          fork: true,
+          parent: {
+            name: 'toolbox',
+            full_name: 'upstream/toolbox',
+            default_branch: 'main',
+            owner: { login: 'upstream' },
+          },
+        });
+      }
+
+      if (url === 'https://api.github.com/repos/upstream/toolbox/compare/upstream%3Amain...forker%3Amain') {
+        return jsonResponse({
+          status: 'ahead',
+          ahead_by: 2,
+          behind_by: 0,
+        });
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
+        return jsonResponse({ message: 'Not Found' }, 404);
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/git/trees/HEAD?recursive=1') {
+        return jsonResponse({
+          truncated: false,
+          tree: [
+            { path: 'skills/alpha/SKILL.md', type: 'blob' },
+            { path: 'skills/beta/SKILL.md', type: 'blob' },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const { POST } = await import('../src/routes/api/submit/+server');
+    const response = await POST({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: db,
+          GITHUB_TOKEN: 'test-token',
+          INDEXING_QUEUE: queue,
+        },
+      },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: 'https://github.com/forker/toolbox',
+        }),
+      }),
+    } as never);
+
+    const payload = await response.json() as {
+      success: boolean;
+      submitted: number;
+      existing: number;
+      message: string;
+      results: Array<{ path: string; status: string; slug?: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(payload.submitted).toBe(0);
+    expect(payload.existing).toBe(2);
+    expect(payload.message).toContain('2 already exist');
+    expect(payload.results).toEqual([
+      {
+        path: 'skills/alpha/SKILL.md',
+        status: 'exists',
+        slug: 'forker/alpha-skill',
+      },
+      {
+        path: 'skills/beta/SKILL.md',
+        status: 'exists',
+        slug: 'forker/beta-skill',
+      },
+    ]);
+    expect(queue.send).not.toHaveBeenCalled();
   });
 
   it('accepts forks that are ahead of upstream and not behind', async () => {

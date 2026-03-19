@@ -6,6 +6,9 @@ const en = {
   seoNotFoundTitle: 'Skill Not Found - SkillsCat',
   seoNotFoundDescription: 'Skill not found on SkillsCat.',
   seoNotFoundImageAlt: 'Skill not found social preview image',
+  seoTemporaryUnavailableTitle: 'Skill Temporarily Unavailable - SkillsCat',
+  seoTemporaryUnavailableDescription: 'This skill page is temporarily unavailable. Please try again later.',
+  seoTemporaryUnavailableImageAlt: 'Skill temporarily unavailable social preview image',
   seoFallbackDescription: 'AI agent skill: {name}',
   breadcrumbHome: 'Home',
   breadcrumbSkills: 'Skills',
@@ -49,6 +52,8 @@ const en = {
   vercelCliDescription: 'Works with Claude Code, Cursor, Codex, and 10+ agents',
   notFoundTitle: 'Skill Not Found',
   notFoundMessage: "The skill you're looking for doesn't exist or has been removed.",
+  temporarilyUnavailableTitle: 'Skill Temporarily Unavailable',
+  temporarilyUnavailableMessage: 'This skill page is temporarily unavailable. Please try again shortly.',
 } as const;
 
 type SkillPageCopy = DeepLocalized<typeof en>;
@@ -58,6 +63,9 @@ const zhCN = {
   seoNotFoundTitle: '未找到技能 - SkillsCat',
   seoNotFoundDescription: '在 SkillsCat 中未找到该技能。',
   seoNotFoundImageAlt: '技能未找到社交预览图',
+  seoTemporaryUnavailableTitle: '技能暂时不可用 - SkillsCat',
+  seoTemporaryUnavailableDescription: '这个技能页面暂时不可用，请稍后再试。',
+  seoTemporaryUnavailableImageAlt: '技能暂时不可用社交预览图',
   seoFallbackDescription: 'AI agent 技能：{name}',
   breadcrumbHome: '首页',
   breadcrumbSkills: '技能',
@@ -101,6 +109,8 @@ const zhCN = {
   vercelCliDescription: '适用于 Claude Code、Cursor、Codex 等 10+ agent',
   notFoundTitle: '未找到技能',
   notFoundMessage: '你要找的技能不存在，或者已经被移除。',
+  temporarilyUnavailableTitle: '技能暂时不可用',
+  temporarilyUnavailableMessage: '这个技能页面暂时不可用，请稍后再试。',
 } satisfies SkillPageCopy;
 
 const ja = {
@@ -108,6 +118,9 @@ const ja = {
   seoNotFoundTitle: 'スキルが見つかりません - SkillsCat',
   seoNotFoundDescription: 'SkillsCat でスキルが見つかりませんでした。',
   seoNotFoundImageAlt: 'スキル未検出のソーシャルプレビュー画像',
+  seoTemporaryUnavailableTitle: 'スキルは一時的に利用できません - SkillsCat',
+  seoTemporaryUnavailableDescription: 'このスキルページは一時的に利用できません。しばらくしてから再試行してください。',
+  seoTemporaryUnavailableImageAlt: 'スキル一時利用不可のソーシャルプレビュー画像',
   seoFallbackDescription: 'AI agent スキル: {name}',
   breadcrumbHome: 'ホーム',
   breadcrumbSkills: 'スキル',
@@ -151,6 +164,8 @@ const ja = {
   vercelCliDescription: 'Claude Code、Cursor、Codex など 10 以上の agent で利用できます',
   notFoundTitle: 'スキルが見つかりません',
   notFoundMessage: 'お探しのスキルは存在しないか、削除されています。',
+  temporarilyUnavailableTitle: 'スキルは一時的に利用できません',
+  temporarilyUnavailableMessage: 'このスキルページは一時的に利用できません。しばらくしてから再試行してください。',
 } satisfies SkillPageCopy;
 
 const ko = {
@@ -158,6 +173,9 @@ const ko = {
   seoNotFoundTitle: '스킬을 찾을 수 없음 - SkillsCat',
   seoNotFoundDescription: 'SkillsCat에서 스킬을 찾을 수 없습니다.',
   seoNotFoundImageAlt: '스킬 미발견 소셜 미리보기 이미지',
+  seoTemporaryUnavailableTitle: '스킬을 일시적으로 사용할 수 없음 - SkillsCat',
+  seoTemporaryUnavailableDescription: '이 스킬 페이지를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
+  seoTemporaryUnavailableImageAlt: '스킬 일시 사용 불가 소셜 미리보기 이미지',
   seoFallbackDescription: 'AI agent 스킬: {name}',
   breadcrumbHome: '홈',
   breadcrumbSkills: '스킬',
@@ -201,6 +219,8 @@ const ko = {
   vercelCliDescription: 'Claude Code, Cursor, Codex 등 10개 이상의 agent에서 동작합니다',
   notFoundTitle: '스킬을 찾을 수 없음',
   notFoundMessage: '찾는 스킬이 없거나 이미 제거되었습니다.',
+  temporarilyUnavailableTitle: '스킬을 일시적으로 사용할 수 없음',
+  temporarilyUnavailableMessage: '이 스킬 페이지를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
 } satisfies SkillPageCopy;
 
 const copyByLocale: Record<SupportedLocale, SkillPageCopy> = {

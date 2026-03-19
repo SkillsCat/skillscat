@@ -55,10 +55,15 @@ export function getLocaleFromAcceptLanguage(header: string | null | undefined): 
 export function resolveRequestLocale(input: {
   cookieLocale?: string | null;
   acceptLanguage?: string | null;
+  preferDefaultLocale?: boolean;
 }): { locale: SupportedLocale; source: LocaleSource } {
   const cookieLocale = normalizeLocale(input.cookieLocale);
   if (cookieLocale) {
     return { locale: cookieLocale, source: 'cookie' };
+  }
+
+  if (input.preferDefaultLocale) {
+    return { locale: DEFAULT_LOCALE, source: 'default' };
   }
 
   const headerLocale = getLocaleFromAcceptLanguage(input.acceptLanguage);

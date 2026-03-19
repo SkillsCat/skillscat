@@ -6,6 +6,10 @@ import { runRequestSecurity, shouldNoIndexPath } from '$lib/server/security/requ
 import { getCachedText, setCacheVersion } from '$lib/server/cache';
 import { getSkillBySlug } from '$lib/server/db/utils';
 import {
+  shouldForceDefaultLocaleForPublicPage,
+  shouldUseDefaultLocaleForIndexablePage,
+} from '$lib/server/seo/locale';
+import {
   buildSkillSlug,
   getCanonicalSkillPathFromPathname,
   normalizeSkillName,
@@ -342,9 +346,17 @@ async function maybeRespondWithOpenClawSkillMarkdown(
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
+  const shouldForceDefaultLocale = shouldForceDefaultLocaleForPublicPage(
+    event.url.pathname,
+    event.request.method
+  );
   const resolvedLocale = resolveRequestLocale({
-    cookieLocale: event.cookies.get(LOCALE_COOKIE_NAME),
-    acceptLanguage: event.request.headers.get('accept-language'),
+    cookieLocale: shouldForceDefaultLocale ? null : event.cookies.get(LOCALE_COOKIE_NAME),
+    acceptLanguage: shouldForceDefaultLocale ? null : event.request.headers.get('accept-language'),
+    preferDefaultLocale: shouldForceDefaultLocale || shouldUseDefaultLocaleForIndexablePage(
+      event.url.pathname,
+      event.request.method
+    ),
   });
   event.locals.locale = resolvedLocale.locale;
   event.locals.localeSource = resolvedLocale.source;

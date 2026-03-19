@@ -13,6 +13,8 @@ interface SubmitResponse {
   error?: string;
   code?: string;
   retryAfterSeconds?: number;
+  submitted?: number;
+  existing?: number;
   existingSlug?: string;
   multipleFound?: boolean;
   skills?: Array<{ path: string; skillPath: string; depth: number }>;
@@ -352,9 +354,22 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
     }
 
     // Success!
+    const submittedCount = result.submitted ?? 0;
+    const existingCount = result.existing ?? 0;
+
     console.log();
-    console.log(pc.green('Skill submitted successfully!'));
+    if (existingCount > 0 && submittedCount === 0) {
+      console.log(pc.green('No new submission needed.'));
+    } else {
+      console.log(pc.green('Skill submitted successfully!'));
+    }
     console.log(pc.dim(result.message || 'It will appear in the catalog once processed.'));
+
+    if (result.existingSlug) {
+      console.log();
+      console.log(`View it at: ${pc.cyan(`${baseUrl}/skills/${result.existingSlug}`)}`);
+      console.log(`Install with: ${pc.cyan(`skillscat add ${result.existingSlug}`)}`);
+    }
   } catch (error) {
     console.error(pc.red('Failed to connect to SkillsCat.'));
     if (error instanceof Error) {

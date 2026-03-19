@@ -13,19 +13,19 @@
     {
       href: '/docs/cli',
       eyebrow: 'CLI',
-      summary: '搜索、安装、更新、发布都在这一套命令里。',
+      summary: 'Search, install, update, and publish skills from one CLI workflow.',
       bullets: [
-        '搜索与仓库检查',
-        '安装、更新、发布',
+        'Search and inspect repositories',
+        'Install, update, and publish',
       ],
     },
     {
       href: '/docs/openclaw',
       eyebrow: 'OpenClaw',
-      summary: '把 SkillsCat 接进 OpenClaw 的自动安装和本机目录。',
+      summary: 'Connect SkillsCat to OpenClaw for compatibility installs and local layouts.',
       bullets: [
-        '自动安装与兼容 registry',
-        '目录、bundle 与重启检查',
+        'Compatibility registry and auto-install',
+        'Bundle layout and restart checks',
       ],
     },
   ] as const;
@@ -49,7 +49,7 @@
       </div>
       <h1>SkillsCat Documentation</h1>
       <p class="docs-summary">
-        从这里开始，快速了解 SkillsCat 是什么、CLI 怎么用，以及怎么接进 OpenClaw。
+        Start here to understand SkillsCat, learn the CLI, and connect it to OpenClaw.
       </p>
     </section>
 
@@ -75,28 +75,31 @@
 
     <DocsProseCard title="docs/README.md">
       <p>
-        SkillsCat 是一个给 AI agent skills 用的 registry 和 CLI。你可以先搜到合适的 skill，再把完整
-        bundle 装进项目、OpenClaw 或团队环境，而不是手动搬一堆零散文件。
+        SkillsCat is a registry and CLI for AI agent skills. Find the right skill first, then
+        install the full bundle into a project, OpenClaw, or a shared team environment instead of
+        hand-copying a few loose files.
       </p>
 
-      <h2>它是什么</h2>
+      <h2>What It Is</h2>
       <ul>
-        <li>一个可搜索的 AI agent skill catalog，不用只靠 GitHub 仓库名盲猜。</li>
-        <li>一个能安装完整 bundle 的 CLI，不只是拷一份 <code>SKILL.md</code>。</li>
-        <li>一个能把 OpenClaw、ClawBot、本地项目接到同一套 skill 源的入口。</li>
+        <li>A searchable AI agent skill catalog, so you do not have to guess from GitHub repo names alone.</li>
+        <li>A CLI that installs complete bundles, not just a copied <code>SKILL.md</code>.</li>
+        <li>A single entry point for OpenClaw, ClawBot, and local projects to use the same skill source.</li>
       </ul>
 
-      <h2>你能用它做什么</h2>
+      <h2>What You Can Do</h2>
       <ul>
-        <li>搜索任务相关的 skill，先确认内容，再决定要不要安装。</li>
-        <li>把一个 skill 连同 templates、scripts、config 一起装下来，减少手工拼装。</li>
-        <li>统一处理安装、更新、登录、发布和 OpenClaw 接入。</li>
+        <li>Search for task-specific skills, inspect the contents, and then decide whether to install.</li>
+        <li>Install templates, scripts, configs, and the rest of a bundle together instead of assembling them by hand.</li>
+        <li>Handle installs, updates, auth, publishing, and OpenClaw integration from one toolchain.</li>
       </ul>
 
-      <h2>从哪里开始</h2>
+      <h2>Where To Start</h2>
       <p>
-        想先学怎么搜、怎么装、怎么更新，就看 <a href="/docs/cli">CLI 文档</a>。如果你已经在用 OpenClaw、
-        ClawBot，或者想把默认 registry 换成 SkillsCat，就直接看 <a href="/docs/openclaw">OpenClaw 文档</a>。
+        If you want to learn how to search, install, and update, start with the
+        <a href="/docs/cli"> CLI docs</a>. If you already use OpenClaw or ClawBot, or you want
+        SkillsCat to replace the default registry, jump to the
+        <a href="/docs/openclaw"> OpenClaw guide</a>.
       </p>
     </DocsProseCard>
 
@@ -105,7 +108,8 @@
         <p class="github-star-eyebrow">GitHub</p>
         <h2 id="github-star-title">Star SkillsCat on GitHub</h2>
         <p class="github-star-summary">
-          看版本发布、产品更新、文档变化，也能顺手给 SkillsCat 一个 star，帮这个项目更容易被搜索到。
+          Follow releases, product changes, and docs updates, and help more people discover the
+          project by starring SkillsCat on GitHub.
         </p>
       </div>
 

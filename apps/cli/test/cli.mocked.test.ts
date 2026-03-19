@@ -1241,6 +1241,31 @@ describe('CLI commands with mocked network', () => {
     expect(result.stdout).toContain('Skill submitted successfully');
   });
 
+  it('submit treats existing skills as a successful no-op', async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      if (url.endsWith('/api/submit')) {
+        return mockResponse({
+          success: true,
+          message: 'This skill already exists.',
+          submitted: 0,
+          existing: 1,
+          existingSlug: 'testowner/testrepo',
+        }, 200);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { submit } = await import('../src/commands/submit');
+    const result = await runCommand(() => submit('testowner/testrepo'));
+
+    expect(result.stdout).toContain('No new submission needed');
+    expect(result.stdout).toContain('View it at:');
+    expect(result.stdout).toContain('skillscat add testowner/testrepo');
+  });
+
   it('updates registry-fallback installs via registry strategy', async () => {
     let registryFetchCount = 0;
     const fetchMock = vi.fn(async (input: unknown) => {

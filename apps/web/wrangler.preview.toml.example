@@ -50,6 +50,7 @@ queue = "skillscat-security-analysis"
 [vars]
 PUBLIC_APP_URL = "http://localhost:3000"
 CACHE_VERSION = "v1"
+SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
 RECOMMEND_ALGO_VERSION = "v1"
 
 [env.production]
@@ -87,4 +88,5 @@ queue = "skillscat-security-analysis"
 [env.production.vars]
 PUBLIC_APP_URL = "https://your-domain.com"
 CACHE_VERSION = "v1"
+SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
 RECOMMEND_ALGO_VERSION = "v1"

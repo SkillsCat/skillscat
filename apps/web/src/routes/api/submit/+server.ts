@@ -135,12 +135,14 @@ function buildSubmitMultipleMessage(
   existing: number,
   truncated: boolean
 ): string {
-  const parts = [
-    formatSubmitApiMessage(locale, {
+  const parts: string[] = [];
+
+  if (queued > 0) {
+    parts.push(formatSubmitApiMessage(locale, {
       key: 'skillsQueued',
       values: { count: queued },
-    }),
-  ];
+    }));
+  }
 
   if (existing > 0) {
     parts.push(formatSubmitApiMessage(locale, {
@@ -151,6 +153,10 @@ function buildSubmitMultipleMessage(
 
   if (truncated) {
     parts.push(formatSubmitApiMessage(locale, { key: 'skillsSkippedDueToLimit' }));
+  }
+
+  if (parts.length === 0) {
+    return formatSubmitApiMessage(locale, { key: 'failedToQueueSkill' });
   }
 
   return parts.join(' ');
@@ -1287,7 +1293,7 @@ async function submitMultipleSkills({
   const failed = results.filter(r => r.status === 'failed').length;
 
   return json({
-    success: queued > 0,
+    success: queued > 0 || existing > 0,
     submitted: queued,
     existing,
     failed,
@@ -1319,6 +1325,8 @@ async function submitSingleSkill({
   platform: App.Platform | undefined;
   locale: App.Locals['locale'];
 }): Promise<Response> {
+  const resultPath = path ? `${path}/SKILL.md` : 'SKILL.md';
+
   // Check if already exists (include skill_path in uniqueness check)
   if (db) {
     const existing = await db.prepare(`
@@ -1351,12 +1359,14 @@ async function submitSingleSkill({
 
       return json(
         {
-          success: false,
-          code: 'skill_already_exists',
-          error: formatSubmitApiMessage(locale, { key: 'skillAlreadyExists' }),
+          success: true,
+          submitted: 0,
+          existing: 1,
+          failed: 0,
+          results: [{ path: resultPath, status: 'exists', slug: existing.slug }],
+          message: formatSubmitApiMessage(locale, { key: 'skillAlreadyExists' }),
           existingSlug: existing.slug,
-        },
-        { status: 409 }
+        }
       );
     }
   }
@@ -1404,6 +1414,10 @@ async function submitSingleSkill({
 
   return json({
     success: true,
+    submitted: 1,
+    existing: 0,
+    failed: 0,
+    results: [{ path: resultPath, status: 'queued' }],
     message: formatSubmitApiMessage(locale, { key: 'skillSubmitted' }),
   });
 }
@@ -1485,10 +1499,16 @@ async function refreshSubmitCheckExistingState(
   }
 
   return {
-    valid: false,
+    valid: true,
     code: 'skill_already_exists',
-    errorDescriptor: { key: 'skillAlreadyExists' },
+    messageDescriptor: { key: 'skillAlreadyExists' },
+    owner: payload.owner,
+    repo: payload.repo,
+    path: payload.path,
     existingSlug: existing.slug,
+    repoName: payload.repoName,
+    description: payload.description,
+    stars: payload.stars,
   };
 }
 
@@ -1591,9 +1611,9 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
               }
 
               return {
-                valid: false,
+                valid: true,
                 code: 'skill_already_exists',
-                errorDescriptor: { key: 'skillAlreadyExists' },
+                messageDescriptor: { key: 'skillAlreadyExists' },
                 owner,
                 repo,
                 path,
@@ -1671,9 +1691,9 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
             }
 
             return {
-              valid: false,
+              valid: true,
               code: 'skill_already_exists',
-              errorDescriptor: { key: 'skillAlreadyExists' },
+              messageDescriptor: { key: 'skillAlreadyExists' },
               owner,
               repo,
               path: singlePath,

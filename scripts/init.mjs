@@ -225,10 +225,20 @@ function getSelectedConfigFiles(selectedWorkerKeys) {
   return CONFIG_FILES.filter((configFile) => selectedSet.has(getWorkerKeyFromConfigFile(configFile)));
 }
 
-function getSelectedProductionWorkers(selectedConfigFiles) {
-  return selectedConfigFiles
-    .map((configFile) => PRODUCTION_WORKER_NAMES[configFile])
-    .filter(Boolean);
+function getSelectedProductionWorkers(selectedConfigFiles, selectedWorkerKeys) {
+  const workers = new Set(
+    selectedConfigFiles
+      .map((configFile) => PRODUCTION_WORKER_NAMES[configFile])
+      .filter(Boolean)
+  );
+
+  // search-precompute calls back into the web worker's internal admin route,
+  // so both sides must share the same WORKER_SECRET in production.
+  if (!selectedWorkerKeys || selectedWorkerKeys.length === 0 || selectedWorkerKeys.includes('search-precompute')) {
+    workers.add(PRODUCTION_WORKER_NAMES['wrangler.preview.toml']);
+  }
+
+  return Array.from(workers).filter(Boolean);
 }
 
 function getRequiredResources(selectedWorkerKeys) {
@@ -550,6 +560,7 @@ queue = "skillscat-security-analysis"
 [env.production.vars]
 PUBLIC_APP_URL = "https://your-domain.com"
 CACHE_VERSION = "v1"
+SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
 RECOMMEND_ALGO_VERSION = "v1"
 `.trim(),
   'wrangler.github-events.toml': `
@@ -749,6 +760,8 @@ database_id = "<your-production-database-id>"
 
 [env.production.vars]
 APP_ORIGIN = "https://your-domain.com"
+SITEMAP_REFRESH_ENABLED = "1"
+SITEMAP_REFRESH_TIMEOUT_MS = "20000"
 RECOMMEND_PRECOMPUTE_ENABLED = "1"
 RECOMMEND_PRECOMPUTE_MAX_PER_RUN = "200"
 RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = "15000"
@@ -1121,6 +1134,7 @@ function ensurePrecomputeWorkerEnvVars({
   if (includePreview) {
     results.push(
       upsertTomlVarsEntries('wrangler.preview.toml', '[vars]', {
+        SITEMAP_REFRESH_MIN_INTERVAL_SECONDS: '3600',
         RECOMMEND_ALGO_VERSION: 'v1',
       }),
     );
@@ -1129,6 +1143,7 @@ function ensurePrecomputeWorkerEnvVars({
       results.push(
         upsertTomlVarsEntries('wrangler.preview.toml', '[env.production.vars]', {
           CACHE_VERSION: 'v1',
+          SITEMAP_REFRESH_MIN_INTERVAL_SECONDS: '3600',
           RECOMMEND_ALGO_VERSION: 'v1',
         }),
       );
@@ -1139,6 +1154,8 @@ function ensurePrecomputeWorkerEnvVars({
     results.push(
       upsertTomlVarsEntries('wrangler.search-precompute.toml', '[vars]', {
         APP_ORIGIN: 'http://localhost:3000',
+        SITEMAP_REFRESH_ENABLED: '1',
+        SITEMAP_REFRESH_TIMEOUT_MS: '20000',
         RECOMMEND_PRECOMPUTE_ENABLED: '1',
         RECOMMEND_PRECOMPUTE_MAX_PER_RUN: '200',
         RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS: '15000',
@@ -1155,6 +1172,8 @@ function ensurePrecomputeWorkerEnvVars({
   if (includeProductionVars && includeSearchPrecompute) {
     const precomputeProductionVars = {
       APP_ORIGIN: productionAppUrl || 'https://your-domain.com',
+      SITEMAP_REFRESH_ENABLED: '1',
+      SITEMAP_REFRESH_TIMEOUT_MS: '20000',
       RECOMMEND_PRECOMPUTE_ENABLED: '1',
       RECOMMEND_PRECOMPUTE_MAX_PER_RUN: '200',
       RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS: '15000',
@@ -1585,7 +1604,7 @@ async function main() {
   const selectedWorkerKeys = resolveSelectedWorkers(args);
   const hasWorkerSelection = Array.isArray(selectedWorkerKeys) && selectedWorkerKeys.length > 0;
   const selectedConfigFiles = getSelectedConfigFiles(selectedWorkerKeys);
-  const selectedProductionWorkers = getSelectedProductionWorkers(selectedConfigFiles);
+  const selectedProductionWorkers = getSelectedProductionWorkers(selectedConfigFiles, selectedWorkerKeys);
   const requiredResources = getRequiredResources(selectedWorkerKeys);
   const secretRequirements = getSecretRequirements(selectedWorkerKeys);
   const requiredSecretKeys = new Set(secretRequirements.required);

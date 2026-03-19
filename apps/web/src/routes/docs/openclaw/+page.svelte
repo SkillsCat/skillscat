@@ -3,37 +3,35 @@
   import DocsProseCard from '$lib/components/docs/DocsProseCard.svelte';
   import DocsTableOfContents from '$lib/components/docs/DocsTableOfContents.svelte';
   import { getDocsCopy } from '$lib/i18n/docs';
-  import { useI18n } from '$lib/i18n/runtime';
   import { buildOgImageUrl } from '$lib/seo/og';
   import { SITE_URL } from '$lib/seo/constants';
 
-  const i18n = useI18n();
-  const docsCopy = $derived(getDocsCopy(i18n.locale()));
-  const commonCopy = $derived(docsCopy.common);
-  const pageCopy = $derived(docsCopy.openclaw);
-  const title = $derived(pageCopy.title);
-  const description = $derived(pageCopy.description);
+  const docsCopy = getDocsCopy('en');
+  const commonCopy = docsCopy.common;
+  const pageCopy = docsCopy.openclaw;
+  const title = pageCopy.title;
+  const description = pageCopy.description;
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'docs-openclaw' });
 
   const toc = [
-    { id: 'auto-install', label: '让 OpenClaw 自动安装' },
-    { id: 'host-cli-install', label: '在主机上用 CLI 安装' },
-    { id: 'registry-override', label: '替换 site / registry' },
-    { id: 'paths-and-layout', label: '目录与 bundle 规则' },
-    { id: 'private-skills', label: 'private skill 与 token' },
-    { id: 'troubleshooting', label: '排查问题' },
+    { id: 'auto-install', label: 'Compatibility Auto-Install' },
+    { id: 'host-cli-install', label: 'Host CLI Install' },
+    { id: 'registry-override', label: 'Override Site and Registry' },
+    { id: 'paths-and-layout', label: 'Paths and Bundle Layout' },
+    { id: 'private-skills', label: 'Private Skills and Tokens' },
+    { id: 'troubleshooting', label: 'Troubleshooting' },
   ] as const;
 
   const installTargets = [
     {
-      target: '项目内安装',
+      target: 'Project-local install',
       path: '<workspace>/skills/<folder-name>/',
-      usage: '推荐默认选项。skill 跟项目一起走，团队协作和版本管理都更清楚。',
+      usage: 'Recommended default. The skill stays with the project, which keeps collaboration and versioning clearer.',
     },
     {
-      target: '全局安装',
+      target: 'Global install',
       path: '~/.openclaw/skills/<folder-name>/',
-      usage: '只给你个人长期复用的通用 skill 用，不适合项目绑定型 workflow。',
+      usage: 'Use this only for personal cross-project reuse, not for project-bound workflows.',
     },
   ] as const;
 
@@ -122,8 +120,9 @@
         </div>
         <h1>{pageCopy.heading}</h1>
         <p class="docs-summary">
-          这页明确区分两套 CLI: <code>clawhub</code> CLI 走 <code>/openclaw</code> 兼容层，
-          <code>skillscat</code> CLI 继续走 SkillsCat 原生 registry。
+          This guide separates two different CLI paths: <code>clawhub</code> uses the
+          <code>/openclaw</code> compatibility layer, while <code>skillscat</code> keeps using the
+          native SkillsCat registry.
         </p>
       </div>
     </section>
@@ -132,17 +131,18 @@
       <div class="docs-main">
         <DocsProseCard title="docs/openclaw.md">
           <p>
-            这页有两条路: 如果你在用的是 <code>clawhub</code> CLI，就让它走
-            <code>https://skills.cat/openclaw</code> 这套兼容接口；如果你用的是我们自己的
-            <code>skillscat</code> CLI，那它还是走 SkillsCat 原生 <code>/registry</code>，
-            不需要切到兼容层。
+            There are two routes here. If you use <code>clawhub</code>, point it at the
+            <code>https://skills.cat/openclaw</code> compatibility surface. If you use our native
+            <code>skillscat</code> CLI, keep using the primary SkillsCat <code>/registry</code> and
+            do not switch to the compatibility layer.
           </p>
 
-          <h2 id="auto-install">让 OpenClaw 自动安装</h2>
+          <h2 id="auto-install">Compatibility Auto-Install</h2>
           <p>
-            想保留 OpenClaw / ClawHub 的使用习惯，可以直接把它的 <code>site</code> 和
-            <code>registry</code> 指向 SkillsCat。这样后续的搜索、安装、更新、检查、发布都会走
-            SkillsCat 的 <code>/openclaw</code> 兼容端口，而不是原生 registry。
+            If you want to keep the default OpenClaw or ClawHub workflow, point both
+            <code>site</code> and <code>registry</code> at SkillsCat. Search, install, update,
+            inspect, and publish operations will then flow through the SkillsCat
+            <code>/openclaw</code> compatibility endpoint instead of the native registry.
           </p>
           <pre><code>clawhub search "seo audit" --site https://skills.cat --registry https://skills.cat/openclaw
 clawhub inspect &lt;owner&gt;~&lt;skill&gt; --site https://skills.cat --registry https://skills.cat/openclaw
@@ -150,16 +150,17 @@ clawhub install &lt;owner&gt;~&lt;skill&gt; --site https://skills.cat --registry
 clawhub update &lt;owner&gt;~&lt;skill&gt; --site https://skills.cat --registry https://skills.cat/openclaw
 clawhub publish ./my-skill --slug &lt;owner&gt;~&lt;skill&gt; --version 1.0.0 --site https://skills.cat --registry https://skills.cat/openclaw</code></pre>
           <ul>
-            <li>SkillsCat 的 ClawHub 兼容 slug 用 <code>~</code> 连接层级，例如 <code>owner~skill</code> 或 <code>owner~path~to~skill</code>。</li>
-            <li>客户端会通过 <code>https://skills.cat/.well-known/clawhub.json</code> 自动发现兼容 API。</li>
-            <li><code>clawhub</code> CLI 兼容层固定在 <code>/openclaw</code>；<code>skillscat</code> CLI 仍然走原生 <code>/registry</code>。</li>
-            <li>如果你要用 <code>clawhub publish</code>，slug 也要用兼容格式，例如 <code>owner~skill</code>。</li>
+            <li>SkillsCat uses <code>~</code> in ClawHub-compatible slugs, such as <code>owner~skill</code> or <code>owner~path~to~skill</code>.</li>
+            <li>Clients can auto-discover the compatibility API through <code>https://skills.cat/.well-known/clawhub.json</code>.</li>
+            <li>The <code>clawhub</code> compatibility surface stays under <code>/openclaw</code>; the native <code>skillscat</code> CLI still uses <code>/registry</code>.</li>
+            <li>If you run <code>clawhub publish</code>, use the compatible slug format there as well.</li>
           </ul>
 
-          <h2 id="host-cli-install">在主机上用 CLI 安装</h2>
+          <h2 id="host-cli-install">Host CLI Install</h2>
           <p>
-            如果你更在意安装结果可控、目录稳定、命令一致，那就直接用 SkillsCat CLI。它不经过
-            <code>/openclaw</code>，而是继续走 SkillsCat 自己的 registry / API 契约。
+            If you care more about deterministic installs, stable directory layout, and one CLI
+            contract, use the native SkillsCat CLI directly. It does not go through
+            <code>/openclaw</code>; it keeps using the primary SkillsCat registry and APIs.
           </p>
           <pre><code>npx skillscat info &lt;owner&gt;/&lt;repo&gt;
 npx skillscat add &lt;owner&gt;/&lt;repo&gt; --agent openclaw
@@ -167,15 +168,16 @@ npx skillscat add &lt;owner&gt;/&lt;repo&gt; --skill "&lt;skill-name&gt;" --agen
 npx skillscat add &lt;owner&gt;/&lt;repo&gt; --agent openclaw --global
 npx skillscat convert openclaw --from agents</code></pre>
           <ul>
-            <li>先 <code>info</code>，再 <code>add</code>，可以避免多 skill 仓库装错内容。</li>
-            <li><code>--agent openclaw</code> 会把 bundle 写到 OpenClaw 预期的 layout。</li>
-            <li><code>convert openclaw --from agents</code> 适合把已有 <code>.agents</code> 内容迁过去。</li>
+            <li>Run <code>info</code> before <code>add</code> to avoid installing the wrong skill from a multi-skill repository.</li>
+            <li><code>--agent openclaw</code> writes the bundle into the layout OpenClaw expects.</li>
+            <li><code>convert openclaw --from agents</code> is useful when migrating existing <code>.agents</code> content.</li>
           </ul>
 
-          <h2 id="registry-override">替换 site / registry</h2>
+          <h2 id="registry-override">Override Site and Registry</h2>
           <p>
-            如果你希望以后默认都从 SkillsCat 拉 skill，可以把设置做成环境变量或者 shell alias。这样就不用每次都在命令后面重复写
-            <code>--site</code> 和 <code>--registry</code>。
+            If you want SkillsCat to become the default source for future installs, move the config
+            into environment variables or a shell alias so you do not have to repeat
+            <code>--site</code> and <code>--registry</code> on every command.
           </p>
           <pre><code>export CLAWHUB_SITE=https://skills.cat
 export CLAWHUB_REGISTRY=https://skills.cat/openclaw
@@ -184,22 +186,25 @@ clawhub search "calendar"
 clawhub install &lt;owner&gt;~&lt;skill&gt;
 clawhub update &lt;owner&gt;~&lt;skill&gt;</code></pre>
           <p>
-            如果你只想临时切换，也可以在单次命令里覆盖。这里要记住一件事:
-            <code>CLAWHUB_SITE</code> 是站点根地址，但 <code>CLAWHUB_REGISTRY</code> 要明确指向
-            <code>/openclaw</code>，因为原生 <code>/registry</code> 是给 SkillsCat CLI 用的。
+            If you only want a temporary override, pass the flags on a single command. The key
+            thing to remember is that <code>CLAWHUB_SITE</code> is the site root, but
+            <code>CLAWHUB_REGISTRY</code> must point at <code>/openclaw</code> because the native
+            <code>/registry</code> path is for the SkillsCat CLI.
           </p>
 
-          <h2 id="paths-and-layout">目录与 bundle 规则</h2>
+          <h2 id="paths-and-layout">Paths and Bundle Layout</h2>
           <p>
-            不管你走 SkillsCat CLI 还是 ClawHub 兼容安装，真正重要的是 bundle 必须完整落地。不要只复制
-            <code>SKILL.md</code>，也不要把 templates、scripts、JSON、YAML 这些伴随文件拆掉。
+            Whether you install through the native SkillsCat CLI or the ClawHub compatibility path,
+            the important part is that the full bundle lands intact. Do not copy only
+            <code>SKILL.md</code>, and do not strip out templates, scripts, JSON, YAML, or other
+            companion files.
           </p>
           <table>
             <thead>
               <tr>
-                <th>目标</th>
-                <th>目录</th>
-                <th>什么时候用</th>
+                <th>Target</th>
+                <th>Directory</th>
+                <th>When To Use It</th>
               </tr>
             </thead>
             <tbody>
@@ -213,38 +218,40 @@ clawhub update &lt;owner&gt;~&lt;skill&gt;</code></pre>
             </tbody>
           </table>
           <ul>
-            <li>OpenClaw 读的是整个 folder，不是单个文件。</li>
-            <li>本地和全局都存在时，优先检查当前 workspace 下的 <code>skills/</code>。</li>
-            <li>装完后重新开一个 OpenClaw session，比热加载更稳。</li>
+            <li>OpenClaw reads the whole folder, not a single file.</li>
+            <li>If both local and global installs exist, check the current workspace <code>skills/</code> directory first.</li>
+            <li>After install, starting a fresh OpenClaw session is more reliable than relying on hot reload.</li>
           </ul>
 
-          <h2 id="private-skills">private skill 与 token</h2>
+          <h2 id="private-skills">Private Skills and Tokens</h2>
           <p>
-            private skill 或写操作时，要先分清你现在用的是哪套 CLI。<code>clawhub</code> CLI 的浏览器登录会拿到一枚
-            SkillsCat 兼容 token；<code>skillscat</code> CLI 则继续用它自己的登录流。
+            For private skills or write actions, first make sure you know which CLI is in use.
+            <code>clawhub</code> browser login returns a SkillsCat-compatible token, while
+            <code>skillscat</code> keeps its own native auth flow.
           </p>
           <pre><code>clawhub login --site https://skills.cat
 clawhub login --token &lt;skillscat-api-token&gt; --site https://skills.cat --registry https://skills.cat/openclaw
 npx skillscat login
 npx skillscat add &lt;owner&gt;/&lt;repo&gt; --agent openclaw</code></pre>
           <ul>
-            <li><code>clawhub login --site https://skills.cat</code> 会打开 SkillsCat 的兼容授权页，并把 registry 固定回 <code>/openclaw</code>。</li>
-            <li>如果你更喜欢手动 token，可以在 SkillsCat 的 <a href="/user/tokens">API tokens</a> 页面创建带 <code>read</code>、<code>write</code>、<code>publish</code> scope 的 token。</li>
-            <li>兼容层支持带认证的搜索和已知 slug 安装；如果你需要完整的 private 浏览、仓库级选择或更复杂的私有工作流，优先用原生 <code>skillscat</code> CLI。</li>
-            <li><code>skillscat login</code> 只影响 SkillsCat CLI，不会改写 <code>clawhub</code> CLI 的 registry 配置。</li>
+            <li><code>clawhub login --site https://skills.cat</code> opens the compatibility auth page and pins the registry back to <code>/openclaw</code>.</li>
+            <li>If you prefer manual tokens, create one with <code>read</code>, <code>write</code>, and <code>publish</code> scopes on the <a href="/user/tokens">API tokens</a> page.</li>
+            <li>The compatibility layer supports authenticated search and known-slug installs. For deeper private browsing, repo-level choices, or more complex private workflows, prefer the native <code>skillscat</code> CLI.</li>
+            <li><code>skillscat login</code> only affects the SkillsCat CLI and does not rewrite <code>clawhub</code> registry config.</li>
           </ul>
 
-          <h2 id="troubleshooting">排查问题</h2>
+          <h2 id="troubleshooting">Troubleshooting</h2>
           <ul>
-            <li>安装后没生效，先看目标目录是不是对的，再重开一个 OpenClaw session。</li>
-            <li>多 skill 仓库装错了，先跑 <code>npx skillscat info owner/repo</code>，然后用 <code>--skill</code> 精确安装。</li>
-            <li>你只想让 OpenClaw 自动拉取，而不想研究兼容 slug，就优先用 <code>npx skillscat add --agent openclaw</code>。</li>
-            <li>遇到 private skill 或权限问题，先确认 token scope，再检查命令到底走的是 <code>skillscat</code> CLI 还是 <code>clawhub</code> CLI。</li>
+            <li>If the install does not take effect, confirm the target directory first and then start a fresh OpenClaw session.</li>
+            <li>If you picked the wrong skill from a multi-skill repository, run <code>npx skillscat info owner/repo</code> and install again with <code>--skill</code>.</li>
+            <li>If you only want OpenClaw to auto-pull the bundle and do not want to think about compatibility slugs, prefer <code>npx skillscat add --agent openclaw</code>.</li>
+            <li>For private-skill or permission issues, verify token scopes first and then confirm whether the command is using <code>skillscat</code> or <code>clawhub</code>.</li>
           </ul>
 
           <blockquote>
-            想看原生 <code>skillscat</code> CLI 命令细节，回到 <a href="/docs/cli">{commonCopy.links.cliDocs}</a>。这页主要负责把
-            <code>clawhub</code> CLI 兼容层和 OpenClaw 安装路径讲清楚。
+            For the native <code>skillscat</code> CLI command details, go back to the
+            <a href="/docs/cli"> {commonCopy.links.cliDocs}</a>. This guide is focused on the
+            <code>clawhub</code> compatibility layer and OpenClaw install paths.
           </blockquote>
         </DocsProseCard>
       </div>

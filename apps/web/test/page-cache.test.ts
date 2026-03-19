@@ -62,4 +62,26 @@ describe('setPublicPageCache', () => {
       Vary: 'Cookie',
     });
   });
+
+  it('can collapse anonymous indexable pages to cookie-only vary', () => {
+    const headers: Record<string, string> = {};
+
+    setPublicPageCache({
+      setHeaders: (next) => Object.assign(headers, next),
+      request: new Request('https://skills.cat/trending', {
+        headers: {
+          'accept-language': 'zh-CN,zh;q=0.9',
+        },
+      }),
+      isAuthenticated: false,
+      sMaxAge: 60,
+      staleWhileRevalidate: 180,
+      varyByLanguageHeader: false,
+    });
+
+    expect(headers).toEqual({
+      'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=180',
+      Vary: 'Cookie',
+    });
+  });
 });

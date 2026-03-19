@@ -6,6 +6,7 @@ interface PageCacheOptions {
   isAuthenticated: boolean;
   sMaxAge: number;
   staleWhileRevalidate: number;
+  varyByLanguageHeader?: boolean;
 }
 
 /**
@@ -20,6 +21,7 @@ export function setPublicPageCache({
   isAuthenticated,
   sMaxAge,
   staleWhileRevalidate,
+  varyByLanguageHeader = true,
 }: PageCacheOptions): void {
   if (isAuthenticated) {
     setHeaders({
@@ -34,9 +36,9 @@ export function setPublicPageCache({
   const hasLocaleCookie = new RegExp(`(?:^|;\\s*)${LOCALE_COOKIE_NAME}=`).test(cookieHeader);
   const varyValues = ['Cookie'];
 
-  // Locale still needs a secondary vary key when language is inferred from Accept-Language
-  // instead of the locale cookie.
-  if (!hasLocaleCookie) {
+  // Indexable public pages intentionally collapse to the default locale unless the user
+  // has chosen a locale explicitly, so they don't need an Accept-Language vary.
+  if (varyByLanguageHeader && !hasLocaleCookie) {
     varyValues.push('Accept-Language');
   }
 

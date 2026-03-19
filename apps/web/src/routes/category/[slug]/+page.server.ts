@@ -1,3 +1,4 @@
+import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { getCategoryBySlug, type Category } from '$lib/constants/categories';
 import { getSkillsByCategoryPaginated } from '$lib/server/db/utils';
@@ -25,6 +26,7 @@ export const load: PageServerLoad = async ({ params, url, platform, setHeaders, 
     isAuthenticated: Boolean(locals.user),
     sMaxAge: 120,
     staleWhileRevalidate: 600,
+    varyByLanguageHeader: false,
   });
 
   const env = {
@@ -72,6 +74,14 @@ export const load: PageServerLoad = async ({ params, url, platform, setHeaders, 
 
       const { skills, total } = await getSkillsByCategoryPaginated(env, params.slug, page, ITEMS_PER_PAGE);
       const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
+      const lastPage = Math.max(1, totalPages);
+
+      if (page > lastPage) {
+        throw redirect(
+          302,
+          lastPage === 1 ? `/category/${params.slug}` : `/category/${params.slug}?page=${lastPage}`
+        );
+      }
 
       return {
         category,
@@ -83,6 +93,7 @@ export const load: PageServerLoad = async ({ params, url, platform, setHeaders, 
           itemsPerPage: ITEMS_PER_PAGE,
           baseUrl: `/category/${params.slug}`,
         },
+        shouldIndex: total > 0,
         isDynamic,
       };
     },

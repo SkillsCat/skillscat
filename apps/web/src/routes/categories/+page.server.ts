@@ -19,6 +19,7 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
     isAuthenticated: Boolean(locals.user),
     sMaxAge: 300,
     staleWhileRevalidate: 900,
+    varyByLanguageHeader: false,
   });
 
   const env = {

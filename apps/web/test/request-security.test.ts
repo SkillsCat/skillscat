@@ -144,4 +144,11 @@ describe('request security', () => {
     expect(shouldNoIndexPath('/u/backrunner')).toBe(false);
     expect(shouldNoIndexPath('/org/skillscat')).toBe(false);
   });
+
+  it('marks machine-facing OpenClaw and discovery endpoints as noindex', () => {
+    expect(shouldNoIndexPath('/openclaw/api/v1/search')).toBe(true);
+    expect(shouldNoIndexPath('/openclaw/api/v1/skills')).toBe(true);
+    expect(shouldNoIndexPath('/.well-known/clawhub.json')).toBe(true);
+    expect(shouldNoIndexPath('/openclaw/.well-known/clawhub.json')).toBe(true);
+  });
 });

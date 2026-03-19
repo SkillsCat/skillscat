@@ -118,6 +118,7 @@ const en = {
   submitDialog: {
     title: 'Submit a Skill',
     successSingleTitle: 'Skill Submitted!',
+    successCompleteTitle: 'All set!',
     successMultiTitle: '{count} Skills Submitted!',
     successSingleDescription: 'Your skill has been submitted for review. It will appear in our catalog once processed.',
     successMultiDescription: 'Your skills have been submitted for review. They will appear in our catalog once processed.',
@@ -414,6 +415,7 @@ const zhCN: MessageCatalog = {
   submitDialog: {
     title: '提交技能',
     successSingleTitle: '技能已提交！',
+    successCompleteTitle: '处理完成！',
     successMultiTitle: '已提交 {count} 个技能！',
     successSingleDescription: '你的技能已提交审核，处理完成后会出现在目录中。',
     successMultiDescription: '你的技能已提交审核，处理完成后会出现在目录中。',
@@ -708,6 +710,7 @@ const ja: MessageCatalog = {
   submitDialog: {
     title: 'スキルを投稿',
     successSingleTitle: 'スキルを投稿しました！',
+    successCompleteTitle: '完了しました！',
     successMultiTitle: '{count} 件のスキルを投稿しました！',
     successSingleDescription: 'スキルは審査待ちです。処理後にカタログへ表示されます。',
     successMultiDescription: 'スキルは審査待ちです。処理後にカタログへ表示されます。',
@@ -1002,6 +1005,7 @@ const ko: MessageCatalog = {
   submitDialog: {
     title: '스킬 제출',
     successSingleTitle: '스킬이 제출되었습니다!',
+    successCompleteTitle: '완료되었습니다!',
     successMultiTitle: '{count}개의 스킬이 제출되었습니다!',
     successSingleDescription: '스킬이 검토 대기열에 들어갔습니다. 처리 후 카탈로그에 표시됩니다.',
     successMultiDescription: '스킬이 검토 대기열에 들어갔습니다. 처리 후 카탈로그에 표시됩니다.',

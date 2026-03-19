@@ -76,6 +76,7 @@
       category: Category | null;
       skills: SkillCardData[];
       pagination: PaginationData | null;
+      shouldIndex?: boolean;
       isDynamic: boolean;
     };
   }
@@ -195,7 +196,7 @@
       : messages.categories.notFoundTitle
   );
   const categoryStructuredData = $derived(
-    displayCategory
+    displayCategory && data.shouldIndex !== false
       ? {
           '@context': 'https://schema.org',
           '@type': 'CollectionPage',
@@ -221,6 +222,7 @@
     image={ogImageUrl}
     imageAlt={i18n.t(messages.legal.categoryImageAlt, { name: displayCategory.name })}
     keywords={[`${displayCategory.name} skills`, 'ai agent skills', 'skillscat category']}
+    noindex={data.shouldIndex === false}
     structuredData={categoryStructuredData}
   />
 {:else}

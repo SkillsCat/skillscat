@@ -20,6 +20,7 @@ declare global {
         GITHUB_TOKEN?: string;
         WORKER_SECRET?: string;
         CACHE_VERSION?: string;
+        SITEMAP_REFRESH_MIN_INTERVAL_SECONDS?: string;
         AI_MODEL?: string;
         CLASSIFICATION_PAID_MODEL?: string;
         FREE_MODELS?: string;
