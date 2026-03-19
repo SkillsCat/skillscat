@@ -44,6 +44,7 @@
   }
 
   type Tab = "skills" | "members";
+  type OrgPageErrorKind = "not_found" | "temporary_failure";
 
   interface Props {
     data: {
@@ -52,6 +53,7 @@
       members: Member[];
       skills: Skill[];
       error: string | null;
+      errorKind: OrgPageErrorKind | null;
     };
   }
 
@@ -65,6 +67,7 @@
   let loadedMembers = $state<Member[] | undefined>(undefined);
   let loadedSkills = $state<Skill[] | undefined>(undefined);
   let loadedError = $state<string | null | undefined>(undefined);
+  let loadedErrorKind = $state<OrgPageErrorKind | null | undefined>(undefined);
   let loading = $state(false);
   let activeSlug = $state('');
   let activeTab = $state<Tab>("skills");
@@ -117,6 +120,8 @@
   const members = $derived(loadedMembers === undefined ? data.members : loadedMembers);
   const skills = $derived(loadedSkills === undefined ? data.skills : loadedSkills);
   const error = $derived(loadedError === undefined ? data.error : loadedError);
+  const errorKind = $derived(loadedErrorKind === undefined ? data.errorKind : loadedErrorKind);
+  const isTemporaryFailure = $derived(errorKind === 'temporary_failure');
   const slug = $derived(data.slug);
   const isAdmin = $derived(
     org?.userRole && ["owner", "admin"].includes(org.userRole),
@@ -143,11 +148,13 @@
       .map((skill) => skill.name)
   );
   const ogImageUrl = $derived(
-    buildOgImageUrl({
-      type: 'org',
-      slug,
-      version: orgSeoUpdatedAt || org?.skillCount || 0,
-    })
+    org
+      ? buildOgImageUrl({
+          type: 'org',
+          slug,
+          version: orgSeoUpdatedAt || org?.skillCount || 0,
+        })
+      : buildOgImageUrl({ type: 'page', slug: isTemporaryFailure ? '500' : '404' })
   );
   const pageTitle = $derived(
     org
@@ -158,7 +165,7 @@
           }),
           MAX_SEO_TITLE_LENGTH
         )
-      : copy.org.seoNotFoundTitle
+      : (isTemporaryFailure ? copy.org.seoTemporaryUnavailableTitle : copy.org.seoNotFoundTitle)
   );
   const orgDescription = $derived(
     (() => {
@@ -168,6 +175,16 @@
       return trimSeoText(orgBio || fallback, MAX_SEO_DESCRIPTION_LENGTH);
     })()
   );
+  const pageDescription = $derived(
+    isTemporaryFailure ? copy.org.seoTemporaryUnavailableDescription : copy.org.seoNotFoundDescription
+  );
+  const errorTitle = $derived(
+    isTemporaryFailure ? copy.org.temporaryUnavailableTitle : copy.org.notFoundTitle
+  );
+  const errorMessage = $derived(
+    isTemporaryFailure ? copy.org.temporaryUnavailableMessage : copy.org.notFoundMessage
+  );
+  const errorCode = $derived(isTemporaryFailure ? 500 : 404);
   const orgSeoKeywords = $derived((() => {
     const keywords: string[] = [];
     const seen = new Set<string>();
@@ -256,6 +273,7 @@
     loadedMembers = undefined;
     loadedSkills = undefined;
     loadedError = undefined;
+    loadedErrorKind = undefined;
     loading = false;
   });
 
@@ -273,9 +291,17 @@
       if (orgRes.ok) {
         const data = (await orgRes.json()) as { organization?: Org };
         loadedOrg = data.organization ?? null;
+        loadedError = data.organization ? null : copy.org.notFoundMessage;
+        loadedErrorKind = data.organization ? null : 'not_found';
+        if (!data.organization) {
+          return;
+        }
       } else {
         loadedOrg = null;
-        loadedError = copy.org.notFoundTitle;
+        loadedErrorKind = orgRes.status === 404 ? 'not_found' : 'temporary_failure';
+        loadedError = orgRes.status === 404
+          ? copy.org.notFoundMessage
+          : copy.org.temporaryUnavailableMessage;
         return;
       }
 
@@ -289,7 +315,8 @@
         loadedSkills = data.skills || [];
       }
     } catch {
-      loadedError = messages.orgSettings.failedToLoadOrganization;
+      loadedErrorKind = 'temporary_failure';
+      loadedError = copy.org.temporaryUnavailableMessage;
     } finally {
       loading = false;
     }
@@ -311,9 +338,9 @@
 {:else}
   <SEO
     title={pageTitle}
-    description={copy.org.seoNotFoundDescription}
+    description={pageDescription}
     image={ogImageUrl}
-    imageAlt={copy.org.notFoundImageAlt}
+    imageAlt={isTemporaryFailure ? copy.org.temporaryUnavailableImageAlt : copy.org.notFoundImageAlt}
     noindex
     structuredData={null}
   />
@@ -327,10 +354,12 @@
     </div>
   {:else if error}
     <ErrorState
-      title={copy.org.notFoundTitle}
-      message={error}
-      primaryActionText={messages.common.tryAgain}
-      primaryActionClick={loadOrg}
+      code={errorCode}
+      title={errorTitle}
+      message={errorMessage}
+      primaryActionText={isTemporaryFailure ? messages.common.tryAgain : messages.common.browseSkills}
+      primaryActionClick={isTemporaryFailure ? loadOrg : undefined}
+      primaryActionHref={isTemporaryFailure ? undefined : '/trending'}
       secondaryActionText={messages.common.goBack}
       secondaryActionClick={() => history.back()}
     />

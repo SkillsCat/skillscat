@@ -32,6 +32,15 @@ function buildCacheRequest(cacheKey: string): Request {
   return new Request(`${CACHE_DOMAIN}/${cacheKey}`);
 }
 
+function buildTextCacheResponse(data: string, ttl: number, contentType = 'text/plain'): Response {
+  return new Response(data, {
+    headers: {
+      'Cache-Control': `public, max-age=${ttl}`,
+      'Content-Type': contentType,
+    },
+  });
+}
+
 function scheduleCacheWrite(write: Promise<void>, waitUntil?: WaitUntilFn): void {
   const guardedWrite = write.catch(() => {
     // Ignore cache write errors.
@@ -182,12 +191,7 @@ export async function getCachedText(
     try {
       const cache = caches.default;
       const cacheUrl = buildCacheRequest(versionedKey);
-      const response = new Response(data, {
-        headers: {
-          'Cache-Control': `public, max-age=${ttl}`,
-          'Content-Type': 'text/plain'
-        }
-      });
+      const response = buildTextCacheResponse(data, ttl);
       scheduleCacheWrite(cache.put(cacheUrl, response), options?.waitUntil);
     } catch {
       // Ignore cache write errors
@@ -203,6 +207,57 @@ export async function getCachedText(
     return { data, hit: false };
   } finally {
     pendingTextFetches.delete(versionedKey);
+  }
+}
+
+export async function peekCachedText(
+  cacheKey: string,
+  options?: {
+    waitUntil?: WaitUntilFn;
+  }
+): Promise<string | null> {
+  const versionedKey = getVersionedCacheKey(cacheKey);
+
+  try {
+    const cache = caches.default;
+    const versionedRequest = buildCacheRequest(versionedKey);
+    const legacyRequest = buildCacheRequest(cacheKey);
+
+    const cached = await cache.match(versionedRequest);
+    if (cached) {
+      return await cached.text();
+    }
+
+    const legacyCached = await cache.match(legacyRequest);
+    if (legacyCached) {
+      const promoted = legacyCached.clone();
+      const data = await legacyCached.text();
+      scheduleCacheWrite(cache.put(versionedRequest, promoted), options?.waitUntil);
+      return data;
+    }
+  } catch {
+    // Cache API not available or error
+  }
+
+  return null;
+}
+
+export async function putCachedText(
+  cacheKey: string,
+  data: string,
+  ttl: number,
+  options?: {
+    waitUntil?: WaitUntilFn;
+    contentType?: string;
+  }
+): Promise<void> {
+  try {
+    const cache = caches.default;
+    const cacheUrl = buildCacheRequest(getVersionedCacheKey(cacheKey));
+    const response = buildTextCacheResponse(data, ttl, options?.contentType);
+    scheduleCacheWrite(cache.put(cacheUrl, response), options?.waitUntil);
+  } catch {
+    // Ignore cache write errors
   }
 }
 

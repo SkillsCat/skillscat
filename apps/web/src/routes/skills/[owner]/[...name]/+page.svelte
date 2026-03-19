@@ -22,12 +22,15 @@
   import { buildOgImageUrl } from '$lib/seo/og';
   import { SITE_URL } from '$lib/seo/constants';
 
+  type SkillPageErrorKind = 'not_found' | 'temporary_failure';
+
   interface Props {
     data: {
       skill: SkillDetail | null;
       recommendSkills: SkillCardData[];
       deferRecommendSkills?: boolean;
       error?: string;
+      errorKind?: SkillPageErrorKind;
       isOwner?: boolean;
       isBookmarked?: boolean;
       isAuthenticated?: boolean;
@@ -132,6 +135,12 @@
     } catch (err) {
       console.error('Copy URL failed:', err);
       toast(copy.copyFailed, 'error');
+    }
+  }
+
+  function retryCurrentPage() {
+    if (typeof window !== 'undefined') {
+      window.location.reload();
     }
   }
 
@@ -1126,13 +1135,26 @@
   const canonicalSkillUrl = $derived(
     data.skill ? `${SITE_URL}/skills/${encodeSkillSlugForPath(data.skill.slug)}` : SITE_URL
   );
+  const skillErrorKind = $derived(
+    data.errorKind === 'temporary_failure' ? 'temporary_failure' : 'not_found'
+  );
+  const isTemporaryFailure = $derived(!data.skill && skillErrorKind === 'temporary_failure');
   const skillDescription = $derived(
     data.seo?.description
       || data.skill?.description
-      || (data.skill ? i18n.t(copy.seoFallbackDescription, { name: data.skill.name }) : copy.seoNotFoundDescription)
+      || (
+        data.skill
+          ? i18n.t(copy.seoFallbackDescription, { name: data.skill.name })
+          : (isTemporaryFailure ? copy.seoTemporaryUnavailableDescription : copy.seoNotFoundDescription)
+      )
   );
   const skillSeoTitle = $derived(
-    data.seo?.title || (data.skill ? `${data.skill.name} - SkillsCat` : copy.seoNotFoundTitle)
+    data.seo?.title
+      || (
+        data.skill
+          ? `${data.skill.name} - SkillsCat`
+          : (isTemporaryFailure ? copy.seoTemporaryUnavailableTitle : copy.seoNotFoundTitle)
+      )
   );
   const ogImageUrl = $derived(
     data.skill
@@ -1141,7 +1163,19 @@
           slug: data.skill.slug,
           version: data.skill.lastCommitAt ?? data.skill.updatedAt ?? data.skill.indexedAt,
         })
-      : buildOgImageUrl({ type: 'page', slug: '404' })
+      : buildOgImageUrl({ type: 'page', slug: isTemporaryFailure ? '500' : '404' })
+  );
+  const errorTitle = $derived(
+    isTemporaryFailure ? copy.temporarilyUnavailableTitle : copy.notFoundTitle
+  );
+  const errorMessage = $derived(
+    isTemporaryFailure ? copy.temporarilyUnavailableMessage : (data.error || copy.notFoundMessage)
+  );
+  const errorCode = $derived(isTemporaryFailure ? 500 : 404);
+  const seoImageAlt = $derived(
+    data.skill
+      ? i18n.t(copy.seoImageAlt, { name: data.skill.name })
+      : (isTemporaryFailure ? copy.seoTemporaryUnavailableImageAlt : copy.seoNotFoundImageAlt)
   );
   const publishedTime = $derived(
     toIsoTimestamp(data.skill?.createdAt)
@@ -1218,7 +1252,7 @@
     description={skillDescription}
     url={canonicalSkillUrl}
     image={ogImageUrl}
-    imageAlt={i18n.t(copy.seoImageAlt, { name: data.skill.name })}
+    imageAlt={seoImageAlt}
     type="article"
     author={getAuthorDisplayName()}
     publishedTime={publishedTime}
@@ -1231,10 +1265,10 @@
   />
 {:else}
   <SEO
-    title={copy.seoNotFoundTitle}
+    title={skillSeoTitle}
     description={skillDescription}
     image={ogImageUrl}
-    imageAlt={copy.seoNotFoundImageAlt}
+    imageAlt={seoImageAlt}
     noindex
     structuredData={null}
   />
@@ -1743,14 +1777,16 @@
     </div>
   </div>
 {:else}
-  <!-- Not Found -->
   <ErrorState
-    code={404}
-    title={copy.notFoundTitle}
-    message={data.error || copy.notFoundMessage}
+    code={errorCode}
+    title={errorTitle}
+    message={errorMessage}
     fullPage
-    primaryActionText={messages.common.browseSkills}
-    primaryActionHref="/trending"
+    primaryActionText={isTemporaryFailure ? messages.common.tryAgain : messages.common.browseSkills}
+    primaryActionClick={isTemporaryFailure ? retryCurrentPage : undefined}
+    primaryActionHref={isTemporaryFailure ? undefined : '/trending'}
+    secondaryActionText={isTemporaryFailure ? messages.common.browseSkills : undefined}
+    secondaryActionHref={isTemporaryFailure ? '/trending' : undefined}
   />
 {/if}
 

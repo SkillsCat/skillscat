@@ -36,6 +36,8 @@ interface Skill {
   updatedAt?: number;
 }
 
+type OrgPageErrorKind = 'not_found' | 'temporary_failure';
+
 export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, request, platform }) => {
   setPublicPageCache({
     setHeaders,
@@ -43,6 +45,7 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
     isAuthenticated: Boolean(locals.user),
     sMaxAge: 120,
     staleWhileRevalidate: 600,
+    varyByLanguageHeader: false,
   });
 
   const slug = params.slug;
@@ -55,17 +58,50 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
     members: [] as Member[],
     skills: [] as Skill[],
     error: 'Failed to load organization',
+    errorKind: 'temporary_failure' as OrgPageErrorKind,
   };
 
   if (useAnonDataCache && cache) {
     try {
       const cached = await cache.match(new Request(`https://cache/${cacheKey}`));
       if (cached) {
-        const data = await cached.json() as typeof fallback;
-        if (data?.error === 'Organization not found') {
+        const data = await cached.json() as Partial<typeof fallback> & {
+          errorKind?: OrgPageErrorKind | null;
+        };
+        const inferredErrorKind = data.errorKind
+          ?? (
+            data.error === 'Organization not found'
+              ? 'not_found'
+              : (data.error ? 'temporary_failure' : null)
+          );
+
+        if (inferredErrorKind === 'not_found') {
           setHeaders({ 'X-Skillscat-Status-Override': '404' });
+          return {
+            slug,
+            org: data.org ?? null,
+            members: data.members ?? [],
+            skills: data.skills ?? [],
+            error: data.error ?? 'Organization not found',
+            errorKind: 'not_found' as OrgPageErrorKind,
+          };
         }
-        return data;
+
+        if (inferredErrorKind === 'temporary_failure') {
+          setHeaders({
+            'X-Skillscat-Status-Override': '500',
+            'Cache-Control': 'no-store',
+          });
+        }
+
+        return {
+          slug,
+          org: data.org ?? null,
+          members: data.members ?? [],
+          skills: data.skills ?? [],
+          error: data.error ?? null,
+          errorKind: inferredErrorKind,
+        };
       }
     } catch {
       // Cache miss or unavailable cache API
@@ -82,15 +118,20 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
     if (!orgRes.ok) {
       if (orgRes.status === 404) {
         setHeaders({ 'X-Skillscat-Status-Override': '404' });
+      } else {
+        setHeaders({
+          'X-Skillscat-Status-Override': '500',
+          'Cache-Control': 'no-store',
+        });
       }
       const result = {
         ...fallback,
         error: orgRes.status === 404 ? 'Organization not found' : 'Failed to load organization',
+        errorKind: orgRes.status === 404 ? 'not_found' as OrgPageErrorKind : 'temporary_failure' as OrgPageErrorKind,
       };
-      if (useAnonDataCache && cache) {
-        const ttl = orgRes.status === 404 ? CACHE_TTL_NOT_FOUND : CACHE_TTL;
+      if (orgRes.status === 404 && useAnonDataCache && cache) {
         const response = new Response(JSON.stringify(result), {
-          headers: { 'Cache-Control': `public, max-age=${ttl}` },
+          headers: { 'Cache-Control': `public, max-age=${CACHE_TTL_NOT_FOUND}` },
         });
         platform?.context?.waitUntil(cache.put(new Request(`https://cache/${cacheKey}`), response));
       }
@@ -103,6 +144,7 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
       return {
         ...fallback,
         error: 'Organization not found',
+        errorKind: 'not_found',
       };
     }
 
@@ -124,6 +166,7 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
       members,
       skills,
       error: null,
+      errorKind: null,
     };
     if (useAnonDataCache && cache) {
       const response = new Response(JSON.stringify(result), {
@@ -133,6 +176,10 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
     }
     return result;
   } catch {
+    setHeaders({
+      'X-Skillscat-Status-Override': '500',
+      'Cache-Control': 'no-store',
+    });
     return fallback;
   }
 };
