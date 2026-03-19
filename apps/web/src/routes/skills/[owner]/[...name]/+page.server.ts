@@ -31,6 +31,8 @@ interface SkillSeoPayload {
   section?: string;
 }
 
+type SkillPageErrorKind = 'not_found' | 'temporary_failure';
+
 function normalizeKeywordValue(keyword: string): string {
   return keyword.trim().toLowerCase().replace(/\s+/g, ' ');
 }
@@ -322,12 +324,27 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     return value;
   };
 
+  const createNotFoundResult = () => ({
+    skill: null,
+    recommendSkills: [] as SkillCardData[],
+    error: 'Skill not found or you do not have permission to view it.',
+    errorKind: 'not_found' as SkillPageErrorKind,
+  });
+
+  const createTemporaryFailureResult = () => ({
+    skill: null,
+    recommendSkills: [] as SkillCardData[],
+    error: 'Failed to load skill',
+    errorKind: 'temporary_failure' as SkillPageErrorKind,
+  });
+
   setPublicPageCache({
     setHeaders,
     request,
     isAuthenticated: Boolean(locals.user),
     sMaxAge: 120,
     staleWhileRevalidate: 600,
+    varyByLanguageHeader: false,
   });
 
   const env = {
@@ -342,20 +359,12 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
   const normalizedName = normalizeSkillName(params.name);
   if (!normalizedOwner) {
     setHeaders({ 'X-Skillscat-Status-Override': '404' });
-    return finish({
-      skill: null,
-      recommendSkills: [],
-      error: 'Skill not found or you do not have permission to view it.',
-    });
+    return finish(createNotFoundResult());
   }
 
   if (!normalizedName) {
     setHeaders({ 'X-Skillscat-Status-Override': '404' });
-    return finish({
-      skill: null,
-      recommendSkills: [],
-      error: 'Skill not found or you do not have permission to view it.',
-    });
+    return finish(createNotFoundResult());
   }
 
   if (normalizedOwner !== params.owner || normalizedName !== params.name) {
@@ -381,11 +390,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
 
     if (!skill) {
       setHeaders({ 'X-Skillscat-Status-Override': '404' });
-      return finish({
-        skill: null,
-        recommendSkills: [],
-        error: 'Skill not found or you do not have permission to view it.',
-      });
+      return finish(createNotFoundResult());
     }
 
     // Record access asynchronously (don't block response)
@@ -519,10 +524,10 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     });
   } catch (error) {
     console.error('Error loading skill:', error);
-    return finish({
-      skill: null,
-      recommendSkills: [],
-      error: 'Failed to load skill',
+    setHeaders({
+      'X-Skillscat-Status-Override': '500',
+      'Cache-Control': 'no-store',
     });
+    return finish(createTemporaryFailureResult());
   }
 };

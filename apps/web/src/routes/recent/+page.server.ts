@@ -1,3 +1,4 @@
+import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { getRecentSkillsPaginated } from '$lib/server/db/utils';
 import { getCached } from '$lib/server/cache';
@@ -17,6 +18,7 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
     isAuthenticated: Boolean(locals.user),
     sMaxAge: 60,
     staleWhileRevalidate: 180,
+    varyByLanguageHeader: false,
   });
 
   const env = {
@@ -32,6 +34,11 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
   );
   const { skills, total } = data;
   const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
+  const lastPage = Math.max(1, totalPages);
+
+  if (page > lastPage) {
+    throw redirect(302, lastPage === 1 ? '/recent' : `/recent?page=${lastPage}`);
+  }
 
   return {
     skills,

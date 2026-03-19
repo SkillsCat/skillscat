@@ -25,6 +25,7 @@ const DEFAULT_RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = 15_000;
 const DEFAULT_RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS = 2_500;
 const DEFAULT_SEARCH_PRECOMPUTE_MAX_PER_RUN = 500;
 const DEFAULT_SEARCH_PRECOMPUTE_TIME_BUDGET_MS = 10_000;
+const DEFAULT_SITEMAP_REFRESH_TIMEOUT_MS = 20_000;
 const DEFAULT_MISSING_STATE_SCAN_HOUR_UTC = 3;
 const DEFAULT_MISSING_STATE_SCAN_LIMIT = 200;
 
@@ -320,6 +321,62 @@ function parseMissingStateScanLimit(raw: string | undefined): number {
   return Math.min(parsed, 2000);
 }
 
+function isSitemapRefreshEnabled(env: SearchPrecomputeEnv): boolean {
+  return (env.SITEMAP_REFRESH_ENABLED || '1').trim() !== '0';
+}
+
+function getSitemapRefreshTimeoutMs(env: SearchPrecomputeEnv): number {
+  const parsed = Number.parseInt(env.SITEMAP_REFRESH_TIMEOUT_MS || '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SITEMAP_REFRESH_TIMEOUT_MS;
+  return Math.min(Math.max(parsed, 1000), 120_000);
+}
+
+async function refreshSitemaps(env: SearchPrecomputeEnv): Promise<'refreshed' | 'skipped' | 'disabled' | 'failed'> {
+  if (!isSitemapRefreshEnabled(env)) {
+    return 'disabled';
+  }
+
+  const appOrigin = getAppOrigin(env);
+  if (!appOrigin) {
+    console.warn('Sitemap refresh enabled but APP_ORIGIN is not configured');
+    return 'failed';
+  }
+
+  if (!env.WORKER_SECRET) {
+    console.warn('Sitemap refresh enabled but WORKER_SECRET is not configured');
+    return 'failed';
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), getSitemapRefreshTimeoutMs(env));
+
+  try {
+    const response = await fetch(`${appOrigin}/api/admin/seo/sitemaps`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.WORKER_SECRET}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ scope: 'all' }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      console.warn(`Sitemap refresh failed: ${response.status} ${body.slice(0, 200)}`);
+      return 'failed';
+    }
+
+    const payload = await response.json().catch(() => null) as { skipped?: boolean } | null;
+    return payload?.skipped ? 'skipped' : 'refreshed';
+  } catch (err) {
+    console.warn('Sitemap refresh request error:', err);
+    return 'failed';
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function shouldRunMissingStateScan(now: number, hourUtc: number): boolean {
   return new Date(now).getUTCHours() === hourUtc;
 }
@@ -609,6 +666,13 @@ export default {
     const recommend = await processRecommendPrecomputeBatch(env);
     if (recommend.attempted > 0 || recommend.skipped > 0) {
       console.log(`Recommend precompute: attempted=${recommend.attempted}, succeeded=${recommend.succeeded}, failed=${recommend.failed}, skipped=${recommend.skipped}`);
+    }
+
+    const sitemapRefreshResult = await refreshSitemaps(env);
+    if (sitemapRefreshResult === 'refreshed') {
+      console.log('Sitemap refresh completed');
+    } else if (sitemapRefreshResult === 'skipped') {
+      console.log('Sitemap refresh skipped by minimum interval');
     }
   },
 };

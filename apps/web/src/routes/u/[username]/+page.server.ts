@@ -61,6 +61,7 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
     isAuthenticated: Boolean(locals.user),
     sMaxAge: 120,
     staleWhileRevalidate: 600,
+    varyByLanguageHeader: false,
   });
 
   const db = platform?.env?.DB;

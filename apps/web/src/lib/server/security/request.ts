@@ -671,7 +671,19 @@ export function shouldNoIndexPath(pathname: string): boolean {
     return true;
   }
 
+  if (pathname.startsWith('/openclaw/api/')) {
+    return true;
+  }
+
   if (pathname.startsWith('/registry/')) {
+    return true;
+  }
+
+  if (pathname === '/.well-known' || pathname.startsWith('/.well-known/')) {
+    return true;
+  }
+
+  if (pathname === '/openclaw/.well-known' || pathname.startsWith('/openclaw/.well-known/')) {
     return true;
   }
 

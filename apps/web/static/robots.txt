@@ -10,14 +10,6 @@ Sitemap: https://skills.cat/sitemap.xml
 # Disallow API routes
 Disallow: /api/
 Disallow: /registry/
-
-# Private/authenticated pages
-Disallow: /user
-Disallow: /user/
-Disallow: /bookmarks
-Disallow: /bookmarks/
-Disallow: /device
-Disallow: /device/
-Disallow: /registry/auth/
-Disallow: /org/*/settings
-Disallow: /org/*/settings/
+Disallow: /openclaw/api/
+Disallow: /.well-known/
+Disallow: /openclaw/.well-known/
