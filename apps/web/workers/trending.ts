@@ -22,6 +22,7 @@ import type {
 } from './shared/types';
 import { TIER_CONFIG } from './shared/types';
 import { getSkillRefreshSelectColumns, resolveRefreshRepoMetrics } from './shared/trending/refresh';
+import { buildGithubSkillR2Key } from '../src/lib/skill-path';
 import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
 import { buildRecentActivitySortSql, getNonlinearStarScore, buildTopRatedSortScoreSql } from '../src/lib/server/ranking';
 import { markSearchDirtyBatch } from '../src/lib/server/ranking/search-precompute';
@@ -541,9 +542,12 @@ async function detectReclassificationNeeded(
 
   // Queue reclassification messages
   for (const skill of skills.results) {
-    const skillMdPath = skill.skill_path
-      ? `skills/${skill.repo_owner}/${skill.repo_name}/${skill.skill_path}/SKILL.md`
-      : `skills/${skill.repo_owner}/${skill.repo_name}/SKILL.md`;
+    const skillMdPath = buildGithubSkillR2Key(
+      skill.repo_owner,
+      skill.repo_name,
+      skill.skill_path,
+      'SKILL.md'
+    );
 
     const message: ClassificationMessage & { stars: number; isReclassification: boolean } = {
       type: 'classify',
@@ -704,14 +708,6 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
              COALESCE(last_commit_at, updated_at) as updatedAt
       FROM skills INDEXED BY skills_top_public_rank_expr_idx
       WHERE visibility = 'public'
-        AND (
-          skill_path IS NULL
-          OR skill_path = ''
-          OR (
-            skill_path NOT LIKE '.%'
-            AND skill_path NOT LIKE '%/.%'
-          )
-        )
       ORDER BY ${topRatedSortScoreSql} DESC, download_count_90d DESC, download_count_30d DESC,
                stars DESC, trending_score DESC,
                ${recentActivitySortSql} DESC

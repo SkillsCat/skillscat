@@ -1,18 +1,15 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { ApiResponse } from '$lib/types';
-import { invalidateCache } from '$lib/server/cache';
-import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '$lib/server/cache/keys';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { isSkillOwner } from '$lib/server/auth/permissions';
 import { resolveSkillDetail } from '$lib/server/skill/detail';
 import {
   buildSkillSlug,
-  buildUploadSkillR2Key,
   normalizeSkillName,
   normalizeSkillOwner,
-  parseSkillSlug,
 } from '$lib/skill-path';
+import { deleteSkillArtifactsAndInvalidateCaches } from '$lib/server/skill/delete';
 
 function responseHeaders(opts: { cacheControl: string; cacheStatus: 'HIT' | 'MISS' | 'BYPASS' }): Record<string, string> {
   return {
@@ -87,32 +84,6 @@ interface SkillInfo {
 }
 
 /**
- * Build possible R2 paths for a skill's SKILL.md file.
- */
-function buildR2Paths(skill: SkillInfo): string[] {
-  if (skill.source_type === 'upload') {
-    const canonical = buildUploadSkillR2Key(skill.slug, 'SKILL.md');
-    const parts = parseSkillSlug(skill.slug);
-    const paths = new Set<string>();
-
-    if (canonical) {
-      paths.add(canonical);
-    }
-
-    if (parts) {
-      // Legacy fallback for previously stored upload paths.
-      paths.add(`skills/${parts.owner}/${parts.name.split('/')[0]}/SKILL.md`);
-    }
-
-    return [...paths];
-  }
-
-  // For GitHub-sourced skills
-  const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
-  return [`skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/SKILL.md`];
-}
-
-/**
  * DELETE /api/skills/[owner]/[...name] - Delete a private skill
  *
  * Only the owner can delete a skill, and only uploaded (private) skills can be deleted.
@@ -162,44 +133,18 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
     throw error(400, 'Cannot delete GitHub-sourced skills. Remove the SKILL.md from your repository instead.');
   }
 
-  const categoryResult = await db
-    .prepare('SELECT category_slug FROM skill_categories WHERE skill_id = ?')
-    .bind(skill.id)
-    .all<{ category_slug: string }>();
-  const categorySlugs = (categoryResult.results || []).map((row) => row.category_slug);
-
-  // Delete from database (cascades handle dependent tables like skill_categories, skill_tags, etc.)
-  await db.prepare('DELETE FROM skills WHERE id = ?').bind(skill.id).run();
-
-  // Delete R2 files
-  try {
-    const r2Paths = buildR2Paths(skill);
-    for (const r2Path of r2Paths) {
-      await r2.delete(r2Path);
-    }
-  } catch (r2Error) {
-    // Log but don't fail - the DB record is already deleted
-    console.error(`Failed to delete R2 file for skill ${skill.id}:`, r2Error);
-  }
-
-  try {
-    const cacheKeys = new Set<string>([
-      `api:skill:${skill.slug}`,
-      `api:skill-files:${skill.slug}`,
-      `skill:${skill.id}`,
-      `recommend:${skill.id}`,
-      ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
-    ]);
-
-    for (const categorySlug of categorySlugs) {
-      cacheKeys.add(`page:category:v1:${categorySlug}:1`);
-    }
-
-    await Promise.all(Array.from(cacheKeys, (cacheKey) => invalidateCache(cacheKey)));
-  } catch (cacheError) {
-    // Log but don't fail
-    console.error(`Failed to invalidate cache for skill ${skill.id}:`, cacheError);
-  }
+  await deleteSkillArtifactsAndInvalidateCaches({
+    db,
+    r2,
+    skill: {
+      id: skill.id,
+      slug: skill.slug,
+      sourceType: skill.source_type,
+      repoOwner: skill.repo_owner,
+      repoName: skill.repo_name,
+      skillPath: skill.skill_path,
+    },
+  });
 
   return json({
     success: true,

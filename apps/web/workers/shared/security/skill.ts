@@ -1,5 +1,10 @@
 import type { D1Database } from '@cloudflare/workers-types';
-import { buildUploadSkillR2Key, buildUploadSkillR2Prefix } from '../../../src/lib/skill-path';
+import {
+  buildGithubSkillR2Keys,
+  buildGithubSkillR2Prefix,
+  buildUploadSkillR2Key,
+  buildUploadSkillR2Prefix,
+} from '../../../src/lib/skill-path';
 import { githubRequest } from '../../../src/lib/server/github-client/request';
 import type { BaseEnv, DirectoryFile } from '../types';
 
@@ -74,8 +79,8 @@ export function parseDirectoryFiles(fileStructure: string | null): DirectoryFile
 }
 
 function getGithubSkillR2Prefix(skill: Pick<SecuritySkillRow, 'repo_owner' | 'repo_name' | 'skill_path'>): string {
-  const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
-  return `skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/`;
+  if (!skill.repo_owner || !skill.repo_name) return '';
+  return buildGithubSkillR2Prefix(skill.repo_owner, skill.repo_name, skill.skill_path);
 }
 
 export function getSkillR2Prefix(skill: Pick<SecuritySkillRow, 'slug' | 'source_type' | 'repo_owner' | 'repo_name' | 'skill_path'>): string {
@@ -83,6 +88,22 @@ export function getSkillR2Prefix(skill: Pick<SecuritySkillRow, 'slug' | 'source_
     return buildUploadSkillR2Prefix(skill.slug);
   }
   return getGithubSkillR2Prefix(skill);
+}
+
+export function getSkillR2Keys(
+  skill: Pick<SecuritySkillRow, 'slug' | 'source_type' | 'repo_owner' | 'repo_name' | 'skill_path'>,
+  filePath: string
+): string[] {
+  if (skill.source_type === 'upload') {
+    const key = buildUploadSkillR2Key(skill.slug, filePath);
+    return key ? [key] : [];
+  }
+
+  if (!skill.repo_owner || !skill.repo_name) {
+    return [];
+  }
+
+  return buildGithubSkillR2Keys(skill.repo_owner, skill.repo_name, skill.skill_path, filePath);
 }
 
 export async function loadSecuritySkill(
@@ -179,12 +200,15 @@ export async function loadSkillTextFilesFromR2(
   env: Pick<BaseEnv, 'R2'>
 ): Promise<SecurityFileRecord[]> {
   const directoryFiles = parseDirectoryFiles(skill.file_structure);
-  const prefix = getSkillR2Prefix(skill);
   const textFiles = directoryFiles.filter((file) => file.type === 'text');
   const loaded: SecurityFileRecord[] = [];
 
   for (const file of textFiles) {
-    const object = await env.R2.get(`${prefix}${file.path}`);
+    let object: R2ObjectBody | null = null;
+    for (const key of getSkillR2Keys(skill, file.path)) {
+      object = await env.R2.get(key);
+      if (object) break;
+    }
     if (!object) continue;
     loaded.push({
       path: file.path,

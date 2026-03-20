@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { classifyByKeywords } from '../workers/classification';
+import { describe, expect, it, vi } from 'vitest';
+import { classifyByKeywords, loadSkillMdForClassification } from '../workers/classification';
 
 describe('classifyByKeywords', () => {
   it('keeps weak secondary keyword matches out of the assigned categories', () => {
@@ -27,5 +27,41 @@ describe('classifyByKeywords', () => {
 
     expect(result.categories).toContain('auth');
     expect(result.categories).toContain('security');
+  });
+});
+
+describe('loadSkillMdForClassification', () => {
+  it('falls back to legacy GitHub cache keys when the canonical key is missing', async () => {
+    const legacyKey = 'skills/Demo/Repo/.claude/SKILL.md';
+    const r2Get = vi.fn(async (key: string) => {
+      if (key === legacyKey) {
+        return {
+          async text() {
+            return '# Legacy cache';
+          },
+        } as R2ObjectBody;
+      }
+
+      return null;
+    });
+    const first = vi.fn(async () => ({
+      slug: 'demo-owner/demo-skill',
+      source_type: 'github',
+      repo_owner: 'Demo',
+      repo_name: 'Repo',
+      skill_path: '.claude',
+      readme: '# Readme fallback',
+    }));
+    const bind = vi.fn(() => ({ first }));
+    const prepare = vi.fn(() => ({ bind }));
+
+    const content = await loadSkillMdForClassification({
+      DB: { prepare } as unknown as D1Database,
+      R2: { get: r2Get } as unknown as R2Bucket,
+    }, 'skill-1', 'skills/github/Demo/Repo/p:.claude/SKILL.md');
+
+    expect(content).toBe('# Legacy cache');
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(r2Get).toHaveBeenCalledWith(legacyKey);
   });
 });

@@ -5,12 +5,13 @@
  * - stars >= 50 (high threshold for batch check)
  * - 90 days recent activity
  *
- * Also provides /resurrect endpoint for on-demand resurrection
+ * Also provides /check endpoint for on-demand resurrection
  * triggered by user access to archived skills.
  */
 
 import type { BaseEnv, GitHubGraphQLRepoData, SkillTier, ExecutionContext, ScheduledController } from './shared/types';
 import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
+import { restoreArchivedSkillFromR2 } from '../src/lib/server/skill/resurrection';
 
 interface ResurrectionEnv extends BaseEnv {}
 
@@ -18,26 +19,6 @@ interface ArchivedSkill {
   id: string;
   repo_owner: string;
   repo_name: string;
-}
-
-interface ArchiveData {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  repo_owner: string;
-  repo_name: string;
-  stars: number;
-  forks: number;
-  star_snapshots: string | null;
-  trending_score: number;
-  last_commit_at: number | null;
-  last_accessed_at: number | null;
-  created_at: number;
-  indexed_at: number;
-  categories: string[];
-  skillMdContent: string | null;
-  archivedAt: string;
 }
 
 const BATCH_SIZE = 50;
@@ -102,66 +83,21 @@ async function batchFetchGitHubRepos(
  */
 async function resurrectSkill(
   env: ResurrectionEnv,
-  skillId: string
+  skillId: string,
+  stars?: number | null
 ): Promise<boolean> {
   try {
-    // Find archive file
-    const archiveList = await env.R2.list({ prefix: 'archive/' });
-    let archivePath: string | null = null;
+    const restored = await restoreArchivedSkillFromR2({
+      db: env.DB,
+      r2: env.R2,
+      skillId,
+      stars: stars ?? null,
+    });
 
-    for (const obj of archiveList.objects) {
-      if (obj.key.includes(skillId)) {
-        archivePath = obj.key;
-        break;
-      }
-    }
-
-    if (!archivePath) {
+    if (!restored) {
       console.log(`No archive found for skill ${skillId}`);
       return false;
     }
-
-    // Get archive data
-    const archiveObj = await env.R2.get(archivePath);
-    if (!archiveObj) {
-      console.error(`Archive file not found: ${archivePath}`);
-      return false;
-    }
-
-    const archiveData = await archiveObj.json() as ArchiveData;
-
-    // Restore SKILL.md to R2
-    if (archiveData.skillMdContent) {
-      const skillMdPath = `skills/${archiveData.repo_owner}/${archiveData.repo_name}/SKILL.md`;
-      await env.R2.put(skillMdPath, archiveData.skillMdContent, {
-        httpMetadata: { contentType: 'text/markdown' },
-      });
-    }
-
-    // Update skill tier to cold (will be promoted based on activity)
-    const now = Date.now();
-    await env.DB.prepare(`
-      UPDATE skills
-      SET tier = 'cold',
-          last_accessed_at = ?,
-          updated_at = ?
-      WHERE id = ?
-    `)
-      .bind(now, now, skillId)
-      .run();
-
-    // Restore categories
-    for (const categorySlug of archiveData.categories) {
-      await env.DB.prepare(`
-        INSERT OR IGNORE INTO skill_categories (skill_id, category_slug)
-        VALUES (?, ?)
-      `)
-        .bind(skillId, categorySlug)
-        .run();
-    }
-
-    // Delete archive file
-    await env.R2.delete(archivePath);
 
     console.log(`Resurrected skill: ${skillId}`);
     return true;
@@ -218,7 +154,7 @@ async function checkAndResurrectSingle(
   }
 
   // Resurrect the skill
-  const success = await resurrectSkill(env, skillId);
+  const success = await resurrectSkill(env, skillId, data.stargazerCount);
   return {
     resurrected: success,
     reason: success ? 'resurrected' : 'resurrection_failed',
@@ -244,6 +180,33 @@ async function recordMetrics(
 }
 
 export default {
+  async fetch(request: Request, env: ResurrectionEnv): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (request.method === 'POST' && url.pathname === '/check') {
+      const authHeader = request.headers.get('Authorization');
+      if (!env.WORKER_SECRET || authHeader !== `Bearer ${env.WORKER_SECRET}`) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+
+      let body: { skillId?: string } = {};
+      try {
+        body = await request.json() as { skillId?: string };
+      } catch {
+        return Response.json({ resurrected: false, reason: 'invalid_json' }, { status: 400 });
+      }
+
+      if (!body.skillId) {
+        return Response.json({ resurrected: false, reason: 'missing_skill_id' }, { status: 400 });
+      }
+
+      const result = await checkAndResurrectSingle(env, body.skillId, USER_ACCESS_STAR_THRESHOLD);
+      return Response.json(result);
+    }
+
+    return new Response('Not Found', { status: 404 });
+  },
+
   /**
    * Quarterly scheduled check of all archived skills
    */
@@ -299,7 +262,7 @@ export default {
           isRecentlyActive(data.pushedAt, RECENT_ACTIVITY_DAYS);
 
         if (shouldResurrect) {
-          const success = await resurrectSkill(env, skill.id);
+          const success = await resurrectSkill(env, skill.id, data.stargazerCount);
           if (success) {
             resurrected++;
             console.log(`Resurrected: ${skill.repo_owner}/${skill.repo_name} (stars: ${data.stargazerCount})`);

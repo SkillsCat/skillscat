@@ -3,7 +3,7 @@
  */
 
 import type { FileNode, SkillCardData, SkillDetail } from '$lib/types';
-import { buildUploadSkillR2Key, parseSkillSlug } from '$lib/skill-path';
+import { buildGithubSkillR2Keys, buildUploadSkillR2Key, parseSkillSlug } from '$lib/skill-path';
 import { buildRecentActivitySortSql, buildTopRatedSortScoreSql } from '$lib/server/ranking';
 import { normalizeSearchText } from '$lib/server/ranking/search-precompute';
 import { buildPrefixRange } from '$lib/server/text/prefix-range';
@@ -181,12 +181,9 @@ export async function loadSkillReadmeFromR2(
       }
     }
   } else {
-    // Include skill_path in R2 path for multi-skill repos
-    const skillPathPart = skill.skillPath ? `/${skill.skillPath}` : '';
-    const candidatePaths = new Set<string>([
-      `skills/${skill.repoOwner}/${skill.repoName}${skillPathPart}/SKILL.md`,
-      `skills/${skill.repoOwner.toLowerCase()}/${skill.repoName.toLowerCase()}${skillPathPart}/SKILL.md`,
-    ]);
+    const candidatePaths = new Set<string>(
+      buildGithubSkillR2Keys(skill.repoOwner, skill.repoName, skill.skillPath, 'SKILL.md')
+    );
 
     for (const path of candidatePaths) {
       const object = await env.R2.get(path);
@@ -608,14 +605,6 @@ export async function getTopSkills(
         COALESCE(last_commit_at, updated_at) as updatedAt
       FROM skills INDEXED BY skills_top_public_rank_expr_idx
       WHERE visibility = 'public'
-        AND (
-          skill_path IS NULL
-          OR skill_path = ''
-          OR (
-            skill_path NOT LIKE '.%'
-            AND skill_path NOT LIKE '%/.%'
-          )
-        )
       ORDER BY ${topRatedSortScoreSql} DESC, download_count_90d DESC, download_count_30d DESC,
                stars DESC, trending_score DESC,
                ${recentActivitySortSql} DESC
@@ -661,14 +650,6 @@ export async function getTopSkillsPaginated(
         COALESCE(last_commit_at, updated_at) as updatedAt
       FROM skills INDEXED BY skills_top_public_rank_expr_idx
       WHERE visibility = 'public'
-        AND (
-          skill_path IS NULL
-          OR skill_path = ''
-          OR (
-            skill_path NOT LIKE '.%'
-            AND skill_path NOT LIKE '%/.%'
-          )
-        )
       ORDER BY ${topRatedSortScoreSql} DESC, download_count_90d DESC, download_count_30d DESC,
                stars DESC, trending_score DESC,
                ${recentActivitySortSql} DESC
@@ -692,14 +673,6 @@ export async function getTopSkillsPaginated(
       SELECT COUNT(*) as total
       FROM skills
       WHERE visibility = 'public'
-        AND (
-          skill_path IS NULL
-          OR skill_path = ''
-          OR (
-            skill_path NOT LIKE '.%'
-            AND skill_path NOT LIKE '%/.%'
-          )
-        )
     `)
       .first<{ total: number }>();
     total = countResult?.total || 0;

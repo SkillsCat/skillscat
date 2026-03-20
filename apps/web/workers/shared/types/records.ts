@@ -17,6 +17,8 @@ export interface SkillRecord {
   file_structure: string | null;
   readme: string | null;
   last_commit_at: number | null;
+  skill_md_first_commit_at: number | null;
+  repo_created_at: number | null;
   visibility: string;
   owner_id: string | null;
   org_id: string | null;

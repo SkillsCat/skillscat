@@ -4,6 +4,7 @@ import { getCached } from '$lib/server/cache';
 import { getAuthContext } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
 import {
+  buildGithubSkillR2Keys,
   buildSkillSlug,
   buildUploadSkillR2Key,
   normalizeSkillName,
@@ -235,11 +236,11 @@ async function buildRegistrySkill(row: RegistrySkillRow, r2: R2Bucket | undefine
           }
         }
       } else if (row.owner && row.repo) {
-        const skillPathPart = row.skillPath ? `/${row.skillPath}` : '';
-        const r2Key = `skills/${row.owner}/${row.repo}${skillPathPart}/SKILL.md`;
-        const object = await r2.get(r2Key);
-        if (object) {
+        for (const r2Key of buildGithubSkillR2Keys(row.owner, row.repo, row.skillPath, 'SKILL.md')) {
+          const object = await r2.get(r2Key);
+          if (!object) continue;
           content = await object.text();
+          break;
         }
       }
     } catch {

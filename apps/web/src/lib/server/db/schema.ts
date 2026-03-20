@@ -108,6 +108,8 @@ export const skills = sqliteTable('skills', {
   commitSha: text('commit_sha'), // 存储最新索引的 commit SHA
   readme: text('readme'),
   lastCommitAt: integer('last_commit_at'),
+  skillMdFirstCommitAt: integer('skill_md_first_commit_at'),
+  repoCreatedAt: integer('repo_created_at'),
   // New fields for private skills
   visibility: text('visibility').notNull().default('public'), // 'public', 'private', 'unlisted'
   ownerId: text('owner_id'), // Better Auth user ID
@@ -178,14 +180,7 @@ export const skills = sqliteTable('skills', {
       sql.raw(`trending_score DESC`),
       sql.raw(`${TOP_RATED_RECENT_ACTIVITY_SQL} DESC`)
     )
-    .where(sql.raw(`visibility = 'public' AND (
-      skill_path IS NULL
-      OR skill_path = ''
-      OR (
-        skill_path NOT LIKE '.%'
-        AND skill_path NOT LIKE '%/.%'
-      )
-    )`)),
+    .where(sql.raw(`visibility = 'public'`)),
   index('skills_public_openclaw_updated_slug_idx')
     .on(
       sql.raw('CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC'),
@@ -498,7 +493,7 @@ export const apiTokens = sqliteTable('api_tokens', {
 export const contentHashes = sqliteTable('content_hashes', {
   id: text('id').primaryKey(),
   skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
-  hashType: text('hash_type').notNull(), // 'full', 'normalized'
+  hashType: text('hash_type').notNull(), // 'full', 'normalized', 'bundle_manifest'
   hashValue: text('hash_value').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [

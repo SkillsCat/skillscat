@@ -36,6 +36,13 @@ import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/midd
 import { canWriteSkill } from '$lib/server/auth/permissions';
 import { parseSkillSlug } from '$lib/skill-path';
 import { resolveOpenClawOwnerContext } from '$lib/server/openclaw/identity';
+import {
+  computeBundleManifestHash,
+  computeSha256Hex,
+  computeSkillMdHashes,
+  findSkillsByHashGroup,
+  storeSkillHashes,
+} from '$lib/server/skill/dedup';
 
 interface SkillListRow {
   id: string;
@@ -161,6 +168,25 @@ async function collectUploadedFiles(formData: FormData): Promise<Array<{ path: s
   }
 
   return files.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+async function computeOpenClawSkillHashes(
+  files: Array<{ path: string; content: string; size: number }>,
+  skillMdContent: string
+): Promise<{ fullHash: string; normalizedHash: string; bundleManifestHash: string }> {
+  const { fullHash, normalizedHash } = await computeSkillMdHashes(skillMdContent);
+  const bundleFiles = await Promise.all(files.map(async (file) => ({
+    path: file.path,
+    sha: await computeSha256Hex(file.content),
+    size: file.size,
+    type: 'text',
+  })));
+
+  return {
+    fullHash,
+    normalizedHash,
+    bundleManifestHash: await computeBundleManifestHash(bundleFiles, normalizedHash),
+  };
 }
 
 async function fetchOpenClawSkillListPage(input: {
@@ -326,6 +352,8 @@ export const POST: RequestHandler = async ({ request, platform, locals }) => {
     repoName;
   const summary = extractMarkdownSummary(readme.content);
   const manifest = await readOpenClawManifest(r2, compatSlug);
+  const fileStructure = JSON.stringify(buildOpenClawFileTree(files));
+  const hashes = await computeOpenClawSkillHashes(files, readme.content);
 
   if (manifest?.versions.some((entry) => entry.version === payload.version)) {
     throw error(409, `Version ${payload.version} already exists`);
@@ -345,6 +373,21 @@ export const POST: RequestHandler = async ({ request, platform, locals }) => {
     `)
     .bind(nativeSlug)
     .first<ExistingSkillRow>();
+
+  const [existingPublicByHash] = await findSkillsByHashGroup(
+    db,
+    hashes.normalizedHash,
+    hashes.bundleManifestHash,
+    {
+      visibility: 'public',
+      excludeSkillId: existing?.id,
+      limit: 1,
+    }
+  );
+
+  if (existingPublicByHash) {
+    throw error(409, `Identical content already exists as public skill ${existingPublicByHash.slug}`);
+  }
 
   let skillId = existing?.id || crypto.randomUUID();
   if (existing) {
@@ -387,8 +430,8 @@ export const POST: RequestHandler = async ({ request, platform, locals }) => {
         auth.userId,
         ownerContext.orgId,
         readme.content,
-        JSON.stringify(buildOpenClawFileTree(files)),
-        fingerprint,
+        fileStructure,
+        hashes.fullHash,
         now,
         now,
         now,
@@ -431,18 +474,20 @@ export const POST: RequestHandler = async ({ request, platform, locals }) => {
         ownerContext.ownerHandle,
         repoName,
         skillPath,
-        JSON.stringify(buildOpenClawFileTree(files)),
+        fileStructure,
         readme.content,
         now,
         auth.userId,
         ownerContext.orgId,
-        fingerprint,
+        hashes.fullHash,
         now,
         now,
         now
       )
       .run();
   }
+
+  await storeSkillHashes(db, skillId, hashes);
 
   await replaceOpenClawCurrentFiles(r2, nativeSlug, files);
   await snapshotOpenClawVersionFiles(r2, compatSlug, payload.version, files);

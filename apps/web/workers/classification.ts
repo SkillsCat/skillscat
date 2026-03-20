@@ -27,6 +27,7 @@ import {
   pauseOpenRouterFreeModels,
 } from './shared/ai/openrouter';
 import { createLogger } from './shared/utils';
+import { buildGithubSkillR2Keys, buildUploadSkillR2Key } from '../src/lib/skill-path';
 import { markRecommendDirty } from '../src/lib/server/ranking/recommend-precompute';
 import { markSearchDirty } from '../src/lib/server/ranking/search-precompute';
 
@@ -63,6 +64,56 @@ interface ClassificationMessageWithMeta extends ClassificationMessage {
   tags?: string[]; // Tags from SKILL.md frontmatter for classification hints
   frontmatterCategories?: string[]; // Direct categories from frontmatter
   isReclassification?: boolean; // Flag for reclassification (stars grew to AI threshold)
+}
+
+interface ClassificationSkillStorageLocation {
+  slug: string;
+  source_type: string;
+  repo_owner: string | null;
+  repo_name: string | null;
+  skill_path: string | null;
+  readme: string | null;
+}
+
+export async function loadSkillMdForClassification(
+  env: Pick<ClassificationEnv, 'DB' | 'R2'>,
+  skillId: string,
+  skillMdPath: string
+): Promise<string | null> {
+  const directObject = await env.R2.get(skillMdPath);
+  if (directObject) {
+    return directObject.text();
+  }
+
+  const skill = await env.DB.prepare(`
+    SELECT slug, source_type, repo_owner, repo_name, skill_path, readme
+    FROM skills
+    WHERE id = ?
+    LIMIT 1
+  `)
+    .bind(skillId)
+    .first<ClassificationSkillStorageLocation>();
+
+  if (!skill) {
+    return null;
+  }
+
+  const candidateKeys = skill.source_type === 'upload'
+    ? [buildUploadSkillR2Key(skill.slug, 'SKILL.md')].filter(Boolean)
+    : (
+      skill.repo_owner && skill.repo_name
+        ? buildGithubSkillR2Keys(skill.repo_owner, skill.repo_name, skill.skill_path, 'SKILL.md')
+        : []
+    );
+
+  for (const candidateKey of candidateKeys) {
+    const object = await env.R2.get(candidateKey);
+    if (object) {
+      return object.text();
+    }
+  }
+
+  return skill.readme;
 }
 
 /**
@@ -691,13 +742,11 @@ async function processMessage(
 
   // Get SKILL.md content
   log.log(`Fetching SKILL.md from R2: ${skillMdPath}`);
-  const r2Object = await env.R2.get(skillMdPath);
-  if (!r2Object) {
+  const skillMdContent = await loadSkillMdForClassification(env, skillId, skillMdPath);
+  if (!skillMdContent) {
     log.error(`SKILL.md not found in R2: ${skillMdPath}`);
     return;
   }
-
-  const skillMdContent = await r2Object.text();
   log.log(`SKILL.md content length: ${skillMdContent.length} chars`);
 
   let result: ExtendedClassificationResult;

@@ -26,6 +26,7 @@ export interface GithubEventsEnv extends BaseEnv {
 }
 
 export interface IndexingEnv extends BaseEnv {
+  INDEXING_QUEUE: Queue<IndexingMessage>;
   CLASSIFICATION_QUEUE: Queue<ClassificationMessage>;
   SECURITY_ANALYSIS_QUEUE?: Queue<SecurityAnalysisMessage>;
   GITHUB_API_VERSION?: string;

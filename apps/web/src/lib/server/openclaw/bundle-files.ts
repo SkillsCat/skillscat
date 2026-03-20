@@ -1,5 +1,7 @@
 import { getBlob, getRepo, getTreeRecursive } from '$lib/server/github-client/rest';
-import { buildUploadSkillR2Prefix } from '$lib/skill-path';
+import { buildGithubSkillR2Prefixes, buildUploadSkillR2Prefix } from '$lib/skill-path';
+import { buildBundleExpectationFromFileTree, chooseBestR2Bundle } from '$lib/server/skill/r2-bundle';
+import { getNestedSkillPaths, resolveSkillRelativePath } from '$lib/server/skill/scope';
 import type { SkillDetail } from '$lib/types';
 import type { SkillFile } from '$lib/server/skill/files';
 
@@ -18,14 +20,6 @@ interface GitHubTreeResponse {
   truncated?: boolean;
 }
 
-function normalizeSkillPathPrefix(skillPath: string | null | undefined): string {
-  const normalized = String(skillPath ?? '')
-    .trim()
-    .replace(/^\/+|\/+$/g, '');
-
-  return normalized ? `${normalized}/` : '';
-}
-
 function normalizeBundlePath(path: string): string {
   const normalized = path
     .replace(/\\/g, '/')
@@ -38,10 +32,6 @@ function normalizeBundlePath(path: string): string {
   }
 
   return normalized;
-}
-
-function isInTopLevelDotFolder(path: string): boolean {
-  return /^\.[\w-]+\//.test(path);
 }
 
 function decodeBase64ToBytes(base64: string): Uint8Array {
@@ -144,18 +134,13 @@ async function fetchGitHubBundleFiles(
     throw new Error('Repository tree is truncated; cannot build a full ClawHub-compatible bundle.');
   }
 
-  const prefix = normalizeSkillPathPrefix(skill.skillPath);
+  const nestedSkillPaths = skill.skillPath ? [] : getNestedSkillPaths(tree.tree.map((item) => item.path));
   const candidates = tree.tree
     .filter((item) => item.type === 'blob')
     .map((item) => {
-      if (prefix) {
-        if (!item.path.startsWith(prefix)) return null;
-        const relativePath = normalizeBundlePath(item.path.slice(prefix.length));
-        return relativePath ? { sha: item.sha, path: relativePath } : null;
-      }
-
-      if (isInTopLevelDotFolder(item.path)) return null;
-      const relativePath = normalizeBundlePath(item.path);
+      const scopedPath = resolveSkillRelativePath(item.path, skill.skillPath, nestedSkillPaths);
+      if (!scopedPath) return null;
+      const relativePath = normalizeBundlePath(scopedPath);
       return relativePath ? { sha: item.sha, path: relativePath } : null;
     })
     .filter((item): item is { sha: string; path: string } => Boolean(item))
@@ -196,7 +181,7 @@ async function fetchGitHubBundleFiles(
 export async function resolveOpenClawBundleFiles(input: {
   skill: Pick<
     SkillDetail,
-    'slug' | 'repoOwner' | 'repoName' | 'skillPath' | 'readme' | 'sourceType'
+    'slug' | 'repoOwner' | 'repoName' | 'skillPath' | 'readme' | 'sourceType' | 'fileStructure'
   >;
   r2: R2Bucket | undefined;
   githubToken?: string;
@@ -218,12 +203,20 @@ export async function resolveOpenClawBundleFiles(input: {
     throw new Error('Uploaded skill bundle is unavailable.');
   }
 
-  const normalizedSkillPath = String(skill.skillPath ?? '').trim();
-  if (normalizedSkillPath) {
-    const prefix = `skills/${skill.repoOwner}/${skill.repoName}/${normalizedSkillPath}/`;
-    const cachedFiles = await readAllTextFilesFromR2(r2, prefix);
-    if (cachedFiles.length > 0) {
-      return cachedFiles;
+  if (r2 && skill.repoOwner && skill.repoName) {
+    const candidates: Array<{ files: SkillFile[]; index: number }> = [];
+
+    for (const [index, prefix] of buildGithubSkillR2Prefixes(skill.repoOwner, skill.repoName, skill.skillPath).entries()) {
+      const cachedFiles = await readAllTextFilesFromR2(r2, prefix);
+      if (cachedFiles.length === 0) {
+        continue;
+      }
+      candidates.push({ files: cachedFiles, index });
+    }
+
+    const selected = chooseBestR2Bundle(candidates, buildBundleExpectationFromFileTree(skill.fileStructure));
+    if (selected.complete && selected.files.length > 0) {
+      return selected.files;
     }
   }
 
