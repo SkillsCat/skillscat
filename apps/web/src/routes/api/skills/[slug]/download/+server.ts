@@ -2,7 +2,7 @@ import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
-import { buildUploadSkillR2Key, normalizeSkillSlug, parseSkillSlug } from '$lib/skill-path';
+import { buildGithubSkillR2Keys, buildUploadSkillR2Key, normalizeSkillSlug, parseSkillSlug } from '$lib/skill-path';
 
 interface SkillInfo {
   id: string;
@@ -36,8 +36,10 @@ function buildR2Paths(skill: SkillInfo): string[] {
 
     return [...paths];
   }
-  const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
-  return [`skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/SKILL.md`];
+  if (!skill.repo_owner || !skill.repo_name) {
+    return [];
+  }
+  return buildGithubSkillR2Keys(skill.repo_owner, skill.repo_name, skill.skill_path, 'SKILL.md');
 }
 
 /**

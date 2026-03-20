@@ -1,20 +1,13 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
+import {
+  computeStandaloneSkillBundleHashes,
+  findSkillsByHashGroup,
+} from '$lib/server/skill/dedup';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '$lib/server/skill/title';
 
 const MAX_PREVIEW_BODY_BYTES = 180000;
-
-/**
- * Compute SHA-256 hash of content
- */
-async function computeContentHash(content: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(content);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
 
 /**
  * Generate a slug from username/org and skill name
@@ -272,24 +265,28 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 
   const warnings: string[] = [];
   let canPublishPrivate = true;
+  let canPublishPublic = true;
 
   if (existingSkill) {
     warnings.push(`A skill with slug ${slug} already exists. Publishing will fail.`);
+    canPublishPublic = false;
   }
 
-  // Check if there's an existing public skill with the same content hash
-  const contentHash = await computeContentHash(skillMdContent);
-  const existingPublicByHash = await db.prepare(`
-    SELECT slug FROM skills INDEXED BY skills_content_hash_idx
-    WHERE content_hash = ? AND visibility = 'public'
-    LIMIT 1
-  `)
-    .bind(contentHash)
-    .first<{ slug: string }>();
+  const hashes = await computeStandaloneSkillBundleHashes(skillMdContent);
+  const [existingPublicByHash] = await findSkillsByHashGroup(
+    db,
+    hashes.normalizedHash,
+    hashes.bundleManifestHash!,
+    {
+      visibility: 'public',
+      limit: 1,
+    }
+  );
 
   if (existingPublicByHash) {
-    warnings.push(`Identical content exists as public skill ${existingPublicByHash.slug}. Cannot publish as private.`);
+    warnings.push(`Identical content already exists as public skill ${existingPublicByHash.slug}. Publishing another copy will fail.`);
     canPublishPrivate = false;
+    canPublishPublic = false;
   }
 
   return json({
@@ -303,6 +300,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     },
     suggestedVisibility,
     canPublishPrivate,
+    canPublishPublic,
     warnings,
   });
 };

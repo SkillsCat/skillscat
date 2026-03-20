@@ -5,6 +5,11 @@ import { invalidateCache } from '$lib/server/cache';
 import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '$lib/server/cache/keys';
 import { buildUploadSkillR2Key } from '$lib/skill-path';
 import { decodeBase64Utf8 } from '$lib/server/text/codec';
+import {
+  computeStandaloneSkillBundleHashes,
+  findSkillsByHashGroup,
+  storeSkillHashes,
+} from '$lib/server/skill/dedup';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '$lib/server/skill/title';
 import { buildSecurityContentFingerprint } from '$lib/server/security';
 import {
@@ -12,17 +17,6 @@ import {
   markSkillSecurityDirty,
   queueSecurityAnalysis,
 } from '$lib/server/security/state';
-
-/**
- * Compute SHA-256 hash of content
- */
-async function computeContentHash(content: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(content);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
 
 /**
  * Generate a slug from username/org and skill name
@@ -246,15 +240,16 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
     warnings.push(`A skill with slug ${slug} already exists. Publishing will fail.`);
   }
 
-  // Check if there's an existing public skill with the same content hash
-  const contentHash = await computeContentHash(skillMdContent);
-  const existingPublicByHash = await db.prepare(`
-    SELECT slug FROM skills INDEXED BY skills_content_hash_idx
-    WHERE content_hash = ? AND visibility = 'public'
-    LIMIT 1
-  `)
-    .bind(contentHash)
-    .first<{ slug: string }>();
+  const hashes = await computeStandaloneSkillBundleHashes(skillMdContent);
+  const [existingPublicByHash] = await findSkillsByHashGroup(
+    db,
+    hashes.normalizedHash,
+    hashes.bundleManifestHash!,
+    {
+      visibility: 'public',
+      limit: 1,
+    }
+  );
 
   if (existingPublicByHash) {
     warnings.push(`Identical content exists as public skill ${existingPublicByHash.slug}. Cannot publish as private.`);
@@ -370,22 +365,24 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   }
 
   // Compute content hash
-  const contentHash = await computeContentHash(skillMdContent);
+  const hashes = await computeStandaloneSkillBundleHashes(skillMdContent);
+  const contentHash = hashes.fullHash;
+  const [existingPublicByHash] = await findSkillsByHashGroup(
+    db,
+    hashes.normalizedHash,
+    hashes.bundleManifestHash!,
+    {
+      visibility: 'public',
+      limit: 1,
+    }
+  );
 
-  // If publishing as private, check for existing public skills
-  if (visibility === 'private') {
-    // Check by content hash - cannot publish as private if identical public skill exists
-    const existingPublicByHash = await db.prepare(`
-      SELECT slug FROM skills INDEXED BY skills_content_hash_idx
-      WHERE content_hash = ? AND visibility = 'public'
-      LIMIT 1
-    `)
-      .bind(contentHash)
-      .first<{ slug: string }>();
-
-    if (existingPublicByHash) {
+  if (existingPublicByHash) {
+    if (visibility === 'private') {
       throw error(409, `Cannot publish as private: identical content exists as public skill ${existingPublicByHash.slug}`);
     }
+
+    throw error(409, `Identical content already exists as public skill ${existingPublicByHash.slug}`);
   }
 
   // Insert skill into database
@@ -419,6 +416,8 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     }
     throw err;
   }
+
+  await storeSkillHashes(db, skillId, hashes);
 
   // Store SKILL.md in R2 after DB insert succeeds to avoid accidental overwrite
   // during concurrent uploads that race on slug uniqueness.

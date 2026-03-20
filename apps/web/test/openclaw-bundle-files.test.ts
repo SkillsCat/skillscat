@@ -102,7 +102,7 @@ describe('resolveOpenClawBundleFiles', () => {
           tree: [
             { path: 'SKILL.md', type: 'blob', sha: 'skill-md' },
             { path: 'templates/prompt.txt', type: 'blob', sha: 'prompt' },
-            { path: '.github/workflows/release.yml', type: 'blob', sha: 'ignored' },
+            { path: '.claude/commands/review.md', type: 'blob', sha: 'dot-companion' },
           ],
         }),
       })),
@@ -112,7 +112,7 @@ describe('resolveOpenClawBundleFiles', () => {
           const contentBySha: Record<string, string> = {
             'skill-md': btoa('# Demo'),
             prompt: btoa('Write a better prompt'),
-            ignored: btoa('name: CI'),
+            'dot-companion': btoa('Review the current change set'),
           };
 
           return {
@@ -131,6 +131,29 @@ describe('resolveOpenClawBundleFiles', () => {
       }),
       r2: undefined,
       githubToken: 'token',
+    });
+
+    expect(files.map((file) => file.path)).toEqual([
+      '.claude/commands/review.md',
+      'SKILL.md',
+      'templates/prompt.txt',
+    ]);
+  });
+
+  it('reads nested GitHub bundles from the canonical isolated R2 prefix', async () => {
+    const { resolveOpenClawBundleFiles } = await import('../src/lib/server/openclaw/bundle-files');
+    const files = await resolveOpenClawBundleFiles({
+      skill: createSkillDetail({
+        sourceType: 'github',
+        repoOwner: 'demo-owner',
+        repoName: 'demo-repo',
+        skillPath: '.claude',
+        readme: null,
+      }),
+      r2: createMockR2({
+        'skills/github/demo-owner/demo-repo/p:.claude/SKILL.md': '# Demo',
+        'skills/github/demo-owner/demo-repo/p:.claude/templates/prompt.txt': 'prompt',
+      }),
     });
 
     expect(files.map((file) => file.path)).toEqual(['SKILL.md', 'templates/prompt.txt']);

@@ -22,8 +22,6 @@ import type {
   FileStructure,
 } from './shared/types';
 import {
-  isInDotFolder,
-  DOT_FOLDER_MIN_STARS,
   githubFetch,
   getRepoApiUrl,
   getContentsApiUrl,
@@ -39,13 +37,30 @@ import { githubRequest } from '../src/lib/server/github-client/request';
 import { invalidateCache } from '../src/lib/server/cache';
 import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '../src/lib/server/cache/keys';
 import { markRecommendDirty } from '../src/lib/server/ranking/recommend-precompute';
+import { deleteSkillArtifactsAndInvalidateCaches } from '../src/lib/server/skill/delete';
+import {
+  chooseCanonicalSkillCandidate,
+  computeBundleManifestHash,
+  computeSkillMdHashes,
+  convertPrivateSkillToPublicGithub,
+  findSkillsByHashGroup,
+  findPublicGithubCanonicalCandidates,
+  storeSkillHashes,
+  type CanonicalSkillCandidate,
+} from '../src/lib/server/skill/dedup';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '../src/lib/server/skill/title';
+import { getNestedSkillPaths, resolveSkillRelativePath } from '../src/lib/server/skill/scope';
 import { buildSecurityContentFingerprint } from '../src/lib/server/security';
 import {
   buildSecurityAnalysisMessage,
   markSkillSecurityDirty,
   queueSecurityAnalysis,
 } from '../src/lib/server/security/state';
+import {
+  buildGithubSkillR2Key,
+  buildGithubSkillR2Keys,
+  buildGithubSkillR2Prefix,
+} from '../src/lib/skill-path';
 
 const log = createLogger('Indexing');
 
@@ -56,7 +71,8 @@ const log = createLogger('Indexing');
 const MAX_FILES = 50;              // 最大文件数
 const MAX_FILE_SIZE = 512 * 1024;  // 单文件最大 512KB
 const MAX_TOTAL_SIZE = 5 * 1024 * 1024; // 总大小最大 5MB
-const INDEXING_RECENT_SUCCESS_TTL_SECONDS = 5 * 60;
+const MAX_DISCOVERED_SKILLS_PER_REPO = 100;
+const INDEXING_PROCESSED_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 async function invalidatePublicDiscoveryCaches(reason: string): Promise<void> {
   try {
@@ -403,108 +419,24 @@ export function resolveSkillMetadata(
   return { name, description };
 }
 
-// ============================================
-// Anti-abuse Functions
-// ============================================
-
-// Anti-abuse: Compute SHA-256 hash
-async function computeHash(content: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(content);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-// Anti-abuse: Normalize content for comparison
-function normalizeContent(content: string): string {
-  return content
-    .replace(/\r\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[ \t]+$/gm, '')
-    .replace(/^[ \t]+/gm, '')
-    .trim();
-}
-
-// Anti-abuse: Check for duplicate of high-star skill
-async function checkForDuplicate(
-  contentHash: string,
-  env: IndexingEnv,
-  minStars: number = 1000
-): Promise<{ isDuplicate: boolean; originalSlug?: string }> {
-  const match = await env.DB.prepare(`
-    WITH matched_hash AS (
-      SELECT skill_id
-      FROM content_hashes
-      WHERE hash_type = 'normalized'
-        AND hash_value = ?
-    )
-    SELECT mh.skill_id, s.slug, s.stars
-    FROM matched_hash mh
-    CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
-    WHERE s.id = mh.skill_id
-      AND s.stars >= ?
-      AND s.visibility = 'public'
-    ORDER BY s.stars DESC
-    LIMIT 1
-  `)
-    .bind(contentHash, minStars)
-    .first<{ skill_id: string; slug: string; stars: number }>();
-
-  if (match) {
-    return { isDuplicate: true, originalSlug: match.slug };
-  }
-  return { isDuplicate: false };
-}
-
 /**
- * Anti-abuse: Store content hashes
- */
-async function storeContentHashes(
-  skillId: string,
-  fullHash: string,
-  normalizedHash: string,
-  env: IndexingEnv
-): Promise<void> {
-  const now = Date.now();
-
-  await env.DB.prepare(`
-    INSERT INTO content_hashes (id, skill_id, hash_type, hash_value, created_at)
-    VALUES (?, ?, 'full', ?, ?)
-    ON CONFLICT(skill_id, hash_type) DO UPDATE SET
-      hash_value = excluded.hash_value
-  `)
-    .bind(generateId(), skillId, fullHash, now)
-    .run();
-
-  await env.DB.prepare(`
-    INSERT INTO content_hashes (id, skill_id, hash_type, hash_value, created_at)
-    VALUES (?, ?, 'normalized', ?, ?)
-    ON CONFLICT(skill_id, hash_type) DO UPDATE SET
-      hash_value = excluded.hash_value
-  `)
-    .bind(generateId(), skillId, normalizedHash, now)
-    .run();
-}
-
-/**
- * Curation Conversion: Check if there's a private skill with identical content
+ * Curation Conversion: Check if there's a private skill with an identical bundle
  * If found, convert it to public and return the existing skill ID
  * This prevents duplicate skills when curating content that users have already published privately
  */
 async function checkAndConvertPrivateSkill(
-  contentHash: string,
+  normalizedHash: string,
+  bundleManifestHash: string,
+  repo: GitHubRepo,
+  skillMetadata: ResolvedSkillMetadata,
+  persistenceMetadata: SkillPersistenceMetadata,
+  skillPath: string | null,
   env: IndexingEnv
 ): Promise<{ converted: boolean; skillId?: string; slug?: string }> {
-  // Find a private skill with the same content hash
-  const existingPrivate = await env.DB.prepare(`
-    SELECT id, slug, owner_id, org_id FROM skills INDEXED BY skills_content_hash_idx
-    WHERE content_hash = ? AND visibility = 'private'
-    ORDER BY created_at ASC
-    LIMIT 1
-  `)
-    .bind(contentHash)
-    .first<{ id: string; slug: string; owner_id: string | null; org_id: string | null }>();
+  const [existingPrivate] = await findSkillsByHashGroup(env.DB, normalizedHash, bundleManifestHash, {
+    visibility: 'private',
+    limit: 1,
+  });
 
   if (!existingPrivate) {
     return { converted: false };
@@ -512,18 +444,28 @@ async function checkAndConvertPrivateSkill(
 
   const now = Date.now();
 
-  // Convert the private skill to public
-  await env.DB.prepare(`
-    UPDATE skills SET visibility = 'public', updated_at = ?
-    WHERE id = ?
-  `)
-    .bind(now, existingPrivate.id)
-    .run();
+  await convertPrivateSkillToPublicGithub(env.DB, {
+    skillId: existingPrivate.id,
+    name: skillMetadata.name,
+    description: skillMetadata.description,
+    repoOwner: repo.owner.login,
+    repoName: repo.name,
+    skillPath,
+    githubUrl: repo.html_url,
+    stars: repo.stargazers_count,
+    forks: repo.forks_count,
+    contentHash: persistenceMetadata.contentHash,
+    lastCommitAt: persistenceMetadata.lastCommitAt,
+    skillMdFirstCommitAt: persistenceMetadata.skillMdFirstCommitAt,
+    repoCreatedAt: persistenceMetadata.repoCreatedAt,
+    indexedAt: now,
+    updatedAt: now,
+  });
 
   log.log(`Converted private skill to public: ${existingPrivate.slug} (${existingPrivate.id})`);
 
   // Send notification to the owner if there is one
-  if (existingPrivate.owner_id) {
+  if (existingPrivate.ownerId) {
     const notificationId = generateId();
     await env.DB.prepare(`
       INSERT INTO notifications (id, user_id, type, title, message, metadata, created_at)
@@ -531,7 +473,7 @@ async function checkAndConvertPrivateSkill(
     `)
       .bind(
         notificationId,
-        existingPrivate.owner_id,
+        existingPrivate.ownerId,
         'skill_curated',
         'Your skill has been curated!',
         `Your skill "${existingPrivate.slug}" has been converted to public as part of the SkillsCat curation process. Your skill is now discoverable by everyone in the registry.`,
@@ -540,7 +482,7 @@ async function checkAndConvertPrivateSkill(
       )
       .run();
 
-    log.log(`Sent curation notification to user ${existingPrivate.owner_id} for skill ${existingPrivate.slug}`);
+    log.log(`Sent curation notification to user ${existingPrivate.ownerId} for skill ${existingPrivate.slug}`);
   }
 
   return {
@@ -579,39 +521,135 @@ async function getLatestCommitSha(
 }
 
 /**
- * Get the latest commit date for SKILL.md in the repository
- * This returns the date of the most recent commit that modified that file
+ * Extract the "last" pagination URL from a GitHub Link header.
  */
-async function getLastCommitDate(
+function extractLastLinkUrl(linkHeader: string | null): string | null {
+  if (!linkHeader) return null;
+
+  for (const part of linkHeader.split(',')) {
+    const match = part.match(/<([^>]+)>;\s*rel="last"/);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get the newest and oldest commit dates for SKILL.md in the repository.
+ */
+async function getSkillCommitDates(
   owner: string,
   name: string,
   skillMdPath: string,
   env: IndexingEnv
-): Promise<number | null> {
+): Promise<{ lastCommitAt: number | null; firstCommitAt: number | null }> {
   const commitsUrl = `https://api.github.com/repos/${owner}/${name}/commits?per_page=1&path=${encodeURIComponent(skillMdPath)}`;
+  const newestResponse = await githubRequest(commitsUrl, {
+    token: env.GITHUB_TOKEN,
+    apiVersion: env.GITHUB_API_VERSION,
+    userAgent: 'SkillsCat-Indexing-Worker/1.0',
+  });
 
-  const commits = await githubFetch<Array<{
+  if (newestResponse.status === 404) {
+    log.log(`No commits found for path: ${skillMdPath}`);
+    return { lastCommitAt: null, firstCommitAt: null };
+  }
+
+  if (!newestResponse.ok) {
+    throw new Error(`Failed to fetch commit history for ${owner}/${name}/${skillMdPath}: ${newestResponse.status}`);
+  }
+
+  const newestCommits = await newestResponse.json() as Array<{
     sha: string;
     commit: {
       committer: {
         date: string;
       };
     };
-  }>>(commitsUrl, {
+  }>;
+
+  if (!newestCommits || newestCommits.length === 0) {
+    log.log(`No commits found for path: ${skillMdPath}`);
+    return { lastCommitAt: null, firstCommitAt: null };
+  }
+
+  const lastCommitAt = new Date(newestCommits[0].commit.committer.date).getTime();
+  let firstCommitAt = lastCommitAt;
+
+  const lastPageUrl = extractLastLinkUrl(newestResponse.headers.get('link'));
+  if (lastPageUrl) {
+    const oldestResponse = await githubRequest(lastPageUrl, {
+      token: env.GITHUB_TOKEN,
+      apiVersion: env.GITHUB_API_VERSION,
+      userAgent: 'SkillsCat-Indexing-Worker/1.0',
+    });
+
+    if (oldestResponse.ok) {
+      const oldestCommits = await oldestResponse.json() as Array<{
+        sha: string;
+        commit: {
+          committer: {
+            date: string;
+          };
+        };
+      }>;
+
+      if (oldestCommits.length > 0) {
+        firstCommitAt = new Date(oldestCommits[oldestCommits.length - 1].commit.committer.date).getTime();
+      }
+    }
+  }
+
+  log.log(`Commit dates for ${skillMdPath}: first=${firstCommitAt}, last=${lastCommitAt}`);
+
+  return { lastCommitAt, firstCommitAt };
+}
+
+function getSkillPathFromSkillMdPath(path: string): string | null {
+  const normalizedPath = path.replace(/^\/+/, '');
+  const parts = normalizedPath.split('/');
+  parts.pop();
+  const skillPath = parts.join('/');
+  return skillPath || null;
+}
+
+async function scanRepositorySkillPaths(
+  owner: string,
+  name: string,
+  branch: string,
+  env: IndexingEnv
+): Promise<string[]> {
+  const treeUrl = `https://api.github.com/repos/${owner}/${name}/git/trees/${branch}?recursive=1`;
+  const treeData = await githubFetch<GitHubTreeResponse>(treeUrl, {
     token: env.GITHUB_TOKEN,
     apiVersion: env.GITHUB_API_VERSION,
     userAgent: 'SkillsCat-Indexing-Worker/1.0',
   });
 
-  if (!commits || commits.length === 0) {
-    log.log(`No commits found for path: ${skillMdPath}`);
-    return null;
+  if (!treeData) {
+    throw new Error('Failed to fetch repository tree for skill path scan');
   }
 
-  const commitDate = new Date(commits[0].commit.committer.date).getTime();
-  log.log(`Last commit date for ${skillMdPath}: ${commits[0].commit.committer.date} (${commitDate})`);
+  const discoveredPaths = new Set<string>();
+  for (const item of treeData.tree) {
+    if (item.type !== 'blob') continue;
+    const fileName = item.path.split('/').pop()?.toLowerCase();
+    if (fileName !== 'skill.md') continue;
 
-  return commitDate;
+    discoveredPaths.add(getSkillPathFromSkillMdPath(item.path) || '');
+    if (discoveredPaths.size >= MAX_DISCOVERED_SKILLS_PER_REPO) {
+      break;
+    }
+  }
+
+  return [...discoveredPaths].sort((left, right) => {
+    const leftDepth = left ? left.split('/').length : 0;
+    const rightDepth = right ? right.split('/').length : 0;
+    if (leftDepth !== rightDepth) return leftDepth - rightDepth;
+    return left.localeCompare(right);
+  });
 }
 
 /**
@@ -715,7 +753,6 @@ async function fetchDirectoryFiles(
   branch: string,
   skillPath: string | null,
   env: IndexingEnv,
-  allowDotFolders: boolean = false,
   previousFileShas?: Map<string, string>
 ): Promise<{ files: DirectoryFile[]; textContents: Map<string, string> }> {
   const treeUrl = `https://api.github.com/repos/${owner}/${name}/git/trees/${branch}?recursive=1`;
@@ -729,9 +766,7 @@ async function fetchDirectoryFiles(
     throw new Error('Failed to fetch repository tree');
   }
 
-  const prefix = skillPath ? `${skillPath}/` : '';
-  const r2PathPart = skillPath ? `/${skillPath}` : '';
-  const r2Prefix = `skills/${owner}/${name}${r2PathPart}/`;
+  const nestedSkillPaths = skillPath ? [] : getNestedSkillPaths(treeData.tree.map((item) => item.path));
   const files: DirectoryFile[] = [];
   const textContents = new Map<string, string>();
 
@@ -748,16 +783,8 @@ async function fetchDirectoryFiles(
     if (item.type !== 'blob') continue;
 
     // Filter by skill path prefix
-    let relativePath: string;
-    if (prefix) {
-      if (!item.path.startsWith(prefix)) continue;
-      relativePath = item.path.slice(prefix.length);
-    } else {
-      relativePath = item.path;
-    }
-
-    // Skip files in dot folders (unless allowed for high-star repos)
-    if (!allowDotFolders && isInDotFolder(relativePath)) continue;
+    const relativePath = resolveSkillRelativePath(item.path, skillPath, nestedSkillPaths);
+    if (!relativePath) continue;
 
     const fileSize = item.size || 0;
 
@@ -790,10 +817,15 @@ async function fetchDirectoryFiles(
     if (isText) {
       const previousSha = previousFileShas?.get(relativePath);
       if (previousSha && previousSha === item.sha) {
-        const cachedObject = await env.R2.get(`${r2Prefix}${relativePath}`);
-        if (cachedObject) {
+        for (const candidateKey of buildGithubSkillR2Keys(owner, name, skillPath, relativePath)) {
+          const cachedObject = await env.R2.get(candidateKey);
+          if (!cachedObject) continue;
           textContents.set(relativePath, await cachedObject.text());
           reusedFromR2++;
+          break;
+        }
+
+        if (textContents.has(relativePath)) {
           continue;
         }
       }
@@ -837,8 +869,10 @@ async function cacheDirectoryFiles(
   directoryFiles: DirectoryFile[],
   env: IndexingEnv
 ): Promise<void> {
-  const pathPart = skillPath ? `/${skillPath}` : '';
-  const r2Prefix = `skills/${owner}/${name}${pathPart}/`;
+  const r2Prefix = buildGithubSkillR2Prefix(owner, name, skillPath);
+  if (!r2Prefix) {
+    throw new Error(`Unable to build GitHub skill R2 prefix for ${owner}/${name}`);
+  }
   const fileByPath = new Map(directoryFiles.map((file) => [file.path, file]));
 
   for (const [relativePath, content] of textContents) {
@@ -907,20 +941,12 @@ async function getSkillMd(
   owner: string,
   name: string,
   env: IndexingEnv,
-  skillPath?: string,
-  allowDotFolders: boolean = false
+  skillPath?: string
 ): Promise<GitHubContent | null> {
-  // Build paths based on skillPath
-  // Only accept SKILL.md in the specified path (skip dot folders unless allowed)
   const basePath = skillPath ? `${skillPath}/` : '';
   const paths = [`${basePath}SKILL.md`, `${basePath}skill.md`];
 
   for (const path of paths) {
-    // Skip if path is in a dot folder (unless allowed for high-star repos)
-    if (!allowDotFolders && isInDotFolder(path)) {
-      continue;
-    }
-
     const content = await githubFetch<GitHubContent>(
       getContentsApiUrl(owner, name, path),
       {
@@ -930,10 +956,6 @@ async function getSkillMd(
       }
     );
     if (content && content.type === 'file') {
-      // Double-check the returned path is not in a dot folder (unless allowed)
-      if (!allowDotFolders && content.path && isInDotFolder(content.path)) {
-        continue;
-      }
       return content;
     }
   }
@@ -957,6 +979,56 @@ async function skillExists(
     .first();
 
   return result !== null;
+}
+
+interface SkillPersistenceMetadata {
+  contentHash: string;
+  lastCommitAt: number | null;
+  skillMdFirstCommitAt: number | null;
+  repoCreatedAt: number | null;
+}
+
+interface SkillIdentityRecord {
+  id: string;
+  slug: string;
+  sourceType: string;
+  visibility: string;
+  repoOwner: string | null;
+  repoName: string | null;
+  skillPath: string | null;
+  stars: number;
+  lastCommitAt: number | null;
+  skillMdFirstCommitAt: number | null;
+  repoCreatedAt: number | null;
+  createdAt: number;
+  indexedAt: number | null;
+}
+
+async function getSkillIdentityRecord(
+  skillId: string,
+  env: IndexingEnv
+): Promise<SkillIdentityRecord | null> {
+  return env.DB.prepare(`
+    SELECT
+      id,
+      slug,
+      source_type as sourceType,
+      visibility,
+      repo_owner as repoOwner,
+      repo_name as repoName,
+      skill_path as skillPath,
+      stars,
+      last_commit_at as lastCommitAt,
+      skill_md_first_commit_at as skillMdFirstCommitAt,
+      repo_created_at as repoCreatedAt,
+      created_at as createdAt,
+      indexed_at as indexedAt
+    FROM skills
+    WHERE id = ?
+    LIMIT 1
+  `)
+    .bind(skillId)
+    .first<SkillIdentityRecord>();
 }
 
 async function upsertAuthor(
@@ -992,6 +1064,7 @@ async function createSkill(
   repo: GitHubRepo,
   skillMetadata: ResolvedSkillMetadata,
   env: IndexingEnv,
+  persistenceMetadata: SkillPersistenceMetadata,
   skillPath?: string,
   frontmatter?: SkillFrontmatter | null
 ): Promise<string> {
@@ -1031,8 +1104,9 @@ async function createSkill(
       await env.DB.prepare(`
         INSERT INTO skills (
           id, name, slug, description, repo_owner, repo_name, skill_path, github_url,
-          stars, forks, trending_score, created_at, updated_at, indexed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          stars, forks, trending_score, content_hash, last_commit_at,
+          skill_md_first_commit_at, repo_created_at, created_at, updated_at, indexed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
         .bind(
           skillId,
@@ -1046,6 +1120,10 @@ async function createSkill(
           repo.stargazers_count,
           repo.forks_count,
           0,
+          persistenceMetadata.contentHash,
+          persistenceMetadata.lastCommitAt,
+          persistenceMetadata.skillMdFirstCommitAt,
+          persistenceMetadata.repoCreatedAt,
           now,
           now,
           now
@@ -1089,6 +1167,7 @@ async function updateSkill(
   skillPath: string | null,
   repo: GitHubRepo,
   skillMetadata: ResolvedSkillMetadata,
+  persistenceMetadata: SkillPersistenceMetadata,
   env: IndexingEnv
 ): Promise<string | null> {
   const now = Date.now();
@@ -1100,6 +1179,10 @@ async function updateSkill(
       description = ?,
       stars = ?,
       forks = ?,
+      content_hash = ?,
+      last_commit_at = ?,
+      skill_md_first_commit_at = ?,
+      repo_created_at = ?,
       indexed_at = ?
     WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, '') = ?
     RETURNING id
@@ -1109,6 +1192,10 @@ async function updateSkill(
       skillMetadata.description,
       repo.stargazers_count,
       repo.forks_count,
+      persistenceMetadata.contentHash,
+      persistenceMetadata.lastCommitAt,
+      persistenceMetadata.skillMdFirstCommitAt,
+      persistenceMetadata.repoCreatedAt,
       now,
       owner,
       name,
@@ -1148,6 +1235,72 @@ async function updateSkillMetricsOnly(
     .first<{ id: string }>();
 
   return result?.id || null;
+}
+
+function mapSkillRecordToCanonicalCandidate(skill: SkillIdentityRecord): CanonicalSkillCandidate {
+  return {
+    id: skill.id,
+    slug: skill.slug,
+    repoOwner: skill.repoOwner,
+    repoName: skill.repoName,
+    skillPath: skill.skillPath,
+    sourceType: skill.sourceType,
+    visibility: skill.visibility,
+    stars: skill.stars,
+    lastCommitAt: skill.lastCommitAt,
+    skillMdFirstCommitAt: skill.skillMdFirstCommitAt,
+    repoCreatedAt: skill.repoCreatedAt,
+    createdAt: skill.createdAt,
+    indexedAt: skill.indexedAt,
+  };
+}
+
+async function reconcileCanonicalDuplicateGroup(
+  skillId: string,
+  normalizedHash: string,
+  bundleManifestHash: string,
+  env: IndexingEnv
+): Promise<{ kept: boolean; canonicalId: string | null; removedIds: string[] }> {
+  const currentSkill = await getSkillIdentityRecord(skillId, env);
+  if (!currentSkill) {
+    return { kept: false, canonicalId: null, removedIds: [] };
+  }
+
+  const existingCandidates = await findPublicGithubCanonicalCandidates(
+    env.DB,
+    normalizedHash,
+    bundleManifestHash,
+    skillId
+  );
+  const allCandidates = [mapSkillRecordToCanonicalCandidate(currentSkill), ...existingCandidates];
+  const canonical = chooseCanonicalSkillCandidate(allCandidates);
+
+  if (!canonical) {
+    return { kept: true, canonicalId: currentSkill.id, removedIds: [] };
+  }
+
+  const losers = allCandidates.filter((candidate) => candidate.id !== canonical.id);
+  for (const loser of losers) {
+    await deleteSkillArtifactsAndInvalidateCaches({
+      db: env.DB,
+      r2: env.R2,
+      skill: {
+        id: loser.id,
+        slug: loser.slug,
+        sourceType: loser.sourceType,
+        repoOwner: loser.repoOwner,
+        repoName: loser.repoName,
+        skillPath: loser.skillPath,
+      },
+    });
+    log.log(`Deleted duplicate skill ${loser.slug} in favor of ${canonical.slug}`);
+  }
+
+  return {
+    kept: canonical.id === currentSkill.id,
+    canonicalId: canonical.id,
+    removedIds: losers.map((candidate) => candidate.id),
+  };
 }
 
 export async function syncRepoMetricsForGithubSkills(
@@ -1241,16 +1394,58 @@ function getMessageDedupKey(message: IndexingMessage): string {
   return `${owner}/${repo}:${path}`;
 }
 
-async function wasProcessedRecently(env: IndexingEnv, dedupKey: string): Promise<boolean> {
-  const key = `indexing:recent:${dedupKey}`;
+function buildProcessedCandidateKey(
+  owner: string,
+  repo: string,
+  skillPath: string | null | undefined,
+  headSha: string
+): string {
+  return `indexing:processed:${owner.toLowerCase()}/${repo.toLowerCase()}:${(skillPath || '').toLowerCase()}:${headSha.toLowerCase()}`;
+}
+
+async function wasCandidateProcessed(env: IndexingEnv, key: string): Promise<boolean> {
   return (await env.KV.get(key)) !== null;
 }
 
-async function markProcessedRecently(env: IndexingEnv, dedupKey: string): Promise<void> {
-  const key = `indexing:recent:${dedupKey}`;
+async function markCandidateProcessed(env: IndexingEnv, key: string): Promise<void> {
   await env.KV.put(key, '1', {
-    expirationTtl: INDEXING_RECENT_SUCCESS_TTL_SECONDS,
+    expirationTtl: INDEXING_PROCESSED_TTL_SECONDS,
   });
+}
+
+async function queueDiscoveredSkillPaths(
+  message: IndexingMessage,
+  owner: string,
+  repo: string,
+  headSha: string,
+  skillPaths: string[],
+  env: IndexingEnv
+): Promise<number> {
+  let queued = 0;
+
+  for (const discoveredSkillPath of skillPaths) {
+    if (!discoveredSkillPath) continue;
+
+    const processedKey = buildProcessedCandidateKey(owner, repo, discoveredSkillPath, headSha);
+    if (!message.forceReindex && await wasCandidateProcessed(env, processedKey)) {
+      continue;
+    }
+
+    await env.INDEXING_QUEUE.send({
+      type: 'check_skill',
+      repoOwner: owner,
+      repoName: repo,
+      skillPath: discoveredSkillPath,
+      submittedBy: message.submittedBy,
+      submittedAt: message.submittedAt,
+      forceReindex: message.forceReindex,
+      discoverySource: message.discoverySource,
+      discoveryFingerprint: message.discoveryFingerprint,
+    });
+    queued++;
+  }
+
+  return queued;
 }
 
 async function processMessage(
@@ -1283,9 +1478,6 @@ async function processMessage(
 
   log.log(`Repo info fetched: ${canonicalRepoOwner}/${canonicalRepoName}, stars: ${repo.stargazers_count}, fork: ${repo.fork}`);
 
-  // Determine if dot-folder skills are allowed based on star count
-  const allowDotFolders = repo.stargazers_count >= DOT_FOLDER_MIN_STARS;
-
   // Step 2: Get latest commit SHA
   const latestCommit = await getLatestCommitSha(
     canonicalRepoOwner,
@@ -1300,282 +1492,368 @@ async function processMessage(
 
   log.log(`Latest commit: ${latestCommit.sha} (branch: ${latestCommit.branch})`);
 
-  // Step 3: Check if update is needed
-  const exists = await skillExists(canonicalRepoOwner, canonicalRepoName, skillPath || null, env);
-  const shouldFetchContent = await needsUpdate(
+  const processedCandidateKey = buildProcessedCandidateKey(
     canonicalRepoOwner,
     canonicalRepoName,
     skillPath || null,
-    latestCommit.sha,
-    forceReindex || false,
-    env
+    latestCommit.sha
   );
+  if (!forceReindex && await wasCandidateProcessed(env, processedCandidateKey)) {
+    log.log(`Skipping exact candidate already processed: ${processedCandidateKey}`);
+    return;
+  }
 
-  // If skill exists and no content update needed, just update stars/forks
-  if (exists && !shouldFetchContent) {
-    const updatedId = await updateSkillMetricsOnly(
+  let shouldMarkProcessed = false;
+  let discoveredRepositorySkillPaths: string[] | null = null;
+
+  try {
+    if (!skillPath) {
+      try {
+        discoveredRepositorySkillPaths = await scanRepositorySkillPaths(
+          canonicalRepoOwner,
+          canonicalRepoName,
+          latestCommit.branch,
+          env
+        );
+        const queuedDiscoveredPaths = await queueDiscoveredSkillPaths(
+          message,
+          canonicalRepoOwner,
+          canonicalRepoName,
+          latestCommit.sha,
+          discoveredRepositorySkillPaths.filter(Boolean),
+          env
+        );
+        if (queuedDiscoveredPaths > 0) {
+          log.log(`Queued ${queuedDiscoveredPaths} discovered nested skill paths for ${canonicalRepoOwner}/${canonicalRepoName}`);
+        }
+      } catch (scanError) {
+        log.warn(`Failed to scan repository skill paths for ${canonicalRepoOwner}/${canonicalRepoName}`, scanError);
+      }
+    }
+
+    // Step 3: Check if update is needed
+    const exists = await skillExists(canonicalRepoOwner, canonicalRepoName, skillPath || null, env);
+    const shouldFetchContent = await needsUpdate(
       canonicalRepoOwner,
       canonicalRepoName,
       skillPath || null,
-      repo,
+      latestCommit.sha,
+      forceReindex || false,
       env
     );
-    if (updatedId) {
-      await syncRepoMetricsForGithubSkills(
-        env.DB,
+
+    // If skill exists and no content update needed, just update stars/forks
+    if (exists && !shouldFetchContent) {
+      const updatedId = await updateSkillMetricsOnly(
         canonicalRepoOwner,
         canonicalRepoName,
-        repo.stargazers_count,
-        repo.forks_count
+        skillPath || null,
+        repo,
+        env
       );
-      log.log(`Updated stars/forks only for skill: ${updatedId}`);
-    }
-    return;
-  }
-
-  // Step 4: Verify SKILL.md exists
-  const skillMd = await getSkillMd(canonicalRepoOwner, canonicalRepoName, env, skillPath, allowDotFolders);
-  if (!skillMd) {
-    log.log(`No SKILL.md found: ${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`);
-    return;
-  }
-
-  log.log(`SKILL.md found: ${canonicalRepoOwner}/${canonicalRepoName}, path: ${skillMd.path}`);
-
-  // Step 5: Fetch all files from directory using Tree API
-  let directoryFiles: DirectoryFile[] = [];
-  let textContents = new Map<string, string>();
-  const previousFileShas = exists
-    ? await getStoredFileShas(canonicalRepoOwner, canonicalRepoName, skillPath || null, env)
-    : undefined;
-
-  try {
-    const result = await fetchDirectoryFiles(
-      canonicalRepoOwner,
-      canonicalRepoName,
-      latestCommit.branch,
-      skillPath || null,
-      env,
-      allowDotFolders,
-      previousFileShas
-    );
-    directoryFiles = result.files;
-    textContents = result.textContents;
-  } catch (err) {
-    log.error(`Failed to fetch directory files: ${canonicalRepoOwner}/${canonicalRepoName}`, err);
-    // Fallback: just use SKILL.md content
-    let skillMdContent = '';
-    if (skillMd.content) {
-      skillMdContent = decodeBase64ToUtf8(skillMd.content);
-    } else if (skillMd.download_url) {
-      const response = await githubRequest(skillMd.download_url, {
-        token: env.GITHUB_TOKEN,
-        apiVersion: env.GITHUB_API_VERSION,
-        userAgent: 'SkillsCat-Worker/1.0',
-      });
-      skillMdContent = await response.text();
-    }
-    textContents.set('SKILL.md', skillMdContent);
-    directoryFiles = [{
-      path: 'SKILL.md',
-      sha: skillMd.sha,
-      size: skillMdContent.length,
-      type: 'text',
-    }];
-  }
-
-  // Get SKILL.md content for parsing
-  const skillMdContent = textContents.get('SKILL.md') || textContents.get('skill.md') || '';
-  if (!skillMdContent) {
-    log.error(`SKILL.md content not found in fetched files`);
-    return;
-  }
-
-  log.log(`SKILL.md content length: ${skillMdContent.length} chars`);
-
-  // Step 6: Parse YAML frontmatter
-  const parsedSkillMd = parseSkillFrontmatter(skillMdContent);
-  const { frontmatter } = parsedSkillMd;
-  if (frontmatter) {
-    log.log(`Frontmatter parsed: name=${frontmatter.name}, description=${frontmatter.description?.slice(0, 50)}..., tags=${frontmatter.metadata?.tags}`);
-  }
-
-  const skillMetadata = resolveSkillMetadata(repo, parsedSkillMd);
-
-  // Step 7: Anti-abuse check
-  const fullHash = await computeHash(skillMdContent);
-  const normalizedHash = await computeHash(normalizeContent(skillMdContent));
-
-  if (!exists && repo.stargazers_count < 100) {
-    const duplicate = await checkForDuplicate(normalizedHash, env, 1000);
-    if (duplicate.isDuplicate) {
-      log.log(`Rejecting duplicate of ${duplicate.originalSlug}: ${canonicalRepoOwner}/${canonicalRepoName}`);
+      if (updatedId) {
+        await syncRepoMetricsForGithubSkills(
+          env.DB,
+          canonicalRepoOwner,
+          canonicalRepoName,
+          repo.stargazers_count,
+          repo.forks_count
+        );
+        log.log(`Updated stars/forks only for skill: ${updatedId}`);
+      }
+      shouldMarkProcessed = true;
       return;
     }
-  }
 
-  // Step 8: Create or update skill record
-  let skillId: string;
+    // Step 4: Verify SKILL.md exists for the requested path.
+    let skillMd = await getSkillMd(canonicalRepoOwner, canonicalRepoName, env, skillPath);
+    if (!skillMd && !skillPath) {
+      const repositorySkillPaths = discoveredRepositorySkillPaths || await scanRepositorySkillPaths(
+        canonicalRepoOwner,
+        canonicalRepoName,
+        latestCommit.branch,
+        env
+      );
+      const discoveredSkillPaths = repositorySkillPaths.filter((candidatePath) => candidatePath);
 
-  if (exists) {
-    const updatedId = await updateSkill(
+      if (!repositorySkillPaths.includes('')) {
+        if (discoveredRepositorySkillPaths === null && discoveredSkillPaths.length > 0) {
+          const queuedDiscoveredPaths = await queueDiscoveredSkillPaths(
+            message,
+            canonicalRepoOwner,
+            canonicalRepoName,
+            latestCommit.sha,
+            discoveredSkillPaths,
+            env
+          );
+          if (queuedDiscoveredPaths > 0) {
+            log.log(`Queued ${queuedDiscoveredPaths} discovered skill paths for ${canonicalRepoOwner}/${canonicalRepoName}`);
+          }
+        }
+
+        if (discoveredSkillPaths.length === 0) {
+          log.log(`No SKILL.md found anywhere in repository: ${canonicalRepoOwner}/${canonicalRepoName}`);
+        } else {
+          log.log(`No root SKILL.md found in repository ${canonicalRepoOwner}/${canonicalRepoName}; nested skills were queued separately`);
+        }
+        shouldMarkProcessed = true;
+        return;
+      }
+    }
+
+    if (!skillMd) {
+      log.log(`No SKILL.md found: ${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`);
+      shouldMarkProcessed = true;
+      return;
+    }
+
+    log.log(`SKILL.md found: ${canonicalRepoOwner}/${canonicalRepoName}, path: ${skillMd.path}`);
+
+    // Step 5: Fetch all files from directory using Tree API
+    let directoryFiles: DirectoryFile[] = [];
+    let textContents = new Map<string, string>();
+    const previousFileShas = exists
+      ? await getStoredFileShas(canonicalRepoOwner, canonicalRepoName, skillPath || null, env)
+      : undefined;
+
+    try {
+      const result = await fetchDirectoryFiles(
+        canonicalRepoOwner,
+        canonicalRepoName,
+        latestCommit.branch,
+        skillPath || null,
+        env,
+        previousFileShas
+      );
+      directoryFiles = result.files;
+      textContents = result.textContents;
+    } catch (err) {
+      log.error(`Failed to fetch directory files: ${canonicalRepoOwner}/${canonicalRepoName}`, err);
+      // Fallback: just use SKILL.md content
+      let skillMdContent = '';
+      if (skillMd.content) {
+        skillMdContent = decodeBase64ToUtf8(skillMd.content);
+      } else if (skillMd.download_url) {
+        const response = await githubRequest(skillMd.download_url, {
+          token: env.GITHUB_TOKEN,
+          apiVersion: env.GITHUB_API_VERSION,
+          userAgent: 'SkillsCat-Worker/1.0',
+        });
+        skillMdContent = await response.text();
+      }
+      textContents.set('SKILL.md', skillMdContent);
+      directoryFiles = [{
+        path: 'SKILL.md',
+        sha: skillMd.sha,
+        size: skillMdContent.length,
+        type: 'text',
+      }];
+    }
+
+    // Get SKILL.md content for parsing
+    const skillMdContent = textContents.get('SKILL.md') || textContents.get('skill.md') || '';
+    if (!skillMdContent) {
+      log.error('SKILL.md content not found in fetched files');
+      shouldMarkProcessed = true;
+      return;
+    }
+
+    log.log(`SKILL.md content length: ${skillMdContent.length} chars`);
+
+    // Step 6: Parse YAML frontmatter
+    const parsedSkillMd = parseSkillFrontmatter(skillMdContent);
+    const { frontmatter } = parsedSkillMd;
+    if (frontmatter) {
+      log.log(`Frontmatter parsed: name=${frontmatter.name}, description=${frontmatter.description?.slice(0, 50)}..., tags=${frontmatter.metadata?.tags}`);
+    }
+
+    const skillMetadata = resolveSkillMetadata(repo, parsedSkillMd);
+    const { fullHash, normalizedHash } = await computeSkillMdHashes(skillMdContent);
+    const bundleManifestHash = await computeBundleManifestHash(directoryFiles, normalizedHash);
+    const { lastCommitAt, firstCommitAt } = await getSkillCommitDates(
       canonicalRepoOwner,
       canonicalRepoName,
-      skillPath || null,
-      repo,
-      skillMetadata,
+      skillMd.path,
       env
     );
-    if (!updatedId) {
-      log.error(`Failed to update skill: ${canonicalRepoOwner}/${canonicalRepoName}`);
-      return;
-    }
-    skillId = updatedId;
-    log.log(`Updated skill: ${skillId}`);
-  } else {
-    // Check if there's a private skill with identical content that should be converted
-    const curationResult = await checkAndConvertPrivateSkill(fullHash, env);
-    if (curationResult.converted && curationResult.skillId) {
-      skillId = curationResult.skillId;
-      log.log(`Curation: Converted private skill to public: ${curationResult.slug} (${skillId})`);
-      await invalidatePublicDiscoveryCaches(`curation publish ${curationResult.slug || skillId}`);
+    const persistenceMetadata: SkillPersistenceMetadata = {
+      contentHash: fullHash,
+      lastCommitAt,
+      skillMdFirstCommitAt: firstCommitAt,
+      repoCreatedAt: repo.created_at ? new Date(repo.created_at).getTime() : null,
+    };
+
+    // Step 7: Create or update skill record.
+    let skillId: string;
+    let shouldRunCanonicalDedup = true;
+
+    if (exists) {
+      const updatedId = await updateSkill(
+        canonicalRepoOwner,
+        canonicalRepoName,
+        skillPath || null,
+        repo,
+        skillMetadata,
+        persistenceMetadata,
+        env
+      );
+      if (!updatedId) {
+        log.error(`Failed to update skill: ${canonicalRepoOwner}/${canonicalRepoName}`);
+        return;
+      }
+      skillId = updatedId;
+      log.log(`Updated skill: ${skillId}`);
     } else {
-      const authorId = await upsertAuthor(repo, env);
-      log.log(`Author upserted: ${authorId}`);
-      skillId = await createSkill(repo, skillMetadata, env, skillPath, frontmatter);
-      log.log(`Created skill: ${skillId}`);
-      await invalidatePublicDiscoveryCaches(`github publish ${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`);
+      const curationResult = await checkAndConvertPrivateSkill(
+        normalizedHash,
+        bundleManifestHash,
+        repo,
+        skillMetadata,
+        persistenceMetadata,
+        skillPath || null,
+        env
+      );
+      if (curationResult.converted && curationResult.skillId) {
+        skillId = curationResult.skillId;
+        shouldRunCanonicalDedup = false;
+        log.log(`Curation: Converted private skill to public: ${curationResult.slug} (${skillId})`);
+        await invalidatePublicDiscoveryCaches(`curation publish ${curationResult.slug || skillId}`);
+      } else {
+        const authorId = await upsertAuthor(repo, env);
+        log.log(`Author upserted: ${authorId}`);
+        skillId = await createSkill(repo, skillMetadata, env, persistenceMetadata, skillPath, frontmatter);
+        log.log(`Created skill: ${skillId}`);
+        await invalidatePublicDiscoveryCaches(`github publish ${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`);
+      }
     }
-  }
 
-  await syncRepoMetricsForGithubSkills(
-    env.DB,
-    canonicalRepoOwner,
-    canonicalRepoName,
-    repo.stargazers_count,
-    repo.forks_count
-  );
+    await syncRepoMetricsForGithubSkills(
+      env.DB,
+      canonicalRepoOwner,
+      canonicalRepoName,
+      repo.stargazers_count,
+      repo.forks_count
+    );
 
-  // Store content hashes for future duplicate detection
-  await storeContentHashes(skillId, fullHash, normalizedHash, env);
-  log.log(`Content hashes stored for: ${skillId}`);
+    await storeSkillHashes(env.DB, skillId, {
+      fullHash,
+      normalizedHash,
+      bundleManifestHash,
+    });
+    log.log(`Stored skill hashes for ${skillId}`);
 
-  // Compute combined content hash across all files for duplicate detection
-  if (textContents.size > 0) {
-    const sortedPaths = [...textContents.keys()].sort();
-    const combinedContent = sortedPaths.map(p => textContents.get(p)!).join('\n---FILE-BOUNDARY---\n');
-    const combinedHash = await computeHash(combinedContent);
+    if (shouldRunCanonicalDedup) {
+      const dedupResult = await reconcileCanonicalDuplicateGroup(
+        skillId,
+        normalizedHash,
+        bundleManifestHash,
+        env
+      );
+      if (!dedupResult.kept) {
+        log.log(`Discarded duplicate candidate ${skillId}; canonical skill is ${dedupResult.canonicalId}`);
+        shouldMarkProcessed = true;
+        return;
+      }
+    }
 
-    // Update skills.content_hash with combined hash
-    await env.DB.prepare('UPDATE skills SET content_hash = ? WHERE id = ?')
-      .bind(combinedHash, skillId)
-      .run();
+    // Save tags from frontmatter (including keywords alias)
+    let tags: string[] = [];
+    const tagsString = frontmatter?.metadata?.tags || frontmatter?.keywords;
+    if (tagsString) {
+      tags = await saveSkillTags(skillId, tagsString, env);
+    }
 
-    // Store combined hash type in content_hashes table
-    await env.DB.prepare(`
-      INSERT INTO content_hashes (id, skill_id, hash_type, hash_value, created_at)
-      VALUES (?, ?, 'combined', ?, ?)
-      ON CONFLICT(skill_id, hash_type) DO UPDATE SET
-        hash_value = excluded.hash_value
-    `)
-      .bind(generateId(), skillId, combinedHash, Date.now())
-      .run();
+    // Extract categories from frontmatter for direct classification
+    const frontmatterCategories = extractFrontmatterCategories(frontmatter);
+    if (frontmatterCategories.length > 0) {
+      log.log(`Frontmatter categories extracted: ${frontmatterCategories.join(', ')}`);
+    }
 
-    log.log(`Combined content hash stored for: ${skillId} (${sortedPaths.length} files)`);
-  }
-
-  // Save tags from frontmatter (including keywords alias)
-  let tags: string[] = [];
-  const tagsString = frontmatter?.metadata?.tags || frontmatter?.keywords;
-  if (tagsString) {
-    tags = await saveSkillTags(skillId, tagsString, env);
-  }
-
-  // Extract categories from frontmatter for direct classification
-  const frontmatterCategories = extractFrontmatterCategories(frontmatter);
-  if (frontmatterCategories.length > 0) {
-    log.log(`Frontmatter categories extracted: ${frontmatterCategories.join(', ')}`);
-  }
-
-  // Step 9: Cache all text files to R2
-  const pathPart = skillPath ? `/${skillPath}` : '';
-  const r2Path = `skills/${canonicalRepoOwner}/${canonicalRepoName}${pathPart}/SKILL.md`;
-
-  try {
-    await cacheDirectoryFiles(
-      skillId,
+    // Step 8: Cache all text files to R2
+    const r2Path = buildGithubSkillR2Key(
       canonicalRepoOwner,
       canonicalRepoName,
       skillPath || null,
-      textContents,
-      latestCommit.sha,
-      directoryFiles,
-      env
+      'SKILL.md'
     );
-    log.log(`Cached ${textContents.size} files to R2`);
-  } catch (r2Error) {
-    log.error(`Failed to cache files to R2: ${canonicalRepoOwner}/${canonicalRepoName}`, r2Error);
-    throw r2Error;
-  }
 
-  // Step 10: Get last commit date for SKILL.md
-  const lastCommitAt = await getLastCommitDate(canonicalRepoOwner, canonicalRepoName, skillMd.path, env);
+    try {
+      await cacheDirectoryFiles(
+        skillId,
+        canonicalRepoOwner,
+        canonicalRepoName,
+        skillPath || null,
+        textContents,
+        latestCommit.sha,
+        directoryFiles,
+        env
+      );
+      log.log(`Cached ${textContents.size} files to R2`);
+    } catch (r2Error) {
+      log.error(`Failed to cache files to R2: ${canonicalRepoOwner}/${canonicalRepoName}`, r2Error);
+      throw r2Error;
+    }
 
-  // Step 11: Update commit_sha, file_structure, and last_commit_at
-  const fileStructure: FileStructure = {
-    commitSha: latestCommit.sha,
-    indexedAt: new Date().toISOString(),
-    files: directoryFiles,
-    fileTree: buildFileTree(directoryFiles),
-  };
-  const securityContentFingerprint = await buildSecurityContentFingerprint(directoryFiles);
+    // Step 9: Update commit_sha, file_structure, and last_commit_at
+    const fileStructure: FileStructure = {
+      commitSha: latestCommit.sha,
+      indexedAt: new Date().toISOString(),
+      files: directoryFiles,
+      fileTree: buildFileTree(directoryFiles),
+    };
+    const securityContentFingerprint = await buildSecurityContentFingerprint(directoryFiles);
 
-  await updateSkillMetadata(skillId, latestCommit.sha, fileStructure, lastCommitAt, env);
+    await updateSkillMetadata(skillId, latestCommit.sha, fileStructure, lastCommitAt, env);
 
-  // Mark recommend candidates dirty after content/tags/metadata updates.
-  await markRecommendDirty(env.DB, skillId);
-  await markSkillSecurityDirty(env.DB, {
-    skillId,
-    contentFingerprint: securityContentFingerprint,
-  });
+    // Mark recommend candidates dirty after content/tags/metadata updates.
+    await markRecommendDirty(env.DB, skillId);
+    await markSkillSecurityDirty(env.DB, {
+      skillId,
+      contentFingerprint: securityContentFingerprint,
+    });
 
-  // Step 12: Send to classification queue
-  const classificationMessage: ClassificationMessage & { tags?: string[] } = {
-    type: 'classify',
-    skillId,
-    repoOwner: canonicalRepoOwner,
-    repoName: canonicalRepoName,
-    skillMdPath: r2Path,
-  };
+    // Step 10: Send to classification queue
+    const classificationMessage: ClassificationMessage & { tags?: string[] } = {
+      type: 'classify',
+      skillId,
+      repoOwner: canonicalRepoOwner,
+      repoName: canonicalRepoName,
+      skillMdPath: r2Path,
+    };
 
-  // Include frontmatter categories for direct classification (cost optimization)
-  if (frontmatterCategories.length > 0) {
-    classificationMessage.frontmatterCategories = frontmatterCategories;
-  }
+    if (frontmatterCategories.length > 0) {
+      classificationMessage.frontmatterCategories = frontmatterCategories;
+    }
 
-  // Include tags if available (for classification hints)
-  if (tags.length > 0) {
-    classificationMessage.tags = tags;
-  }
+    if (tags.length > 0) {
+      classificationMessage.tags = tags;
+    }
 
-  log.log(`Sending to classification queue: ${skillId}`, JSON.stringify(classificationMessage));
-  try {
-    await env.CLASSIFICATION_QUEUE.send(classificationMessage);
-    log.log(`Successfully sent to classification queue: ${skillId}`);
-  } catch (classificationError) {
-    log.error(`Failed to send to classification queue: ${skillId}`, classificationError);
-    throw classificationError;
-  }
+    log.log(`Sending to classification queue: ${skillId}`, JSON.stringify(classificationMessage));
+    try {
+      await env.CLASSIFICATION_QUEUE.send(classificationMessage);
+      log.log(`Successfully sent to classification queue: ${skillId}`);
+    } catch (classificationError) {
+      log.error(`Failed to send to classification queue: ${skillId}`, classificationError);
+      throw classificationError;
+    }
 
-  try {
-    await queueSecurityAnalysis(
-      env.SECURITY_ANALYSIS_QUEUE,
-      buildSecurityAnalysisMessage(skillId, 'content_update', 'free')
-    );
-    log.log(`Successfully queued security analysis for: ${skillId}`);
-  } catch (securityError) {
-    log.error(`Failed to queue security analysis: ${skillId}`, securityError);
-    throw securityError;
+    try {
+      await queueSecurityAnalysis(
+        env.SECURITY_ANALYSIS_QUEUE,
+        buildSecurityAnalysisMessage(skillId, 'content_update', 'free')
+      );
+      log.log(`Successfully queued security analysis for: ${skillId}`);
+    } catch (securityError) {
+      log.error(`Failed to queue security analysis: ${skillId}`, securityError);
+      throw securityError;
+    }
+
+    shouldMarkProcessed = true;
+  } finally {
+    if (shouldMarkProcessed && !forceReindex) {
+      await markCandidateProcessed(env, processedCandidateKey);
+    }
   }
 }
 
@@ -1600,19 +1878,10 @@ export default {
 
       try {
         if (!message.body.forceReindex) {
-          const processedRecently = await wasProcessedRecently(env, dedupKey);
-          if (processedRecently) {
-            log.log(`Skipping recently processed message: ${dedupKey}`);
-            message.ack();
-            continue;
-          }
+          log.log(`Processing deduped queue candidate: ${dedupKey}`);
         }
-
         log.log(`Processing message ID: ${message.id}`);
         await processMessage(message.body, env);
-        if (!message.body.forceReindex) {
-          await markProcessedRecently(env, dedupKey);
-        }
         message.ack();
         log.log(`Message acknowledged: ${message.id}`);
       } catch (error) {

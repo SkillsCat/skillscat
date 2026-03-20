@@ -3,7 +3,17 @@ import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
 import { getCached } from '$lib/server/cache';
 import { getBlob, getCommitByRef, getRepo, getTreeRecursive } from '$lib/server/github-client/rest';
-import { buildUploadSkillR2Prefix, normalizeSkillSlug } from '$lib/skill-path';
+import {
+  buildGithubSkillR2Prefix,
+  buildGithubSkillR2Prefixes,
+  buildUploadSkillR2Prefix,
+  normalizeSkillSlug,
+} from '$lib/skill-path';
+import {
+  buildBundleExpectationFromRawFileStructure,
+  chooseBestR2Bundle,
+} from '$lib/server/skill/r2-bundle';
+import { getNestedSkillPaths, resolveSkillRelativePath } from '$lib/server/skill/scope';
 
 export interface SkillFile {
   path: string;
@@ -38,6 +48,7 @@ interface SkillInfo {
   last_commit_at: number | null;
   indexed_at: number | null;
   updated_at: number | null;
+  file_structure: string | null;
 }
 
 interface GitHubTreeItem {
@@ -166,7 +177,7 @@ async function fetchGitHubFiles(
   if (!treeRes.ok) throw new Error(`Failed to fetch tree: ${treeRes.status}`);
   const treeData = await treeRes.json() as { tree: GitHubTreeItem[] };
 
-  const prefix = skillPath ? `${skillPath}/` : '';
+  const nestedSkillPaths = skillPath ? [] : getNestedSkillPaths(treeData.tree.map((item) => item.path));
   const files: SkillFile[] = [];
 
   const MAX_FILES = 50;
@@ -176,14 +187,8 @@ async function fetchGitHubFiles(
     if (fileCount >= MAX_FILES) break;
     if (item.type !== 'blob') continue;
 
-    let relativePath: string;
-    if (prefix) {
-      if (!item.path.startsWith(prefix)) continue;
-      relativePath = item.path.slice(prefix.length);
-    } else {
-      if (item.path !== 'SKILL.md') continue;
-      relativePath = item.path;
-    }
+    const relativePath = resolveSkillRelativePath(item.path, skillPath, nestedSkillPaths);
+    if (!relativePath) continue;
 
     if (item.size && item.size > 512 * 1024) continue;
     if (!isTextFile(relativePath)) continue;
@@ -227,6 +232,23 @@ async function fetchR2Files(r2: R2Bucket, r2Prefix: string): Promise<SkillFile[]
   return files;
 }
 
+async function fetchR2FilesFromPrefixes(
+  r2: R2Bucket,
+  prefixes: string[],
+  fileStructureRaw: string | null
+): Promise<{ files: SkillFile[]; complete: boolean }> {
+  const candidates: Array<{ files: SkillFile[]; index: number }> = [];
+
+  for (const [index, prefix] of prefixes.entries()) {
+    if (!prefix) continue;
+    const files = await fetchR2Files(r2, prefix);
+    if (files.length === 0) continue;
+    candidates.push({ files, index });
+  }
+
+  return chooseBestR2Bundle(candidates, buildBundleExpectationFromRawFileStructure(fileStructureRaw));
+}
+
 async function updateR2Cache(
   r2: R2Bucket,
   r2Prefix: string,
@@ -241,16 +263,24 @@ async function updateR2Cache(
   }
 }
 
-async function getR2CacheSha(r2: R2Bucket, r2Prefix: string): Promise<string | null> {
-  const skillMdKey = `${r2Prefix}SKILL.md`;
-  const obj = await r2.head(skillMdKey);
-  return obj?.customMetadata?.commitSha || obj?.customMetadata?.sha || null;
+async function getR2CacheSha(r2: R2Bucket, r2Prefixes: string[]): Promise<string | null> {
+  for (const r2Prefix of r2Prefixes) {
+    if (!r2Prefix) continue;
+    const skillMdKey = `${r2Prefix}SKILL.md`;
+    const obj = await r2.head(skillMdKey);
+    const commitSha = obj?.customMetadata?.commitSha || obj?.customMetadata?.sha || null;
+    if (commitSha) {
+      return commitSha;
+    }
+  }
+
+  return null;
 }
 
 async function fetchSkillInfo(db: D1Database, slug: string): Promise<SkillInfo | null> {
   return db.prepare(`
     SELECT id, name, slug, source_type, repo_owner, repo_name, skill_path, readme, visibility,
-           last_commit_at, indexed_at, updated_at
+           last_commit_at, indexed_at, updated_at, file_structure
     FROM skills WHERE slug = ?
   `).bind(slug).first<SkillInfo>();
 }
@@ -270,21 +300,30 @@ async function buildSkillFilesData(
   const folderName = skill.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
 
   let r2Prefix: string;
+  let r2Prefixes: string[];
   if (skill.source_type === 'upload') {
     const uploadPrefix = buildUploadSkillR2Prefix(skill.slug);
     if (!uploadPrefix) {
       throw error(500, 'Invalid upload skill path');
     }
     r2Prefix = uploadPrefix;
+    r2Prefixes = [uploadPrefix];
   } else {
-    const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
-    r2Prefix = `skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/`;
+    if (!skill.repo_owner || !skill.repo_name) {
+      throw error(500, 'Invalid GitHub skill path');
+    }
+    r2Prefix = buildGithubSkillR2Prefix(skill.repo_owner, skill.repo_name, skill.skill_path);
+    r2Prefixes = buildGithubSkillR2Prefixes(skill.repo_owner, skill.repo_name, skill.skill_path);
   }
 
   if (skill.source_type === 'github' && skill.visibility === 'public' && skill.repo_owner && skill.repo_name) {
-    const r2Files = await fetchR2Files(r2, r2Prefix);
+    const { files: r2Files, complete: hasCompleteR2Bundle } = await fetchR2FilesFromPrefixes(
+      r2,
+      r2Prefixes,
+      skill.file_structure
+    );
     const hasR2Files = r2Files.length > 0;
-    const shouldRealtimeRefresh = shouldRunRealtimeRefresh(skill, hasR2Files);
+    const shouldRealtimeRefresh = !hasCompleteR2Bundle || shouldRunRealtimeRefresh(skill, hasR2Files);
 
     if (!shouldRealtimeRefresh) {
       files.push(...r2Files);
@@ -305,9 +344,9 @@ async function buildSkillFilesData(
           throw error(404, 'Repository not found - it may have been deleted');
         }
 
-        const cachedSha = await getR2CacheSha(r2, r2Prefix);
+        const cachedSha = await getR2CacheSha(r2, r2Prefixes);
 
-        if (cachedSha === latestCommit.sha && hasR2Files) {
+        if (cachedSha === latestCommit.sha && hasR2Files && hasCompleteR2Bundle) {
           files.push(...r2Files);
         } else {
           const githubFiles = await fetchGitHubFiles(
@@ -334,7 +373,7 @@ async function buildSkillFilesData(
       }
     }
   } else {
-    const r2Files = await fetchR2Files(r2, r2Prefix);
+    const { files: r2Files } = await fetchR2FilesFromPrefixes(r2, r2Prefixes, skill.file_structure);
     files.push(...r2Files);
   }
 

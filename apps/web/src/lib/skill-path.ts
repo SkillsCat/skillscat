@@ -97,6 +97,105 @@ export function buildUploadSkillR2Key(slug: string, filePath: string): string {
   return `${prefix}${normalizedFilePath}`;
 }
 
+function normalizeGithubRepoCachePart(value: string): string {
+  return normalizeSegment(value);
+}
+
+function normalizeGithubSkillCachePath(skillPath: string | null | undefined): string {
+  return splitSegments(String(skillPath ?? '')).join('/');
+}
+
+function buildGithubSkillCacheSegment(skillPath: string | null | undefined): string {
+  const normalizedSkillPath = normalizeGithubSkillCachePath(skillPath);
+  return normalizedSkillPath ? `p:${encodeURIComponent(normalizedSkillPath)}` : '_root_';
+}
+
+export function buildGithubSkillR2Prefix(
+  repoOwner: string,
+  repoName: string,
+  skillPath?: string | null
+): string {
+  const owner = normalizeGithubRepoCachePart(repoOwner);
+  const repo = normalizeGithubRepoCachePart(repoName);
+  if (!owner || !repo) return '';
+  return `skills/github/${owner}/${repo}/${buildGithubSkillCacheSegment(skillPath)}/`;
+}
+
+export function buildGithubSkillR2Key(
+  repoOwner: string,
+  repoName: string,
+  skillPath: string | null | undefined,
+  filePath: string
+): string {
+  const prefix = buildGithubSkillR2Prefix(repoOwner, repoName, skillPath);
+  if (!prefix) return '';
+  const normalizedFilePath = filePath.replace(/^\/+/, '');
+  return `${prefix}${normalizedFilePath}`;
+}
+
+export function buildLegacyGithubSkillR2Prefix(
+  repoOwner: string,
+  repoName: string,
+  skillPath?: string | null
+): string {
+  const owner = normalizeGithubRepoCachePart(repoOwner);
+  const repo = normalizeGithubRepoCachePart(repoName);
+  if (!owner || !repo) return '';
+  const normalizedSkillPath = normalizeGithubSkillCachePath(skillPath);
+  return normalizedSkillPath ? `skills/${owner}/${repo}/${normalizedSkillPath}/` : `skills/${owner}/${repo}/`;
+}
+
+export function buildLegacyGithubSkillR2Key(
+  repoOwner: string,
+  repoName: string,
+  skillPath: string | null | undefined,
+  filePath: string
+): string {
+  const prefix = buildLegacyGithubSkillR2Prefix(repoOwner, repoName, skillPath);
+  if (!prefix) return '';
+  const normalizedFilePath = filePath.replace(/^\/+/, '');
+  return `${prefix}${normalizedFilePath}`;
+}
+
+export function buildGithubSkillR2Prefixes(
+  repoOwner: string,
+  repoName: string,
+  skillPath?: string | null
+): string[] {
+  const paths = new Set<string>();
+  const canonical = buildGithubSkillR2Prefix(repoOwner, repoName, skillPath);
+  if (canonical) {
+    paths.add(canonical);
+  }
+
+  const legacy = buildLegacyGithubSkillR2Prefix(repoOwner, repoName, skillPath);
+  if (legacy) {
+    paths.add(legacy);
+  }
+
+  const ownerLower = normalizeGithubRepoCachePart(repoOwner).toLowerCase();
+  const repoLower = normalizeGithubRepoCachePart(repoName).toLowerCase();
+  if (ownerLower && repoLower) {
+    const lowerLegacy = buildLegacyGithubSkillR2Prefix(ownerLower, repoLower, skillPath);
+    if (lowerLegacy) {
+      paths.add(lowerLegacy);
+    }
+  }
+
+  return [...paths];
+}
+
+export function buildGithubSkillR2Keys(
+  repoOwner: string,
+  repoName: string,
+  skillPath: string | null | undefined,
+  filePath: string
+): string[] {
+  const normalizedFilePath = filePath.replace(/^\/+/, '');
+  return buildGithubSkillR2Prefixes(repoOwner, repoName, skillPath)
+    .map((prefix) => `${prefix}${normalizedFilePath}`);
+}
+
 export function getCanonicalSkillPathFromPathname(pathname: string): string | null {
   const pathOnly = pathname.replace(/\/+$/, '') || '/';
   const segments = pathOnly.split('/').filter(Boolean);

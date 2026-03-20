@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { createLogger } from '$lib';
+import { parseGitHubRepoUrl, type ParsedGitHubRepoUrl } from '$lib/github-url';
 import {
   formatSubmitApiMessage,
   resolveSubmitApiLocale,
@@ -10,6 +11,7 @@ import type { SkillMdLocation, ScanResult } from '$lib/types';
 import { githubRequest } from '$lib/server/github-client/request';
 import { getCached } from '$lib/server/cache';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
+import { restoreArchivedSkillFromR2 } from '$lib/server/skill/resurrection';
 
 const log = createLogger('Submit');
 
@@ -20,8 +22,6 @@ const MAX_DEPTH = 3;
 const MAX_SKILLS_TO_SUBMIT = 50; // Safety limit for auto-submission
 const QUEUE_DELAY_MS = 1000; // 1 second delay between queue messages
 
-/** Minimum stars required for a repo to allow dot-folder skills */
-const DOT_FOLDER_MIN_STARS = 500;
 /** Maximum size for submit request JSON body */
 const MAX_SUBMIT_BODY_BYTES = 16 * 1024;
 /** Fast-fail policy for submit-route GitHub calls (POST submit + GET /check) */
@@ -420,14 +420,6 @@ async function githubRequestForSubmit(
   }
 }
 
-interface ArchiveData {
-  id: string;
-  categories: string[];
-  skillMdContent: string | null;
-  repo_owner: string;
-  repo_name: string;
-}
-
 /**
  * Read request body with a hard size limit and parse JSON.
  */
@@ -505,71 +497,15 @@ async function triggerDirectResurrection(
   if (!r2) return false;
 
   try {
-    // Find archive file
-    const archiveList = await r2.list({ prefix: 'archive/' });
-    let archivePath: string | null = null;
-
-    for (const obj of archiveList.objects) {
-      if (obj.key.includes(skillId)) {
-        archivePath = obj.key;
-        break;
-      }
-    }
-
-    if (!archivePath) {
-      // No archive found, just update tier to cold
-      const now = Date.now();
-      await db.prepare(`
-        UPDATE skills SET tier = 'cold', last_accessed_at = ?, updated_at = ? WHERE id = ?
-      `).bind(now, now, skillId).run();
-      return true;
-    }
-
-    // Get archive data
-    const archiveObj = await r2.get(archivePath);
-    if (!archiveObj) return false;
-
-    const archiveData = await archiveObj.json() as ArchiveData;
-
-    // Restore SKILL.md to R2
-    if (archiveData.skillMdContent) {
-      const skillMdPath = `skills/${archiveData.repo_owner}/${archiveData.repo_name}/SKILL.md`;
-      await r2.put(skillMdPath, archiveData.skillMdContent, {
-        httpMetadata: { contentType: 'text/markdown' },
-      });
-    }
-
-    // Update skill tier to cold
-    const now = Date.now();
-    await db.prepare(`
-      UPDATE skills SET tier = 'cold', last_accessed_at = ?, updated_at = ? WHERE id = ?
-    `).bind(now, now, skillId).run();
-
-    // Restore categories
-    for (const categorySlug of archiveData.categories || []) {
-      await db.prepare(`
-        INSERT OR IGNORE INTO skill_categories (skill_id, category_slug)
-        VALUES (?, ?)
-      `).bind(skillId, categorySlug).run();
-    }
-
-    // Delete archive file
-    await r2.delete(archivePath);
-
-    return true;
+    return await restoreArchivedSkillFromR2({
+      db,
+      r2,
+      skillId,
+    });
   } catch (err) {
     log.error('Failed to resurrect skill:', err);
     return false;
   }
-}
-
-/**
- * Check if a path starts with a dot folder (e.g., .claude/, .cursor/, .trae/)
- * Skills in dot folders are IDE-specific configurations and should not be accepted
- * as standalone skills in the registry.
- */
-function isInDotFolder(path: string): boolean {
-  return /^\.[\w-]+\//.test(path) || /^\.[\w-]+$/.test(path);
 }
 
 /**
@@ -587,13 +523,6 @@ function getSkillPath(skillMdPath: string): string {
   const parts = skillMdPath.split('/');
   parts.pop(); // Remove SKILL.md
   return parts.join('/');
-}
-
-/**
- * Check if a path contains any dot folder segment
- */
-function containsDotFolder(path: string): boolean {
-  return path.split('/').some(segment => segment.startsWith('.'));
 }
 
 interface GitHubTreeItem {
@@ -620,7 +549,6 @@ async function scanRepoForSkillMd(
   token?: string,
   basePath: string = '',
   maxDepth: number = MAX_DEPTH,
-  allowDotFolders: boolean = false,
   mode: GitHubRequestMode = 'default'
 ): Promise<ScanResult> {
   try {
@@ -645,9 +573,6 @@ async function scanRepoForSkillMd(
         // Check if it's a SKILL.md file (case-insensitive)
         const fileName = item.path.split('/').pop() || '';
         if (fileName.toLowerCase() !== 'skill.md') continue;
-
-        // Skip files in dot folders (unless allowed for high-star repos)
-        if (!allowDotFolders && containsDotFolder(item.path)) continue;
 
         // If basePath is specified, only include files within that scope
         if (normalizedBasePath) {
@@ -700,7 +625,7 @@ async function scanRepoForSkillMd(
   }
 
   // Fallback to search API
-  return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, allowDotFolders, mode);
+  return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, mode);
 }
 
 interface GitHubSearchItem {
@@ -727,7 +652,6 @@ async function searchRepoForSkillMd(
   token?: string,
   basePath: string = '',
   maxDepth: number = MAX_DEPTH,
-  allowDotFolders: boolean = false,
   mode: GitHubRequestMode = 'default'
 ): Promise<ScanResult> {
   try {
@@ -749,9 +673,6 @@ async function searchRepoForSkillMd(
     const normalizedBasePath = basePath ? basePath.replace(/\/$/, '') : '';
 
     for (const item of data.items) {
-      // Skip files in dot folders (unless allowed for high-star repos)
-      if (!allowDotFolders && containsDotFolder(item.path)) continue;
-
       // If basePath is specified, only include files within that scope
       if (normalizedBasePath) {
         if (!item.path.startsWith(normalizedBasePath + '/') && item.path !== normalizedBasePath + '/SKILL.md') {
@@ -805,16 +726,6 @@ interface GitHubContent {
   size?: number;
 }
 
-type GitHubRefType = 'tree' | 'blob' | 'commit';
-
-interface ParsedRepoUrl {
-  owner: string;
-  repo: string;
-  path: string;
-  refType?: GitHubRefType;
-  refPath?: string;
-}
-
 interface ForkParentInfo {
   owner: string;
   repo: string;
@@ -846,63 +757,10 @@ interface SubmitValidationFailure {
 }
 
 /**
- * Parse repository URL to extract owner/repo and optional ref data (GitHub only)
- */
-function parseRepoUrl(url: string): ParsedRepoUrl | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
-
-  if (!['github.com', 'www.github.com'].includes(parsed.hostname.toLowerCase())) {
-    return null;
-  }
-
-  const segments = parsed.pathname
-    .split('/')
-    .filter(Boolean)
-    .map(segment => decodeURIComponent(segment));
-
-  if (segments.length < 2) {
-    return null;
-  }
-
-  const owner = segments[0];
-  const repo = segments[1].replace(/\.git$/, '');
-
-  if (!owner || !repo) {
-    return null;
-  }
-
-  if (segments.length === 2) {
-    return { owner, repo, path: '' };
-  }
-
-  const route = segments[2];
-  if (route === 'tree' || route === 'blob' || route === 'commit') {
-    return {
-      owner,
-      repo,
-      path: '',
-      refType: route,
-      refPath: segments.slice(3).join('/'),
-    };
-  }
-
-  return {
-    owner,
-    repo,
-    path: segments.slice(2).join('/'),
-  };
-}
-
-/**
  * Resolve submitted path from parsed URL and enforce default-branch-only policy.
  */
 function resolveSubmittedPath(
-  parsedUrl: ParsedRepoUrl,
+  parsedUrl: ParsedGitHubRepoUrl,
   defaultBranch: string
 ): { path: string } | SubmitValidationFailure {
   if (!parsedUrl.refType) {
@@ -1106,20 +964,18 @@ async function validateForkSubmission(
 }
 
 /**
- * Check if SKILL.md exists in GitHub repo (only in root, not in dot folders)
+ * Check if SKILL.md exists in GitHub repo at the requested path
  */
 async function checkGitHubSkillMd(
   owner: string,
   repo: string,
   path: string,
   token?: string,
-  allowDotFolders: boolean = false,
   mode: GitHubRequestMode = 'default'
 ): Promise<boolean> {
-  // Only check root SKILL.md (skip dot folders unless allowed for high-star repos)
   const skillPaths = [
     path ? `${path}/SKILL.md` : 'SKILL.md',
-  ].filter(p => allowDotFolders || !isInDotFolder(p));
+  ];
 
   for (const checkPath of skillPaths) {
     const response = await githubRequestForSubmit(
@@ -1186,7 +1042,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     }
 
     // Parse URL
-    const repoInfo = parseRepoUrl(url);
+    const repoInfo = parseGitHubRepoUrl(url);
     if (!repoInfo) {
       throw new SubmitRouteError({
         status: 400,
@@ -1220,18 +1076,8 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     // Use explicit skillPath if provided, otherwise use path from URL
     const path = explicitSkillPath !== undefined ? explicitSkillPath : resolvedPath.path;
 
-    // Reject dot-folder submissions from repos with insufficient stars
-    const allowDotFolders = (repoData.stars ?? 0) >= DOT_FOLDER_MIN_STARS;
-    if (path && isInDotFolder(path) && !allowDotFolders) {
-      throw new SubmitRouteError({
-        status: 400,
-        code: 'dot_folder_requires_stars',
-        descriptor: { key: 'dotFolderRequiresStars' },
-      });
-    }
-
     // First, check if SKILL.md exists at the submitted path (or root if no path)
-    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, allowDotFolders, githubRequestMode);
+    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, githubRequestMode);
 
     if (hasSkillMd) {
       // SKILL.md found at the submitted path - submit directly
@@ -1248,7 +1094,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     }
 
     // No SKILL.md at submitted path - scan for SKILL.md files as fallback
-    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders, githubRequestMode);
+    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, githubRequestMode);
 
     if (scanResult.found.length === 0) {
       throw new SubmitRouteError({
@@ -1646,7 +1492,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
       cacheKey,
       async () => {
         // Parse URL
-        const repoInfo = parseRepoUrl(repoUrl);
+        const repoInfo = parseGitHubRepoUrl(repoUrl);
         if (!repoInfo) {
           return {
             valid: false,
@@ -1690,11 +1536,8 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
 
         const path = resolvedPath.path;
 
-        // Determine if dot-folder skills are allowed based on star count
-        const allowDotFolders = (repoData.stars ?? 0) >= DOT_FOLDER_MIN_STARS;
-
         // First, check if SKILL.md exists at the submitted path (or root if no path)
-        const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, allowDotFolders, 'submit_fast_fail');
+        const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, 'submit_fast_fail');
 
         if (hasSkillMd) {
           // SKILL.md found at the submitted path - check if already exists in DB
@@ -1751,7 +1594,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
         }
 
         // No SKILL.md at submitted path - scan for SKILL.md files as fallback
-        const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, allowDotFolders, 'submit_fast_fail');
+        const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, 'submit_fast_fail');
 
         if (scanResult.found.length === 0) {
           return {

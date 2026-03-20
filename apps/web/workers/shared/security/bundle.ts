@@ -2,7 +2,7 @@ import type { BaseEnv } from '../types';
 import {
   fetchGitHubBlobBytes,
   getSkillDirectoryFiles,
-  getSkillR2Prefix,
+  getSkillR2Keys,
   type SecurityFileRecord,
   type SecuritySkillRow,
 } from './skill';
@@ -16,12 +16,15 @@ export async function buildSkillBundleFiles(
     return [];
   }
 
-  const prefix = getSkillR2Prefix(skill);
   const bundleFiles: SecurityFileRecord[] = [];
 
   for (const file of directoryFiles) {
     if (file.type === 'text') {
-      const object = await env.R2.get(`${prefix}${file.path}`);
+      let object: R2ObjectBody | null = null;
+      for (const key of getSkillR2Keys(skill, file.path)) {
+        object = await env.R2.get(key);
+        if (object) break;
+      }
       if (object) {
         const bytes = new Uint8Array(await object.arrayBuffer());
         bundleFiles.push({

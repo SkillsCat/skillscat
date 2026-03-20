@@ -70,6 +70,13 @@ SkillsCat 是一个 `pnpm` monorepo，目标是构建一个用于发现、发布
 - 技能发布与管理：上传、预览、可见性调整、下载、文件读取、分享、推荐、安装追踪。
 - 鉴权与安全：GitHub OAuth、device auth、registry auth、request security、CORS/CSRF/UA 保护、rate limit。
 
+### 业务角色边界
+
+- 项目没有“管理员”这个业务角色，所有能力都只面向普通用户、组织所有者或组织成员设计。
+- 不要新增 `admin`、`superadmin`、后台运营专用接口、隐藏管理入口或仅供人工操作的管理路由。
+- 如果需要批处理、归档、恢复、重算、同步之类的内部能力，应优先落在 worker、queue、cron 或现有普通用户触发链路里，而不是暴露成 `admin API`。
+- 设计权限模型时，只能基于现有真实主体做约束：未登录用户、登录用户、skill owner、organization member、organization owner，以及显式分享授权对象。
+
 ### CLI
 
 `apps/cli` 当前覆盖：
@@ -224,6 +231,7 @@ pnpm --filter ./apps/cli typecheck
 - `/api/*` 默认应为 `no-store`，除非该接口明确设计为公共可缓存接口。
 - 不要破坏已有的 request security、UA 校验、CORS、CSRF、rate limit 逻辑。
 - 改动工具接口或 registry 接口时，注意 CLI、外部 agent、crawler 的兼容性。
+- 不要引入“管理员专用”鉴权分支、`/api/admin/*` 路由或等价的隐藏管理接口；内部操作应走 worker bindings、queue、cron 或用户态已存在流程。
 
 ### 7. 代码风格规范
 
