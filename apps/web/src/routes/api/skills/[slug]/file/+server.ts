@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
 import { githubRequest } from '$lib/server/github-client/request';
-import { buildUploadSkillR2Key, normalizeSkillSlug } from '$lib/skill-path';
+import { buildGithubSkillR2Key, buildGithubSkillR2Keys, buildUploadSkillR2Key, normalizeSkillSlug } from '$lib/skill-path';
 
 interface SkillInfo {
   id: string;
@@ -119,20 +119,27 @@ export const GET: RequestHandler = async ({ params, platform, request, url, loca
 
   // Build canonical R2 key
   let r2Key: string;
+  let candidateR2Keys: string[];
   if (skill.source_type === 'upload') {
     const uploadKey = buildUploadSkillR2Key(skill.slug, filePath);
     if (!uploadKey) {
       throw error(500, 'Invalid upload skill path');
     }
     r2Key = uploadKey;
+    candidateR2Keys = [uploadKey];
   } else {
-    const pathPart = skill.skill_path ? `/${skill.skill_path}` : '';
-    r2Key = `skills/${skill.repo_owner}/${skill.repo_name}${pathPart}/${filePath}`;
+    if (!skill.repo_owner || !skill.repo_name) {
+      throw error(500, 'Invalid GitHub skill path');
+    }
+    r2Key = buildGithubSkillR2Key(skill.repo_owner, skill.repo_name, skill.skill_path, filePath);
+    candidateR2Keys = buildGithubSkillR2Keys(skill.repo_owner, skill.repo_name, skill.skill_path, filePath);
   }
 
   // Try R2 first
-  const r2Object = await r2.get(r2Key);
-  if (r2Object) {
+  for (const candidateKey of candidateR2Keys) {
+    const r2Object = await r2.get(candidateKey);
+    if (!r2Object) continue;
+
     const content = await r2Object.text();
     return json({ path: filePath, content }, {
       headers: { 'Cache-Control': cacheControl }

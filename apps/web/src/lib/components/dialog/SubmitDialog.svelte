@@ -7,6 +7,7 @@
   import { fade, fly } from 'svelte/transition';
   import Button from '$lib/components/ui/Button.svelte';
   import Input from '$lib/components/ui/Input.svelte';
+  import { isValidGitHubRepoUrlForSubmit } from '$lib/github-url';
   import { useI18n } from '$lib/i18n/runtime';
   import { buildSkillPath } from '$lib/skill-path';
 
@@ -74,9 +75,7 @@
 
   // Validate GitHub URL
   const isValidUrl = $derived.by(() => {
-    if (!githubUrl) return false;
-    const pattern = /^https:\/\/github\.com\/[\w-]+\/[\w.-]+(?:\/tree\/[\w.-]+)?(?:\/[\w.-/]+)?$/;
-    return pattern.test(githubUrl);
+    return isValidGitHubRepoUrlForSubmit(githubUrl);
   });
   const canSubmit = $derived(isValidUrl && !isSubmitting);
 

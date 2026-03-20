@@ -821,4 +821,134 @@ describe('submit route', () => {
     expect(payload.message).toContain('提交成功');
     expect(queue.send).toHaveBeenCalledTimes(1);
   });
+
+  it('accepts dot-folder skills during submit precheck', async () => {
+    const db = buildDbMock();
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          description: 'Dot folder skills are welcome',
+          stargazers_count: 3,
+          default_branch: 'main',
+          fork: false,
+        });
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/contents/.claude/SKILL.md') {
+        return jsonResponse({
+          name: 'SKILL.md',
+          path: '.claude/SKILL.md',
+          type: 'file',
+        });
+      }
+
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const { GET } = await import('../src/routes/api/submit/+server');
+    const response = await GET({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: db,
+          GITHUB_TOKEN: 'test-token',
+        },
+      },
+      request: new Request('https://skills.cat/api/submit?url=https://github.com/forker/toolbox/tree/main/.claude'),
+      url: new URL('https://skills.cat/api/submit?url=https://github.com/forker/toolbox/tree/main/.claude'),
+    } as never);
+
+    const payload = await response.json() as {
+      valid: boolean;
+      path: string;
+      repoName: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.valid).toBe(true);
+    expect(payload.path).toBe('.claude');
+    expect(payload.repoName).toBe('toolbox');
+  });
+
+  it('queues dot-folder skills for submission without a star gate', async () => {
+    const db = buildDbMock();
+    const queue = {
+      send: vi.fn(async () => undefined),
+    };
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          description: 'Dot folder skills are welcome',
+          stargazers_count: 3,
+          default_branch: 'main',
+          fork: false,
+        });
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/contents/.claude/SKILL.md') {
+        return jsonResponse({
+          name: 'SKILL.md',
+          path: '.claude/SKILL.md',
+          type: 'file',
+        });
+      }
+
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const { POST } = await import('../src/routes/api/submit/+server');
+    const response = await POST({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: db,
+          GITHUB_TOKEN: 'test-token',
+          INDEXING_QUEUE: queue,
+        },
+      },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: 'https://github.com/forker/toolbox',
+          skillPath: '.claude',
+        }),
+      }),
+    } as never);
+
+    const payload = await response.json() as {
+      success: boolean;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(queue.send).toHaveBeenCalledTimes(1);
+    expect(queue.send).toHaveBeenCalledWith(expect.objectContaining({
+      repoOwner: 'forker',
+      repoName: 'toolbox',
+      skillPath: '.claude',
+    }));
+  });
 });

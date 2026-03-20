@@ -64,7 +64,6 @@ const CSRF_EXEMPT_PATHS = [
   /^\/api\/auth\//,
   /^\/api\/device\/(authorize|code|token|refresh)$/,
   /^\/registry\/auth\/(authorize|init|token)$/,
-  /^\/api\/admin\/(archive|resurrection)$/,
   /^\/api\/skills\/[^/]+\/track-install$/,
 ];
 

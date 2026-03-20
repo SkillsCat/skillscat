@@ -10,6 +10,7 @@
  */
 
 import type { BaseEnv } from './shared/types';
+import { buildGithubSkillR2Keys, buildUploadSkillR2Key } from '../src/lib/skill-path';
 
 interface ArchiveEnv extends BaseEnv {}
 
@@ -18,8 +19,10 @@ interface SkillToArchive {
   name: string;
   slug: string;
   description: string | null;
+  source_type: string;
   repo_owner: string;
   repo_name: string;
+  skill_path: string | null;
   stars: number;
   forks: number;
   star_snapshots: string | null;
@@ -42,7 +45,7 @@ async function findArchiveCandidates(env: ArchiveEnv): Promise<SkillToArchive[]>
   const result = await env.DB.prepare(`
     WITH candidates AS (
       SELECT * FROM (
-        SELECT id, name, slug, description, repo_owner, repo_name, stars, forks,
+        SELECT id, name, slug, description, source_type, repo_owner, repo_name, skill_path, stars, forks,
                star_snapshots, trending_score, last_commit_at, last_accessed_at,
                created_at, indexed_at
         FROM skills INDEXED BY skills_public_archive_candidates_idx
@@ -55,7 +58,7 @@ async function findArchiveCandidates(env: ArchiveEnv): Promise<SkillToArchive[]>
       )
       UNION ALL
       SELECT * FROM (
-        SELECT id, name, slug, description, repo_owner, repo_name, stars, forks,
+        SELECT id, name, slug, description, source_type, repo_owner, repo_name, skill_path, stars, forks,
                star_snapshots, trending_score, last_commit_at, last_accessed_at,
                created_at, indexed_at
         FROM skills INDEXED BY skills_public_archive_candidates_idx
@@ -68,7 +71,7 @@ async function findArchiveCandidates(env: ArchiveEnv): Promise<SkillToArchive[]>
       )
       UNION ALL
       SELECT * FROM (
-        SELECT id, name, slug, description, repo_owner, repo_name, stars, forks,
+        SELECT id, name, slug, description, source_type, repo_owner, repo_name, skill_path, stars, forks,
                star_snapshots, trending_score, last_commit_at, last_accessed_at,
                created_at, indexed_at
         FROM skills INDEXED BY skills_public_archive_candidates_idx
@@ -81,7 +84,7 @@ async function findArchiveCandidates(env: ArchiveEnv): Promise<SkillToArchive[]>
       )
       UNION ALL
       SELECT * FROM (
-        SELECT id, name, slug, description, repo_owner, repo_name, stars, forks,
+        SELECT id, name, slug, description, source_type, repo_owner, repo_name, skill_path, stars, forks,
                star_snapshots, trending_score, last_commit_at, last_accessed_at,
                created_at, indexed_at
         FROM skills INDEXED BY skills_public_archive_candidates_idx
@@ -129,10 +132,17 @@ async function archiveSkill(
 
     // Get SKILL.md content from R2
     let skillMdContent: string | null = null;
-    const skillMdPath = `skills/${skill.repo_owner}/${skill.repo_name}/SKILL.md`;
-    const skillMdObject = await env.R2.get(skillMdPath);
-    if (skillMdObject) {
+    let cachedSkillMdKey: string | null = null;
+    const skillMdCandidateKeys = skill.source_type === 'upload'
+      ? [buildUploadSkillR2Key(skill.slug, 'SKILL.md')].filter(Boolean)
+      : buildGithubSkillR2Keys(skill.repo_owner, skill.repo_name, skill.skill_path, 'SKILL.md');
+
+    for (const skillMdKey of skillMdCandidateKeys) {
+      const skillMdObject = await env.R2.get(skillMdKey);
+      if (!skillMdObject) continue;
       skillMdContent = await skillMdObject.text();
+      cachedSkillMdKey = skillMdKey;
+      break;
     }
 
     // Create archive object
@@ -150,8 +160,8 @@ async function archiveSkill(
     });
 
     // Delete original SKILL.md from R2 (save storage)
-    if (skillMdObject) {
-      await env.R2.delete(skillMdPath);
+    if (cachedSkillMdKey) {
+      await env.R2.delete(cachedSkillMdKey);
     }
 
     // Update skill tier to archived
