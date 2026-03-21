@@ -3,7 +3,7 @@
   import { useI18n } from '$lib/i18n/runtime';
   import { getSettingsCopy } from '$lib/i18n/settings';
   import { buildSkillPath } from '$lib/skill-path';
-  import { cleanSkillCardDescription } from '$lib/text/skill-card-description';
+  import { cleanSkillCardDescription, matchesSkillCardDescription } from '$lib/text/skill-card-description';
 
   interface Skill {
     id: string;
@@ -41,7 +41,7 @@
   const filteredSkills = $derived(
     skills.filter(skill =>
       skill.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      skill.description?.toLowerCase().includes(searchQuery.toLowerCase())
+      matchesSkillCardDescription(skill.description, searchQuery)
     )
   );
 </script>

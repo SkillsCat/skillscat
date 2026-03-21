@@ -7,6 +7,7 @@
   import { useI18n } from '$lib/i18n/runtime';
   import { getSettingsCopy } from '$lib/i18n/settings';
   import { SecurityLockIcon, Search01Icon, Bookmark02Icon } from '@hugeicons/core-free-icons';
+  import { matchesSkillCardDescription } from '$lib/text/skill-card-description';
   import type { SkillCardData } from '$lib/types';
 
   interface Props {
@@ -28,7 +29,7 @@
       ? data.favorites.filter(
           (s) =>
             s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (s.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
+            matchesSkillCardDescription(s.description, searchQuery)
         )
       : data.favorites
   );
