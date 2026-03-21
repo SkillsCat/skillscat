@@ -48,4 +48,30 @@ Final note.
 
     expect(result).toBe('Portable automation');
   });
+
+  it('does not throw on invalid numeric html entities', () => {
+    expect(() => cleanSkillCardDescription('&#99999999;')).not.toThrow();
+    expect(cleanSkillCardDescription('&#99999999;')).toBe('&#99999999;');
+  });
+
+  it('strips markdown links with nested parentheses in the target url', () => {
+    const result = cleanSkillCardDescription('Use [name](https://x.com_(abc)) helper');
+
+    expect(result).toBe('Use name helper');
+  });
+
+  it('preserves non-presentation angle-bracket placeholders', () => {
+    expect(cleanSkillCardDescription('Install into <path> and sync <repo>.')).toBe(
+      'Install into <path> and sync <repo>.'
+    );
+    expect(cleanSkillCardDescription('Use &lt;owner&gt;/&lt;repo&gt; in the command.')).toBe(
+      'Use <owner>/<repo> in the command.'
+    );
+  });
+
+  it('does not sanitize non-presentation html-like tags', () => {
+    expect(cleanSkillCardDescription('&lt;script&gt;alert(1)&lt;/script&gt; safe')).toBe(
+      '<script>alert(1)</script> safe'
+    );
+  });
 });

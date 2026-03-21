@@ -8,6 +8,7 @@
   import type { Category } from '$lib/constants/categories';
   import { localizeCategory } from '$lib/i18n/categories';
   import { useI18n } from '$lib/i18n/runtime';
+  import { matchesSkillCardDescription } from '$lib/text/skill-card-description';
   import type { SkillCardData } from '$lib/types';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { buildOgImageUrl } from '$lib/seo/og';
@@ -155,7 +156,7 @@
       ? data.skills.filter(
           (s) =>
             s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (s.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
+            matchesSkillCardDescription(s.description, searchQuery)
         )
       : data.skills
   );

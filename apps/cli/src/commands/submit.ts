@@ -20,6 +20,10 @@ interface SubmitResponse {
   skills?: Array<{ path: string; skillPath: string; depth: number }>;
 }
 
+const IGNORED_DISCOVERY_DIRS = new Set([
+  '.git',
+]);
+
 /**
  * Check if a URL is a valid GitHub URL
  */
@@ -123,8 +127,7 @@ function findSkillMd(cwd: string, maxDepth: number = 3): string | null {
       const entries = readdirSync(dir);
 
       for (const entry of entries) {
-        // Skip dot folders
-        if (entry.startsWith('.')) continue;
+        if (IGNORED_DISCOVERY_DIRS.has(entry)) continue;
 
         const fullPath = join(dir, entry);
 
@@ -331,7 +334,7 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
       console.error(pc.red(`Submission failed: ${submitError}`));
       if (result.code === 'no_skill_md_found') {
         console.log();
-        console.log(pc.dim('Make sure your repository has a SKILL.md file in the root directory.'));
+        console.log(pc.dim('Make sure your repository has a SKILL.md file in the repository root or a supported subdirectory, including dot folders.'));
         console.log(pc.dim('Learn more: https://skillscat.com/docs/skill-format'));
       }
       if (result.code === 'fork_no_unique_commits') {

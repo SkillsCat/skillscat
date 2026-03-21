@@ -7,6 +7,7 @@
   import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Search01Icon } from '@hugeicons/core-free-icons';
+  import { matchesSkillCardDescription } from '$lib/text/skill-card-description';
   import type { SkillCardData } from '$lib/types';
   import type { Snippet } from 'svelte';
 
@@ -37,7 +38,7 @@
       ? skills.filter(
           (s) =>
             s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (s.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
+            matchesSkillCardDescription(s.description, searchQuery)
         )
       : skills
   );

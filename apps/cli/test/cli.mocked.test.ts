@@ -1241,6 +1241,46 @@ describe('CLI commands with mocked network', () => {
     expect(result.stdout).toContain('Skill submitted successfully');
   });
 
+  it('submit auto-detects dot-directory skills from the current repository', async () => {
+    mkdirSync(join(process.cwd(), '.git', 'ignored-skill'), { recursive: true });
+    mkdirSync(join(process.cwd(), '.claude', 'skills', 'dot-skill'), { recursive: true });
+    writeFileSync(
+      join(process.cwd(), 'package.json'),
+      JSON.stringify({
+        repository: 'testowner/testrepo',
+      }, null, 2),
+      'utf-8'
+    );
+    writeFileSync(join(process.cwd(), '.git', 'ignored-skill', 'SKILL.md'), SKILL_MD_V1, 'utf-8');
+    writeFileSync(
+      join(process.cwd(), '.claude', 'skills', 'dot-skill', 'SKILL.md'),
+      SKILL_MD_V1.replaceAll('Test Skill', 'Dot Skill'),
+      'utf-8'
+    );
+
+    let requestBody: { url?: string; skillPath?: string } | null = null;
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = toUrlString(input);
+      if (url.endsWith('/api/submit')) {
+        requestBody = JSON.parse(String(init?.body ?? '{}')) as { url?: string; skillPath?: string };
+        return mockResponse({ success: true, message: 'Queued' }, 200);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { submit } = await import('../src/commands/submit');
+    const result = await runCommand(() => submit());
+
+    expect(result.exitCode).toBeNull();
+    expect(result.stdout).toContain('Found SKILL.md at: .claude/skills/dot-skill/SKILL.md');
+    expect(requestBody).toEqual({
+      url: 'https://github.com/testowner/testrepo',
+      skillPath: '.claude/skills/dot-skill',
+    });
+  });
+
   it('submit treats existing skills as a successful no-op', async () => {
     const fetchMock = vi.fn(async (input: unknown) => {
       const url = toUrlString(input);
