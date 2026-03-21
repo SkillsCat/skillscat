@@ -3,8 +3,9 @@
   import { useI18n } from '$lib/i18n/runtime';
   import { getSettingsCopy } from '$lib/i18n/settings';
   import { buildSkillPath } from '$lib/skill-path';
+  import { cleanSkillCardDescription } from '$lib/text/skill-card-description';
 
-interface Skill {
+  interface Skill {
     id: string;
     name: string;
     slug: string;
@@ -82,14 +83,15 @@ interface Skill {
   {#if filteredSkills.length > 0}
     <div class="skills-list">
       {#each filteredSkills as skill (skill.id)}
+        {@const displayDescription = cleanSkillCardDescription(skill.description)}
         <a href={buildSkillPath(skill.slug)} class="skill-card">
           <div class="skill-info">
             <div class="skill-header">
               <h3 class="skill-name">{skill.name}</h3>
               <VisibilityBadge visibility={skill.visibility} />
             </div>
-            {#if skill.description}
-              <p class="skill-description">{skill.description}</p>
+            {#if displayDescription}
+              <p class="skill-description">{displayDescription}</p>
             {/if}
             {#if skill.visibility !== 'private'}
               <div class="skill-meta">

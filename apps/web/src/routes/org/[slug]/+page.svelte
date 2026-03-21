@@ -7,6 +7,7 @@
   import { getProfilesCopy } from '$lib/i18n/profiles';
   import { getUiCopy } from '$lib/i18n/ui';
   import { buildSkillPath } from '$lib/skill-path';
+  import { cleanSkillCardDescription } from '$lib/text/skill-card-description';
   import { buildOgImageUrl } from '$lib/seo/og';
   import { SITE_URL } from '$lib/seo/constants';
 
@@ -476,10 +477,11 @@
         {#if skills.length > 0}
           <div class="skills-grid">
             {#each skills as skill (skill.id)}
+              {@const displayDescription = cleanSkillCardDescription(skill.description)}
               <a href={buildSkillPath(skill.slug)} class="skill-card">
                 <h3>{skill.name}</h3>
-                {#if skill.description}
-                  <p>{skill.description}</p>
+                {#if displayDescription}
+                  <p>{displayDescription}</p>
                 {/if}
                 <div class="skill-meta">
                   <span class="stars">

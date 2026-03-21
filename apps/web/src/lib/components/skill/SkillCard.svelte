@@ -6,6 +6,7 @@
   import { useI18n } from '$lib/i18n/runtime';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import { buildSkillPath } from '$lib/skill-path';
+  import { cleanSkillCardDescription } from '$lib/text/skill-card-description';
 
   interface Props {
     skill: {
@@ -35,6 +36,7 @@
   const messages = $derived(i18n.messages());
   let primaryCategoryLabel = $derived(getPrimaryCategoryLabel());
   let relativeTimeLabel = $derived(formatRelativeTime(skill.updatedAt));
+  let displayDescription = $derived(cleanSkillCardDescription(skill.description));
 
   function formatNumber(num: number): string {
     return i18n.formatCompactNumber(num);
@@ -189,9 +191,9 @@
       </p>
 
       <!-- Description -->
-      {#if skill.description}
+      {#if displayDescription}
         <p class="skill-desc">
-          {skill.description}
+          {displayDescription}
         </p>
       {/if}
 
