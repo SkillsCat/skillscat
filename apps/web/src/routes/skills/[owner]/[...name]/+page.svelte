@@ -1159,7 +1159,7 @@
           `;
         }
 
-        if (/^(Preferred command|Fallback command):$/.test(trimmed)) {
+        if (/^(Command|Preferred command|Fallback command|Alternate SkillsCat command):$/.test(trimmed)) {
           return `<div class="agent-section-label">${escapeHtml(trimmed)}</div>`;
         }
 

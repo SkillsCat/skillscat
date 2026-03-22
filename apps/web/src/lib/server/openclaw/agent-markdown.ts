@@ -57,8 +57,8 @@ OpenClaw user agent detected. This response is markdown on purpose so the agent 
 ## Fast path
 
 - Prefer the native SkillsCat CLI when terminal access is available.
-- Install for OpenClaw with: \`npx skillscat add <owner>/<repo> --agent openclaw\`
-- For one skill inside a multi-skill repo: \`npx skillscat add <owner>/<repo> --skill "<skill-name>" --agent openclaw\`
+- Install for OpenClaw with: \`npx skillscat add <slug> --agent openclaw\`
+- If you only know the repository, inspect it first with: \`npx skillscat info <owner>/<repo>\`
 - Canonical machine guide: \`https://skills.cat/llm.txt\`
 - If manual installation is required, fetch \`/api/skills/<slug>/files\` and write the returned files into \`<workspace>/skills/<folderName>/\` or \`~/.openclaw/skills/<folderName>/\`
 - Preserve every returned relative path exactly, including companion files next to \`SKILL.md\`

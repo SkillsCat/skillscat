@@ -52,7 +52,7 @@ export function splitShellCommand(command: string): string[] {
   return command.match(COMMAND_TOKEN_RE) ?? [];
 }
 
-export function buildSkillscatInstallCommand(target: SkillInstallTarget): string {
+export function buildSkillscatRepoInstallCommand(target: SkillInstallTarget): string {
   const repoSource = buildRepoSource(target);
   const skillName = resolveSkillName(target);
   if (repoSource && hasNestedGitHubSkillPath(target) && skillName) {
@@ -61,6 +61,10 @@ export function buildSkillscatInstallCommand(target: SkillInstallTarget): string
   if (repoSource && target.sourceType === 'github' && target.slug === repoSource) {
     return `npx skillscat add ${repoSource}`;
   }
+  return `npx skillscat add ${target.slug}`;
+}
+
+export function buildSkillscatInstallCommand(target: SkillInstallTarget): string {
   return `npx skillscat add ${target.slug}`;
 }
 
@@ -98,8 +102,6 @@ function buildAgentVisibilityNote(target: SkillInstallTarget): string | null {
 
 export function buildAgentInstallPrompt(target: SkillInstallTarget): string {
   const skillscatCommand = buildSkillscatInstallCommand(target);
-  const preferredCommand = buildVercelSkillsInstallCommand(target) || skillscatCommand;
-  const fallbackCommand = preferredCommand === skillscatCommand ? null : skillscatCommand;
   const visibilityNote = buildAgentVisibilityNote(target);
   const lines = [
     'Install this SkillsCat skill into the current workspace.',
@@ -114,14 +116,8 @@ export function buildAgentInstallPrompt(target: SkillInstallTarget): string {
 
   lines.push(`Skill page: ${buildSkillPageUrl(target.slug)}`);
   lines.push('');
-  lines.push('Preferred command:');
-  lines.push(preferredCommand);
-
-  if (fallbackCommand) {
-    lines.push('');
-    lines.push('Fallback command:');
-    lines.push(fallbackCommand);
-  }
+  lines.push('Command:');
+  lines.push(skillscatCommand);
 
   if (visibilityNote) {
     lines.push('');

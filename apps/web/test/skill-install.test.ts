@@ -3,12 +3,13 @@ import {
   buildAgentInstallPrompt,
   buildSkillInstallData,
   buildSkillscatInstallCommand,
+  buildSkillscatRepoInstallCommand,
   buildVercelSkillsInstallCommand,
   splitShellCommand,
 } from '../src/lib/skill-install';
 
 describe('buildSkillscatInstallCommand', () => {
-  it('uses repo install for root GitHub skills', () => {
+  it('uses the slug for root GitHub skills', () => {
     expect(buildSkillscatInstallCommand({
       slug: 'testowner/testrepo',
       sourceType: 'github',
@@ -17,7 +18,7 @@ describe('buildSkillscatInstallCommand', () => {
     })).toBe('npx skillscat add testowner/testrepo');
   });
 
-  it('uses repo plus --skill for multi-skill GitHub skills', () => {
+  it('uses the exact slug for multi-skill GitHub skills', () => {
     expect(buildSkillscatInstallCommand({
       slug: 'testowner/testrepo/nested-skill',
       skillName: 'Nested Skill',
@@ -25,7 +26,7 @@ describe('buildSkillscatInstallCommand', () => {
       sourceType: 'github',
       repoOwner: 'testowner',
       repoName: 'testrepo',
-    })).toBe('npx skillscat add testowner/testrepo --skill "Nested Skill"');
+    })).toBe('npx skillscat add testowner/testrepo/nested-skill');
   });
 
   it('falls back to slug for uploaded skills', () => {
@@ -42,6 +43,28 @@ describe('buildSkillscatInstallCommand', () => {
       repoOwner: 'testowner',
       repoName: 'testrepo',
     })).toBe('npx skillscat add testowner/testrepo-ab12');
+  });
+});
+
+describe('buildSkillscatRepoInstallCommand', () => {
+  it('keeps repo shorthand for root GitHub skills', () => {
+    expect(buildSkillscatRepoInstallCommand({
+      slug: 'testowner/testrepo',
+      sourceType: 'github',
+      repoOwner: 'testowner',
+      repoName: 'testrepo',
+    })).toBe('npx skillscat add testowner/testrepo');
+  });
+
+  it('supports repo plus --skill for multi-skill GitHub skills', () => {
+    expect(buildSkillscatRepoInstallCommand({
+      slug: 'testowner/testrepo/nested-skill',
+      skillName: 'Nested Skill',
+      skillPath: 'skills/nested-skill',
+      sourceType: 'github',
+      repoOwner: 'testowner',
+      repoName: 'testrepo',
+    })).toBe('npx skillscat add testowner/testrepo --skill "Nested Skill"');
   });
 });
 
@@ -88,7 +111,7 @@ describe('splitShellCommand', () => {
 });
 
 describe('buildAgentInstallPrompt', () => {
-  it('includes preferred and fallback commands for public GitHub skills', () => {
+  it('uses the slug-based SkillsCat command for public GitHub skills', () => {
     const prompt = buildAgentInstallPrompt({
       slug: 'testowner/testrepo/nested-skill',
       skillName: 'Nested Skill',
@@ -100,8 +123,10 @@ describe('buildAgentInstallPrompt', () => {
     });
 
     expect(prompt).toContain('Install this SkillsCat skill into the current workspace.');
-    expect(prompt).toContain('Preferred command:\nnpx skills add testowner/testrepo --skill "Nested Skill"');
-    expect(prompt).toContain('Fallback command:\nnpx skillscat add testowner/testrepo --skill "Nested Skill"');
+    expect(prompt).toContain('Command:\nnpx skillscat add testowner/testrepo/nested-skill');
+    expect(prompt).not.toContain('Preferred command:');
+    expect(prompt).not.toContain('Fallback command:');
+    expect(prompt).not.toContain('Alternate SkillsCat command:');
     expect(prompt).toContain('https://skills.cat/api/skills/testowner%2Ftestrepo%2Fnested-skill/files');
   });
 

@@ -33,12 +33,12 @@
       purpose: 'Inspect which skills a repository contains before you install anything.',
     },
     {
-      command: 'npx skillscat add owner/repo',
-      purpose: 'Install the default skill bundle into the current project.',
+      command: 'npx skillscat add owner/my-skill',
+      purpose: 'Install a published skill by its exact slug.',
     },
     {
-      command: 'npx skillscat add owner/repo --skill "skill-name"',
-      purpose: 'Install a single named skill from a multi-skill repository.',
+      command: 'npx skillscat add owner/path/to/skill',
+      purpose: 'Install a nested published skill by slug when the skill lives below the repo root.',
     },
     {
       command: 'npx skillscat update --check',
@@ -162,8 +162,8 @@
           <p>For a first session, this command set covers most common workflows.</p>
           <pre><code>npx skillscat search "code review"
 npx skillscat info owner/repo
-npx skillscat add owner/repo
-npx skillscat add owner/repo --skill "skill-name"
+npx skillscat add owner/my-skill
+npx skillscat add owner/path/to/skill
 npx skillscat update --check
 npx skillscat list</code></pre>
 
@@ -180,23 +180,25 @@ npx skillscat info owner/repo</code></pre>
           <ul>
             <li><code>search</code> is best when you know the task but not the repository.</li>
             <li><code>info</code> is best when you know the repository owner but not the exact bundle layout.</li>
-            <li>For multi-skill repositories, inspect with <code>info</code> before deciding whether you need <code>--skill</code>.</li>
+            <li>For multi-skill repositories, inspect with <code>info</code> first and then install by the exact published slug.</li>
           </ul>
 
           <h2 id="install-skills">Install Skills</h2>
           <p>
             <code>add</code> is the main install command. By default it installs into the current
             project so the skill stays close to the codebase it belongs to. Reach for
-            <code>--global</code> only when you really want cross-project reuse.
+            <code>--global</code> only when you really want cross-project reuse. For published
+            skills, prefer the exact slug instead of repo-scoped selection flags.
           </p>
-          <pre><code>npx skillscat add owner/repo
-npx skillscat add owner/repo --skill "skill-name"
+          <pre><code>npx skillscat add owner/my-skill
+npx skillscat add owner/path/to/skill
 npx skillscat add https://github.com/owner/repo
-npx skillscat add owner/repo --list
-npx skillscat add owner/repo --global
-npx skillscat add owner/repo --agent openclaw</code></pre>
+npx skillscat add owner/my-skill --global
+npx skillscat add owner/my-skill --agent openclaw
+npx skillscat add owner/repo --list</code></pre>
           <ul>
-            <li><code>--skill</code> installs one named skill only.</li>
+            <li>Use the published slug for installs, including nested slugs such as <code>owner/path/to/skill</code>.</li>
+            <li>If you only know the repository, run <code>info</code> or <code>add owner/repo --list</code> first to discover the right slug.</li>
             <li><code>--list</code> previews installable entries without writing files.</li>
             <li><code>--yes</code> skips confirmation prompts for scripted flows.</li>
             <li><code>--force</code> is for overwriting an existing install or continuing through riskier states.</li>

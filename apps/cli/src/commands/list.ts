@@ -91,7 +91,7 @@ export async function list(options: ListOptions): Promise<void> {
     warn('No skills installed.');
     console.log();
     console.log(pc.dim('Install skills with:'));
-    console.log(`  ${pc.cyan('npx skillscat add <owner>/<repo>')}`);
+    console.log(`  ${pc.cyan('npx skillscat add <slug>')}`);
     console.log();
     console.log(pc.dim('Or search for skills:'));
     console.log(`  ${pc.cyan('npx skillscat search <query>')}`);
