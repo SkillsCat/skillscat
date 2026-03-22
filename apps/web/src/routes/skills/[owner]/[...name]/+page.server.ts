@@ -8,6 +8,7 @@ import { CATEGORIES } from '$lib/constants/categories';
 import type { Category } from '$lib/constants/categories';
 import { buildSkillPathFromOwnerAndName, buildSkillSlug, encodeSkillSlugForPath, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
 import type { SkillCardData, SkillDetail } from '$lib/types';
+import { buildSkillInstallData } from '$lib/skill-install';
 
 const BOT_UA_PATTERN = /\b(bot|crawler|spider|slurp|preview|headless|lighthouse)\b/i;
 const CATEGORY_BY_SLUG = new Map(CATEGORIES.map((category) => [category.slug, category] as const));
@@ -509,10 +510,12 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     const hasReadme = Boolean(skill.readme) || Boolean(renderedReadme);
     // Avoid sending both raw markdown and rendered HTML in the same data payload.
     const skillForClient: SkillDetail = hasReadme ? { ...skill, readme: null } : skill;
+    const install = buildSkillInstallData(skillForClient);
     const seo = buildSkillSeoPayload(skill);
 
     return finish({
       skill: skillForClient,
+      install,
       renderedReadme,
       recommendSkills,
       deferRecommendSkills,

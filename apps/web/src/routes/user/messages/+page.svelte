@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { PageData } from './$types';
   import { invalidateAll } from "$app/navigation";
   import Button from '$lib/components/ui/Button.svelte';
   import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
@@ -36,8 +37,16 @@
     processedAt: number | null;
   }
 
-  let notifications = $state<Notification[]>([]);
-  let loading = $state(true);
+  interface Props {
+    data: PageData;
+  }
+
+  let { data }: Props = $props();
+
+  const serverNotifications = $derived(data.notifications);
+  let localNotifications = $state<Notification[] | null>(null);
+  const notifications = $derived(localNotifications ?? serverNotifications);
+  let loading = $state(false);
   let error = $state<string | null>(null);
   let processingIds = $state<Set<string>>(new Set());
   let markingAllRead = $state(false);
@@ -49,7 +58,10 @@
   const hasUnread = $derived(notifications.some((n) => !n.read));
 
   $effect(() => {
-    loadNotifications();
+    serverNotifications;
+    localNotifications = null;
+    loading = false;
+    autoMarkedRead = false;
   });
 
   $effect(() => {
@@ -61,7 +73,7 @@
       try {
         const res = await fetch("/api/notifications/read-all", { method: "POST" });
         if (res.ok) {
-          notifications = notifications.map((n) => ({ ...n, read: true }));
+          localNotifications = notifications.map((n) => ({ ...n, read: true }));
           await invalidateAll();
         }
       } catch {
@@ -79,7 +91,7 @@
       const res = await fetch("/api/notifications");
       if (res.ok) {
         const data = (await res.json()) as { notifications: Notification[] };
-        notifications = data.notifications;
+        localNotifications = data.notifications;
       } else {
         error = copy.messages.failedToLoad;
       }
@@ -97,7 +109,7 @@
     try {
       const res = await fetch("/api/notifications/read-all", { method: "POST" });
       if (res.ok) {
-        notifications = notifications.map((n) => ({ ...n, read: true }));
+        localNotifications = notifications.map((n) => ({ ...n, read: true }));
         await invalidateAll();
       }
     } catch {
@@ -117,7 +129,7 @@
       });
       if (res.ok) {
         // Update local state
-        notifications = notifications.map((n) =>
+        localNotifications = notifications.map((n) =>
           n.id === notification.id ? { ...n, processed: true } : n,
         );
       }
@@ -140,7 +152,7 @@
       });
       if (res.ok) {
         // Update local state
-        notifications = notifications.map((n) =>
+        localNotifications = notifications.map((n) =>
           n.id === notification.id ? { ...n, processed: true } : n,
         );
       }

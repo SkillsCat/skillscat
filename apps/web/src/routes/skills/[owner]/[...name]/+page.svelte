@@ -11,13 +11,9 @@
   import { getSkillPageCopy } from '$lib/i18n/skill-page';
   import { formatRelativeTimestamp } from '$lib/i18n/relative';
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
-  import {
-    buildSkillscatInstallCommand,
-    buildVercelSkillsInstallCommand,
-    splitShellCommand
-  } from '$lib/skill-install';
+  import { splitShellCommand } from '$lib/skill-install';
   import { encodeSkillSlugForPath } from '$lib/skill-path';
-  import type { SkillDetail, SkillCardData, FileNode } from '$lib/types';
+  import type { SkillDetail, SkillCardData, FileNode, SkillInstallData } from '$lib/types';
   import type { Highlighter } from 'shiki';
   import { buildOgImageUrl } from '$lib/seo/og';
   import { SITE_URL } from '$lib/seo/constants';
@@ -27,6 +23,7 @@
   interface Props {
     data: {
       skill: SkillDetail | null;
+      install?: SkillInstallData;
       recommendSkills: SkillCardData[];
       deferRecommendSkills?: boolean;
       error?: string;
@@ -353,36 +350,6 @@
     highlightedReadme = container.innerHTML;
   }
 
-  const skillscatInstallCommand = $derived(data.skill
-    ? buildSkillscatInstallCommand({
-        slug: data.skill.slug,
-        skillName: data.skill.name,
-        skillPath: data.skill.skillPath,
-        sourceType: data.skill.sourceType,
-        repoOwner: data.skill.repoOwner,
-        repoName: data.skill.repoName,
-      })
-    : ''
-  );
-  const vercelSkillsInstallCommand = $derived(data.skill
-    ? buildVercelSkillsInstallCommand({
-        slug: data.skill.slug,
-        skillName: data.skill.name,
-        skillPath: data.skill.skillPath,
-        sourceType: data.skill.sourceType,
-        repoOwner: data.skill.repoOwner,
-        repoName: data.skill.repoName,
-      })
-    : null
-  );
-
-  const canUseVercelInstaller = $derived(Boolean(
-    data.skill &&
-    data.skill.visibility === 'public' &&
-    data.skill.sourceType === 'github' &&
-    data.skill.repoOwner &&
-    data.skill.repoName
-  ));
   const encodedApiSkillSlug = $derived(data.skill ? encodeURIComponent(data.skill.slug) : '');
   const canUseDirectGitHubRead = $derived(Boolean(
     data.skill &&
@@ -630,35 +597,61 @@
     }
   }
 
-  // Installation commands
-  const installCommands = $derived(data.skill ? [
-    {
-      name: 'skillscat',
-      label: 'SkillsCat CLI',
-      command: skillscatInstallCommand,
-      description: data.skill.visibility === 'private'
-        ? copy.privateCliDescription
-        : copy.registryCliDescription
-    },
-    ...(canUseVercelInstaller ? [{
-      name: 'skills',
-      label: 'Vercel Skills CLI',
-      command: vercelSkillsInstallCommand || '',
-      description: copy.vercelCliDescription
-    }] : [])
-  ] : []);
+  type InstallOption =
+    | {
+        id: 'skillscat' | 'skills';
+        type: 'cli';
+        label: string;
+        command: string;
+        description: string;
+      }
+    | {
+        id: 'agent';
+        type: 'agent';
+        label: string;
+        prompt: string;
+        description: string;
+      };
 
-  let selectedInstaller = $state('skillscat');
-  const selectedInstallerIndex = $derived(
-    Math.max(installCommands.findIndex((command) => command.name === selectedInstaller), 0)
+  const agentInstallPrompt = $derived(data.install?.agentPrompt || '');
+  const installOptions = $derived<InstallOption[]>([
+    ...(data.install?.cli || []).map((installer) => ({
+      id: installer.id,
+      type: 'cli' as const,
+      label: installer.id === 'skillscat' ? copy.skillscatCliLabel : copy.skillsCliLabel,
+      command: installer.command,
+      description: installer.id === 'skillscat'
+        ? data.skill?.visibility === 'private'
+          ? copy.privateCliDescription
+          : copy.registryCliDescription
+        : copy.vercelCliDescription
+    })),
+    ...(agentInstallPrompt
+      ? [{
+          id: 'agent' as const,
+          type: 'agent' as const,
+          label: copy.installAgentTab,
+          prompt: agentInstallPrompt,
+          description: copy.agentInstallDescription
+        }]
+      : [])
+  ]);
+  let selectedInstallMethod = $state<'skillscat' | 'skills' | 'agent'>('skillscat');
+  const selectedInstallOptionIndex = $derived(
+    Math.max(installOptions.findIndex((option) => option.id === selectedInstallMethod), 0)
   );
-  const currentInstaller = $derived(installCommands[selectedInstallerIndex] || null);
-  const currentCommand = $derived(currentInstaller?.command || '');
+  const currentInstallOption = $derived(installOptions[selectedInstallOptionIndex] || null);
+  const currentCommand = $derived(
+    currentInstallOption?.type === 'cli' ? currentInstallOption.command : ''
+  );
+  const rawAgentPrompt = $derived(
+    currentInstallOption?.type === 'agent' ? currentInstallOption.prompt : ''
+  );
 
   $effect(() => {
-    if (installCommands.length === 0) return;
-    if (!installCommands.some((command) => command.name === selectedInstaller)) {
-      selectedInstaller = installCommands[0].name;
+    if (installOptions.length === 0) return;
+    if (!installOptions.some((option) => option.id === selectedInstallMethod)) {
+      selectedInstallMethod = installOptions[0].id;
     }
   });
 
@@ -1132,6 +1125,70 @@
   }
 
   const highlightedCommand = $derived(highlightCommand(currentCommand));
+  function highlightAgentPromptText(value: string): string {
+    return escapeHtml(value).replace(
+      /npx skillscat login/g,
+      '<span class="agent-inline-code">npx skillscat login</span>'
+    );
+  }
+
+  function highlightAgentPrompt(prompt: string): string {
+    if (!prompt.trim()) return '';
+
+    return prompt
+      .split('\n')
+      .map((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return '<div class="agent-spacer" aria-hidden="true"></div>';
+        }
+
+        const metaMatch = trimmed.match(/^(Skill|Slug|Repository|Skill page):\s*(.+)$/);
+        if (metaMatch) {
+          const [, label, value] = metaMatch;
+          const valueHtml = /^https?:\/\//.test(value)
+            ? `<span class="agent-link">${escapeHtml(value)}</span>`
+            : `<span class="agent-meta-value">${escapeHtml(value)}</span>`;
+
+          return `
+            <div class="agent-meta-line">
+              <span class="agent-meta-label">${escapeHtml(label)}</span>
+              <span class="agent-meta-sep">:</span>
+              ${valueHtml}
+            </div>
+          `;
+        }
+
+        if (/^(Preferred command|Fallback command):$/.test(trimmed)) {
+          return `<div class="agent-section-label">${escapeHtml(trimmed)}</div>`;
+        }
+
+        if (/^https?:\/\//.test(trimmed)) {
+          return `<div class="agent-endpoint-line"><span class="agent-endpoint-pill">${escapeHtml(trimmed)}</span></div>`;
+        }
+
+        if (trimmed.startsWith('npx ')) {
+          return `<div class="agent-command-line"><code class="agent-command">${highlightCommand(trimmed)}</code></div>`;
+        }
+
+        if (
+          trimmed.startsWith('This skill is ')
+          || trimmed.startsWith('If CLI installation is not possible')
+          || trimmed.startsWith('After installing')
+        ) {
+          return `<div class="agent-note-line">${highlightAgentPromptText(trimmed)}</div>`;
+        }
+
+        if (trimmed.startsWith('Install this SkillsCat skill')) {
+          return `<div class="agent-intro-line">${escapeHtml(trimmed)}</div>`;
+        }
+
+        return `<div class="agent-body-line">${highlightAgentPromptText(trimmed)}</div>`;
+      })
+      .join('');
+  }
+
+  const highlightedAgentPrompt = $derived(highlightAgentPrompt(rawAgentPrompt));
   const canonicalSkillUrl = $derived(
     data.skill ? `${SITE_URL}/skills/${encodeSkillSlugForPath(data.skill.slug)}` : SITE_URL
   );
@@ -1328,38 +1385,47 @@
       </div>
     {/snippet}
 
-    {#snippet renderCliInstallCard()}
-      <h3 class="font-semibold text-fg mb-4">{copy.cliInstall}</h3>
+    {#snippet renderInstallCard()}
+      <h3 class="font-semibold text-fg mb-4">{messages.common.install}</h3>
 
-      <!-- CLI Switcher -->
       <div class="cli-switcher">
-        {#each installCommands as installer (installer.name)}
+        {#each installOptions as option (option.id)}
           <button
             class="cli-switcher-btn"
-            class:active={selectedInstaller === installer.name}
-            onclick={() => selectedInstaller = installer.name}
+            class:active={selectedInstallMethod === option.id}
+            onclick={() => selectedInstallMethod = option.id}
           >
-            {installer.label}
+            {option.label}
           </button>
         {/each}
         <div
           class="cli-switcher-indicator"
-          style:width={`calc((100% - (var(--switcher-padding) * 2)) / ${Math.max(installCommands.length, 1)})`}
-          style:transform={`translateX(${selectedInstallerIndex * 100}%)`}
+          style:width={`calc((100% - (var(--switcher-padding) * 2)) / ${Math.max(installOptions.length, 1)})`}
+          style:transform={`translateX(${selectedInstallOptionIndex * 100}%)`}
         ></div>
       </div>
 
-      <!-- Command -->
-      <div class="command-box">
-        <code class="command-text">{@html highlightedCommand}</code>
-        <CopyButton text={currentCommand} size="sm" />
-      </div>
+      {#if currentInstallOption?.type === 'cli'}
+        <div class="command-box">
+          <code class="command-text">{@html highlightedCommand}</code>
+          <CopyButton text={currentCommand} size="sm" />
+        </div>
 
-      <!-- Description -->
-      <p class="command-description">
-        {currentInstaller?.description}
-      </p>
+        <p class="command-description">
+          {currentInstallOption.description}
+        </p>
+      {:else if currentInstallOption?.type === 'agent'}
+        <div class="prompt-box">
+          <div class="prompt-rich">
+            {@html highlightedAgentPrompt}
+          </div>
+          <CopyButton text={rawAgentPrompt} size="sm" />
+        </div>
 
+        <p class="command-description">
+          {currentInstallOption.description}
+        </p>
+      {/if}
     {/snippet}
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 skill-detail-layout">
@@ -1654,7 +1720,7 @@
           </div>
 
           <div class="card">
-            {@render renderCliInstallCard()}
+            {@render renderInstallCard()}
           </div>
         </div>
 
@@ -1705,9 +1771,9 @@
           {@render renderActionButtons()}
         </div>
 
-        <!-- CLI Install -->
+        <!-- Install -->
         <div class="card desktop-primary-card">
-          {@render renderCliInstallCard()}
+          {@render renderInstallCard()}
         </div>
 
         <!-- Private Skill Notice -->
@@ -2470,6 +2536,199 @@
 
   .command-text :global(.cmd-default) {
     color: var(--fg);
+  }
+
+  .prompt-box {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.875rem 1rem;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at top right, color-mix(in oklch, var(--primary) 14%, transparent), transparent 35%),
+      linear-gradient(135deg, color-mix(in oklch, var(--bg) 88%, var(--primary) 12%), var(--bg));
+    border-radius: var(--radius-lg);
+    border: 2px solid color-mix(in oklch, var(--border) 82%, var(--primary) 18%);
+    box-shadow: 0 12px 28px -18px color-mix(in oklch, var(--primary) 30%, transparent);
+  }
+
+  .prompt-box::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--primary), var(--accent));
+  }
+
+  :root:not(.dark) .prompt-box {
+    background:
+      radial-gradient(circle at top right, rgba(242, 107, 41, 0.12), transparent 35%),
+      linear-gradient(135deg, #fffaf7, #fafafa);
+    border-color: rgba(242, 107, 41, 0.22);
+    box-shadow: 0 12px 24px -18px rgba(242, 107, 41, 0.45);
+  }
+
+  .prompt-rich {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    color: var(--fg);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.55;
+  }
+
+  .prompt-box :global(.copy-button) {
+    position: relative;
+    z-index: 1;
+    flex-shrink: 0;
+  }
+
+  .agent-intro-line {
+    font-family: var(--font-sans);
+    font-size: 0.88rem;
+    font-weight: 700;
+    line-height: 1.45;
+    color: var(--fg);
+  }
+
+  .agent-body-line {
+    color: var(--fg-muted);
+  }
+
+  .agent-section-label {
+    margin-top: 0.15rem;
+    font-family: var(--font-sans);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--primary);
+  }
+
+  .agent-meta-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: baseline;
+  }
+
+  .agent-meta-label {
+    font-family: var(--font-sans);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+  }
+
+  .agent-meta-sep {
+    color: var(--fg-subtle);
+  }
+
+  .agent-meta-value {
+    color: var(--fg);
+    font-weight: 600;
+  }
+
+  .agent-link {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 0.125rem 0.5rem;
+    color: var(--primary);
+    background: color-mix(in oklch, var(--primary) 10%, transparent);
+    border: 1px solid color-mix(in oklch, var(--primary) 18%, transparent);
+    border-radius: 9999px;
+    word-break: break-all;
+  }
+
+  .agent-command-line {
+    padding: 0.7rem 0.85rem;
+    background: color-mix(in oklch, var(--bg) 72%, var(--primary) 10%);
+    border: 1px solid color-mix(in oklch, var(--border) 70%, var(--primary) 18%);
+    border-radius: calc(var(--radius-lg) - 2px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .agent-command-line::-webkit-scrollbar {
+    display: none;
+  }
+
+  .agent-command {
+    display: block;
+    white-space: nowrap;
+    color: var(--fg);
+  }
+
+  .agent-command :global(.cmd-npx) {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .agent-command :global(.cmd-tool) {
+    color: var(--fg);
+    font-weight: 600;
+  }
+
+  .agent-command :global(.cmd-action) {
+    color: var(--primary);
+    font-weight: 700;
+  }
+
+  .agent-command :global(.cmd-repo) {
+    color: var(--fg-muted);
+  }
+
+  .agent-command :global(.cmd-default) {
+    color: var(--fg);
+  }
+
+  .agent-note-line {
+    padding: 0.65rem 0.75rem;
+    color: var(--fg);
+    background: color-mix(in oklch, var(--accent) 11%, transparent);
+    border: 1px solid color-mix(in oklch, var(--accent) 20%, transparent);
+    border-radius: calc(var(--radius-lg) - 4px);
+  }
+
+  .agent-inline-code {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.35rem;
+    margin: 0 0.1rem;
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--primary);
+    background: color-mix(in oklch, var(--primary) 12%, transparent);
+    border-radius: 0.4rem;
+  }
+
+  .agent-endpoint-line {
+    display: flex;
+  }
+
+  .agent-endpoint-pill {
+    display: inline-flex;
+    max-width: 100%;
+    padding: 0.45rem 0.65rem;
+    color: var(--fg);
+    background: color-mix(in oklch, var(--bg) 74%, var(--accent) 9%);
+    border: 1px dashed color-mix(in oklch, var(--border) 72%, var(--primary) 16%);
+    border-radius: calc(var(--radius-lg) - 6px);
+    word-break: break-all;
+  }
+
+  .agent-spacer {
+    height: 0.2rem;
   }
 
   /* Command Description */
