@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { PageData } from './$types';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
@@ -12,13 +13,21 @@
     slug: string;
     displayName: string;
     description?: string;
-    avatar?: string;
+    avatarUrl?: string;
     verified: boolean;
     role: string;
   }
 
-  let orgs = $state<Org[]>([]);
-  let loading = $state(true);
+  interface Props {
+    data: PageData;
+  }
+
+  let { data }: Props = $props();
+
+  const serverOrganizations = $derived(data.organizations);
+  let localOrganizations = $state<Org[] | null>(null);
+  const orgs = $derived(localOrganizations ?? serverOrganizations);
+  let loading = $state(false);
   let error = $state<string | null>(null);
   let showCreateDialog = $state(false);
   let creating = $state(false);
@@ -31,7 +40,9 @@
   const ui = $derived(getUiCopy(i18n.locale()));
 
   $effect(() => {
-    loadOrgs();
+    serverOrganizations;
+    localOrganizations = null;
+    loading = false;
   });
 
   async function loadOrgs() {
@@ -41,7 +52,7 @@
       const res = await fetch('/api/orgs');
       if (res.ok) {
         const data = await res.json() as { organizations?: Org[] };
-        orgs = data.organizations || [];
+        localOrganizations = data.organizations || [];
       } else {
         error = copy.organizations.failedToLoad;
       }
@@ -156,7 +167,7 @@
       {#each orgs as org (org.id)}
         <a href="/org/{org.slug}" class="org-card">
           <Avatar
-            src={org.avatar}
+            src={org.avatarUrl}
             alt={org.displayName || org.name}
             fallback={org.displayName || org.name}
             size="md"

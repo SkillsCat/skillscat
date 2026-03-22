@@ -1,8 +1,9 @@
 import type { D1Database } from '@cloudflare/workers-types';
-import type { FileNode, SkillCardData, SkillDetail } from '$lib/types';
+import type { FileNode, SkillCardData, SkillDetail, SkillInstallData } from '$lib/types';
 import { getCached } from '$lib/server/cache';
 import { getAuthContext } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
+import { buildSkillInstallData } from '$lib/skill-install';
 
 const PUBLIC_CACHE_TTL_SECONDS = 300;
 
@@ -40,6 +41,7 @@ interface SkillDetailRow {
 export interface SkillDetailPayload {
   skill: SkillDetail;
   recommendSkills: SkillCardData[];
+  install: SkillInstallData;
 }
 
 export interface ResolvedSkillDetail {
@@ -216,6 +218,7 @@ async function fetchSkillDetailPayload(db: D1Database, slug: string): Promise<Sk
   return {
     skill,
     recommendSkills: await fetchRecommendedSkills(db, skill),
+    install: buildSkillInstallData(skill),
   };
 }
 

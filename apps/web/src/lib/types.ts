@@ -63,6 +63,16 @@ export interface SkillDetail extends SkillCardData {
   orgAvatar?: string | null;
 }
 
+export interface SkillInstallCliMethod {
+  id: 'skillscat' | 'skills';
+  command: string;
+}
+
+export interface SkillInstallData {
+  cli: SkillInstallCliMethod[];
+  agentPrompt: string;
+}
+
 // ========== File Node ==========
 export interface FileNode {
   name: string;
