@@ -91,6 +91,16 @@ SkillsCat 是一个 `pnpm` monorepo，目标是构建一个用于发现、发布
 
 本地 CLI 数据位置由 [apps/cli/src/utils/config/config.ts](~/Projects/skillscat/apps/cli/src/utils/config/config.ts) 管理，安装记录在 `installed.json`，缓存位于 OS 用户配置目录下。
 
+### 安装命令与文案规范
+
+- 对 `skillscat` 原生命令，所有用户可见安装文案默认必须采用 slug-first：`npx skillscat add <slug>`。
+- 这里的“用户可见安装文案”包括但不限于：skill 详情页安装区、docs、`llm.txt`、OpenClaw 相关说明、agent prompt、OG 文案、CLI help/提示输出。
+- 对 OpenClaw 的 `skillscat` 安装文案，同样默认使用 slug-first：`npx skillscat add <slug> --agent openclaw`。
+- `owner/repo` 形式默认只用于发现和检查仓库内容，例如 `npx skillscat info <owner>/<repo>`、`npx skillscat add <owner>/<repo> --list`、或直接 GitHub URL 安装。
+- 不要在新的默认文案、提示词、页面主路径里优先展示 `npx skillscat add <owner>/<repo> --skill "..."`。
+- `repo + --skill` 只能作为兼容路径、历史说明或特定实现细节保留，不能再作为默认推荐路径。
+- 只要一个 skill 已经有发布 slug，无论它是否来自多 skill 仓库、嵌套路径仓库或 OpenClaw 场景，默认展示和提示都应优先使用它的精确 slug。
+
 ## Cloudflare 资源与后台 Worker
 
 当前项目有一组独立的 Cloudflare workers / cron / queue 消费者：
