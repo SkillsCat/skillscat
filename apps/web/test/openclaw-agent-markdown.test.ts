@@ -45,7 +45,8 @@ describe('openclaw agent markdown', () => {
     const text = buildOpenClawHomeMarkdown();
 
     expect(text).toContain('# SkillsCat for OpenClaw');
-    expect(text).toContain('npx skillscat add <owner>/<repo> --agent openclaw');
+    expect(text).toContain('npx skillscat add <slug> --agent openclaw');
+    expect(text).toContain('npx skillscat info <owner>/<repo>');
     expect(text).toContain('/api/skills/<slug>/files');
     expect(text).toContain('https://skills.cat/llm.txt');
   });
@@ -55,7 +56,7 @@ describe('openclaw agent markdown', () => {
 
     expect(text).toContain('# SEO Audit Skill');
     expect(text).toContain('`backrunner/tools/openclaw/setup`');
-    expect(text).toContain('`npx skillscat add backrunner/tools --skill "SEO Audit Skill" --agent openclaw`');
+    expect(text).toContain('`npx skillscat add backrunner/tools/openclaw/setup --agent openclaw`');
     expect(text).toContain('`https://skills.cat/api/skills/backrunner%2Ftools%2Fopenclaw%2Fsetup/files`');
     expect(text).toContain('~/.openclaw/skills/seo-audit-skill/');
     expect(text).toContain('## Original SKILL.md');

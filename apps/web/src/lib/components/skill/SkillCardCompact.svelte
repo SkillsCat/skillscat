@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { StarIcon } from '@hugeicons/core-free-icons';
@@ -18,8 +19,19 @@
   }
 
   let { skill }: Props = $props();
+  let titleEl: HTMLSpanElement | null = $state(null);
+  let authorEl: HTMLDivElement | null = $state(null);
+  let titleTruncated = $state(false);
+  let authorTruncated = $state(false);
+  let resizeObserver: ResizeObserver | null = null;
+  let measureFrame = 0;
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
+  const authorLabel = $derived(formatAuthorLabel(skill.repoOwner));
+  const tooltipLabel = $derived.by(() => {
+    if (!titleTruncated && !authorTruncated) return undefined;
+    return `${skill.name}\n${authorLabel}`;
+  });
 
   function formatNumber(num: number): string {
     return i18n.formatCompactNumber(num);
@@ -39,11 +51,66 @@
     if (days > 0) return i18n.t(messages.common.relativeDaysAgo, { count: days });
     return messages.common.relativeToday;
   }
+
+  function isTextTruncated(el: HTMLElement | null): boolean {
+    if (!el) return false;
+    return el.scrollWidth > el.clientWidth + 1;
+  }
+
+  function updateTextTruncation() {
+    titleTruncated = isTextTruncated(titleEl);
+    authorTruncated = isTextTruncated(authorEl);
+  }
+
+  function scheduleTextTruncationMeasure() {
+    if (typeof window === 'undefined') return;
+
+    if (measureFrame) cancelAnimationFrame(measureFrame);
+    measureFrame = requestAnimationFrame(() => {
+      measureFrame = 0;
+      updateTextTruncation();
+    });
+  }
+
+  function observeTextTargets() {
+    if (!resizeObserver) return;
+
+    resizeObserver.disconnect();
+
+    if (titleEl) resizeObserver.observe(titleEl);
+    if (authorEl) resizeObserver.observe(authorEl);
+  }
+
+  onMount(() => {
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        scheduleTextTruncationMeasure();
+      });
+      observeTextTargets();
+    }
+
+    scheduleTextTruncationMeasure();
+
+    return () => {
+      if (measureFrame) cancelAnimationFrame(measureFrame);
+      resizeObserver?.disconnect();
+      resizeObserver = null;
+    };
+  });
+
+  $effect(() => {
+    skill.name;
+    authorLabel;
+
+    observeTextTargets();
+    scheduleTextTruncationMeasure();
+  });
 </script>
 
 <a
   href={buildSkillPath(skill.slug)}
   class="skill-card-compact group"
+  title={tooltipLabel}
 >
   <!-- Avatar -->
   <div class="flex-shrink-0 avatar-wrapper">
@@ -58,13 +125,19 @@
 
   <!-- Content -->
   <div class="flex-1 min-w-0">
-    <div class="flex items-center gap-2">
-      <span class="font-semibold text-fg group-hover:text-primary transition-colors truncate">
+    <div class="flex items-center gap-2 min-w-0">
+      <span
+        bind:this={titleEl}
+        class="block font-semibold text-fg group-hover:text-primary transition-colors truncate"
+      >
         {skill.name}
       </span>
     </div>
-    <div class="text-xs text-fg-muted font-medium">
-      {formatAuthorLabel(skill.repoOwner)}
+    <div
+      bind:this={authorEl}
+      class="truncate text-xs text-fg-muted font-medium"
+    >
+      {authorLabel}
     </div>
   </div>
 

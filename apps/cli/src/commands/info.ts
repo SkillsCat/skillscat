@@ -75,8 +75,9 @@ export async function info(source: string): Promise<void> {
 
   console.log(pc.dim('─'.repeat(50)));
   console.log();
-  console.log(pc.bold('Install:'));
-  console.log(`  ${pc.cyan(`npx skillscat add ${source}`)}`);
+  console.log(pc.bold('Install published skills by slug:'));
+  console.log(`  ${pc.cyan('npx skillscat add <slug>')}`);
+  console.log(`  ${pc.dim('Use search or the web detail page to discover the exact published slug for this repository.')}`);
   console.log();
 
   // Show compatible agents

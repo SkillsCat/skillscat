@@ -171,8 +171,7 @@ INSTALL_WITH_SKILLSCAT_CLI:
 - this section is only for the native skillscat CLI
 - no global install is required; prefer npx for one-off installs
 - search: npx skillscat search "<query>"
-- install by repo: npx skillscat add <owner>/<repo>
-- install one skill from a multi-skill repo: npx skillscat add <owner>/<repo> --skill "<skill-name>"
+- install by published slug: npx skillscat add <slug>
 - install from a direct GitHub URL: npx skillscat add https://github.com/<owner>/<repo>
 - inspect repository skills: npx skillscat info <owner>/<repo>
 
@@ -180,10 +179,8 @@ OPENCLAW_WITH_SKILLSCAT_CLI:
 If terminal access is available, prefer the SkillsCat CLI over manual file writes.
 - the canonical human guide lives at ${HTML_OPENCLAW_DOCS_URL}
 - run commands from the target workspace root so project-local installs land in ./skills when appropriate
-- target OpenClaw only when needed with: npx skillscat add <owner>/<repo> --agent openclaw
-- install a repo or root skill: npx skillscat add <owner>/<repo>
-- install one skill from a multi-skill repo: npx skillscat add <owner>/<repo> --skill "<skill-name>"
-- if <owner>/<repo> is not a single published slug but the repo exists in the registry, the CLI may prompt to install every indexed skill in that repo
+- target OpenClaw only when needed with: npx skillscat add <slug> --agent openclaw
+- discover candidate slugs with: npx skillscat search "<query>" or npx skillscat info <owner>/<repo>
 - for private skills: run npx skillscat login first, then re-run the add command
 - after install: start a new OpenClaw session so newly installed skills are discovered
 

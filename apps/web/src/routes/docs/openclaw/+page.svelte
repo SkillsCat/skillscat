@@ -163,12 +163,12 @@ clawhub publish ./my-skill --slug &lt;owner&gt;~&lt;skill&gt; --version 1.0.0 --
             <code>/openclaw</code>; it keeps using the primary SkillsCat registry and APIs.
           </p>
           <pre><code>npx skillscat info &lt;owner&gt;/&lt;repo&gt;
-npx skillscat add &lt;owner&gt;/&lt;repo&gt; --agent openclaw
-npx skillscat add &lt;owner&gt;/&lt;repo&gt; --skill "&lt;skill-name&gt;" --agent openclaw
-npx skillscat add &lt;owner&gt;/&lt;repo&gt; --agent openclaw --global
+npx skillscat add &lt;slug&gt; --agent openclaw
+npx skillscat add &lt;slug&gt; --agent openclaw --global
 npx skillscat convert openclaw --from agents</code></pre>
           <ul>
-            <li>Run <code>info</code> before <code>add</code> to avoid installing the wrong skill from a multi-skill repository.</li>
+            <li>Run <code>info</code> before <code>add</code> when you only know the repository and need to discover the published slug.</li>
+            <li>Prefer the exact published slug for install, including nested slugs like <code>owner/path/to/skill</code>.</li>
             <li><code>--agent openclaw</code> writes the bundle into the layout OpenClaw expects.</li>
             <li><code>convert openclaw --from agents</code> is useful when migrating existing <code>.agents</code> content.</li>
           </ul>
@@ -232,7 +232,7 @@ clawhub update &lt;owner&gt;~&lt;skill&gt;</code></pre>
           <pre><code>clawhub login --site https://skills.cat
 clawhub login --token &lt;skillscat-api-token&gt; --site https://skills.cat --registry https://skills.cat/openclaw
 npx skillscat login
-npx skillscat add &lt;owner&gt;/&lt;repo&gt; --agent openclaw</code></pre>
+npx skillscat add &lt;slug&gt; --agent openclaw</code></pre>
           <ul>
             <li><code>clawhub login --site https://skills.cat</code> opens the compatibility auth page and pins the registry back to <code>/openclaw</code>.</li>
             <li>If you prefer manual tokens, create one with <code>read</code>, <code>write</code>, and <code>publish</code> scopes on the <a href="/user/tokens">API tokens</a> page.</li>
@@ -243,8 +243,8 @@ npx skillscat add &lt;owner&gt;/&lt;repo&gt; --agent openclaw</code></pre>
           <h2 id="troubleshooting">Troubleshooting</h2>
           <ul>
             <li>If the install does not take effect, confirm the target directory first and then start a fresh OpenClaw session.</li>
-            <li>If you picked the wrong skill from a multi-skill repository, run <code>npx skillscat info owner/repo</code> and install again with <code>--skill</code>.</li>
-            <li>If you only want OpenClaw to auto-pull the bundle and do not want to think about compatibility slugs, prefer <code>npx skillscat add --agent openclaw</code>.</li>
+            <li>If you picked the wrong skill from a multi-skill repository, run <code>npx skillscat info owner/repo</code> and install again with the exact slug.</li>
+            <li>If you only want OpenClaw to auto-pull the bundle, prefer <code>npx skillscat add &lt;slug&gt; --agent openclaw</code>.</li>
             <li>For private-skill or permission issues, verify token scopes first and then confirm whether the command is using <code>skillscat</code> or <code>clawhub</code>.</li>
           </ul>
 

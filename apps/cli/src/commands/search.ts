@@ -144,8 +144,8 @@ export async function search(query?: string, options: SearchOptions = {}): Promi
   console.log(pc.dim('─'.repeat(50)));
   console.log();
   console.log(pc.dim('Install a skill:'));
-  console.log(`  ${pc.cyan('npx skillscat add <owner>/<repo>')}`);
+  console.log(`  ${pc.cyan('npx skillscat add <slug>')}`);
   console.log();
-  console.log(pc.dim('View skill details:'));
+  console.log(pc.dim('Inspect a repository first:'));
   console.log(`  ${pc.cyan('npx skillscat info <owner>/<repo>')}`);
 }
