@@ -56,6 +56,7 @@ describe('request security', () => {
 
     expect(response?.status).toBe(403);
     expect(response?.headers.get('x-security-block')).toBe('ua-policy');
+    expect(response?.headers.get('x-robots-tag')).toBe('noindex, nofollow, noarchive');
     await expect(response?.json()).resolves.toEqual({
       error: 'Request blocked by abuse protection policy',
     });
@@ -95,6 +96,24 @@ describe('request security', () => {
     }));
 
     expect(response).toBeNull();
+  });
+
+  it('allows Google crawler variants on protected machine endpoints', async () => {
+    const userAgents = [
+      'GoogleOther/1.0',
+      'AdsBot-Google (+http://www.google.com/adsbot.html)',
+      'Mediapartners-Google',
+    ];
+
+    for (const userAgent of userAgents) {
+      const response = await runRequestSecurity(createEvent({
+        pathname: '/api/skills/testowner%2Fdemo/files',
+        routeId: '/api/skills/[slug]/files',
+        userAgent,
+      }));
+
+      expect(response).toBeNull();
+    }
   });
 
   it('does not apply native UA protection to OpenClaw compat endpoints', async () => {

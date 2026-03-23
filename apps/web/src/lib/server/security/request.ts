@@ -135,7 +135,14 @@ const BROWSER_OR_APP_UA = [
 
 const ALLOWED_CRAWLER_UA = [
   /\bgooglebot\b/i,
+  /\bgoogleother(?:-[a-z]+)?\b/i,
   /\bgoogle-inspectiontool\b/i,
+  /\badsbot-google(?:-mobile)?\b/i,
+  /\bmediapartners-google\b/i,
+  /\bstorebot-google\b/i,
+  /\bfeedfetcher-google\b/i,
+  /\bapis-google\b/i,
+  /\bgoogle-read-aloud\b/i,
   /\bbingbot\b/i,
   /\bduckduckbot\b/i,
   /\bapplebot\b/i,
@@ -153,6 +160,8 @@ const ALLOWED_CRAWLER_UA = [
   /\bmeta-externalagent\b/i,
   /\bfacebookexternalhit\b/i,
 ];
+
+const SECURITY_NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
 
 function isApiOrRegistryPath(pathname: string): boolean {
   if (pathname === '/mcp') {
@@ -535,6 +544,7 @@ function securityJsonResponse(
   const mergedHeaders = new Headers({
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
+    'X-Robots-Tag': SECURITY_NO_INDEX_VALUE,
     ...headers,
   });
 

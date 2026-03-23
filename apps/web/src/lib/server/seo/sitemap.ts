@@ -460,10 +460,6 @@ export function buildSitemapIndexEntries(stats: SitemapIndexStats): SitemapIndex
 
   for (const kind of orderedKinds) {
     const recentStats = stats.recent[kind];
-    if (recentStats.count <= 0) {
-      continue;
-    }
-
     entries.push({
       url: `/sitemaps/recent-${kind}.xml`,
       lastmod: recentStats.lastmod,
@@ -861,14 +857,6 @@ export async function refreshAllSitemapSnapshots(options: {
     refreshed.push(input.debugTag);
   };
 
-  const remove = async (cacheKey: string, debugTag: string) => {
-    await Promise.all([
-      deleteSitemapSnapshot(r2, cacheKey),
-      invalidateCache(cacheKey),
-    ]);
-    removed.push(debugTag);
-  };
-
   await refresh({
     cacheKey: 'sitemap:index:xml',
     ttl: SITEMAP_INDEX_CACHE_TTL,
@@ -885,36 +873,28 @@ export async function refreshAllSitemapSnapshots(options: {
 
   for (const kind of ['skills', 'profiles', 'orgs'] as const) {
     const recentCacheKey = `sitemap:recent:${kind}:xml`;
-    if (stats.recent[kind].count > 0) {
-      await refresh({
-        cacheKey: recentCacheKey,
-        ttl: SITEMAP_DYNAMIC_CACHE_TTL,
-        debugTag: `recent-${kind}`,
-        fetcher: async () => {
-          let pages: SitemapPage[];
+    await refresh({
+      cacheKey: recentCacheKey,
+      ttl: SITEMAP_DYNAMIC_CACHE_TTL,
+      debugTag: `recent-${kind}`,
+      fetcher: async () => {
+        let pages: SitemapPage[];
 
-          switch (kind) {
-            case 'skills':
-              pages = await loadRecentSkillsSitemapPages(db);
-              break;
-            case 'profiles':
-              pages = await loadRecentProfilesSitemapPages(db);
-              break;
-            case 'orgs':
-              pages = await loadRecentOrgsSitemapPages(db);
-              break;
-          }
+        switch (kind) {
+          case 'skills':
+            pages = await loadRecentSkillsSitemapPages(db);
+            break;
+          case 'profiles':
+            pages = await loadRecentProfilesSitemapPages(db);
+            break;
+          case 'orgs':
+            pages = await loadRecentOrgsSitemapPages(db);
+            break;
+        }
 
-          if (pages.length === 0) {
-            throw new SitemapNotFoundError();
-          }
-
-          return buildUrlSetXml(pages);
-        },
-      });
-    } else {
-      await remove(recentCacheKey, `recent-${kind}`);
-    }
+        return buildUrlSetXml(pages);
+      },
+    });
 
     for (let page = 1; page <= stats.dynamic[kind].pages; page += 1) {
       const cacheKey = `sitemap:${kind}:${page}:xml`;
