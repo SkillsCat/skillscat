@@ -55,6 +55,7 @@
   let success = $state(false);
   let successMessage = $state<string | null>(null);
   let existingSkillSlug = $state<string | null>(null);
+  let wasOpen = $state(false);
 
   // Result state for multi-skill submission
   let submitResults = $state<SubmitResult[]>([]);
@@ -62,8 +63,7 @@
   let existingCount = $state(0);
   const isExistingOnlySuccess = $derived(success && submittedCount === 0 && existingCount > 0);
 
-  function resetDialogState() {
-    githubUrl = '';
+  function resetSubmitState() {
     error = null;
     success = false;
     successMessage = null;
@@ -73,20 +73,33 @@
     existingCount = 0;
   }
 
+  function resetDialogState() {
+    githubUrl = '';
+    resetSubmitState();
+  }
+
+  $effect(() => {
+    if (isOpen && !wasOpen) {
+      resetDialogState();
+    }
+    wasOpen = isOpen;
+  });
+
   // Validate GitHub URL
   const isValidUrl = $derived.by(() => {
-    return isValidGitHubRepoUrlForSubmit(githubUrl);
+    return isValidGitHubRepoUrlForSubmit(githubUrl.trim());
   });
   const canSubmit = $derived(isValidUrl && !isSubmitting);
 
   async function handleSubmit() {
     if (!isValidUrl || isSubmitting) return;
 
+    const normalizedGithubUrl = githubUrl.trim();
     isSubmitting = true;
-    resetDialogState();
+    resetSubmitState();
 
     try {
-      const checkParams = new URLSearchParams({ url: githubUrl.trim() });
+      const checkParams = new URLSearchParams({ url: normalizedGithubUrl });
       const checkResponse = await fetch(`/api/submit?${checkParams.toString()}`, {
         headers: {
           'X-Skillscat-Locale': i18n.locale(),
@@ -112,7 +125,7 @@
           'Content-Type': 'application/json',
           'X-Skillscat-Locale': i18n.locale(),
         },
-        body: JSON.stringify({ url: githubUrl }),
+        body: JSON.stringify({ url: normalizedGithubUrl }),
       });
 
       const contentType = response.headers.get('content-type') || '';

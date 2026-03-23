@@ -1031,7 +1031,8 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     const githubRequestMode: GitHubRequestMode = 'submit_fast_fail';
 
     const body = await readLimitedJsonBody(request, MAX_SUBMIT_BODY_BYTES) as { url?: string; skillPath?: string };
-    const { url, skillPath: explicitSkillPath } = body;
+    const url = typeof body.url === 'string' ? body.url.trim() : '';
+    const explicitSkillPath = body.skillPath;
 
     if (!url) {
       throw new SubmitRouteError({
@@ -1479,7 +1480,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
   const locale = resolveSubmitApiLocale(request, locals.locale);
 
   try {
-    const repoUrl = url.searchParams.get('url');
+    const repoUrl = url.searchParams.get('url')?.trim() || '';
     if (!repoUrl) {
       throw new SubmitRouteError({
         status: 400,
