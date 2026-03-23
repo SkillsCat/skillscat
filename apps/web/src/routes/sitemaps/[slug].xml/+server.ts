@@ -75,10 +75,6 @@ export const GET: RequestHandler = async ({ params, platform }) => {
             pages = [];
         }
 
-        if (pages.length === 0) {
-          throw new SitemapNotFoundError();
-        }
-
         return buildUrlSetXml(pages);
       },
     });

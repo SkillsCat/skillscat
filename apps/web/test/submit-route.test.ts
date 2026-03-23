@@ -348,6 +348,63 @@ describe('submit route', () => {
     expect(payload.path).toBe('');
   });
 
+  it('trims whitespace around repository URLs during submit precheck', async () => {
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          default_branch: 'main',
+          fork: false,
+        });
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
+        return jsonResponse({
+          name: 'SKILL.md',
+          path: 'SKILL.md',
+          type: 'file',
+        });
+      }
+
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const { GET } = await import('../src/routes/api/submit/+server');
+    const response = await GET({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: undefined,
+          GITHUB_TOKEN: 'test-token',
+        },
+      },
+      request: new Request('https://skills.cat/api/submit?url=%20%20https%3A%2F%2Fgithub.com%2Fforker%2Ftoolbox%20%20'),
+      url: new URL('https://skills.cat/api/submit?url=%20%20https%3A%2F%2Fgithub.com%2Fforker%2Ftoolbox%20%20'),
+    } as never);
+
+    const payload = await response.json() as {
+      valid: boolean;
+      owner: string;
+      repo: string;
+      path: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.valid).toBe(true);
+    expect(payload.owner).toBe('forker');
+    expect(payload.repo).toBe('toolbox');
+    expect(payload.path).toBe('');
+  });
+
   it('treats existing skills as valid during submit precheck', async () => {
     const db = buildDbMock({
       '': {
@@ -1044,6 +1101,82 @@ describe('submit route', () => {
     expect(payload.success).toBe(true);
     expect(payload.message).toContain('提交成功');
     expect(queue.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('trims whitespace around repository URLs during submit', async () => {
+    const queue = {
+      send: vi.fn(async () => undefined),
+    };
+    const db = buildDbMock();
+
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          default_branch: 'main',
+          fork: false,
+        });
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
+        return jsonResponse({
+          name: 'SKILL.md',
+          path: 'SKILL.md',
+          type: 'file',
+        });
+      }
+
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const { POST } = await import('../src/routes/api/submit/+server');
+    const response = await POST({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: db,
+          GITHUB_TOKEN: 'test-token',
+          INDEXING_QUEUE: queue,
+        },
+      },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: '  https://github.com/forker/toolbox  ',
+        }),
+      }),
+    } as never);
+
+    const payload = await response.json() as {
+      success: boolean;
+      submitted: number;
+      existing: number;
+      message: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(payload.submitted).toBe(1);
+    expect(payload.existing).toBe(0);
+    expect(payload.message).toContain('submitted successfully');
+    expect(queue.send).toHaveBeenCalledTimes(1);
+    expect(queue.send).toHaveBeenCalledWith(expect.objectContaining({
+      repoOwner: 'forker',
+      repoName: 'toolbox',
+      skillPath: '',
+    }));
   });
 
   it('accepts dot-folder skills during submit precheck', async () => {

@@ -104,7 +104,7 @@ describe('getExpandedCoreSitemapPages', () => {
 });
 
 describe('buildSitemapIndexEntries', () => {
-  it('emits recent delta sitemaps before full dynamic shards', () => {
+  it('keeps recent delta sitemap urls stable before full dynamic shards', () => {
     const entries = buildSitemapIndexEntries({
       dynamic: {
         skills: { count: 10001, pages: 3, lastmod: '2026-03-18' },
@@ -121,6 +121,7 @@ describe('buildSitemapIndexEntries', () => {
     expect(entries.map((entry) => entry.url)).toEqual([
       '/sitemaps/core.xml',
       '/sitemaps/recent-skills.xml',
+      '/sitemaps/recent-profiles.xml',
       '/sitemaps/recent-orgs.xml',
       '/sitemaps/skills-1.xml',
       '/sitemaps/skills-2.xml',
