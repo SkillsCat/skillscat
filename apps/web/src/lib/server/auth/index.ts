@@ -3,6 +3,10 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 
+const SESSION_EXPIRES_IN_SECONDS = 60 * 60 * 24 * 30;
+const SESSION_UPDATE_AGE_SECONDS = 60 * 60 * 24;
+const SESSION_COOKIE_CACHE_MAX_AGE_SECONDS = 5 * 60;
+
 export interface AuthEnv {
   DB: D1Database;
   BETTER_AUTH_SECRET: string;
@@ -35,11 +39,13 @@ export function createAuth(env: AuthEnv, baseURL?: string) {
       }
     },
     session: {
-      expiresIn: 60 * 60 * 24 * 7, // 7 days
-      updateAge: 60 * 60 * 24, // Update session every 24 hours
+      // Keep web sessions alive longer so returning users do not need to
+      // re-authorize with GitHub every week, while still using rolling refresh.
+      expiresIn: SESSION_EXPIRES_IN_SECONDS,
+      updateAge: SESSION_UPDATE_AGE_SECONDS,
       cookieCache: {
         enabled: true,
-        maxAge: 5 * 60 // Cache session in cookie for 5 minutes to reduce DB queries
+        maxAge: SESSION_COOKIE_CACHE_MAX_AGE_SECONDS
       }
     },
     trustedOrigins: [
