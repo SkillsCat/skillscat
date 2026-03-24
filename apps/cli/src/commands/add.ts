@@ -31,6 +31,7 @@ import type { SkillInfo, RepoSource } from '../utils/source/source';
 interface AddOptions {
   global?: boolean;
   agent?: string[];
+  repo?: boolean;
   skill?: string[];
   list?: boolean;
   yes?: boolean;
@@ -60,6 +61,7 @@ const COMPANION_MANIFEST_FILE = '.skillscat-companion-files.json';
 const COMPANION_MANIFEST_VERSION = 1;
 
 export async function add(source: string, options: AddOptions): Promise<void> {
+  const explicitRepoInstall = options.repo === true;
   const repoSource = parseSource(source);
   if (!repoSource) {
     error('Invalid source. Supported formats:');
@@ -92,6 +94,7 @@ export async function add(source: string, options: AddOptions): Promise<void> {
       sourceInput: source,
       repoSource,
       requestedSkillNames: options.skill ?? [],
+      explicitRepoInstall,
       explicitRefBypassRegistry: isExplicitGitHubRefSource,
       githubSnapshot,
     });
@@ -138,13 +141,17 @@ export async function add(source: string, options: AddOptions): Promise<void> {
 
     console.log(pc.dim('─'.repeat(50)));
     console.log(pc.dim('Install with:'));
-    console.log(`  ${pc.cyan(`npx skillscat add ${source}`)}`);
+    console.log(`  ${pc.cyan(formatAddCommand(source, options))}`);
     return;
   }
 
   if (selectionMode === 'install-all' && !options.yes && (!options.skill || options.skill.length === 0)) {
     console.log();
-    info(`No published skill slug matched ${pc.cyan(sourceLabel)}.`);
+    if (explicitRepoInstall) {
+      info(`Treating ${pc.cyan(sourceLabel)} as a repository install.`);
+    } else {
+      info(`No published skill slug matched ${pc.cyan(sourceLabel)}.`);
+    }
     console.log(pc.dim(`Found ${resolvedSkills.length} published skill(s) in repository ${sourceLabel}:`));
     for (const entry of resolvedSkills) {
       console.log(pc.dim(`  - ${entry.skill.name}${formatSkillPathHint(entry.skill.path)}`));
@@ -359,19 +366,22 @@ async function resolveInstallSkills({
   sourceInput,
   repoSource,
   requestedSkillNames,
+  explicitRepoInstall,
   explicitRefBypassRegistry,
   githubSnapshot,
 }: {
   sourceInput: string;
   repoSource: RepoSource;
   requestedSkillNames: string[];
+  explicitRepoInstall: boolean;
   explicitRefBypassRegistry: boolean;
   githubSnapshot?: GitHubRepoSnapshot | null;
 }): Promise<ResolveInstallSkillsResult> {
   const requestedNamesLower = new Set(requestedSkillNames.map((name) => name.toLowerCase()));
   const needsRegistryFirst = repoSource.platform === 'github' && !explicitRefBypassRegistry;
-  const preferSlugLookup = isAmbiguousSlugOrRepoInput(sourceInput, repoSource);
-  const canShortCircuitExactSlug = preferSlugLookup && requestedNamesLower.size === 0;
+  const ambiguousSlugOrRepoInput = isAmbiguousSlugOrRepoInput(sourceInput, repoSource);
+  const preferRepoSelection = explicitRepoInstall || ambiguousSlugOrRepoInput;
+  const canShortCircuitExactSlug = ambiguousSlugOrRepoInput && !explicitRepoInstall && requestedNamesLower.size === 0;
 
   let resolved: ResolvedInstallSkill[] = [];
   let selectionMode: ResolveSelectionMode = 'default';
@@ -410,7 +420,7 @@ async function resolveInstallSkills({
         let selectedSummaries = summaries;
         if (requestedNamesLower.size > 0) {
           selectedSummaries = summaries.filter((item) => requestedNamesLower.has(item.name.toLowerCase()));
-        } else if (preferSlugLookup) {
+        } else if (preferRepoSelection) {
           selectionMode = 'install-all';
         }
 
@@ -460,7 +470,7 @@ async function resolveInstallSkills({
       }
 
       // Fallback: preserve existing behavior for registry slugs or private skills.
-      if (resolved.length === 0 && !gitDiscoveryRanFailedDueToEmptyPath(err)) {
+      if (!explicitRepoInstall && resolved.length === 0 && !gitDiscoveryRanFailedDueToEmptyPath(err)) {
         const registrySkill = await fetchSkill(sourceInput).catch(() => null);
         if (registrySkill?.content) {
           resolved.push(toRegistryResolvedSkill(registrySkill, sourceInput, repoSource));
@@ -834,6 +844,10 @@ function normalizeSkillPath(path?: string): string {
 function formatSkillPathHint(path?: string): string {
   const normalized = normalizeSkillPath(path);
   return normalized ? ` (${normalized})` : '';
+}
+
+function formatAddCommand(source: string, options: AddOptions): string {
+  return options.repo ? `npx skillscat add ${source} --repo` : `npx skillscat add ${source}`;
 }
 
 function toSkillFilePath(path?: string): string {

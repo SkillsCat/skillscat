@@ -43,6 +43,7 @@ program
   .description('Add a skill from a repository')
   .option('-g, --global', 'Install to user directory instead of project')
   .option('-a, --agent <agents...>', 'Target specific agents (e.g., claude-code, cursor, agents)')
+  .option('-r, --repo', 'Treat <source> as a repository instead of an exact published skill slug')
   .option('-s, --skill <skills...>', 'Install specific skills by name')
   .option('-l, --list', 'List available skills without installing')
   .option('-y, --yes', 'Skip confirmation prompts')

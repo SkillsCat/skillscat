@@ -894,6 +894,113 @@ describe('CLI commands with mocked network', () => {
     expect(seenUrls).not.toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
   });
 
+  it('treats shorthand input as a repository when --repo is explicit', async () => {
+    const seenUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      seenUrls.push(url);
+
+      if (url === `${REGISTRY_URL}/skill/testowner/testrepo`) {
+        return mockResponse({
+          name: 'Exact Slug Skill',
+          description: 'Published as an exact slug',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Exact Slug Skill'),
+          githubUrl: '',
+          visibility: 'private',
+          slug: 'testowner/testrepo',
+        }, 200);
+      }
+
+      if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
+        return mockResponse({
+          skills: [
+            {
+              slug: 'testowner/skill-one',
+              name: 'Skill One',
+              description: 'First repo skill',
+              owner: 'testowner',
+              repo: 'testrepo',
+              skillPath: '',
+              githubUrl: 'https://github.com/testowner/testrepo',
+              visibility: 'public',
+              updatedAt: Date.now(),
+              stars: 0,
+            },
+            {
+              slug: 'testowner/skill-two',
+              name: 'Skill Two',
+              description: 'Second repo skill',
+              owner: 'testowner',
+              repo: 'testrepo',
+              skillPath: 'skills/two',
+              githubUrl: 'https://github.com/testowner/testrepo',
+              visibility: 'public',
+              updatedAt: Date.now(),
+              stars: 0,
+            },
+          ],
+          total: 2,
+        }, 200);
+      }
+
+      if (url === `${REGISTRY_URL}/skill/testowner/skill-one`) {
+        return mockResponse({
+          name: 'Skill One',
+          description: 'First repo skill',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Skill One'),
+          githubUrl: 'https://github.com/testowner/testrepo',
+          visibility: 'public',
+          slug: 'testowner/skill-one',
+          skillPath: '',
+        }, 200);
+      }
+
+      if (url === `${REGISTRY_URL}/skill/testowner/skill-two`) {
+        return mockResponse({
+          name: 'Skill Two',
+          description: 'Second repo skill',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Skill Two'),
+          githubUrl: 'https://github.com/testowner/testrepo',
+          visibility: 'public',
+          slug: 'testowner/skill-two',
+          skillPath: 'skills/two',
+        }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() => add('testowner/testrepo', { yes: true, repo: true }));
+    expect(result.exitCode).toBeNull();
+
+    expect(existsSync(join(process.cwd(), '.agents', 'Skill One', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(process.cwd(), '.agents', 'Skill Two', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(process.cwd(), '.agents', 'Exact Slug Skill', 'SKILL.md'))).toBe(false);
+
+    expect(seenUrls).not.toContain(`${REGISTRY_URL}/skill/testowner/testrepo`);
+    expect(seenUrls).toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
+    expect(seenUrls).toContain(`${REGISTRY_URL}/skill/testowner/skill-one`);
+    expect(seenUrls).toContain(`${REGISTRY_URL}/skill/testowner/skill-two`);
+  });
+
   it('does not let an exact slug short-circuit an explicit --skill selection', async () => {
     const seenUrls: string[] = [];
     const fetchMock = vi.fn(async (input: unknown) => {
@@ -987,6 +1094,52 @@ describe('CLI commands with mocked network', () => {
     expect(seenUrls).not.toContain(`${REGISTRY_URL}/skill/testowner/testrepo`);
     expect(seenUrls).toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
     expect(seenUrls).toContain(`${REGISTRY_URL}/skill/testowner/nested-skill`);
+  });
+
+  it('does not fall back to an exact slug when --repo install fails', async () => {
+    const seenUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      seenUrls.push(url);
+
+      if (url === `${REGISTRY_URL}/skill/testowner/testrepo`) {
+        return mockResponse({
+          name: 'Exact Slug Skill',
+          description: 'Published as an exact slug',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Exact Slug Skill'),
+          githubUrl: '',
+          visibility: 'private',
+          slug: 'testowner/testrepo',
+        }, 200);
+      }
+
+      if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
+        return mockResponse({ skills: [], total: 0 }, 200);
+      }
+
+      if (url.includes('https://api.github.com/repos/testowner/testrepo')) {
+        return mockResponse({ message: 'GitHub unavailable' }, 503);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() => add('testowner/testrepo', { yes: true, repo: true }));
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).not.toContain('Installed');
+    expect(existsSync(join(process.cwd(), '.agents', 'Exact Slug Skill', 'SKILL.md'))).toBe(false);
+
+    expect(seenUrls).not.toContain(`${REGISTRY_URL}/skill/testowner/testrepo`);
+    expect(seenUrls).toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
+    expect(seenUrls.some((url) => url.includes('https://api.github.com/repos/testowner/testrepo'))).toBe(true);
   });
 
   it('prompts to install all repo skills when shorthand slug lookup misses', async () => {
