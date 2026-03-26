@@ -609,7 +609,6 @@ async function fetchGitHubSkillCompanionFiles(
   const tree = await snapshot.getTree();
   const normalizedSkillFilePath = normalizeRepoPath(skillFilePath);
   const skillDir = getRepoDirPath(normalizedSkillFilePath);
-  const nestedSkillDirs = getNestedSkillDirectories(tree, normalizedSkillFilePath);
   const pathMap = await snapshot.getPathMap();
 
   const files: SkillCompanionFile[] = [];
@@ -618,7 +617,6 @@ async function fetchGitHubSkillCompanionFiles(
     if (item.type !== 'blob') continue;
     if (repoPath === normalizedSkillFilePath) continue;
     if (!isPathWithinDirectory(repoPath, skillDir)) continue;
-    if (isPathInNestedSkillDirectory(repoPath, nestedSkillDirs)) continue;
 
     const relativePath = toRelativeSkillPath(repoPath, skillDir);
     if (!relativePath) continue;
@@ -692,33 +690,6 @@ async function resolveGitHubBlobOrSymlinkContent({
     depth: depth + 1,
     visited: nextVisited,
   });
-}
-
-function getNestedSkillDirectories(tree: GitHubTreeItem[], currentSkillFilePath: string): string[] {
-  const currentSkillDir = getRepoDirPath(currentSkillFilePath);
-  const nested = new Set<string>();
-
-  for (const item of tree) {
-    const itemPath = normalizeRepoPath(item.path);
-    if (item.type !== 'blob' || !itemPath.endsWith('/SKILL.md')) continue;
-    if (itemPath === currentSkillFilePath) continue;
-
-    const dir = getRepoDirPath(itemPath);
-    if (dir === currentSkillDir) continue;
-    if (!isPathWithinDirectory(dir, currentSkillDir)) continue;
-    nested.add(dir);
-  }
-
-  return Array.from(nested);
-}
-
-function isPathInNestedSkillDirectory(path: string, nestedSkillDirs: string[]): boolean {
-  for (const nestedDir of nestedSkillDirs) {
-    if (isPathWithinDirectory(path, nestedDir)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function normalizeRepoPath(path: string): string {

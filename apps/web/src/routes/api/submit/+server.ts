@@ -20,6 +20,8 @@ const GITHUB_API_BASE = 'https://api.github.com';
 // Limits for scanning
 const MAX_DEPTH = 3;
 const MAX_SKILLS_TO_SUBMIT = 50; // Safety limit for auto-submission
+const ROOT_SUBMIT_SCAN_MAX_DEPTH = Number.MAX_SAFE_INTEGER;
+const ROOT_SUBMIT_SCAN_MAX_SKILLS = 100;
 const QUEUE_DELAY_MS = 1000; // 1 second delay between queue messages
 
 /** Maximum size for submit request JSON body */
@@ -133,6 +135,7 @@ function buildSubmitMultipleMessage(
   locale: App.Locals['locale'],
   queued: number,
   existing: number,
+  resurrected: number,
   refreshQueued: number,
   truncated: boolean
 ): string {
@@ -149,6 +152,13 @@ function buildSubmitMultipleMessage(
     parts.push(formatSubmitApiMessage(locale, {
       key: 'skillsAlreadyExist',
       values: { count: existing },
+    }));
+  }
+
+  if (resurrected > 0) {
+    parts.push(formatSubmitApiMessage(locale, {
+      key: 'skillsResurrected',
+      values: { count: resurrected },
     }));
   }
 
@@ -190,7 +200,7 @@ interface ExistingSkillState {
 
 interface SubmitResultEntry {
   path: string;
-  status: 'queued' | 'exists' | 'failed';
+  status: 'queued' | 'exists' | 'resurrected' | 'failed';
   slug?: string;
   refreshQueued?: boolean;
 }
@@ -549,7 +559,8 @@ async function scanRepoForSkillMd(
   token?: string,
   basePath: string = '',
   maxDepth: number = MAX_DEPTH,
-  mode: GitHubRequestMode = 'default'
+  mode: GitHubRequestMode = 'default',
+  maxSkills: number = MAX_SKILLS_TO_SUBMIT
 ): Promise<ScanResult> {
   try {
     // Use Git Trees API with recursive flag
@@ -602,8 +613,8 @@ async function scanRepoForSkillMd(
       });
 
       // Limit results for safety
-      const truncated = found.length > MAX_SKILLS_TO_SUBMIT || data.truncated;
-      const limited = found.slice(0, MAX_SKILLS_TO_SUBMIT);
+      const truncated = found.length > maxSkills || data.truncated;
+      const limited = found.slice(0, maxSkills);
 
       return { found: limited, truncated };
     }
@@ -625,7 +636,7 @@ async function scanRepoForSkillMd(
   }
 
   // Fallback to search API
-  return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, mode);
+  return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, mode, maxSkills);
 }
 
 interface GitHubSearchItem {
@@ -652,7 +663,8 @@ async function searchRepoForSkillMd(
   token?: string,
   basePath: string = '',
   maxDepth: number = MAX_DEPTH,
-  mode: GitHubRequestMode = 'default'
+  mode: GitHubRequestMode = 'default',
+  maxSkills: number = MAX_SKILLS_TO_SUBMIT
 ): Promise<ScanResult> {
   try {
     const query = encodeURIComponent(`filename:SKILL.md repo:${owner}/${repo}`);
@@ -701,8 +713,8 @@ async function searchRepoForSkillMd(
     });
 
     // Limit results for safety
-    const truncated = found.length > MAX_SKILLS_TO_SUBMIT || data.incomplete_results;
-    const limited = found.slice(0, MAX_SKILLS_TO_SUBMIT);
+    const truncated = found.length > maxSkills || data.incomplete_results;
+    const limited = found.slice(0, maxSkills);
 
     return { found: limited, truncated };
   } catch (err) {
@@ -1081,6 +1093,35 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, githubRequestMode);
 
     if (hasSkillMd) {
+      if (!path) {
+        try {
+          const scanResult = await scanRepoForSkillMd(
+            owner,
+            repo,
+            githubToken,
+            path,
+            ROOT_SUBMIT_SCAN_MAX_DEPTH,
+            githubRequestMode,
+            ROOT_SUBMIT_SCAN_MAX_SKILLS
+          );
+          if (scanResult.found.length > 1) {
+            return await submitMultipleSkills({
+              owner,
+              repo,
+              skills: scanResult.found,
+              truncated: scanResult.truncated,
+              userId: submitterUserId,
+              db,
+              queue,
+              platform,
+              locale,
+            });
+          }
+        } catch (scanError) {
+          log.warn(`Failed to scan nested skills for root submit ${owner}/${repo}; falling back to single-skill submit`, scanError);
+        }
+      }
+
       // SKILL.md found at the submitted path - submit directly
       return await submitSingleSkill({
         owner,
@@ -1169,15 +1210,6 @@ async function submitMultipleSkills({
   platform: App.Platform | undefined;
   locale: App.Locals['locale'];
 }): Promise<Response> {
-  if (!queue) {
-    log.error(`INDEXING_QUEUE not available for ${owner}/${repo}`);
-    throw new SubmitRouteError({
-      status: 500,
-      code: 'indexing_queue_not_configured',
-      descriptor: { key: 'indexingQueueNotConfigured' },
-    });
-  }
-
   const results: SubmitResultEntry[] = [];
   const now = Date.now();
 
@@ -1189,14 +1221,34 @@ async function submitMultipleSkills({
       // Check if already exists
       if (db) {
         const existing = await db.prepare(`
-          SELECT slug, tier, next_update_at, indexed_at FROM skills
+          SELECT id, slug, tier, next_update_at, indexed_at FROM skills
           WHERE repo_owner = ? AND repo_name = ?
           AND COALESCE(skill_path, '') = ?
         `)
           .bind(owner, repo, skillPath || '')
           .first<ExistingSkillState>();
 
-        if (existing && existing.tier !== 'archived') {
+        if (existing) {
+          if (existing.tier === 'archived') {
+            if (!existing.id) {
+              results.push({ path: skill.path, status: 'failed', slug: existing.slug });
+              continue;
+            }
+
+            const resurrected = await triggerDirectResurrection(db, platform?.env?.R2, existing.id);
+            if (!resurrected) {
+              results.push({ path: skill.path, status: 'failed', slug: existing.slug });
+              continue;
+            }
+
+            results.push({
+              path: skill.path,
+              status: 'resurrected',
+              slug: existing.slug,
+            });
+            continue;
+          }
+
           const refreshQueued = shouldQueueExistingSkillRefreshOnSubmit(existing, now)
             ? await tryQueueExistingSkillRefresh(queue, owner, repo, skillPath, userId)
             : false;
@@ -1209,10 +1261,23 @@ async function submitMultipleSkills({
           });
           continue;
         }
-
-        // If archived, we'll let it be resurrected through the queue
       }
+    } catch (err) {
+      log.error(`Failed to inspect existing skill state: ${owner}/${repo}/${skillPath}`, err);
+      results.push({ path: skill.path, status: 'failed' });
+      continue;
+    }
 
+    if (!queue) {
+      log.error(`INDEXING_QUEUE not available for ${owner}/${repo}`);
+      throw new SubmitRouteError({
+        status: 500,
+        code: 'indexing_queue_not_configured',
+        descriptor: { key: 'indexingQueueNotConfigured' },
+      });
+    }
+
+    try {
       // Send to indexing queue with delay
       // Use delaySeconds for staggered processing (Cloudflare Queues supports this)
       const delaySeconds = i * Math.ceil(QUEUE_DELAY_MS / 1000);
@@ -1238,18 +1303,20 @@ async function submitMultipleSkills({
 
   const queued = results.filter(r => r.status === 'queued').length;
   const existing = results.filter(r => r.status === 'exists').length;
+  const resurrected = results.filter(r => r.status === 'resurrected').length;
   const refreshQueued = results.filter(r => r.refreshQueued).length;
   const failed = results.filter(r => r.status === 'failed').length;
 
   return json({
-    success: queued > 0 || existing > 0,
+    success: queued > 0 || existing > 0 || resurrected > 0,
     submitted: queued,
     existing,
+    resurrected,
     refreshQueued,
     failed,
     truncated,
     results,
-    message: buildSubmitMultipleMessage(locale, queued, existing, refreshQueued, truncated),
+    message: buildSubmitMultipleMessage(locale, queued, existing, resurrected, refreshQueued, truncated),
   });
 }
 

@@ -49,7 +49,7 @@ import {
   type CanonicalSkillCandidate,
 } from '../src/lib/server/skill/dedup';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '../src/lib/server/skill/title';
-import { getNestedSkillPaths, resolveSkillRelativePath } from '../src/lib/server/skill/scope';
+import { resolveSkillRelativePath } from '../src/lib/server/skill/scope';
 import { buildSecurityContentFingerprint } from '../src/lib/server/security';
 import {
   buildSecurityAnalysisMessage,
@@ -766,7 +766,6 @@ async function fetchDirectoryFiles(
     throw new Error('Failed to fetch repository tree');
   }
 
-  const nestedSkillPaths = skillPath ? [] : getNestedSkillPaths(treeData.tree.map((item) => item.path));
   const files: DirectoryFile[] = [];
   const textContents = new Map<string, string>();
 
@@ -783,7 +782,7 @@ async function fetchDirectoryFiles(
     if (item.type !== 'blob') continue;
 
     // Filter by skill path prefix
-    const relativePath = resolveSkillRelativePath(item.path, skillPath, nestedSkillPaths);
+    const relativePath = resolveSkillRelativePath(item.path, skillPath);
     if (!relativePath) continue;
 
     const fileSize = item.size || 0;

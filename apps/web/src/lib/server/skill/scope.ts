@@ -24,7 +24,7 @@ export function getNestedSkillPaths(treePaths: string[]): string[] {
 export function resolveSkillRelativePath(
   itemPath: string,
   skillPath: string | null | undefined,
-  nestedSkillPaths: string[] = []
+  _nestedSkillPaths: string[] = []
 ): string | null {
   const normalizedItemPath = normalizeSkillTreePath(itemPath);
   const normalizedSkillPath = normalizeSkillTreePath(skillPath || '');
@@ -35,13 +35,6 @@ export function resolveSkillRelativePath(
       return null;
     }
     return normalizedItemPath.slice(prefix.length);
-  }
-
-  for (const nestedSkillPath of nestedSkillPaths) {
-    const prefix = `${normalizeSkillTreePath(nestedSkillPath)}/`;
-    if (normalizedItemPath.startsWith(prefix)) {
-      return null;
-    }
   }
 
   return normalizedItemPath;

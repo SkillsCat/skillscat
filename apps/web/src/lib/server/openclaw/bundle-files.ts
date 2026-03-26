@@ -1,7 +1,7 @@
 import { getBlob, getRepo, getTreeRecursive } from '$lib/server/github-client/rest';
 import { buildGithubSkillR2Prefixes, buildUploadSkillR2Prefix } from '$lib/skill-path';
 import { buildBundleExpectationFromFileTree, chooseBestR2Bundle } from '$lib/server/skill/r2-bundle';
-import { getNestedSkillPaths, resolveSkillRelativePath } from '$lib/server/skill/scope';
+import { resolveSkillRelativePath } from '$lib/server/skill/scope';
 import type { SkillDetail } from '$lib/types';
 import type { SkillFile } from '$lib/server/skill/files';
 
@@ -134,11 +134,10 @@ async function fetchGitHubBundleFiles(
     throw new Error('Repository tree is truncated; cannot build a full ClawHub-compatible bundle.');
   }
 
-  const nestedSkillPaths = skill.skillPath ? [] : getNestedSkillPaths(tree.tree.map((item) => item.path));
   const candidates = tree.tree
     .filter((item) => item.type === 'blob')
     .map((item) => {
-      const scopedPath = resolveSkillRelativePath(item.path, skill.skillPath, nestedSkillPaths);
+      const scopedPath = resolveSkillRelativePath(item.path, skill.skillPath);
       if (!scopedPath) return null;
       const relativePath = normalizeBundlePath(scopedPath);
       return relativePath ? { sha: item.sha, path: relativePath } : null;

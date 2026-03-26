@@ -15,6 +15,7 @@ interface SubmitResponse {
   retryAfterSeconds?: number;
   submitted?: number;
   existing?: number;
+  resurrected?: number;
   existingSlug?: string;
   multipleFound?: boolean;
   skills?: Array<{ path: string; skillPath: string; depth: number }>;

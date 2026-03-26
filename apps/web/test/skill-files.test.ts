@@ -43,13 +43,20 @@ describe('parseSkillFilesInput', () => {
           tree: [
             { path: 'SKILL.md', type: 'blob', sha: 'skill-md', size: 7 },
             { path: 'templates/prompt.txt', type: 'blob', sha: 'prompt', size: 6 },
+            { path: 'subskill/SKILL.md', type: 'blob', sha: 'subskill-skill', size: 11 },
+            { path: 'subskill/extra.txt', type: 'blob', sha: 'subskill-extra', size: 10 },
           ],
         }),
       })),
       getBlob: vi.fn(async (_owner: string, _repo: string, sha: string) => ({
         ok: true,
         json: async () => ({
-          content: sha === 'skill-md' ? btoa('# Demo') : btoa('Prompt'),
+          content: ({
+            'skill-md': btoa('# Demo'),
+            prompt: btoa('Prompt'),
+            'subskill-skill': btoa('# Subskill'),
+            'subskill-extra': btoa('Child file'),
+          })[sha],
         }),
       })),
     }));
@@ -72,6 +79,8 @@ describe('parseSkillFilesInput', () => {
         files: [
           { path: 'SKILL.md', type: 'text' },
           { path: 'templates/prompt.txt', type: 'text' },
+          { path: 'subskill/SKILL.md', type: 'text' },
+          { path: 'subskill/extra.txt', type: 'text' },
         ],
       }),
     };
@@ -143,7 +152,13 @@ describe('parseSkillFilesInput', () => {
       slug: 'demo/demo-skill',
     });
 
-    expect(result.data.files.map((file) => file.path)).toEqual(['SKILL.md', 'templates/prompt.txt']);
+    expect(result.data.files.map((file) => file.path)).toEqual([
+      'SKILL.md',
+      'templates/prompt.txt',
+      'subskill/SKILL.md',
+      'subskill/extra.txt',
+    ]);
     expect(writtenEntries['skills/github/demo/repo/_root_/templates/prompt.txt']).toBe('Prompt');
+    expect(writtenEntries['skills/github/demo/repo/_root_/subskill/extra.txt']).toBe('Child file');
   });
 });

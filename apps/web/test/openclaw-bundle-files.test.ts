@@ -103,6 +103,8 @@ describe('resolveOpenClawBundleFiles', () => {
             { path: 'SKILL.md', type: 'blob', sha: 'skill-md' },
             { path: 'templates/prompt.txt', type: 'blob', sha: 'prompt' },
             { path: '.claude/commands/review.md', type: 'blob', sha: 'dot-companion' },
+            { path: 'subskill/SKILL.md', type: 'blob', sha: 'subskill-skill' },
+            { path: 'subskill/extra.txt', type: 'blob', sha: 'subskill-extra' },
           ],
         }),
       })),
@@ -113,6 +115,8 @@ describe('resolveOpenClawBundleFiles', () => {
             'skill-md': btoa('# Demo'),
             prompt: btoa('Write a better prompt'),
             'dot-companion': btoa('Review the current change set'),
+            'subskill-skill': btoa('# Nested Skill'),
+            'subskill-extra': btoa('Nested companion'),
           };
 
           return {
@@ -136,6 +140,8 @@ describe('resolveOpenClawBundleFiles', () => {
     expect(files.map((file) => file.path)).toEqual([
       '.claude/commands/review.md',
       'SKILL.md',
+      'subskill/extra.txt',
+      'subskill/SKILL.md',
       'templates/prompt.txt',
     ]);
   });

@@ -129,6 +129,14 @@ function mockGitHubCompanionSkillFetch() {
       return mockResponse({ content: Buffer.from('shared prompt content').toString('base64'), encoding: 'base64' }, 200);
     }
 
+    if (url.endsWith('/git/blobs/sha-other')) {
+      return mockResponse({ content: Buffer.from('# Nested skill').toString('base64'), encoding: 'base64' }, 200);
+    }
+
+    if (url.endsWith('/git/blobs/sha-other-extra')) {
+      return mockResponse({ content: Buffer.from('nested extra').toString('base64'), encoding: 'base64' }, 200);
+    }
+
     throw new Error(`Unexpected fetch: ${url}`);
   });
 
@@ -350,7 +358,8 @@ describe('CLI commands with mocked network', () => {
     expect(readFileSync(join(skillRoot, 'SKILL.md'), 'utf-8')).toContain('Hello from v1');
     expect(readFileSync(join(skillRoot, 'notes.txt'), 'utf-8')).toBe('local notes');
     expect(readFileSync(join(skillRoot, 'templates', 'prompt.txt'), 'utf-8')).toBe('shared prompt content');
-    expect(existsSync(join(skillRoot, 'subskill', 'extra.txt'))).toBe(false);
+    expect(readFileSync(join(skillRoot, 'subskill', 'SKILL.md'), 'utf-8')).toBe('# Nested skill');
+    expect(readFileSync(join(skillRoot, 'subskill', 'extra.txt'), 'utf-8')).toBe('nested extra');
     const treeRequests = fetchMock.mock.calls.filter((call) =>
       toUrlString(call[0]).includes('/git/trees/feature-x?recursive=1')
     );

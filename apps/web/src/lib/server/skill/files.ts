@@ -13,7 +13,7 @@ import {
   buildBundleExpectationFromRawFileStructure,
   chooseBestR2Bundle,
 } from '$lib/server/skill/r2-bundle';
-import { getNestedSkillPaths, resolveSkillRelativePath } from '$lib/server/skill/scope';
+import { resolveSkillRelativePath } from '$lib/server/skill/scope';
 
 export interface SkillFile {
   path: string;
@@ -177,7 +177,6 @@ async function fetchGitHubFiles(
   if (!treeRes.ok) throw new Error(`Failed to fetch tree: ${treeRes.status}`);
   const treeData = await treeRes.json() as { tree: GitHubTreeItem[] };
 
-  const nestedSkillPaths = skillPath ? [] : getNestedSkillPaths(treeData.tree.map((item) => item.path));
   const files: SkillFile[] = [];
 
   const MAX_FILES = 50;
@@ -187,7 +186,7 @@ async function fetchGitHubFiles(
     if (fileCount >= MAX_FILES) break;
     if (item.type !== 'blob') continue;
 
-    const relativePath = resolveSkillRelativePath(item.path, skillPath, nestedSkillPaths);
+    const relativePath = resolveSkillRelativePath(item.path, skillPath);
     if (!relativePath) continue;
 
     if (item.size && item.size > 512 * 1024) continue;

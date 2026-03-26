@@ -18,7 +18,7 @@
 
   interface SubmitResult {
     path: string;
-    status: 'queued' | 'exists' | 'failed';
+    status: 'queued' | 'exists' | 'resurrected' | 'failed';
     slug?: string;
     refreshQueued?: boolean;
   }
@@ -39,6 +39,7 @@
     existingSlug?: string;
     submitted?: number;
     existing?: number;
+    resurrected?: number;
     refreshQueued?: number;
     results?: SubmitResult[];
     message?: string;
@@ -152,7 +153,7 @@
 
       successMessage = data.message || null;
       existingSkillSlug = data.existingSlug
-        || data.results?.find((result) => result.status === 'exists')?.slug
+        || data.results?.find((result) => result.status === 'exists' || result.status === 'resurrected')?.slug
         || null;
       submitResults = data.results || [];
       submittedCount = data.submitted || 0;
