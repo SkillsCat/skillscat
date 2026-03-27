@@ -8,9 +8,11 @@ function getIndexNowKey(platformKey: string | undefined): string {
   return (env.INDEXNOW_KEY || platformKey || '').trim();
 }
 
-export const GET: RequestHandler = async ({ platform }) => {
-  const key = getIndexNowKey(platform?.env?.INDEXNOW_KEY);
-  if (!key) {
+export const GET: RequestHandler = async ({ params, platform }) => {
+  const configuredKey = getIndexNowKey(platform?.env?.INDEXNOW_KEY);
+  const requestedKey = String(params.key || '').trim();
+
+  if (!configuredKey || !requestedKey || requestedKey !== configuredKey) {
     return new Response('Not Found', {
       status: 404,
       headers: {
@@ -20,7 +22,7 @@ export const GET: RequestHandler = async ({ platform }) => {
     });
   }
 
-  return new Response(key, {
+  return new Response(configuredKey, {
     headers: {
       'Cache-Control': INDEXNOW_CACHE_CONTROL,
       'Content-Type': 'text/plain; charset=utf-8',

@@ -3,7 +3,6 @@ import { buildSkillPath } from '$lib/skill-path';
 
 const DEFAULT_INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow';
 const DEFAULT_INDEXNOW_DEDUPE_TTL_SECONDS = 600;
-const DEFAULT_INDEXNOW_KEY_LOCATION_PATH = '/indexnow.txt';
 const INDEXNOW_DEDUPE_PREFIX = 'seo:indexnow:v1';
 const MAX_URLS_PER_REQUEST = 10_000;
 
@@ -81,10 +80,17 @@ function getSiteHost(): string {
   return new URL(SITE_URL).host;
 }
 
-export function getIndexNowKeyLocation(env: Pick<IndexNowEnvLike, 'INDEXNOW_KEY_LOCATION'> | undefined): string {
+function buildDefaultIndexNowKeyLocation(key: string): string {
+  return `${getSiteOrigin()}/${encodeURIComponent(key)}.txt`;
+}
+
+export function getIndexNowKeyLocation(
+  env: Pick<IndexNowEnvLike, 'INDEXNOW_KEY' | 'INDEXNOW_KEY_LOCATION'> | undefined
+): string {
   const configured = env?.INDEXNOW_KEY_LOCATION?.trim();
   if (!configured) {
-    return `${getSiteOrigin()}${DEFAULT_INDEXNOW_KEY_LOCATION_PATH}`;
+    const key = env?.INDEXNOW_KEY?.trim();
+    return key ? buildDefaultIndexNowKeyLocation(key) : '';
   }
 
   if (/^https?:\/\//i.test(configured)) {
@@ -268,7 +274,7 @@ export async function submitIndexNowUrls(
       body: JSON.stringify({
         host: getSiteHost(),
         key,
-        keyLocation,
+        ...(keyLocation ? { keyLocation } : {}),
         urlList: urlChunk,
       }),
     });

@@ -53,7 +53,6 @@ CACHE_VERSION = "v1"
 SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
 RECOMMEND_ALGO_VERSION = "v1"
 INDEXNOW_ENABLED = "0"
-INDEXNOW_KEY_LOCATION = "http://localhost:3000/indexnow.txt"
 
 [env.production]
 name = "skillscat-web-production"
@@ -93,4 +92,3 @@ CACHE_VERSION = "v1"
 SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
 RECOMMEND_ALGO_VERSION = "v1"
 INDEXNOW_ENABLED = "1"
-INDEXNOW_KEY_LOCATION = "https://your-domain.com/indexnow.txt"
