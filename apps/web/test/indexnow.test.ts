@@ -41,14 +41,50 @@ describe('buildIndexNowSkillUrls', () => {
 });
 
 describe('getIndexNowKeyLocation', () => {
-  it('uses the default root-level key file when unset', () => {
-    expect(getIndexNowKeyLocation(undefined)).toBe('https://skills.cat/indexnow.txt');
+  it('uses the default root-level key-named file when unset', () => {
+    expect(getIndexNowKeyLocation({ INDEXNOW_KEY: 'secret-key' })).toBe('https://skills.cat/secret-key.txt');
+  });
+
+  it('returns empty when neither key nor override is configured', () => {
+    expect(getIndexNowKeyLocation(undefined)).toBe('');
   });
 
   it('accepts root-relative overrides', () => {
     expect(getIndexNowKeyLocation({ INDEXNOW_KEY_LOCATION: '/custom-indexnow.txt' })).toBe(
       'https://skills.cat/custom-indexnow.txt'
     );
+  });
+});
+
+describe('indexnow key route', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.doMock('$env/dynamic/private', () => ({ env: {} }));
+  });
+
+  it('serves the configured key from the root-level key file path', async () => {
+    const { GET } = await import('../src/routes/[key].txt/+server');
+    const response = await GET({
+      params: { key: 'secret-key' },
+      platform: { env: { INDEXNOW_KEY: 'secret-key' }, context: {} },
+    } as never);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('public, max-age=300, s-maxage=300');
+    expect(response.headers.get('x-robots-tag')).toBe('noindex, nofollow, noarchive');
+    await expect(response.text()).resolves.toBe('secret-key');
+  });
+
+  it('returns 404 when the requested key does not match the configured key', async () => {
+    const { GET } = await import('../src/routes/[key].txt/+server');
+    const response = await GET({
+      params: { key: 'wrong-key' },
+      platform: { env: { INDEXNOW_KEY: 'secret-key' }, context: {} },
+    } as never);
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    await expect(response.text()).resolves.toBe('Not Found');
   });
 });
 
@@ -65,7 +101,6 @@ describe('submitIndexNowUrls', () => {
     const result = await submitIndexNowUrls({
       env: {
         INDEXNOW_KEY: 'secret-key',
-        INDEXNOW_KEY_LOCATION: '/indexnow.txt',
         KV: kv as unknown as KVNamespace,
       },
       urls: [
@@ -95,12 +130,28 @@ describe('submitIndexNowUrls', () => {
     expect(body).toEqual({
       host: 'skills.cat',
       key: 'secret-key',
-      keyLocation: 'https://skills.cat/indexnow.txt',
+      keyLocation: 'https://skills.cat/secret-key.txt',
       urlList: [
         'https://skills.cat/skills/acme/demo-skill',
         'https://skills.cat/u/acme',
       ],
     });
+  });
+
+  it('uses a root-level keyLocation by default and allows overrides', async () => {
+    await submitIndexNowUrls({
+      env: {
+        INDEXNOW_KEY: 'secret-key',
+        INDEXNOW_KEY_LOCATION: '/custom-indexnow.txt',
+      },
+      urls: ['https://skills.cat/skills/acme/demo-skill'],
+      source: 'explicit-key-location',
+      fetchImpl,
+    });
+
+    const [, requestInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(requestInit.body));
+    expect(body.keyLocation).toBe('https://skills.cat/custom-indexnow.txt');
   });
 
   it('uses KV to skip duplicate submissions after a successful push', async () => {

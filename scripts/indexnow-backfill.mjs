@@ -2,8 +2,10 @@
 
 const DEFAULT_SITE_URL = 'https://skills.cat';
 const DEFAULT_INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow';
-const DEFAULT_KEY_LOCATION_PATH = '/indexnow.txt';
 const MAX_URLS_PER_REQUEST = 10_000;
+const MIN_URLS_PER_REQUEST = 500;
+const DEFAULT_RETRY_AFTER_MS = 10 * 60 * 1000;
+const MAX_429_RETRIES = 6;
 
 function parseArgs(argv) {
   const options = {
@@ -79,7 +81,7 @@ function getSitemapUrl(siteUrl, sitemapUrl) {
   return sitemapUrl || `${normalizeOrigin(siteUrl)}/sitemap.xml`;
 }
 
-function getKeyLocation(siteUrl, keyLocation) {
+function getKeyLocation(siteUrl, key, keyLocation) {
   if (keyLocation) {
     if (/^https?:\/\//i.test(keyLocation)) {
       return keyLocation;
@@ -87,7 +89,7 @@ function getKeyLocation(siteUrl, keyLocation) {
     return `${normalizeOrigin(siteUrl)}${keyLocation.startsWith('/') ? keyLocation : `/${keyLocation}`}`;
   }
 
-  return `${normalizeOrigin(siteUrl)}${DEFAULT_KEY_LOCATION_PATH}`;
+  return `${normalizeOrigin(siteUrl)}/${encodeURIComponent(key)}.txt`;
 }
 
 function decodeXml(value) {
@@ -119,6 +121,24 @@ async function fetchText(url) {
   }
 
   return response.text();
+}
+
+async function verifyKeyFile({ keyFileUrl, key }) {
+  const response = await fetch(keyFileUrl, {
+    headers: {
+      'user-agent': 'SkillsCat-IndexNow-Backfill/1.0',
+      accept: 'text/plain, */*;q=0.1',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`IndexNow key file check failed for ${keyFileUrl}: ${response.status} ${response.statusText}`);
+  }
+
+  const body = (await response.text()).trim();
+  if (body !== key) {
+    throw new Error(`IndexNow key file check failed for ${keyFileUrl}: response body did not match the configured key.`);
+  }
 }
 
 async function collectUrlsFromSitemap(startUrl, siteHost, visited = new Set()) {
@@ -160,34 +180,91 @@ function chunkUrls(urls) {
   return chunks;
 }
 
-async function submitUrls({ endpoint, host, key, keyLocation, urls, dryRun }) {
-  const chunks = chunkUrls(urls);
+function parseRetryAfterMs(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return DEFAULT_RETRY_AFTER_MS;
 
-  for (const [index, chunk] of chunks.entries()) {
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.max(seconds * 1000, 1000);
+  }
+
+  const retryAt = Date.parse(raw);
+  if (Number.isFinite(retryAt)) {
+    return Math.max(retryAt - Date.now(), 1000);
+  }
+
+  return DEFAULT_RETRY_AFTER_MS;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function submitChunk({ endpoint, host, key, keyLocation, chunk }) {
+  return fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify({
+      host,
+      key,
+      ...(keyLocation ? { keyLocation } : {}),
+      urlList: chunk,
+    }),
+  });
+}
+
+async function submitUrls({ endpoint, host, key, keyLocation, urls, dryRun }) {
+  const totalChunks = chunkUrls(urls).length || 1;
+  let submittedUrls = 0;
+  let chunkIndex = 0;
+  let batchSize = MAX_URLS_PER_REQUEST;
+  let throttledRetries = 0;
+
+  while (submittedUrls < urls.length) {
+    const chunk = urls.slice(submittedUrls, submittedUrls + batchSize);
+    chunkIndex += 1;
+
     if (dryRun) {
-      console.log(`[dry-run] chunk ${index + 1}/${chunks.length}: ${chunk.length} urls`);
+      console.log(`[dry-run] chunk ${chunkIndex}/${totalChunks}: ${chunk.length} urls`);
+      submittedUrls += chunk.length;
       continue;
     }
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json; charset=utf-8',
-      },
-      body: JSON.stringify({
-        host,
-        key,
-        keyLocation,
-        urlList: chunk,
-      }),
+    const response = await submitChunk({
+      endpoint,
+      host,
+      key,
+      keyLocation,
+      chunk,
     });
+
+    if (response.status === 429) {
+      throttledRetries += 1;
+      if (throttledRetries > MAX_429_RETRIES) {
+        throw new Error(`IndexNow submission hit 429 too many times while sending chunk ${chunkIndex}.`);
+      }
+
+      const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
+      batchSize = Math.max(Math.floor(batchSize / 2), MIN_URLS_PER_REQUEST);
+      console.log(`IndexNow returned 429. Waiting ${Math.ceil(retryAfterMs / 1000)}s before retrying chunk ${chunkIndex} with batch size ${batchSize}.`);
+      await sleep(retryAfterMs);
+      chunkIndex -= 1;
+      continue;
+    }
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      throw new Error(`IndexNow submission failed for chunk ${index + 1}: ${response.status} ${response.statusText}${text ? ` - ${text.slice(0, 200)}` : ''}`);
+      throw new Error(`IndexNow submission failed for chunk ${chunkIndex}: ${response.status} ${response.statusText}${text ? ` - ${text.slice(0, 200)}` : ''}`);
     }
 
-    console.log(`Submitted chunk ${index + 1}/${chunks.length}: ${chunk.length} urls`);
+    throttledRetries = 0;
+    submittedUrls += chunk.length;
+    console.log(`Submitted chunk ${chunkIndex}/${Math.max(totalChunks, chunkIndex)}: ${chunk.length} urls`);
   }
 }
 
@@ -196,10 +273,17 @@ async function main() {
   const siteOrigin = normalizeOrigin(options.siteUrl);
   const siteHost = new URL(siteOrigin).host;
   const sitemapUrl = getSitemapUrl(siteOrigin, options.sitemapUrl);
-  const keyLocation = getKeyLocation(siteOrigin, options.keyLocation);
+  const key = options.key.trim();
+  const keyLocation = key ? getKeyLocation(siteOrigin, key, options.keyLocation) : '';
 
-  if (!options.dryRun && !options.key.trim()) {
+  if (!options.dryRun && !key) {
     throw new Error('INDEXNOW_KEY is required unless --dry-run is used.');
+  }
+
+  if (!options.dryRun) {
+    console.log(`Verifying IndexNow key file at ${keyLocation} ...`);
+    await verifyKeyFile({ keyFileUrl: keyLocation, key });
+    console.log('IndexNow key file verified.');
   }
 
   console.log(`Collecting URLs from ${sitemapUrl} ...`);
@@ -215,7 +299,7 @@ async function main() {
   await submitUrls({
     endpoint: options.endpoint,
     host: siteHost,
-    key: options.key.trim(),
+    key,
     keyLocation,
     urls: limitedUrls,
     dryRun: options.dryRun,

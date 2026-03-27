@@ -563,7 +563,6 @@ CACHE_VERSION = "v1"
 SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
 RECOMMEND_ALGO_VERSION = "v1"
 INDEXNOW_ENABLED = "1"
-INDEXNOW_KEY_LOCATION = "https://your-domain.com/indexnow.txt"
 `.trim(),
   'wrangler.github-events.toml': `
 [env.production]
@@ -627,7 +626,6 @@ queue = "skillscat-security-analysis"
 [env.production.vars]
 GITHUB_API_VERSION = "2022-11-28"
 INDEXNOW_ENABLED = "1"
-INDEXNOW_KEY_LOCATION = "https://your-domain.com/indexnow.txt"
 `.trim(),
   'wrangler.classification.toml': `
 [env.production]
@@ -1198,7 +1196,6 @@ function ensurePrecomputeWorkerEnvVars({
 }
 
 function ensureIndexNowEnvVars({
-  productionAppUrl,
   includeProductionVars = true,
   includePreview = true,
   includeIndexing = true,
@@ -1209,7 +1206,6 @@ function ensureIndexNowEnvVars({
     results.push(
       upsertTomlVarsEntries('wrangler.preview.toml', '[vars]', {
         INDEXNOW_ENABLED: '0',
-        INDEXNOW_KEY_LOCATION: 'http://localhost:3000/indexnow.txt',
       }),
     );
 
@@ -1217,7 +1213,6 @@ function ensureIndexNowEnvVars({
       results.push(
         upsertTomlVarsEntries('wrangler.preview.toml', '[env.production.vars]', {
           INDEXNOW_ENABLED: '1',
-          INDEXNOW_KEY_LOCATION: `${productionAppUrl || 'https://your-domain.com'}/indexnow.txt`,
         }),
       );
     }
@@ -1227,7 +1222,6 @@ function ensureIndexNowEnvVars({
     results.push(
       upsertTomlVarsEntries('wrangler.indexing.toml', '[vars]', {
         INDEXNOW_ENABLED: '0',
-        INDEXNOW_KEY_LOCATION: 'http://localhost:3000/indexnow.txt',
       }),
     );
 
@@ -1235,7 +1229,6 @@ function ensureIndexNowEnvVars({
       results.push(
         upsertTomlVarsEntries('wrangler.indexing.toml', '[env.production.vars]', {
           INDEXNOW_ENABLED: '1',
-          INDEXNOW_KEY_LOCATION: `${productionAppUrl || 'https://your-domain.com'}/indexnow.txt`,
         }),
       );
     }
