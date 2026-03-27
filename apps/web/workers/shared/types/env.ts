@@ -7,6 +7,11 @@ export interface BaseEnv {
   GITHUB_TOKEN?: string;
   WORKER_SECRET?: string;
   CACHE_VERSION?: string;
+  INDEXNOW_ENABLED?: string;
+  INDEXNOW_KEY?: string;
+  INDEXNOW_KEY_LOCATION?: string;
+  INDEXNOW_API_URL?: string;
+  INDEXNOW_DEDUPE_TTL_SECONDS?: string;
 }
 
 export interface GithubEventsEnv extends BaseEnv {

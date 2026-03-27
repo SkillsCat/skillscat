@@ -18,6 +18,11 @@ GITHUB_CLIENT_SECRET=your-github-client-secret
 # 需要的权限: public_repo (用于读取公开仓库信息)
 GITHUB_TOKEN=your-github-token
 
+# ========== IndexNow (可选，用于加速 Bing 等搜索引擎发现) ==========
+# 获取/生成 key 后，配合 wrangler vars 中的 INDEXNOW_KEY_LOCATION 使用
+# 文档: https://www.indexnow.org/documentation
+INDEXNOW_KEY=
+
 # ========== OpenRouter API (用于 AI 分类) ==========
 # 获取 API Key: https://openrouter.ai/keys
 # 注意: 推荐使用免费模型，无需付费

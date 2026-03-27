@@ -7,10 +7,27 @@ import {
 import { invalidateCache } from '$lib/server/cache';
 import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '$lib/server/cache/keys';
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
+import {
+  buildIndexNowSkillUrls,
+  scheduleIndexNowSubmission,
+} from '$lib/server/seo/indexnow';
 
 export interface DeleteSkillArtifactsInput {
   db: D1Database;
   r2: R2Bucket | undefined;
+  indexNow?: {
+    env:
+      | {
+          INDEXNOW_ENABLED?: string;
+          INDEXNOW_KEY?: string;
+          INDEXNOW_KEY_LOCATION?: string;
+          INDEXNOW_API_URL?: string;
+          INDEXNOW_DEDUPE_TTL_SECONDS?: string;
+          KV?: KVNamespace;
+        }
+      | undefined;
+    waitUntil?: (promise: Promise<unknown>) => void;
+  };
   skill: {
     id: string;
     slug: string;
@@ -134,21 +151,59 @@ async function deleteR2Artifacts(
 export async function deleteSkillArtifactsAndInvalidateCaches(
   input: DeleteSkillArtifactsInput
 ): Promise<void> {
-  const { db, r2, skill } = input;
-  const fileStructure = await db
-    .prepare('SELECT file_structure FROM skills WHERE id = ?')
-    .bind(skill.id)
-    .first<{ file_structure: string | null }>();
+  const { db, r2, skill, indexNow } = input;
+  let skillRow:
+    | {
+        file_structure: string | null;
+        visibility: string | null;
+        repo_owner: string | null;
+        org_slug: string | null;
+        owner_name: string | null;
+      }
+    | null = null;
+  try {
+    skillRow = await db.prepare(`
+      SELECT
+        s.file_structure AS file_structure,
+        s.visibility AS visibility,
+        s.repo_owner AS repo_owner,
+        o.slug AS org_slug,
+        u.name AS owner_name
+      FROM skills s
+      LEFT JOIN organizations o ON o.id = s.org_id
+      LEFT JOIN user u ON u.id = s.owner_id
+      WHERE s.id = ?
+      LIMIT 1
+    `)
+      .bind(skill.id)
+      .first<{
+        file_structure: string | null;
+        visibility: string | null;
+        repo_owner: string | null;
+        org_slug: string | null;
+        owner_name: string | null;
+      }>();
+  } catch (error) {
+    console.error(`Failed to load IndexNow metadata for deleted skill ${skill.id}:`, error);
+  }
   const categoryResult = await db
     .prepare('SELECT category_slug FROM skill_categories WHERE skill_id = ?')
     .bind(skill.id)
     .all<{ category_slug: string }>();
   const categorySlugs = (categoryResult.results || []).map((row) => row.category_slug);
+  const indexNowUrls = skillRow?.visibility === 'public'
+    ? buildIndexNowSkillUrls({
+        slug: skill.slug,
+        visibility: skillRow.visibility,
+        orgSlug: skillRow.org_slug,
+        ownerHandle: skillRow.org_slug ? null : (skillRow.repo_owner || skillRow.owner_name || null),
+      })
+    : [];
 
   await db.prepare('DELETE FROM skills WHERE id = ?').bind(skill.id).run();
 
   try {
-    await deleteR2Artifacts(r2, buildSkillR2DeletePlan(skill, fileStructure?.file_structure || null));
+    await deleteR2Artifacts(r2, buildSkillR2DeletePlan(skill, skillRow?.file_structure || null));
   } catch (error) {
     console.error(`Failed to delete R2 artifacts for skill ${skill.id}:`, error);
   }
@@ -170,5 +225,23 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
     await invalidateOpenClawSkillCaches(skill.id, skill.slug);
   } catch (error) {
     console.error(`Failed to invalidate caches for deleted skill ${skill.id}:`, error);
+  }
+
+  if (indexNowUrls.length > 0) {
+    try {
+      const indexNowTask = scheduleIndexNowSubmission({
+        env: indexNow?.env,
+        waitUntil: indexNow?.waitUntil,
+        urls: indexNowUrls,
+        action: 'delete',
+        source: `delete-skill:${skill.slug}`,
+      });
+
+      if (indexNowTask) {
+        await indexNowTask;
+      }
+    } catch (error) {
+      console.error(`Failed to enqueue IndexNow deletion for skill ${skill.slug}:`, error);
+    }
   }
 }

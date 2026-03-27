@@ -5,6 +5,10 @@ import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '$lib/server/cache/keys'
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import { isSkillOwner } from '$lib/server/auth/permissions';
 import { getRepo } from '$lib/server/github-client/rest';
+import {
+  buildIndexNowSkillUrls,
+  scheduleIndexNowSubmission,
+} from '$lib/server/seo/indexnow';
 
 /**
  * Verify that a GitHub repo exists and belongs to the user
@@ -92,14 +96,38 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
 
   // Get current skill info
   const skill = await db.prepare(`
-    SELECT slug, visibility, source_type, github_url FROM skills WHERE id = ?
+    SELECT
+      s.slug AS slug,
+      s.visibility AS visibility,
+      s.source_type AS source_type,
+      s.repo_owner AS repo_owner,
+      o.slug AS org_slug,
+      u.name AS owner_name
+    FROM skills s
+    LEFT JOIN organizations o ON o.id = s.org_id
+    LEFT JOIN user u ON u.id = s.owner_id
+    WHERE s.id = ?
   `)
     .bind(skillId)
-    .first<{ slug: string; visibility: string; source_type: string; github_url: string | null }>();
+    .first<{
+      slug: string;
+      visibility: string;
+      source_type: string;
+      repo_owner: string | null;
+      org_slug: string | null;
+      owner_name: string | null;
+    }>();
 
   if (!skill) {
     throw error(404, 'Skill not found');
   }
+
+  const previousIndexNowUrls = buildIndexNowSkillUrls({
+    slug: skill.slug,
+    visibility: skill.visibility,
+    orgSlug: skill.org_slug,
+    ownerHandle: skill.org_slug ? null : (skill.repo_owner || skill.owner_name || null),
+  });
 
   // Private to public requires verification
   if (skill.visibility === 'private' && visibility === 'public') {
@@ -171,6 +199,42 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
   }
 
   await Promise.all(Array.from(cacheKeys, (cacheKey) => invalidateCache(cacheKey)));
+
+  try {
+    if (visibility === 'public') {
+      const nextIndexNowUrls = buildIndexNowSkillUrls({
+        slug: skill.slug,
+        visibility,
+        orgSlug: skill.org_slug,
+        ownerHandle: skill.org_slug ? null : (skill.repo_owner || skill.owner_name || null),
+      });
+      const indexNowTask = scheduleIndexNowSubmission({
+        env: platform?.env,
+        waitUntil: platform?.context?.waitUntil?.bind(platform.context),
+        urls: nextIndexNowUrls,
+        action: 'update',
+        source: `skill-visibility:${skill.slug}:public`,
+      });
+
+      if (indexNowTask) {
+        await indexNowTask;
+      }
+    } else if (skill.visibility === 'public') {
+      const indexNowTask = scheduleIndexNowSubmission({
+        env: platform?.env,
+        waitUntil: platform?.context?.waitUntil?.bind(platform.context),
+        urls: previousIndexNowUrls,
+        action: 'delete',
+        source: `skill-visibility:${skill.slug}:${visibility}`,
+      });
+
+      if (indexNowTask) {
+        await indexNowTask;
+      }
+    }
+  } catch (indexNowError) {
+    console.error(`Failed to enqueue IndexNow update for visibility change ${skill.slug}:`, indexNowError);
+  }
 
   return json({
     success: true,

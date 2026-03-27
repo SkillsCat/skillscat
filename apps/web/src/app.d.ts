@@ -21,6 +21,11 @@ declare global {
         WORKER_SECRET?: string;
         CACHE_VERSION?: string;
         SITEMAP_REFRESH_MIN_INTERVAL_SECONDS?: string;
+        INDEXNOW_ENABLED?: string;
+        INDEXNOW_KEY?: string;
+        INDEXNOW_KEY_LOCATION?: string;
+        INDEXNOW_API_URL?: string;
+        INDEXNOW_DEDUPE_TTL_SECONDS?: string;
         AI_MODEL?: string;
         CLASSIFICATION_PAID_MODEL?: string;
         FREE_MODELS?: string;

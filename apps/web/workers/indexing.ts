@@ -57,6 +57,11 @@ import {
   queueSecurityAnalysis,
 } from '../src/lib/server/security/state';
 import {
+  buildIndexNowSkillUrls,
+  loadIndexNowSkillTarget,
+  scheduleIndexNowSubmission,
+} from '../src/lib/server/seo/indexnow';
+import {
   buildGithubSkillR2Key,
   buildGithubSkillR2Keys,
   buildGithubSkillR2Prefix,
@@ -1283,6 +1288,9 @@ async function reconcileCanonicalDuplicateGroup(
     await deleteSkillArtifactsAndInvalidateCaches({
       db: env.DB,
       r2: env.R2,
+      indexNow: {
+        env,
+      },
       skill: {
         id: loser.id,
         slug: loser.slug,
@@ -1803,6 +1811,19 @@ async function processMessage(
     const securityContentFingerprint = await buildSecurityContentFingerprint(directoryFiles);
 
     await updateSkillMetadata(skillId, latestCommit.sha, fileStructure, lastCommitAt, env);
+
+    try {
+      const indexNowTarget = await loadIndexNowSkillTarget(env.DB, skillId);
+      if (indexNowTarget) {
+        await scheduleIndexNowSubmission({
+          env,
+          urls: buildIndexNowSkillUrls(indexNowTarget),
+          source: `indexing:${indexNowTarget.slug}`,
+        });
+      }
+    } catch (indexNowError) {
+      log.error(`Failed to enqueue IndexNow update for ${skillId}`, indexNowError);
+    }
 
     // Mark recommend candidates dirty after content/tags/metadata updates.
     await markRecommendDirty(env.DB, skillId);

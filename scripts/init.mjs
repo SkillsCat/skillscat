@@ -112,9 +112,9 @@ const REQUIRED_SECRETS_BY_WORKER = {
 };
 
 const OPTIONAL_SECRETS_BY_WORKER = {
-  preview: [],
+  preview: ['INDEXNOW_KEY'],
   'github-events': [],
-  indexing: [],
+  indexing: ['INDEXNOW_KEY'],
   classification: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY'],
   'security-analysis': ['OPENROUTER_API_KEY'],
   trending: [],
@@ -562,6 +562,8 @@ PUBLIC_APP_URL = "https://your-domain.com"
 CACHE_VERSION = "v1"
 SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
 RECOMMEND_ALGO_VERSION = "v1"
+INDEXNOW_ENABLED = "1"
+INDEXNOW_KEY_LOCATION = "https://your-domain.com/indexnow.txt"
 `.trim(),
   'wrangler.github-events.toml': `
 [env.production]
@@ -624,6 +626,8 @@ queue = "skillscat-security-analysis"
 
 [env.production.vars]
 GITHUB_API_VERSION = "2022-11-28"
+INDEXNOW_ENABLED = "1"
+INDEXNOW_KEY_LOCATION = "https://your-domain.com/indexnow.txt"
 `.trim(),
   'wrangler.classification.toml': `
 [env.production]
@@ -1193,6 +1197,53 @@ function ensurePrecomputeWorkerEnvVars({
   return results;
 }
 
+function ensureIndexNowEnvVars({
+  productionAppUrl,
+  includeProductionVars = true,
+  includePreview = true,
+  includeIndexing = true,
+} = {}) {
+  const results = [];
+
+  if (includePreview) {
+    results.push(
+      upsertTomlVarsEntries('wrangler.preview.toml', '[vars]', {
+        INDEXNOW_ENABLED: '0',
+        INDEXNOW_KEY_LOCATION: 'http://localhost:3000/indexnow.txt',
+      }),
+    );
+
+    if (includeProductionVars) {
+      results.push(
+        upsertTomlVarsEntries('wrangler.preview.toml', '[env.production.vars]', {
+          INDEXNOW_ENABLED: '1',
+          INDEXNOW_KEY_LOCATION: `${productionAppUrl || 'https://your-domain.com'}/indexnow.txt`,
+        }),
+      );
+    }
+  }
+
+  if (includeIndexing) {
+    results.push(
+      upsertTomlVarsEntries('wrangler.indexing.toml', '[vars]', {
+        INDEXNOW_ENABLED: '0',
+        INDEXNOW_KEY_LOCATION: 'http://localhost:3000/indexnow.txt',
+      }),
+    );
+
+    if (includeProductionVars) {
+      results.push(
+        upsertTomlVarsEntries('wrangler.indexing.toml', '[env.production.vars]', {
+          INDEXNOW_ENABLED: '1',
+          INDEXNOW_KEY_LOCATION: `${productionAppUrl || 'https://your-domain.com'}/indexnow.txt`,
+        }),
+      );
+    }
+  }
+
+  return results;
+}
+
 /**
  * 创建 .dev.vars 文件
  */
@@ -1618,16 +1669,21 @@ async function main() {
   const needsOpenRouter = optionalSecretKeys.has('OPENROUTER_API_KEY');
   const needsDeepSeek = optionalSecretKeys.has('DEEPSEEK_API_KEY');
   const needsVirusTotal = optionalSecretKeys.has('VIRUSTOTAL_API_KEY');
+  const needsIndexNowKey = optionalSecretKeys.has('INDEXNOW_KEY');
   const needsGeneratedSecrets = needsBetterAuthSecret || needsWorkerSecret;
   const includePreviewWorker = !hasWorkerSelection || selectedWorkerKeys.includes('preview');
+  const includeIndexingWorker = !hasWorkerSelection || selectedWorkerKeys.includes('indexing');
   const includeSearchPrecomputeWorker = !hasWorkerSelection || selectedWorkerKeys.includes('search-precompute');
-  const needsProductionAppUrl = includePreviewWorker || includeSearchPrecomputeWorker;
+  const needsProductionAppUrl = includePreviewWorker
+    || includeSearchPrecomputeWorker
+    || (needsIndexNowKey && includeIndexingWorker);
   const needsEnvInput = needsGitHubClientId
     || needsGitHubClientSecret
     || needsGitHubToken
     || needsOpenRouter
     || needsDeepSeek
     || needsVirusTotal
+    || needsIndexNowKey
     || (isProduction && needsProductionAppUrl);
   DRY_RUN = dryRun;
 
@@ -1801,6 +1857,16 @@ ${colors.cyan}╔═════════════════════
       logSuccess('Updated local wrangler vars for search/recommend precompute defaults');
     }
 
+    const localIndexNowEnvUpdates = ensureIndexNowEnvVars({
+      includeProductionVars: false,
+      includePreview: includePreviewWorker,
+      includeIndexing: includeIndexingWorker,
+    });
+    const localIndexNowVarsUpdated = localIndexNowEnvUpdates.some((result) => result.exists && result.updated);
+    if (localIndexNowVarsUpdated) {
+      logSuccess('Updated local wrangler vars for IndexNow defaults');
+    }
+
     if (isProduction) {
       logInfo('Ensuring [env.production] exists in all wrangler config files...');
       for (const configFile of selectedConfigFiles) {
@@ -1880,6 +1946,7 @@ ${colors.cyan}╔═════════════════════
     let openrouterApiKey = '';
     let deepseekApiKey = '';
     let virusTotalApiKey = '';
+    let indexNowKey = '';
     let productionAppUrl = '';
 
     if (!needsEnvInput && !needsSecretSetup) {
@@ -1902,6 +1969,9 @@ ${colors.cyan}╔═════════════════════
       }
       if (needsVirusTotal) {
         lines.push('- VirusTotal: https://www.virustotal.com/gui/join-us (可选，public API 需要 API Key)');
+      }
+      if (needsIndexNowKey) {
+        lines.push('- IndexNow: https://www.indexnow.org/documentation (可选，用于加速 Bing 等搜索引擎发现)');
       }
       if (lines.length > 0) {
         console.log(`\n${colors.gray}以下变量需要手动配置:\n${lines.join('\n')}${colors.reset}\n`);
@@ -1927,6 +1997,9 @@ ${colors.cyan}╔═════════════════════
         if (needsVirusTotal) {
           virusTotalApiKey = existingVars.VIRUSTOTAL_API_KEY || '';
         }
+        if (needsIndexNowKey) {
+          indexNowKey = existingVars.INDEXNOW_KEY || '';
+        }
         productionAppUrl = (isProduction && needsProductionAppUrl) ? 'https://your-domain.com' : '';
       } else {
         if (needsGitHubClientId) {
@@ -1946,6 +2019,9 @@ ${colors.cyan}╔═════════════════════
         }
         if (needsVirusTotal) {
           virusTotalApiKey = existingVars.VIRUSTOTAL_API_KEY || await ask(rl, 'VirusTotal API Key (可选，public API)', '');
+        }
+        if (needsIndexNowKey) {
+          indexNowKey = existingVars.INDEXNOW_KEY || await ask(rl, 'IndexNow Key (可选)', '');
         }
         if (isProduction && needsProductionAppUrl) {
           productionAppUrl = await ask(rl, 'Production PUBLIC_APP_URL', 'https://your-domain.com');
@@ -1970,13 +2046,22 @@ ${colors.cyan}╔═════════════════════
           includePreview: false,
           includeSearchPrecompute: includeSearchPrecomputeWorker,
         });
+        const indexNowEnvUpdates = ensureIndexNowEnvVars({
+          productionAppUrl,
+          includePreview: includePreviewWorker,
+          includeIndexing: includeIndexingWorker,
+        });
         const previewRecommendVarsUpdated = previewEnvUpdates.some((result) => result.exists && result.updated);
         const precomputeWorkerVarsUpdated = precomputeWorkerEnvUpdates.some((result) => result.exists && result.updated);
+        const indexNowVarsUpdated = indexNowEnvUpdates.some((result) => result.exists && result.updated);
         if (previewRecommendVarsUpdated) {
           logSuccess('Updated preview worker recommend env vars');
         }
         if (precomputeWorkerVarsUpdated) {
           logSuccess('Updated search-precompute worker env vars');
+        }
+        if (indexNowVarsUpdated) {
+          logSuccess('Updated preview/indexing IndexNow env vars');
         }
 
         if (needsSecretSetup && selectedProductionWorkers.length > 0) {
@@ -1998,6 +2083,7 @@ ${colors.cyan}╔═════════════════════
             if (needsOpenRouter && openrouterApiKey) secrets.OPENROUTER_API_KEY = openrouterApiKey;
             if (needsDeepSeek && deepseekApiKey) secrets.DEEPSEEK_API_KEY = deepseekApiKey;
             if (needsVirusTotal && virusTotalApiKey) secrets.VIRUSTOTAL_API_KEY = virusTotalApiKey;
+            if (needsIndexNowKey && indexNowKey) secrets.INDEXNOW_KEY = indexNowKey;
 
             const secretErrors = [];
             for (const worker of selectedProductionWorkers) {
@@ -2051,6 +2137,9 @@ ${colors.cyan}╔═════════════════════
         }
         if (needsVirusTotal) {
           devVars.VIRUSTOTAL_API_KEY = virusTotalApiKey || '';
+        }
+        if (needsIndexNowKey) {
+          devVars.INDEXNOW_KEY = indexNowKey || '';
         }
 
         const devVarsResult = createDevVars(devVars, force);

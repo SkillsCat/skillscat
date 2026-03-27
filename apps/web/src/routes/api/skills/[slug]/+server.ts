@@ -125,6 +125,10 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
   await deleteSkillArtifactsAndInvalidateCaches({
     db,
     r2,
+    indexNow: {
+      env: platform?.env,
+      waitUntil: platform?.context?.waitUntil?.bind(platform.context),
+    },
     skill: {
       id: skill.id,
       slug: skill.slug,

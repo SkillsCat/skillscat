@@ -17,6 +17,11 @@ import {
   markSkillSecurityDirty,
   queueSecurityAnalysis,
 } from '$lib/server/security/state';
+import {
+  loadIndexNowSkillTarget,
+  buildIndexNowSkillUrls,
+  scheduleIndexNowSubmission,
+} from '$lib/server/seo/indexnow';
 
 /**
  * Generate a slug from username/org and skill name
@@ -473,6 +478,22 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       );
     } catch (cacheError) {
       console.error(`Failed to invalidate public discovery caches for uploaded skill ${skillId}:`, cacheError);
+    }
+
+    try {
+      const indexNowTarget = await loadIndexNowSkillTarget(db, skillId);
+      const indexNowTask = scheduleIndexNowSubmission({
+        env: platform?.env,
+        waitUntil: platform?.context?.waitUntil?.bind(platform.context),
+        urls: indexNowTarget ? buildIndexNowSkillUrls(indexNowTarget) : [],
+        source: `upload-skill:${slug}`,
+      });
+
+      if (indexNowTask) {
+        await indexNowTask;
+      }
+    } catch (indexNowError) {
+      console.error(`Failed to enqueue IndexNow update for uploaded skill ${skillId}:`, indexNowError);
     }
   }
 
