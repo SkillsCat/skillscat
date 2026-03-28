@@ -9,8 +9,9 @@
   interface Props {
     currentUser?: CurrentUser | null;
     unreadCount?: number;
+    authPending?: boolean;
   }
-  let { currentUser = null, unreadCount = 0 }: Props = $props();
+  let { currentUser = null, unreadCount = 0, authPending = false }: Props = $props();
 
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
@@ -23,6 +24,8 @@
 
 {#if currentUser}
   <UserMenuAuthenticated {currentUser} {unreadCount} />
+{:else if authPending}
+  <div class="auth-placeholder" aria-hidden="true"></div>
 {:else}
   <button
     type="button"
@@ -37,6 +40,21 @@
 {/if}
 
 <style>
+  .auth-placeholder {
+    width: 6.25rem;
+    height: 2.5rem;
+    border-radius: var(--radius-full);
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in oklch, var(--fg) 7%, transparent) 0%,
+        color-mix(in oklch, var(--fg) 12%, transparent) 50%,
+        color-mix(in oklch, var(--fg) 7%, transparent) 100%
+      );
+    background-size: 200% 100%;
+    animation: auth-placeholder-shimmer 1.4s linear infinite;
+  }
+
   .sign-in-btn {
     --btn-shadow-offset: 3px;
     --btn-shadow-color: oklch(50% 0.22 55);
@@ -73,5 +91,15 @@
 
   :global(.dark) .sign-in-btn {
     --btn-shadow-color: oklch(40% 0.20 55);
+  }
+
+  @keyframes auth-placeholder-shimmer {
+    from {
+      background-position: 200% 0;
+    }
+
+    to {
+      background-position: -200% 0;
+    }
   }
 </style>

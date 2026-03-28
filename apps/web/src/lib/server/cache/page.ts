@@ -7,13 +7,13 @@ interface PageCacheOptions {
   sMaxAge: number;
   staleWhileRevalidate: number;
   varyByLanguageHeader?: boolean;
+  varyByCookie?: boolean;
 }
 
 /**
- * Apply conservative HTML caching for public pages:
- * - Anonymous requests: edge-cacheable, but cookie-varied because the root layout
- *   still includes auth-sensitive shell state (for example the navbar session state)
- * - Logged-in requests: private browser-cacheable (never shared-cache)
+ * Apply HTML caching policy for public pages:
+ * - Logged-in requests with auth-sensitive SSR shell: private browser-cacheable
+ * - Public pages with auth-independent shell: shared-cacheable and may opt out of Cookie vary
  */
 export function setPublicPageCache({
   setHeaders,
@@ -22,6 +22,7 @@ export function setPublicPageCache({
   sMaxAge,
   staleWhileRevalidate,
   varyByLanguageHeader = true,
+  varyByCookie = true,
 }: PageCacheOptions): void {
   if (isAuthenticated) {
     setHeaders({
@@ -34,7 +35,11 @@ export function setPublicPageCache({
 
   const cookieHeader = request.headers.get('cookie') || '';
   const hasLocaleCookie = new RegExp(`(?:^|;\\s*)${LOCALE_COOKIE_NAME}=`).test(cookieHeader);
-  const varyValues = ['Cookie'];
+  const varyValues: string[] = [];
+
+  if (varyByCookie) {
+    varyValues.push('Cookie');
+  }
 
   // Indexable public pages intentionally collapse to the default locale unless the user
   // has chosen a locale explicitly, so they don't need an Accept-Language vary.
@@ -42,8 +47,13 @@ export function setPublicPageCache({
     varyValues.push('Accept-Language');
   }
 
-  setHeaders({
+  const headers: Record<string, string> = {
     'Cache-Control': `public, max-age=0, s-maxage=${sMaxAge}, stale-while-revalidate=${staleWhileRevalidate}`,
-    Vary: varyValues.join(', '),
-  });
+  };
+
+  if (varyValues.length > 0) {
+    headers.Vary = varyValues.join(', ');
+  }
+
+  setHeaders(headers);
 }

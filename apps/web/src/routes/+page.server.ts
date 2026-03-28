@@ -22,6 +22,7 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
     sMaxAge: 30,
     staleWhileRevalidate: 120,
     varyByLanguageHeader: false,
+    varyByCookie: false,
   });
 
   const env = {

@@ -5,7 +5,10 @@ import {
   buildUploadSkillR2Prefix,
 } from '$lib/skill-path';
 import { invalidateCache } from '$lib/server/cache';
-import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '$lib/server/cache/keys';
+import {
+  getSkillPageCacheInvalidationKeys,
+  PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
+} from '$lib/server/cache/keys';
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 import {
   buildIndexNowSkillUrls,
@@ -216,6 +219,7 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
       `api:skill-files:${skill.slug}`,
       `skill:${skill.id}`,
       `recommend:${skill.id}`,
+      ...getSkillPageCacheInvalidationKeys(skill.slug),
       ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
     ]);
 

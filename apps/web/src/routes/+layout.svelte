@@ -37,6 +37,14 @@
     };
   });
   const currentUserId = $derived(currentUser?.id ?? null);
+  const pageDefersAuthUi = $derived(
+    (($page.data as { deferUserState?: boolean } | undefined)?.deferUserState) === true
+  );
+  const deferAuthUi = $derived(
+    ($page.route.id === '/' || pageDefersAuthUi)
+      && $session.isPending
+      && !data.currentUser
+  );
 
   const i18n = createI18nRuntime({
     getLocale: () => locale,
@@ -199,7 +207,7 @@
       </div>
 
       <div class="main-content">
-        <Navbar {unreadCount} {currentUser} />
+        <Navbar {unreadCount} {currentUser} authPending={deferAuthUi} />
 
         <main class="flex-1">
           {@render children()}

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { StarIcon, Clock01Icon } from '@hugeicons/core-free-icons';
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
@@ -24,14 +23,6 @@
   }
 
   let { skill, hideAvatar = false }: Props = $props();
-  let metaRowEl: HTMLDivElement | null = $state(null);
-  let categoryBadgeEl: HTMLSpanElement | null = $state(null);
-  let starsBadgeEl: HTMLSpanElement | null = $state(null);
-  let timeMeasureEl: HTMLSpanElement | null = $state(null);
-  let shouldMeasureTimeWidth = $state(false);
-  let showTimeBadge = $state(true);
-  let resizeObserver: ResizeObserver | null = null;
-  let measureFrame = 0;
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
   let primaryCategoryLabel = $derived(getPrimaryCategoryLabel());
@@ -62,102 +53,6 @@
     if (!category) return null;
     return getLocalizedCategoryBySlug(category, i18n.locale())?.name || category;
   }
-
-  function shouldMeasureTimeBadge(): boolean {
-    return true;
-  }
-
-  function parsePx(value: string): number {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-
-  function getIntrinsicOuterWidth(el: HTMLElement): number {
-    const styles = getComputedStyle(el);
-    // scrollWidth includes content + padding, but excludes borders.
-    return el.scrollWidth + parsePx(styles.borderLeftWidth) + parsePx(styles.borderRightWidth);
-  }
-
-  function updateTimeBadgeVisibility() {
-    if (!shouldMeasureTimeWidth) {
-      showTimeBadge = true;
-      return;
-    }
-
-    if (!metaRowEl || !starsBadgeEl || !timeMeasureEl) return;
-
-    const rowStyles = getComputedStyle(metaRowEl);
-    const gap = parsePx(rowStyles.columnGap || rowStyles.gap);
-    const hasCategory = !!categoryBadgeEl;
-    const gapCount = hasCategory ? 2 : 1;
-    const categoryRequiredWidth = categoryBadgeEl ? getIntrinsicOuterWidth(categoryBadgeEl) : 0;
-
-    const requiredWidth =
-      starsBadgeEl.offsetWidth +
-      timeMeasureEl.offsetWidth +
-      categoryRequiredWidth +
-      gap * gapCount;
-
-    showTimeBadge = requiredWidth <= metaRowEl.clientWidth + 1;
-  }
-
-  function scheduleTimeBadgeMeasure() {
-    if (typeof window === 'undefined') return;
-
-    if (!shouldMeasureTimeWidth) {
-      if (measureFrame) {
-        cancelAnimationFrame(measureFrame);
-        measureFrame = 0;
-      }
-      showTimeBadge = true;
-      return;
-    }
-
-    if (measureFrame) cancelAnimationFrame(measureFrame);
-    measureFrame = requestAnimationFrame(() => {
-      measureFrame = 0;
-      updateTimeBadgeVisibility();
-    });
-  }
-
-  function observeMeasureTargets() {
-    if (!resizeObserver || !shouldMeasureTimeWidth) {
-      resizeObserver?.disconnect();
-      return;
-    }
-
-    resizeObserver.disconnect();
-
-    if (metaRowEl) resizeObserver.observe(metaRowEl);
-    if (categoryBadgeEl) resizeObserver.observe(categoryBadgeEl);
-    if (starsBadgeEl) resizeObserver.observe(starsBadgeEl);
-    if (timeMeasureEl) resizeObserver.observe(timeMeasureEl);
-  }
-
-  onMount(() => {
-    return () => {
-      if (measureFrame) cancelAnimationFrame(measureFrame);
-      resizeObserver?.disconnect();
-      resizeObserver = null;
-    };
-  });
-
-  $effect(() => {
-    skill.categories;
-    skill.stars;
-    skill.updatedAt;
-
-    shouldMeasureTimeWidth = shouldMeasureTimeBadge();
-
-    if (shouldMeasureTimeWidth && !resizeObserver && typeof ResizeObserver !== 'undefined') {
-      resizeObserver = new ResizeObserver(() => {
-        scheduleTimeBadgeMeasure();
-      });
-    }
-
-    observeMeasureTargets();
-    scheduleTimeBadgeMeasure();
-  });
 </script>
 
 <a
@@ -198,15 +93,11 @@
       {/if}
 
       <!-- Meta -->
-      <div
-        class="meta-row"
-        bind:this={metaRowEl}
-      >
+      <div class="meta-row">
         <!-- Categories -->
         {#if primaryCategoryLabel}
           <span
             class="meta-badge meta-badge-category"
-            bind:this={categoryBadgeEl}
             title={primaryCategoryLabel}
           >
             {primaryCategoryLabel}
@@ -214,33 +105,16 @@
         {/if}
 
         <!-- Stars -->
-        <span
-          class="meta-badge meta-badge-stars"
-          bind:this={starsBadgeEl}
-        >
+        <span class="meta-badge meta-badge-stars">
           <HugeiconsIcon icon={StarIcon} size={14} strokeWidth={2} />
           {formatNumber(skill.stars)}
         </span>
 
         <!-- Updated -->
-        {#if showTimeBadge}
-          <span class="meta-badge meta-badge-time">
-            <HugeiconsIcon icon={Clock01Icon} size={14} strokeWidth={2} />
-            {relativeTimeLabel}
-          </span>
-        {/if}
-
-        <!-- Hidden time badge probe for width measurement -->
-        {#if shouldMeasureTimeWidth}
-          <span
-            class="meta-badge meta-badge-time meta-badge-measure"
-            bind:this={timeMeasureEl}
-            aria-hidden="true"
-          >
-            <HugeiconsIcon icon={Clock01Icon} size={14} strokeWidth={2} />
-            {relativeTimeLabel}
-          </span>
-        {/if}
+        <span class="meta-badge meta-badge-time">
+          <HugeiconsIcon icon={Clock01Icon} size={14} strokeWidth={2} />
+          {relativeTimeLabel}
+        </span>
       </div>
     </div>
   </div>
@@ -293,8 +167,7 @@
     align-items: center;
     gap: 0.5rem;
     margin-top: 0.75rem;
-    flex-wrap: nowrap;
-    overflow: hidden;
+    flex-wrap: wrap;
     min-width: 0;
   }
 
@@ -383,14 +256,6 @@
   .meta-badge-time {
     flex-shrink: 0;
     white-space: nowrap;
-  }
-
-  .meta-badge-measure {
-    position: absolute;
-    visibility: hidden;
-    pointer-events: none;
-    inset: 0 auto auto 0;
-    transform: translate(-200vw, -200vh);
   }
 
   /* Mobile optimizations */

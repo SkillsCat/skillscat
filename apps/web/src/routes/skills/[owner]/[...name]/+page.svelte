@@ -13,6 +13,7 @@
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
   import { splitShellCommand } from '$lib/skill-install';
   import { encodeSkillSlugForPath } from '$lib/skill-path';
+  import { useSession } from '$lib/auth-client';
   import type { SkillDetail, SkillCardData, FileNode, SkillInstallData } from '$lib/types';
   import type { Highlighter } from 'shiki';
   import { buildOgImageUrl } from '$lib/seo/og';
@@ -31,6 +32,8 @@
       isOwner?: boolean;
       isBookmarked?: boolean;
       isAuthenticated?: boolean;
+      deferUserState?: boolean;
+      trackPublicAccessClientSide?: boolean;
       isDotFolderSkill?: boolean;
       hasReadme?: boolean;
       renderedReadme?: string;
@@ -48,15 +51,136 @@
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
   const copy = $derived(getSkillPageCopy(i18n.locale()));
+  const session = useSession();
 
   // Bookmark state - use local state that syncs with server data
   let bookmarkOverride = $state<boolean | null>(null);
+  let bookmarkState = $state<{ isAuthenticated: boolean; isBookmarked: boolean } | null>(null);
   let isBookmarking = $state(false);
-  const isAuthenticated = $derived(data.isAuthenticated ?? false);
-  const isBookmarked = $derived(bookmarkOverride ?? data.isBookmarked ?? false);
+  let isLoadingBookmarkState = $state(false);
+  const shouldDeferUserState = $derived(Boolean(data.deferUserState && data.skill?.visibility === 'public'));
+  const bookmarkUiPending = $derived.by(() => {
+    if (!shouldDeferUserState) {
+      return false;
+    }
+
+    if ($session.isPending) {
+      return true;
+    }
+
+    return Boolean($session.data?.user) && isLoadingBookmarkState && !bookmarkState && bookmarkOverride === null;
+  });
+  const isAuthenticated = $derived.by(() => {
+    if (bookmarkState) {
+      return bookmarkState.isAuthenticated;
+    }
+
+    if (!shouldDeferUserState) {
+      return data.isAuthenticated ?? false;
+    }
+
+    if ($session.isPending) {
+      return false;
+    }
+
+    return Boolean($session.data?.user);
+  });
+  const isBookmarked = $derived(bookmarkOverride ?? bookmarkState?.isBookmarked ?? data.isBookmarked ?? false);
   const canUseNativeShare = $derived(
     typeof navigator !== 'undefined' && typeof navigator.share === 'function'
   );
+
+  $effect(() => {
+    data.skill?.id;
+    bookmarkOverride = null;
+    bookmarkState = null;
+    isLoadingBookmarkState = false;
+  });
+
+  $effect(() => {
+    const skillId = data.skill?.id;
+    if (!skillId || !shouldDeferUserState) {
+      return;
+    }
+
+    if ($session.isPending) {
+      return;
+    }
+
+    if (!$session.data?.user) {
+      bookmarkState = {
+        isAuthenticated: false,
+        isBookmarked: false,
+      };
+      return;
+    }
+
+    const controller = new AbortController();
+    isLoadingBookmarkState = true;
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/favorites/state?skillId=${encodeURIComponent(skillId)}`, {
+          signal: controller.signal,
+          headers: { accept: 'application/json' }
+        });
+
+        if (response.status === 401) {
+          bookmarkState = {
+            isAuthenticated: false,
+            isBookmarked: false,
+          };
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const payload = await response.json() as {
+          isAuthenticated?: boolean;
+          isBookmarked?: boolean;
+        };
+
+        bookmarkState = {
+          isAuthenticated: Boolean(payload.isAuthenticated),
+          isBookmarked: Boolean(payload.isBookmarked),
+        };
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        console.error('Failed to load bookmark state:', err);
+        bookmarkState = {
+          isAuthenticated: true,
+          isBookmarked: false,
+        };
+      } finally {
+        if (!controller.signal.aborted) {
+          isLoadingBookmarkState = false;
+        }
+      }
+    })();
+
+    return () => controller.abort();
+  });
+
+  $effect(() => {
+    const skillId = data.skill?.id;
+    if (!skillId || !data.trackPublicAccessClientSide || typeof window === 'undefined') {
+      return;
+    }
+
+    void fetch('/api/skills/access', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        accept: 'application/json'
+      },
+      body: JSON.stringify({ skillId }),
+      keepalive: true,
+    }).catch((err) => {
+      console.error('Failed to record public skill access:', err);
+    });
+  });
 
   async function handleBookmark() {
     if (!data.skill || isBookmarking) return;
@@ -73,6 +197,10 @@
 
       if (response.ok) {
         bookmarkOverride = !currentState;
+        bookmarkState = {
+          isAuthenticated: true,
+          isBookmarked: !currentState,
+        };
         toast(
           !currentState ? copy.bookmarkAdded : copy.bookmarkRemoved,
           'success'
@@ -1501,7 +1629,13 @@
                   </DropdownMenu.Portal>
                 </DropdownMenu.Root>
 
-                {#if isAuthenticated}
+                {#if bookmarkUiPending}
+                  <div class="skill-action-btn bookmark-btn bookmark-btn-placeholder" aria-hidden="true">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                    </svg>
+                  </div>
+                {:else if isAuthenticated}
                   <button
                     class="skill-action-btn bookmark-btn"
                     class:bookmarked={isBookmarked}
@@ -1988,6 +2122,23 @@
     color: var(--primary);
     background: var(--primary-subtle);
     border-color: var(--primary);
+  }
+
+  .bookmark-btn-placeholder {
+    color: var(--fg-subtle);
+    cursor: default;
+    pointer-events: none;
+    opacity: 0.72;
+    animation: bookmark-placeholder-pulse 1.4s ease-in-out infinite;
+  }
+
+  @keyframes bookmark-placeholder-pulse {
+    0%, 100% {
+      opacity: 0.52;
+    }
+    50% {
+      opacity: 0.9;
+    }
   }
 
   :global(.skill-action-btn:focus-visible) {

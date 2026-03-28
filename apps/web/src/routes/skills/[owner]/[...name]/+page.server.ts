@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
-import { getSkillBySlug, getRecommendedSkills, loadSkillReadmeFromR2, recordSkillAccess } from '$lib/server/db/utils';
+import { getSkillBySlug, getRecommendedSkills, loadSkillReadmeFromR2 } from '$lib/server/db/utils';
 import { getCached } from '$lib/server/cache';
 import { renderReadmeMarkdown } from '$lib/server/text/markdown';
 import { setPublicPageCache } from '$lib/server/cache/page';
@@ -10,7 +10,7 @@ import { buildSkillPathFromOwnerAndName, buildSkillSlug, encodeSkillSlugForPath,
 import type { SkillCardData, SkillDetail } from '$lib/types';
 import { buildSkillInstallData } from '$lib/skill-install';
 
-const BOT_UA_PATTERN = /\b(bot|crawler|spider|slurp|preview|headless|lighthouse)\b/i;
+const PUBLIC_SKILL_HTML_CACHE_HEADER = 'X-Skillscat-Public-Skill-Cache';
 const CATEGORY_BY_SLUG = new Map(CATEGORIES.map((category) => [category.slug, category] as const));
 const SEO_DESCRIPTION_STOP_WORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'how',
@@ -234,42 +234,6 @@ function buildSkillSeoPayload(skill: SkillDetail): SkillSeoPayload {
   };
 }
 
-function shouldTrackAccess(request: Request): boolean {
-  const purpose = `${request.headers.get('purpose') || ''} ${request.headers.get('sec-purpose') || ''}`.toLowerCase();
-  if (purpose.includes('prefetch')) {
-    return false;
-  }
-
-  const ua = (request.headers.get('user-agent') || '').trim();
-  if (!ua) {
-    return false;
-  }
-
-  return !BOT_UA_PATTERN.test(ua);
-}
-
-function getAccessClientKey(request: Request, userId: string | null): string | undefined {
-  if (userId) {
-    return `user:${userId}`;
-  }
-
-  const ua = (request.headers.get('user-agent') || '').slice(0, 64);
-  const cfIp = request.headers.get('cf-connecting-ip');
-  if (cfIp) {
-    return ua ? `ipua:${cfIp}:${ua}` : `ip:${cfIp}`;
-  }
-
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) {
-      return ua ? `ipua:${first}:${ua}` : `ip:${first}`;
-    }
-  }
-
-  return ua ? `ua:${ua}` : undefined;
-}
-
 /**
  * Multi-segment skill detail page: /skills/[owner]/[...name]
  *
@@ -339,15 +303,6 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     errorKind: 'temporary_failure' as SkillPageErrorKind,
   });
 
-  setPublicPageCache({
-    setHeaders,
-    request,
-    isAuthenticated: Boolean(locals.user),
-    sMaxAge: 120,
-    staleWhileRevalidate: 600,
-    varyByLanguageHeader: false,
-  });
-
   const env = {
     DB: platform?.env?.DB,
     R2: platform?.env?.R2,
@@ -359,12 +314,18 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
   const normalizedOwner = normalizeSkillOwner(params.owner);
   const normalizedName = normalizeSkillName(params.name);
   if (!normalizedOwner) {
-    setHeaders({ 'X-Skillscat-Status-Override': '404' });
+    setHeaders({
+      'X-Skillscat-Status-Override': '404',
+      'Cache-Control': 'no-store',
+    });
     return finish(createNotFoundResult());
   }
 
   if (!normalizedName) {
-    setHeaders({ 'X-Skillscat-Status-Override': '404' });
+    setHeaders({
+      'X-Skillscat-Status-Override': '404',
+      'Cache-Control': 'no-store',
+    });
     return finish(createNotFoundResult());
   }
 
@@ -390,15 +351,26 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     );
 
     if (!skill) {
-      setHeaders({ 'X-Skillscat-Status-Override': '404' });
+      setHeaders({
+        'X-Skillscat-Status-Override': '404',
+        'Cache-Control': 'no-store',
+      });
       return finish(createNotFoundResult());
     }
 
-    // Record access asynchronously (don't block response)
-    if (skill.visibility === 'public' && shouldTrackAccess(request)) {
-      recordSkillAccess(env, skill.id, getAccessClientKey(request, userId)).catch((err) => {
-        console.error('Failed to record skill access:', err);
-      });
+    const shouldDeferUserState = skill.visibility === 'public';
+    setPublicPageCache({
+      setHeaders,
+      request,
+      isAuthenticated: shouldDeferUserState ? false : Boolean(locals.user),
+      sMaxAge: 120,
+      staleWhileRevalidate: 600,
+      varyByLanguageHeader: false,
+      varyByCookie: !shouldDeferUserState,
+    });
+
+    if (shouldDeferUserState) {
+      setHeaders({ [PUBLIC_SKILL_HTML_CACHE_HEADER]: '1' });
     }
 
     const deferRecommendSkills = Boolean(isDataRequest);
@@ -475,17 +447,19 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       'secondary'
     );
 
-    const isBookmarkedPromise = timed(
-      'bookmark',
-      async () => {
-        if (!userId || !env.DB) return false;
-        const bookmark = await env.DB.prepare(
-          'SELECT 1 FROM favorites WHERE user_id = ? AND skill_id = ?'
-        ).bind(userId, skill.id).first();
-        return !!bookmark;
-      },
-      'secondary'
-    );
+    const isBookmarkedPromise = shouldDeferUserState
+      ? Promise.resolve(false)
+      : timed(
+        'bookmark',
+        async () => {
+          if (!userId || !env.DB) return false;
+          const bookmark = await env.DB.prepare(
+            'SELECT 1 FROM favorites WHERE user_id = ? AND skill_id = ?'
+          ).bind(userId, skill.id).first();
+          return !!bookmark;
+        },
+        'secondary'
+      );
 
     const [recommendSkillsResult, renderedReadmeResult, isBookmarkedResult] = await Promise.allSettled([
       recommendSkillsPromise,
@@ -519,8 +493,10 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       renderedReadme,
       recommendSkills,
       deferRecommendSkills,
-      isBookmarked,
-      isAuthenticated: !!userId,
+      isBookmarked: shouldDeferUserState ? false : isBookmarked,
+      isAuthenticated: shouldDeferUserState ? false : !!userId,
+      deferUserState: shouldDeferUserState,
+      trackPublicAccessClientSide: shouldDeferUserState,
       isDotFolderSkill,
       hasReadme,
       seo,

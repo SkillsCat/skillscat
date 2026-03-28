@@ -1,9 +1,44 @@
+import { LOCALES, type SupportedLocale } from '$lib/i18n/config';
+
 export const HOME_CRITICAL_CACHE_KEY = 'page:home:critical:v1';
 export const LEGACY_HOME_CACHE_KEY = 'page:home:v1';
+export const HOME_HTML_CACHE_KEY_PREFIX = 'page:home:html:v1';
+export const SKILL_HTML_CACHE_KEY_PREFIX = 'page:skill:html:v1';
+export const SKILL_PUBLIC_HINT_CACHE_KEY_PREFIX = 'page:skill:public:v1';
 export const PUBLIC_SKILLS_STATS_CACHE_KEY = 'stats:public-skills:v1';
+
+export function getHomeHtmlCacheKey(locale: SupportedLocale): string {
+  return `${HOME_HTML_CACHE_KEY_PREFIX}:${locale}`;
+}
+
+function encodeCacheKeySegment(value: string): string {
+  return encodeURIComponent(value);
+}
+
+export function getSkillHtmlCacheKey(locale: SupportedLocale, slug: string): string {
+  return `${SKILL_HTML_CACHE_KEY_PREFIX}:${locale}:${encodeCacheKeySegment(slug)}`;
+}
+
+export function getSkillHtmlCacheKeys(slug: string): string[] {
+  return LOCALES.map((locale) => getSkillHtmlCacheKey(locale, slug));
+}
+
+export function getSkillPublicHintCacheKey(slug: string): string {
+  return `${SKILL_PUBLIC_HINT_CACHE_KEY_PREFIX}:${encodeCacheKeySegment(slug)}`;
+}
+
+export function getSkillPageCacheInvalidationKeys(slug: string): string[] {
+  return [
+    getSkillPublicHintCacheKey(slug),
+    ...getSkillHtmlCacheKeys(slug),
+  ];
+}
+
+export const HOME_HTML_CACHE_KEYS = LOCALES.map((locale) => getHomeHtmlCacheKey(locale));
 
 export const PUBLIC_DISCOVERY_PAGE_CACHE_KEYS = [
   HOME_CRITICAL_CACHE_KEY,
+  ...HOME_HTML_CACHE_KEYS,
   PUBLIC_SKILLS_STATS_CACHE_KEY,
   'page:trending:v1:1',
   'page:recent:v1:1',

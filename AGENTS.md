@@ -188,6 +188,12 @@ pnpm --filter ./apps/cli typecheck
 
 ## 开发规范
 
+### 0. 提交与发布确认规范
+
+- 未经用户明确确认，不得自行执行任何 `git commit`、`git push`、创建 PR、打 tag、`pnpm deploy`、`pnpm deploy:workers`、`pnpm publish:cli`、`wrangler deploy`、上线发布或其他会产生提交、发布、部署结果的操作。
+- 即使代码已经修改完成，默认也只停留在本地工作区变更和必要验证阶段；所有提交、推送、发布、部署动作都必须先征得用户确认。
+- 如果任务看起来“顺手就该提交/发布”，也不能自行假设，必须先向用户确认再执行。
+
 ### 1. Migration 规范
 
 - `apps/web/migrations` 下的 migration 必须通过 Drizzle 生成，不允许手写 SQL migration。

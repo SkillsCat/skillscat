@@ -3,7 +3,7 @@ import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { building } from '$app/environment';
 import type { Handle, ResolveOptions } from '@sveltejs/kit';
 import { runRequestSecurity, shouldNoIndexPath } from '$lib/server/security/request';
-import { getCachedText, setCacheVersion } from '$lib/server/cache';
+import { getCachedText, peekCachedText, putCachedText, setCacheVersion } from '$lib/server/cache';
 import { getSkillBySlug } from '$lib/server/db/utils';
 import {
   shouldForceDefaultLocaleForPublicPage,
@@ -16,17 +16,27 @@ import {
   normalizeSkillOwner,
 } from '$lib/skill-path';
 import { getHtmlLang, resolveRequestLocale } from '$lib/i18n/resolve';
-import { LOCALE_COOKIE_NAME } from '$lib/i18n/config';
+import { LOCALE_COOKIE_NAME, type SupportedLocale } from '$lib/i18n/config';
 import {
   buildOpenClawHomeMarkdown,
   buildOpenClawSkillMarkdown,
   isOpenClawUserAgent,
 } from '$lib/server/openclaw/agent-markdown';
+import {
+  getHomeHtmlCacheKey,
+  getSkillHtmlCacheKey,
+  getSkillPublicHintCacheKey,
+} from '$lib/server/cache/keys';
 
 const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
 const STATUS_OVERRIDE_HEADER = 'X-Skillscat-Status-Override';
 const AUTHOR_LINK_COOKIE = 'sc-author-linked';
 const AUTHOR_LINK_COOKIE_TTL_SECONDS = 24 * 60 * 60;
+const PUBLIC_SKILL_HTML_CACHE_HEADER = 'X-Skillscat-Public-Skill-Cache';
+const HOME_HTML_CACHE_TTL_SECONDS = 30;
+const HOME_HTML_CACHE_STALE_WHILE_REVALIDATE_SECONDS = 120;
+const SKILL_HTML_CACHE_TTL_SECONDS = 60;
+const SKILL_PUBLIC_HINT_CACHE_TTL_SECONDS = 60 * 30;
 const OPENCLAW_HOME_CACHE_KEY = 'ua:openclaw:home:v1';
 const OPENCLAW_HOME_CACHE_TTL_SECONDS = 3600;
 const OPENCLAW_SKILL_CACHE_TTL_SECONDS = 300;
@@ -80,6 +90,28 @@ function cloneResponseWithStatus(response: Response, status: number): Response {
   });
 }
 
+function cloneResponseWithHeaders(
+  response: Response,
+  updates: Record<string, string | null>
+): Response {
+  const headers = new Headers(response.headers);
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === null) {
+      headers.delete(key);
+      continue;
+    }
+
+    headers.set(key, value);
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 function applyResponseSecurityHeaders(pathname: string, response: Response): Response {
   let secured = response;
 
@@ -106,6 +138,239 @@ function applyResponseSecurityHeaders(pathname: string, response: Response): Res
   }
 
   return secured;
+}
+
+function isHomeRouteRequest(event: Parameters<Handle>[0]['event']): boolean {
+  return event.route.id === '/' && ['GET', 'HEAD'].includes(event.request.method);
+}
+
+function isHomeHtmlCacheableRequest(event: Parameters<Handle>[0]['event']): boolean {
+  return event.request.method === 'GET'
+    && !event.isDataRequest
+    && event.url.pathname === '/';
+}
+
+function isSkillRouteRequest(event: Parameters<Handle>[0]['event']): boolean {
+  return event.route.id === '/skills/[owner]/[...name]'
+    && ['GET', 'HEAD'].includes(event.request.method);
+}
+
+function isSkillHtmlCacheableRequest(event: Parameters<Handle>[0]['event']): boolean {
+  return event.request.method === 'GET'
+    && !event.isDataRequest
+    && event.route.id === '/skills/[owner]/[...name]';
+}
+
+function applyHomeHtmlCacheHeaders(
+  response: Response,
+  locale: SupportedLocale,
+  cacheStatus: 'HIT' | 'MISS'
+): Response {
+  return cloneResponseWithHeaders(response, {
+    // Shared caching is handled explicitly through the Worker Cache API with
+    // locale-aware keys. Keep the HTTP response itself out of generic URL-based
+    // caches so locale cookie variants cannot bleed across users.
+    'Cache-Control': 'no-store',
+    'Content-Language': locale,
+    'Content-Type': response.headers.get('Content-Type') || 'text/html; charset=utf-8',
+    Vary: null,
+    'X-Cache': cacheStatus,
+  });
+}
+
+function applySkillHtmlCacheHeaders(
+  response: Response,
+  locale: SupportedLocale,
+  cacheStatus: 'HIT' | 'MISS'
+): Response {
+  return cloneResponseWithHeaders(response, {
+    // Shared caching is handled explicitly through the Worker Cache API with
+    // locale-aware keys. Keep the HTTP response itself out of generic URL-based
+    // caches so locale or auth cookie variants cannot bleed across users.
+    'Cache-Control': 'no-store',
+    'Content-Language': locale,
+    'Content-Type': response.headers.get('Content-Type') || 'text/html; charset=utf-8',
+    Vary: null,
+    'X-Cache': cacheStatus,
+    [PUBLIC_SKILL_HTML_CACHE_HEADER]: null,
+  });
+}
+
+function isHtmlResponse(response: Response): boolean {
+  return (response.headers.get('content-type') || '').includes('text/html');
+}
+
+async function maybeRespondWithCachedHomeHtml(
+  event: Parameters<Handle>[0]['event']
+): Promise<Response | null> {
+  if (!isHomeHtmlCacheableRequest(event)) {
+    return null;
+  }
+
+  const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+  const cachedHtml = await peekCachedText(getHomeHtmlCacheKey(event.locals.locale), { waitUntil });
+  if (!cachedHtml) {
+    return null;
+  }
+
+  return applyHomeHtmlCacheHeaders(
+    new Response(cachedHtml, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+      },
+    }),
+    event.locals.locale,
+    'HIT'
+  );
+}
+
+async function maybeRespondWithCachedSkillHtml(
+  event: Parameters<Handle>[0]['event']
+): Promise<Response | null> {
+  if (!isSkillHtmlCacheableRequest(event)) {
+    return null;
+  }
+
+  const slug = getSkillSlugFromPathname(event.url.pathname);
+  if (!slug) {
+    return null;
+  }
+
+  const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+  const cachedHtml = await peekCachedText(getSkillHtmlCacheKey(event.locals.locale, slug), { waitUntil });
+  if (!cachedHtml) {
+    return null;
+  }
+
+  return applySkillHtmlCacheHeaders(
+    new Response(cachedHtml, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+      },
+    }),
+    event.locals.locale,
+    'HIT'
+  );
+}
+
+function maybeWriteHomeHtmlCache(
+  event: Parameters<Handle>[0]['event'],
+  response: Response
+): void {
+  if (!isHomeHtmlCacheableRequest(event)) {
+    return;
+  }
+
+  if (!response.ok) {
+    return;
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('text/html')) {
+    return;
+  }
+
+  const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+  const cacheWrite = (async () => {
+    const html = await response.text();
+    if (!html) {
+      return;
+    }
+
+    await putCachedText(
+      getHomeHtmlCacheKey(event.locals.locale),
+      html,
+      HOME_HTML_CACHE_TTL_SECONDS,
+      {
+        waitUntil,
+        contentType: 'text/html; charset=utf-8',
+      }
+    );
+  })();
+
+  if (waitUntil) {
+    waitUntil(cacheWrite);
+    return;
+  }
+
+  void cacheWrite;
+}
+
+async function shouldSkipAuthForSharedSkillHtml(
+  event: Parameters<Handle>[0]['event']
+): Promise<boolean> {
+  if (!isSkillRouteRequest(event)) {
+    return false;
+  }
+
+  const slug = getSkillSlugFromPathname(event.url.pathname);
+  if (!slug) {
+    return false;
+  }
+
+  const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+  const publicHint = await peekCachedText(getSkillPublicHintCacheKey(slug), { waitUntil });
+  return publicHint === '1';
+}
+
+function maybeWriteSkillHtmlCache(
+  event: Parameters<Handle>[0]['event'],
+  response: Response
+): void {
+  if (!isSkillHtmlCacheableRequest(event)) {
+    return;
+  }
+
+  if (response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) !== '1') {
+    return;
+  }
+
+  if (!response.ok) {
+    return;
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('text/html')) {
+    return;
+  }
+
+  const slug = getSkillSlugFromPathname(event.url.pathname);
+  if (!slug) {
+    return;
+  }
+
+  const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+  const cacheWrite = (async () => {
+    const html = await response.text();
+    if (!html) {
+      return;
+    }
+
+    await Promise.all([
+      putCachedText(
+        getSkillHtmlCacheKey(event.locals.locale, slug),
+        html,
+        SKILL_HTML_CACHE_TTL_SECONDS,
+        {
+          waitUntil,
+          contentType: 'text/html; charset=utf-8',
+        }
+      ),
+      putCachedText(
+        getSkillPublicHintCacheKey(slug),
+        '1',
+        SKILL_PUBLIC_HINT_CACHE_TTL_SECONDS,
+        { waitUntil, contentType: 'text/plain; charset=utf-8' }
+      ),
+    ]);
+  })();
+
+  if (waitUntil) {
+    waitUntil(cacheWrite);
+    return;
+  }
+
+  void cacheWrite;
 }
 
 function safeDecodeURIComponent(value: string): string {
@@ -227,7 +492,7 @@ function buildApiRedirectResponse(location: string): Response {
   });
 }
 
-function getOpenClawSkillSlug(pathname: string): string | null {
+function getSkillSlugFromPathname(pathname: string): string | null {
   const pathOnly = pathname.replace(/\/+$/, '') || '/';
   const segments = pathOnly.split('/').filter(Boolean);
   if (segments[0] !== 'skills' || segments.length < 3) {
@@ -283,7 +548,7 @@ async function maybeRespondWithOpenClawSkillMarkdown(
     return null;
   }
 
-  const slug = getOpenClawSkillSlug(event.url.pathname);
+  const slug = getSkillSlugFromPathname(event.url.pathname);
   if (!slug) {
     return null;
   }
@@ -387,6 +652,16 @@ export const handle: Handle = async ({ event, resolve }) => {
     return openClawHomeResponse;
   }
 
+  const cachedHomeResponse = await maybeRespondWithCachedHomeHtml(event);
+  if (cachedHomeResponse) {
+    return applyResponseSecurityHeaders(event.url.pathname, cachedHomeResponse);
+  }
+
+  const cachedSkillResponse = await maybeRespondWithCachedSkillHtml(event);
+  if (cachedSkillResponse) {
+    return applyResponseSecurityHeaders(event.url.pathname, cachedSkillResponse);
+  }
+
   if (env?.DB) {
     const skillOwner = getSkillOwnerFromPathname(event.url.pathname);
     if (skillOwner) {
@@ -398,13 +673,36 @@ export const handle: Handle = async ({ event, resolve }) => {
     }
   }
 
+  const shouldSkipAuthForHome = isHomeRouteRequest(event);
+  const shouldSkipAuthForSharedSkill = await shouldSkipAuthForSharedSkillHtml(event);
+
   // During build or if env is not available, skip auth
-  if (building || !env?.DB) {
+  if (building || !env?.DB || shouldSkipAuthForHome || shouldSkipAuthForSharedSkill) {
     event.locals.auth = async () => ({ user: null });
     event.locals.session = null;
     event.locals.user = null;
     const response = await resolve(event, withHtmlLangTransform(event.locals.htmlLang));
-    return applyResponseSecurityHeaders(event.url.pathname, response);
+    const cacheWriteCandidate = isHomeHtmlCacheableRequest(event) ? response.clone() : null;
+    const skillCacheWriteCandidate = isSkillHtmlCacheableRequest(event) ? response.clone() : null;
+    const shouldApplySkillHtmlOptimization = response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) === '1'
+      && isHtmlResponse(response);
+    const optimizedResponse = isHomeHtmlCacheableRequest(event)
+      ? applyHomeHtmlCacheHeaders(response, event.locals.locale, 'MISS')
+      : shouldApplySkillHtmlOptimization
+        ? applySkillHtmlCacheHeaders(response, event.locals.locale, 'MISS')
+        : response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) === '1'
+          ? cloneResponseWithoutHeader(response, PUBLIC_SKILL_HTML_CACHE_HEADER)
+          : response;
+
+    if (cacheWriteCandidate) {
+      maybeWriteHomeHtmlCache(event, cacheWriteCandidate);
+    }
+
+    if (skillCacheWriteCandidate) {
+      maybeWriteSkillHtmlCache(event, skillCacheWriteCandidate);
+    }
+
+    return applyResponseSecurityHeaders(event.url.pathname, optimizedResponse);
   }
 
   // Get base URL from request
@@ -490,5 +788,18 @@ export const handle: Handle = async ({ event, resolve }) => {
     auth,
     building,
   });
-  return applyResponseSecurityHeaders(event.url.pathname, response);
+  const skillCacheWriteCandidate = isSkillHtmlCacheableRequest(event) ? response.clone() : null;
+  const shouldApplySkillHtmlOptimization = response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) === '1'
+    && isHtmlResponse(response);
+  const optimizedResponse = shouldApplySkillHtmlOptimization
+    ? applySkillHtmlCacheHeaders(response, event.locals.locale, 'MISS')
+    : response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) === '1'
+      ? cloneResponseWithoutHeader(response, PUBLIC_SKILL_HTML_CACHE_HEADER)
+      : response;
+
+  if (skillCacheWriteCandidate) {
+    maybeWriteSkillHtmlCache(event, skillCacheWriteCandidate);
+  }
+
+  return applyResponseSecurityHeaders(event.url.pathname, optimizedResponse);
 };

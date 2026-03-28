@@ -33,9 +33,10 @@
   interface Props {
     currentUser?: CurrentUser | null;
     unreadCount?: number;
+    authPending?: boolean;
   }
 
-  let { currentUser = null, unreadCount = 0 }: Props = $props();
+  let { currentUser = null, unreadCount = 0, authPending = false }: Props = $props();
 
   let mobileMenuOpen = $state(false);
   let searchQuery = $state('');
@@ -147,7 +148,7 @@
             </button>
           {/if}
           <ThemeToggle />
-          <UserMenu {currentUser} {unreadCount} />
+          <UserMenu {currentUser} {unreadCount} authPending={authPending} />
         </div>
 
         <!-- Mobile Menu Button -->
@@ -273,6 +274,10 @@
               <HugeiconsIcon icon={Logout01Icon} size={16} strokeWidth={2} />
               {messages.userMenu.signOut}
             </button>
+          </div>
+        {:else if authPending}
+          <div class="mobile-sign-in-wrap">
+            <div class="mobile-sign-in-placeholder" aria-hidden="true"></div>
           </div>
         {:else}
           <div class="mobile-sign-in-wrap">
@@ -653,6 +658,20 @@
     padding: 0.5rem 1rem 0;
   }
 
+  .mobile-sign-in-placeholder {
+    height: 2.75rem;
+    border-radius: var(--radius-full);
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in oklch, var(--fg) 6%, transparent) 0%,
+        color-mix(in oklch, var(--fg) 10%, transparent) 50%,
+        color-mix(in oklch, var(--fg) 6%, transparent) 100%
+      );
+    background-size: 200% 100%;
+    animation: navbar-auth-placeholder 1.4s linear infinite;
+  }
+
   .mobile-separator {
     height: 0;
     border-top: 2px solid var(--border);
@@ -714,5 +733,15 @@
     background: var(--primary);
     border-radius: var(--radius-full);
     margin-left: auto;
+  }
+
+  @keyframes navbar-auth-placeholder {
+    from {
+      background-position: 200% 0;
+    }
+
+    to {
+      background-position: -200% 0;
+    }
   }
 </style>
