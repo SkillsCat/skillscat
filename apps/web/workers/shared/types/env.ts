@@ -4,6 +4,7 @@ export interface BaseEnv {
   DB: D1Database;
   KV: KVNamespace;
   R2: R2Bucket;
+  PUBLIC_APP_URL?: string;
   GITHUB_TOKEN?: string;
   WORKER_SECRET?: string;
   CACHE_VERSION?: string;

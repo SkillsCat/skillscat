@@ -485,7 +485,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       const indexNowTask = scheduleIndexNowSubmission({
         env: platform?.env,
         waitUntil: platform?.context?.waitUntil?.bind(platform.context),
-        urls: indexNowTarget ? buildIndexNowSkillUrls(indexNowTarget) : [],
+        urls: indexNowTarget ? buildIndexNowSkillUrls(indexNowTarget, platform?.env) : [],
         source: `upload-skill:${slug}`,
       });
 
