@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildIndexNowSkillUrls,
   getIndexNowKeyLocation,
+  resolveIndexNowOwnerHandle,
   submitIndexNowUrls,
 } from '../src/lib/server/seo/indexnow';
 
@@ -31,12 +32,47 @@ describe('buildIndexNowSkillUrls', () => {
     ]);
   });
 
+  it('uses PUBLIC_APP_URL when provided', () => {
+    expect(buildIndexNowSkillUrls({
+      slug: 'acme/demo-skill',
+      visibility: 'public',
+      ownerHandle: 'acme',
+    }, { PUBLIC_APP_URL: 'https://preview.skillscat.example/' })).toEqual([
+      'https://preview.skillscat.example/skills/acme/demo-skill',
+      'https://preview.skillscat.example/u/acme',
+    ]);
+  });
+
   it('omits non-public skills', () => {
     expect(buildIndexNowSkillUrls({
       slug: 'acme/private-skill',
       visibility: 'private',
       ownerHandle: 'acme',
     })).toEqual([]);
+  });
+
+  it('does not add a user profile URL when there is no stable owner handle', () => {
+    expect(buildIndexNowSkillUrls({
+      slug: 'acme/demo-skill',
+      visibility: 'public',
+      ownerHandle: null,
+    })).toEqual([
+      'https://skills.cat/skills/acme/demo-skill',
+    ]);
+  });
+});
+
+describe('resolveIndexNowOwnerHandle', () => {
+  it('prefers the repo owner when available', () => {
+    expect(resolveIndexNowOwnerHandle('acme', 'octocat')).toBe('acme');
+  });
+
+  it('falls back to the linked author username', () => {
+    expect(resolveIndexNowOwnerHandle(null, 'octocat')).toBe('octocat');
+  });
+
+  it('returns null when there is no stable owner handle', () => {
+    expect(resolveIndexNowOwnerHandle(null, null)).toBeNull();
   });
 });
 
@@ -53,6 +89,13 @@ describe('getIndexNowKeyLocation', () => {
     expect(getIndexNowKeyLocation({ INDEXNOW_KEY_LOCATION: '/custom-indexnow.txt' })).toBe(
       'https://skills.cat/custom-indexnow.txt'
     );
+  });
+
+  it('uses PUBLIC_APP_URL for the default key location', () => {
+    expect(getIndexNowKeyLocation({
+      PUBLIC_APP_URL: 'https://preview.skillscat.example/',
+      INDEXNOW_KEY: 'secret-key',
+    })).toBe('https://preview.skillscat.example/secret-key.txt');
   });
 });
 
@@ -152,6 +195,24 @@ describe('submitIndexNowUrls', () => {
     const [, requestInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(String(requestInit.body));
     expect(body.keyLocation).toBe('https://skills.cat/custom-indexnow.txt');
+  });
+
+  it('uses PUBLIC_APP_URL for host and keyLocation', async () => {
+    await submitIndexNowUrls({
+      env: {
+        PUBLIC_APP_URL: 'https://preview.skillscat.example/',
+        INDEXNOW_KEY: 'secret-key',
+      },
+      urls: ['/skills/acme/demo-skill'],
+      source: 'custom-origin',
+      fetchImpl,
+    });
+
+    const [, requestInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(requestInit.body));
+    expect(body.host).toBe('preview.skillscat.example');
+    expect(body.keyLocation).toBe('https://preview.skillscat.example/secret-key.txt');
+    expect(body.urlList).toEqual(['https://preview.skillscat.example/skills/acme/demo-skill']);
   });
 
   it('uses KV to skip duplicate submissions after a successful push', async () => {

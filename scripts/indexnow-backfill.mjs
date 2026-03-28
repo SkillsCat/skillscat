@@ -11,7 +11,7 @@ function parseArgs(argv) {
   const options = {
     dryRun: false,
     limit: 0,
-    siteUrl: process.env.SITE_URL || DEFAULT_SITE_URL,
+    siteUrl: process.env.PUBLIC_APP_URL || process.env.SITE_URL || DEFAULT_SITE_URL,
     sitemapUrl: process.env.INDEXNOW_SITEMAP_URL || '',
     endpoint: process.env.INDEXNOW_API_URL || DEFAULT_INDEXNOW_ENDPOINT,
     key: process.env.INDEXNOW_KEY || '',

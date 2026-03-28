@@ -1817,7 +1817,7 @@ async function processMessage(
       if (indexNowTarget) {
         await scheduleIndexNowSubmission({
           env,
-          urls: buildIndexNowSkillUrls(indexNowTarget),
+          urls: buildIndexNowSkillUrls(indexNowTarget, env),
           source: `indexing:${indexNowTarget.slug}`,
         });
       }

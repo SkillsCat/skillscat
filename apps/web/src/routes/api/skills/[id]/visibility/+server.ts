@@ -7,6 +7,7 @@ import { isSkillOwner } from '$lib/server/auth/permissions';
 import { getRepo } from '$lib/server/github-client/rest';
 import {
   buildIndexNowSkillUrls,
+  resolveIndexNowOwnerHandle,
   scheduleIndexNowSubmission,
 } from '$lib/server/seo/indexnow';
 
@@ -102,10 +103,10 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
       s.source_type AS source_type,
       s.repo_owner AS repo_owner,
       o.slug AS org_slug,
-      u.name AS owner_name
+      a.username AS owner_username
     FROM skills s
     LEFT JOIN organizations o ON o.id = s.org_id
-    LEFT JOIN user u ON u.id = s.owner_id
+    LEFT JOIN authors a ON a.user_id = s.owner_id
     WHERE s.id = ?
   `)
     .bind(skillId)
@@ -115,7 +116,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
       source_type: string;
       repo_owner: string | null;
       org_slug: string | null;
-      owner_name: string | null;
+      owner_username: string | null;
     }>();
 
   if (!skill) {
@@ -126,8 +127,8 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
     slug: skill.slug,
     visibility: skill.visibility,
     orgSlug: skill.org_slug,
-    ownerHandle: skill.org_slug ? null : (skill.repo_owner || skill.owner_name || null),
-  });
+    ownerHandle: skill.org_slug ? null : resolveIndexNowOwnerHandle(skill.repo_owner, skill.owner_username),
+  }, platform?.env);
 
   // Private to public requires verification
   if (skill.visibility === 'private' && visibility === 'public') {
@@ -206,8 +207,8 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
         slug: skill.slug,
         visibility,
         orgSlug: skill.org_slug,
-        ownerHandle: skill.org_slug ? null : (skill.repo_owner || skill.owner_name || null),
-      });
+        ownerHandle: skill.org_slug ? null : resolveIndexNowOwnerHandle(skill.repo_owner, skill.owner_username),
+      }, platform?.env);
       const indexNowTask = scheduleIndexNowSubmission({
         env: platform?.env,
         waitUntil: platform?.context?.waitUntil?.bind(platform.context),

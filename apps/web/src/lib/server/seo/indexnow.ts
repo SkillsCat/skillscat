@@ -9,6 +9,7 @@ const MAX_URLS_PER_REQUEST = 10_000;
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 
 export interface IndexNowEnvLike {
+  PUBLIC_APP_URL?: string;
   INDEXNOW_ENABLED?: string;
   INDEXNOW_KEY?: string;
   INDEXNOW_KEY_LOCATION?: string;
@@ -29,7 +30,7 @@ interface LoadedSkillTargetRow {
   visibility: string | null;
   orgSlug: string | null;
   repoOwner: string | null;
-  ownerName: string | null;
+  ownerUsername: string | null;
 }
 
 export interface SubmitIndexNowUrlsOptions {
@@ -72,42 +73,49 @@ function isIndexNowEnabled(env: IndexNowEnvLike | undefined): boolean {
   return parseBooleanEnv(env?.INDEXNOW_ENABLED, true);
 }
 
-function getSiteOrigin(): string {
-  return SITE_URL.replace(/\/+$/, '');
+function getResolvedSiteUrl(env: Pick<IndexNowEnvLike, 'PUBLIC_APP_URL'> | undefined): string {
+  return env?.PUBLIC_APP_URL?.trim() || SITE_URL;
 }
 
-function getSiteHost(): string {
-  return new URL(SITE_URL).host;
+function getSiteOrigin(env?: Pick<IndexNowEnvLike, 'PUBLIC_APP_URL'>): string {
+  return getResolvedSiteUrl(env).replace(/\/+$/, '');
 }
 
-function buildDefaultIndexNowKeyLocation(key: string): string {
-  return `${getSiteOrigin()}/${encodeURIComponent(key)}.txt`;
+function getSiteHost(env?: Pick<IndexNowEnvLike, 'PUBLIC_APP_URL'>): string {
+  return new URL(getResolvedSiteUrl(env)).host;
+}
+
+function buildDefaultIndexNowKeyLocation(
+  key: string,
+  env?: Pick<IndexNowEnvLike, 'PUBLIC_APP_URL'>
+): string {
+  return `${getSiteOrigin(env)}/${encodeURIComponent(key)}.txt`;
 }
 
 export function getIndexNowKeyLocation(
-  env: Pick<IndexNowEnvLike, 'INDEXNOW_KEY' | 'INDEXNOW_KEY_LOCATION'> | undefined
+  env: Pick<IndexNowEnvLike, 'PUBLIC_APP_URL' | 'INDEXNOW_KEY' | 'INDEXNOW_KEY_LOCATION'> | undefined
 ): string {
   const configured = env?.INDEXNOW_KEY_LOCATION?.trim();
   if (!configured) {
     const key = env?.INDEXNOW_KEY?.trim();
-    return key ? buildDefaultIndexNowKeyLocation(key) : '';
+    return key ? buildDefaultIndexNowKeyLocation(key, env) : '';
   }
 
   if (/^https?:\/\//i.test(configured)) {
     return configured;
   }
 
-  return `${getSiteOrigin()}${configured.startsWith('/') ? configured : `/${configured}`}`;
+  return `${getSiteOrigin(env)}${configured.startsWith('/') ? configured : `/${configured}`}`;
 }
 
-function normalizeIndexNowUrl(value: string): string | null {
+function normalizeIndexNowUrl(value: string, env?: Pick<IndexNowEnvLike, 'PUBLIC_APP_URL'>): string | null {
   const raw = value.trim();
   if (!raw) return null;
 
   const url = raw.startsWith('http://') || raw.startsWith('https://')
     ? new URL(raw)
-    : new URL(raw, SITE_URL);
-  const siteUrl = new URL(SITE_URL);
+    : new URL(raw, getResolvedSiteUrl(env));
+  const siteUrl = new URL(getResolvedSiteUrl(env));
 
   if (url.host !== siteUrl.host) return null;
   if (!['http:', 'https:'].includes(url.protocol)) return null;
@@ -170,21 +178,31 @@ async function markFreshUrlsSubmitted(
   );
 }
 
-export function buildIndexNowSkillUrls(skill: IndexNowSkillTarget): string[] {
+export function buildIndexNowSkillUrls(
+  skill: IndexNowSkillTarget,
+  env?: Pick<IndexNowEnvLike, 'PUBLIC_APP_URL'>
+): string[] {
   if (skill.visibility && skill.visibility !== 'public') {
     return [];
   }
 
   const urls = new Set<string>();
-  urls.add(`${getSiteOrigin()}${buildSkillPath(skill.slug)}`);
+  urls.add(`${getSiteOrigin(env)}${buildSkillPath(skill.slug)}`);
 
   if (skill.orgSlug) {
-    urls.add(`${getSiteOrigin()}/org/${encodeURIComponent(skill.orgSlug)}`);
+    urls.add(`${getSiteOrigin(env)}/org/${encodeURIComponent(skill.orgSlug)}`);
   } else if (skill.ownerHandle) {
-    urls.add(`${getSiteOrigin()}/u/${encodeURIComponent(skill.ownerHandle)}`);
+    urls.add(`${getSiteOrigin(env)}/u/${encodeURIComponent(skill.ownerHandle)}`);
   }
 
   return [...urls];
+}
+
+export function resolveIndexNowOwnerHandle(
+  repoOwner: string | null | undefined,
+  ownerUsername: string | null | undefined
+): string | null {
+  return repoOwner || ownerUsername || null;
 }
 
 export async function loadIndexNowSkillTarget(
@@ -199,10 +217,10 @@ export async function loadIndexNowSkillTarget(
       s.visibility AS visibility,
       o.slug AS orgSlug,
       s.repo_owner AS repoOwner,
-      u.name AS ownerName
+      a.username AS ownerUsername
     FROM skills s
     LEFT JOIN organizations o ON o.id = s.org_id
-    LEFT JOIN user u ON u.id = s.owner_id
+    LEFT JOIN authors a ON a.user_id = s.owner_id
     WHERE s.id = ?
     LIMIT 1
   `)
@@ -213,7 +231,7 @@ export async function loadIndexNowSkillTarget(
     return null;
   }
 
-  const ownerHandle = row.orgSlug ? null : (row.repoOwner || row.ownerName || null);
+  const ownerHandle = row.orgSlug ? null : resolveIndexNowOwnerHandle(row.repoOwner, row.ownerUsername);
 
   return {
     slug: row.slug,
@@ -227,7 +245,7 @@ export async function submitIndexNowUrls(
   options: SubmitIndexNowUrlsOptions
 ): Promise<SubmitIndexNowUrlsResult> {
   const { env, urls, source, action = 'update', fetchImpl = fetch } = options;
-  const normalized = Array.from(new Set(urls.map(normalizeIndexNowUrl).filter((url): url is string => Boolean(url))));
+  const normalized = Array.from(new Set(urls.map((url) => normalizeIndexNowUrl(url, env)).filter((url): url is string => Boolean(url))));
 
   if (!isIndexNowEnabled(env)) {
     return {
@@ -272,7 +290,7 @@ export async function submitIndexNowUrls(
         'content-type': 'application/json; charset=utf-8',
       },
       body: JSON.stringify({
-        host: getSiteHost(),
+        host: getSiteHost(env),
         key,
         ...(keyLocation ? { keyLocation } : {}),
         urlList: urlChunk,

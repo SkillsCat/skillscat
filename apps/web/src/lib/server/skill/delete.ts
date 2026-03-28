@@ -9,6 +9,7 @@ import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '$lib/server/cache/keys'
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 import {
   buildIndexNowSkillUrls,
+  resolveIndexNowOwnerHandle,
   scheduleIndexNowSubmission,
 } from '$lib/server/seo/indexnow';
 
@@ -18,6 +19,7 @@ export interface DeleteSkillArtifactsInput {
   indexNow?: {
     env:
       | {
+          PUBLIC_APP_URL?: string;
           INDEXNOW_ENABLED?: string;
           INDEXNOW_KEY?: string;
           INDEXNOW_KEY_LOCATION?: string;
@@ -158,7 +160,7 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
         visibility: string | null;
         repo_owner: string | null;
         org_slug: string | null;
-        owner_name: string | null;
+        owner_username: string | null;
       }
     | null = null;
   try {
@@ -168,10 +170,10 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
         s.visibility AS visibility,
         s.repo_owner AS repo_owner,
         o.slug AS org_slug,
-        u.name AS owner_name
+        a.username AS owner_username
       FROM skills s
       LEFT JOIN organizations o ON o.id = s.org_id
-      LEFT JOIN user u ON u.id = s.owner_id
+      LEFT JOIN authors a ON a.user_id = s.owner_id
       WHERE s.id = ?
       LIMIT 1
     `)
@@ -181,7 +183,7 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
         visibility: string | null;
         repo_owner: string | null;
         org_slug: string | null;
-        owner_name: string | null;
+        owner_username: string | null;
       }>();
   } catch (error) {
     console.error(`Failed to load IndexNow metadata for deleted skill ${skill.id}:`, error);
@@ -196,8 +198,8 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
         slug: skill.slug,
         visibility: skillRow.visibility,
         orgSlug: skillRow.org_slug,
-        ownerHandle: skillRow.org_slug ? null : (skillRow.repo_owner || skillRow.owner_name || null),
-      })
+        ownerHandle: skillRow.org_slug ? null : resolveIndexNowOwnerHandle(skillRow.repo_owner, skillRow.owner_username),
+      }, indexNow?.env)
     : [];
 
   await db.prepare('DELETE FROM skills WHERE id = ?').bind(skill.id).run();
