@@ -14,6 +14,7 @@ import {
   getSkillPageCacheInvalidationKeys,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
+import { getSkillDetailCacheKeys } from '$lib/server/skill/detail';
 
 export interface OpenClawRouteCachePolicy {
   ttlSeconds: number;
@@ -339,7 +340,7 @@ export async function resolveOpenClawBinaryCache(input: {
 
 export async function invalidateOpenClawSkillCaches(skillId: string, nativeSlug: string): Promise<void> {
   const cacheKeys = [
-    `api:skill:${nativeSlug}`,
+    ...getSkillDetailCacheKeys(nativeSlug),
     `api:skill-files:${nativeSlug}`,
     `skill:${skillId}`,
     `recommend:${skillId}`,

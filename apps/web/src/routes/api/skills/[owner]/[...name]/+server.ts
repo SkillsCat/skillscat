@@ -32,8 +32,17 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
 
   try {
     const db = platform?.env?.DB;
+    const r2 = platform?.env?.R2;
     const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
-    const resolved = await resolveSkillDetail({ db, request, locals, waitUntil }, slug);
+    const recommendAlgoVersion = (platform?.env as { RECOMMEND_ALGO_VERSION?: string } | undefined)?.RECOMMEND_ALGO_VERSION;
+    const resolved = await resolveSkillDetail({
+      db,
+      r2,
+      request,
+      locals,
+      waitUntil,
+      recommendAlgoVersion,
+    }, slug);
 
     if (!resolved.data) {
       return json({

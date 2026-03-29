@@ -4,8 +4,13 @@ import { getCached } from '$lib/server/cache';
 import { getAuthContext } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
 import { buildSkillInstallData } from '$lib/skill-install';
+import {
+  readCachedRecommendSkills,
+  RECOMMEND_ONLINE_CACHE_TTL_SECONDS,
+} from '$lib/server/ranking/recommend-cache';
 
 const PUBLIC_CACHE_TTL_SECONDS = 300;
+const NO_RECOMMEND_SKILL_DETAIL_CACHE_SUFFIX = ':norecommend:v1';
 
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 
@@ -61,6 +66,19 @@ class PublicSkillDetailCacheBypass extends Error {
     this.reason = reason;
     this.data = data;
   }
+}
+
+export function getSkillDetailCacheKey(slug: string, options?: { includeRecommendSkills?: boolean }): string {
+  return options?.includeRecommendSkills === false
+    ? `api:skill:${slug}${NO_RECOMMEND_SKILL_DETAIL_CACHE_SUFFIX}`
+    : `api:skill:${slug}`;
+}
+
+export function getSkillDetailCacheKeys(slug: string): string[] {
+  return [
+    getSkillDetailCacheKey(slug),
+    getSkillDetailCacheKey(slug, { includeRecommendSkills: false }),
+  ];
 }
 
 function parseFileStructure(fileStructure: string | null): FileNode[] | null {
@@ -146,7 +164,53 @@ async function fetchRecommendedSkills(db: D1Database, skill: SkillDetail): Promi
   }));
 }
 
-async function fetchSkillDetailPayload(db: D1Database, slug: string): Promise<SkillDetailPayload | null> {
+async function resolveRecommendSkills(
+  db: D1Database,
+  skill: SkillDetail,
+  options?: {
+    r2?: R2Bucket;
+    waitUntil?: WaitUntilFn;
+    recommendAlgoVersion?: string | null;
+  }
+): Promise<SkillCardData[]> {
+  if (skill.visibility === 'public') {
+    try {
+      const cachedRecommendSkills = await readCachedRecommendSkills({
+        skillId: skill.id,
+        r2: options?.r2,
+        algoVersion: options?.recommendAlgoVersion,
+        waitUntil: options?.waitUntil,
+      });
+
+      if (cachedRecommendSkills.recommendSkills !== null) {
+        return cachedRecommendSkills.recommendSkills;
+      }
+    } catch (error) {
+      console.warn(`Failed to read cached recommend skills for ${skill.slug}:`, error);
+    }
+
+    const { data } = await getCached(
+      `recommend:${skill.id}`,
+      () => fetchRecommendedSkills(db, skill),
+      RECOMMEND_ONLINE_CACHE_TTL_SECONDS,
+      { waitUntil: options?.waitUntil }
+    );
+    return data;
+  }
+
+  return fetchRecommendedSkills(db, skill);
+}
+
+async function fetchSkillDetailPayload(
+  db: D1Database,
+  slug: string,
+  options?: {
+    r2?: R2Bucket;
+    waitUntil?: WaitUntilFn;
+    includeRecommendSkills?: boolean;
+    recommendAlgoVersion?: string | null;
+  }
+): Promise<SkillDetailPayload | null> {
   const row = await db.prepare(`
     SELECT
       s.id,
@@ -215,9 +279,13 @@ async function fetchSkillDetailPayload(db: D1Database, slug: string): Promise<Sk
     sourceType: (row.sourceType as 'github' | 'upload') || 'github',
   };
 
+  const includeRecommendSkills = options?.includeRecommendSkills !== false;
+
   return {
     skill,
-    recommendSkills: await fetchRecommendedSkills(db, skill),
+    recommendSkills: includeRecommendSkills
+      ? await resolveRecommendSkills(db, skill, options)
+      : [],
     install: buildSkillInstallData(skill),
   };
 }
@@ -225,14 +293,20 @@ async function fetchSkillDetailPayload(db: D1Database, slug: string): Promise<Sk
 export async function resolveSkillDetail(
   {
     db,
+    r2,
     request,
     locals,
     waitUntil,
+    includeRecommendSkills = true,
+    recommendAlgoVersion,
   }: {
     db: D1Database | undefined;
+    r2?: R2Bucket;
     request: Request;
     locals: App.Locals;
     waitUntil?: WaitUntilFn;
+    includeRecommendSkills?: boolean;
+    recommendAlgoVersion?: string | null;
   },
   slug: string
 ): Promise<ResolvedSkillDetail> {
@@ -251,9 +325,14 @@ export async function resolveSkillDetail(
 
   try {
     const cached = await getCached(
-      `api:skill:${slug}`,
+      getSkillDetailCacheKey(slug, { includeRecommendSkills }),
       async () => {
-        const payload = await fetchSkillDetailPayload(db, slug);
+        const payload = await fetchSkillDetailPayload(db, slug, {
+          r2,
+          waitUntil,
+          includeRecommendSkills,
+          recommendAlgoVersion,
+        });
         if (!payload) {
           throw new PublicSkillDetailCacheBypass('not_found');
         }

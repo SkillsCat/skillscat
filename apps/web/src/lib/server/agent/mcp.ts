@@ -283,6 +283,7 @@ async function callTool(context: McpRequestContext, name: string, rawArguments: 
         const resolved = await resolveSkillDetail(
           {
             db: context.db,
+            r2: context.r2,
             request: context.request,
             locals: context.locals,
             waitUntil: context.waitUntil,

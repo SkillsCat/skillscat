@@ -274,7 +274,6 @@
   let highlightedReadme = $state('');
   let isLoadingShiki = $state(false);
   let deferredRecommendSkills = $state<SkillCardData[] | null>(null);
-  let isLoadingDeferredRecommendSkills = $state(false);
   let deferredRecommendSkillsError = $state<string | null>(null);
 
   // Reset highlighted HTML whenever server-rendered markdown changes.
@@ -290,12 +289,10 @@
 
     deferredRecommendSkills = null;
     deferredRecommendSkillsError = null;
-    isLoadingDeferredRecommendSkills = false;
 
     if (!shouldDefer || !skill) return;
 
     const controller = new AbortController();
-    isLoadingDeferredRecommendSkills = true;
 
     void (async () => {
       try {
@@ -324,10 +321,6 @@
         console.error('Deferred recommend skills load failed:', err);
         deferredRecommendSkillsError = copy.recommendFailed;
         deferredRecommendSkills = [];
-      } finally {
-        if (!controller.signal.aborted) {
-          isLoadingDeferredRecommendSkills = false;
-        }
       }
     })();
 
@@ -1371,7 +1364,7 @@
   const skillSeoKeywords = $derived(data.seo?.keywords ?? ['ai agent skill', 'skillscat']);
   const displayRecommendSkills = $derived(deferredRecommendSkills ?? data.recommendSkills ?? []);
   const showRecommendSkillsLoading = $derived(
-    Boolean(data.deferRecommendSkills && data.skill && isLoadingDeferredRecommendSkills && displayRecommendSkills.length === 0)
+    Boolean(data.deferRecommendSkills && data.skill && deferredRecommendSkills === null && !deferredRecommendSkillsError)
   );
   const showRecommendSkillsCard = $derived(
     displayRecommendSkills.length > 0 || showRecommendSkillsLoading || Boolean(deferredRecommendSkillsError)

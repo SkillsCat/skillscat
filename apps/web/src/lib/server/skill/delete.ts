@@ -9,6 +9,7 @@ import {
   getSkillPageCacheInvalidationKeys,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
+import { getSkillDetailCacheKeys } from '$lib/server/skill/detail';
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 import {
   buildIndexNowSkillUrls,
@@ -215,7 +216,7 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
 
   try {
     const cacheKeys = new Set<string>([
-      `api:skill:${skill.slug}`,
+      ...getSkillDetailCacheKeys(skill.slug),
       `api:skill-files:${skill.slug}`,
       `skill:${skill.id}`,
       `recommend:${skill.id}`,

@@ -40,7 +40,14 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
   const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
-  const detail = await resolveSkillDetail({ db, request, locals, waitUntil }, slug);
+  const detail = await resolveSkillDetail({
+    db,
+    r2: platform?.env?.R2,
+    request,
+    locals,
+    waitUntil,
+    includeRecommendSkills: false,
+  }, slug);
 
   if (!detail.data) {
     throw error(detail.status, detail.error || 'Skill not found.');

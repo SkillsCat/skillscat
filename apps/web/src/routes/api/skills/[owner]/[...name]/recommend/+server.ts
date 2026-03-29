@@ -5,11 +5,18 @@ import { getCached, invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
 import { getRecommendedSkills } from '$lib/server/db/utils';
+import { isOpenClawUserAgent } from '$lib/server/openclaw/agent-markdown';
 import { buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
+import {
+  buildRecommendPrecomputedCacheKey,
+  type RecommendRefreshStateRow,
+  readCachedRecommendSkills,
+  RECOMMEND_ONLINE_CACHE_TTL_SECONDS,
+  shouldRefreshPrecomputedRecommend,
+} from '$lib/server/ranking/recommend-cache';
 import {
   markRecommendFallbackServed,
   normalizeRecommendAlgoVersion,
-  readRecommendPrecomputedPayload,
   upsertRecommendStateFailure,
   upsertRecommendStateSuccess,
   writeRecommendPrecomputedPayload,
@@ -17,8 +24,6 @@ import {
 
 const RECOMMEND_RESPONSE_LIMIT = 6;
 const RECOMMEND_CACHE_LIMIT = 10;
-const RECOMMEND_CACHE_TTL = 3600;
-const PRECOMPUTED_READ_CACHE_TTL = 120;
 const PUBLIC_RECOMMEND_MAX_AGE_SECONDS = 1800; // 30 minutes
 const PUBLIC_RECOMMEND_STALE_WHILE_REVALIDATE_SECONDS = 86400; // 1 day
 
@@ -39,10 +44,10 @@ interface SkillContextRow {
   repoOwner: string | null;
   visibility: 'public' | 'private' | 'unlisted' | null;
   tier: string | null;
-  recommendDirty: number | null;
-  recommendNextUpdateAt: number | null;
-  recommendPrecomputedAt: number | null;
-  recommendAlgoVersion: string | null;
+  recommendDirty: RecommendRefreshStateRow['recommendDirty'];
+  recommendNextUpdateAt: RecommendRefreshStateRow['recommendNextUpdateAt'];
+  recommendPrecomputedAt: RecommendRefreshStateRow['recommendPrecomputedAt'];
+  recommendAlgoVersion: RecommendRefreshStateRow['recommendAlgoVersion'];
 }
 
 function hasStatus(errorValue: unknown): errorValue is { status: number } {
@@ -58,24 +63,6 @@ function parseJsonStringArray(value: string | null): string[] {
   } catch {
     return [];
   }
-}
-
-function shouldRefreshPrecomputed(
-  skill: SkillContextRow,
-  algoVersion: string,
-  now: number
-): boolean {
-  if ((skill.recommendDirty ?? 0) === 1) return true;
-  if (skill.recommendAlgoVersion && skill.recommendAlgoVersion !== algoVersion) return true;
-  if (skill.recommendNextUpdateAt !== null && skill.recommendNextUpdateAt <= now) return true;
-
-  const hasState = skill.recommendDirty !== null
-    || skill.recommendNextUpdateAt !== null
-    || skill.recommendPrecomputedAt !== null
-    || skill.recommendAlgoVersion !== null;
-  if (!hasState) return true;
-
-  return false;
 }
 
 function isAuthorizedWorkerRefresh(request: Request, env: RuntimeEnv | undefined): boolean {
@@ -131,6 +118,8 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
   const forceRefresh = url.searchParams.get('refresh') === '1';
   const algoVersion = normalizeRecommendAlgoVersion(env?.RECOMMEND_ALGO_VERSION);
   const now = Date.now();
+  const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
+  const isOpenClawRequest = isOpenClawUserAgent(request.headers.get('user-agent'));
 
   if (forceRefresh && !isAuthorizedWorkerRefresh(request, env)) {
     return json({
@@ -220,7 +209,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       return { categories: skillCategories, tags: skillTags };
     };
 
-    const precomputedCacheKey = `recommend:precomputed:${skill.id}:${algoVersion}`;
+    const precomputedCacheKey = buildRecommendPrecomputedCacheKey(skill.id, algoVersion);
 
     const computeRecommendOnline = async (useOnlineCache: boolean): Promise<SkillCardData[]> => {
       const runCompute = async () => {
@@ -246,7 +235,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       const { data } = await getCached(
         `recommend:${skill.id}`,
         runCompute,
-        RECOMMEND_CACHE_TTL
+        RECOMMEND_ONLINE_CACHE_TTL_SECONDS
       );
       return data;
     };
@@ -305,9 +294,9 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
     };
 
     const refreshInBackground = (): void => {
-      if (!platform?.context?.waitUntil) return;
+      if (!waitUntil) return;
       serverTimings.push({ name: 'backfill_scheduled', dur: 0, desc: 'stale-hit' });
-      platform.context.waitUntil(
+      waitUntil(
         (async () => {
           try {
             const refreshed = await computeRecommendOnline(false);
@@ -320,28 +309,54 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
     };
 
     if (!forceRefresh && skill.visibility === 'public') {
-      const { data: precomputedPayload, hit: precomputedCacheHit } = await timed(
+      const { recommendSkills: precomputedRecommendSkills, hit: precomputedCacheHit } = await timed(
         'precomputed_read',
-        () => getCached(
-          precomputedCacheKey,
-          () => readRecommendPrecomputedPayload(env?.R2, skill.id, algoVersion),
-          PRECOMPUTED_READ_CACHE_TTL
-        ),
+        async () => {
+          try {
+            return await readCachedRecommendSkills({
+              skillId: skill.id,
+              r2: env?.R2,
+              algoVersion,
+              waitUntil,
+              limit: RECOMMEND_RESPONSE_LIMIT,
+            });
+          } catch (precomputedReadError) {
+            console.warn('Failed to read precomputed recommend payload:', precomputedReadError);
+            return {
+              recommendSkills: null,
+              hit: false,
+              algoVersion,
+            };
+          }
+        },
         'cache+r2'
       );
 
-      if (precomputedPayload?.recommendSkills?.length) {
-        if (shouldRefreshPrecomputed(skill, algoVersion, now)) {
+      if (precomputedRecommendSkills !== null) {
+        if (shouldRefreshPrecomputedRecommend(skill, algoVersion, now)) {
           refreshInBackground();
         }
 
         return json({
           success: true,
           data: {
-            recommendSkills: precomputedPayload.recommendSkills.slice(0, RECOMMEND_RESPONSE_LIMIT).map((item) => ({
-              ...item,
-              categories: item.categories ?? [],
-            })) as SkillCardData[],
+            recommendSkills: precomputedRecommendSkills,
+          },
+        } satisfies ApiResponse<{ recommendSkills: SkillCardData[] }>, {
+          headers: {
+            'Cache-Control': buildPublicRecommendCacheControl(),
+            'X-Cache': precomputedCacheHit ? 'HIT' : 'MISS',
+            'Server-Timing': buildServerTimingHeader(),
+          },
+        });
+      }
+
+      if (isOpenClawRequest) {
+        serverTimings.push({ name: 'fallback_online', dur: 0, desc: 'openclaw-cache-only' });
+        return json({
+          success: true,
+          data: {
+            recommendSkills: [],
           },
         } satisfies ApiResponse<{ recommendSkills: SkillCardData[] }>, {
           headers: {
@@ -361,9 +376,9 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
 
     if (forceRefresh) {
       await persistPrecomputed(recommendSkills);
-    } else if (platform?.context?.waitUntil) {
+    } else if (waitUntil) {
       serverTimings.push({ name: 'backfill_scheduled', dur: 0, desc: 'fallback' });
-      platform.context.waitUntil(
+      waitUntil(
         (async () => {
           try {
             await Promise.all([
