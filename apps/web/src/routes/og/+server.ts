@@ -2,7 +2,8 @@ import type { RequestHandler } from './$types';
 import { Resvg } from '@cf-wasm/resvg';
 import { SITE_NAME, SITE_DESCRIPTION, SITE_OG_DEFAULT_SUBTITLE, SITE_URL } from '$lib/seo/constants';
 import { OG_IMAGE_VERSION } from '$lib/seo/og';
-import { getSkillBySlug, type DbEnv } from '$lib/server/db/utils';
+import { getSkillBySlug } from '$lib/server/db/business/detail';
+import type { DbEnv } from '$lib/server/db/shared/types';
 import { getCategoryBySlug } from '$lib/constants/categories';
 import { buildSkillscatInstallCommand, splitShellCommand } from '$lib/skill-install';
 

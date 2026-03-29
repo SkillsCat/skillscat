@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { CATEGORIES } from '$lib/constants';
-import { searchSkills } from '$lib/server/db/utils';
+import { searchSkills } from '$lib/server/db/business/search';
 import { getCached } from '$lib/server/cache';
 import { setPublicPageCache } from '$lib/server/cache/page';
 

@@ -14,7 +14,7 @@
   import { splitShellCommand } from '$lib/skill-install';
   import { encodeSkillSlugForPath } from '$lib/skill-path';
   import { useSession } from '$lib/auth-client';
-  import type { SkillDetail, SkillCardData, FileNode, SkillInstallData } from '$lib/types';
+  import type { SkillDetail, SkillCardData, FileNode, SkillInstallData, SecurityRiskLevel } from '$lib/types';
   import type { Highlighter } from 'shiki';
   import { buildOgImageUrl } from '$lib/seo/og';
   import { SITE_URL } from '$lib/seo/constants';
@@ -52,6 +52,40 @@
   const messages = $derived(i18n.messages());
   const copy = $derived(getSkillPageCopy(i18n.locale()));
   const session = useSession();
+  const securitySummary = $derived(data.skill?.security ?? null);
+
+  const securityRiskOrder: Record<SecurityRiskLevel, number> = {
+    low: 1,
+    mid: 2,
+    high: 3,
+    fatal: 4,
+  };
+
+  function pickHighestRisk(...levels: Array<SecurityRiskLevel | null | undefined>): SecurityRiskLevel {
+    let highest: SecurityRiskLevel = 'low';
+    for (const level of levels) {
+      if (!level) continue;
+      if (securityRiskOrder[level] > securityRiskOrder[highest]) {
+        highest = level;
+      }
+    }
+    return highest;
+  }
+
+  function formatRiskLabel(level: SecurityRiskLevel | null | undefined): string {
+    if (!level) return copy.securityRiskUnknown;
+    if (level === 'low') return copy.securityRiskLow;
+    if (level === 'mid') return copy.securityRiskMid;
+    if (level === 'high') return copy.securityRiskHigh;
+    return copy.securityRiskFatal;
+  }
+
+  const securityVisualRisk = $derived.by(() => pickHighestRisk(
+    securitySummary?.aiRiskLevel,
+    securitySummary?.vtRiskLevel
+  ));
+  const securityAiLabel = $derived.by(() => formatRiskLabel(securitySummary?.aiRiskLevel));
+  const securityVtLabel = $derived.by(() => formatRiskLabel(securitySummary?.vtRiskLevel));
 
   // Bookmark state - use local state that syncs with server data
   let bookmarkOverride = $state<boolean | null>(null);
@@ -1622,6 +1656,34 @@
                   </DropdownMenu.Portal>
                 </DropdownMenu.Root>
 
+                {#if securitySummary}
+                  <button
+                    class="skill-action-btn security-btn"
+                    data-risk={securityVisualRisk}
+                    type="button"
+                    aria-label={copy.securityScanLabel}
+                  >
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7l7-4z" />
+                    </svg>
+                    <div class="security-tooltip" role="tooltip">
+                      <div class="security-tooltip-title">{copy.securityScanLabel}</div>
+                      <div class="security-tooltip-row">
+                        <span class="security-tooltip-label">{copy.securityAiScanLabel}</span>
+                        <span class="security-risk-pill" data-risk={securitySummary.aiRiskLevel ?? 'unknown'}>
+                          {securityAiLabel}
+                        </span>
+                      </div>
+                      <div class="security-tooltip-row">
+                        <span class="security-tooltip-label">{copy.securityVtScanLabel}</span>
+                        <span class="security-risk-pill" data-risk={securitySummary.vtRiskLevel ?? 'unknown'}>
+                          {securityVtLabel}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                {/if}
+
                 {#if bookmarkUiPending}
                   <div class="skill-action-btn bookmark-btn bookmark-btn-placeholder" aria-hidden="true">
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -2115,6 +2177,104 @@
     color: var(--primary);
     background: var(--primary-subtle);
     border-color: var(--primary);
+  }
+
+  .security-btn {
+    position: relative;
+    color: var(--security-accent, var(--fg-muted));
+    border-color: var(--security-accent, var(--border));
+  }
+
+  .security-btn[data-risk='mid'] {
+    --security-accent: var(--warning);
+  }
+
+  .security-btn[data-risk='high'],
+  .security-btn[data-risk='fatal'] {
+    --security-accent: var(--destructive);
+  }
+
+  .security-btn:hover {
+    color: var(--security-accent, var(--primary));
+    border-color: var(--security-accent, var(--primary));
+    background: var(--primary-subtle);
+  }
+
+  .security-tooltip {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 0.5rem);
+    min-width: 13rem;
+    padding: 0.625rem 0.75rem;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    color: var(--fg);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(6px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    z-index: 70;
+  }
+
+  .security-btn:hover .security-tooltip,
+  .security-btn:focus-visible .security-tooltip {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .security-tooltip-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin-bottom: 0.375rem;
+    color: var(--fg);
+  }
+
+  .security-tooltip-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+  }
+
+  .security-tooltip-row + .security-tooltip-row {
+    margin-top: 0.375rem;
+  }
+
+  .security-tooltip-label {
+    font-weight: 600;
+    color: var(--fg-muted);
+  }
+
+  .security-risk-pill {
+    padding: 0.1rem 0.5rem;
+    border-radius: 9999px;
+    font-weight: 700;
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+    color: var(--fg-muted);
+    background: var(--bg-muted);
+  }
+
+  .security-risk-pill[data-risk='mid'] {
+    color: var(--warning);
+  }
+
+  .security-risk-pill[data-risk='high'],
+  .security-risk-pill[data-risk='fatal'] {
+    color: var(--destructive);
+  }
+
+  .security-risk-pill[data-risk='low'] {
+    color: var(--success);
+  }
+
+  .security-risk-pill[data-risk='unknown'] {
+    color: var(--fg-subtle);
   }
 
   .bookmark-btn-placeholder {

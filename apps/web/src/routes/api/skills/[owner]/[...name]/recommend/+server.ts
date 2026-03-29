@@ -4,7 +4,7 @@ import type { ApiResponse, SkillCardData } from '$lib/types';
 import { getCached, invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
-import { getRecommendedSkills } from '$lib/server/db/utils';
+import { getRecommendedSkills } from '$lib/server/db/business/recommend';
 import { isOpenClawUserAgent } from '$lib/server/openclaw/agent-markdown';
 import { buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
 import {

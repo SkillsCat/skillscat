@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { CATEGORIES, type CategoryWithCount } from '$lib/constants/categories';
-import { getCategoryStats } from '$lib/server/db/utils';
+import { getCategoryStats } from '$lib/server/db/business/stats';
 import { getCached } from '$lib/server/cache';
 import { setPublicPageCache } from '$lib/server/cache/page';
 
