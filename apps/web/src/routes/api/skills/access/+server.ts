@@ -1,6 +1,6 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { recordSkillAccess } from '$lib/server/db/utils';
+import { recordSkillAccess } from '$lib/server/db/business/access';
 import {
   getSkillAccessClientKey,
   shouldTrackSkillAccess,

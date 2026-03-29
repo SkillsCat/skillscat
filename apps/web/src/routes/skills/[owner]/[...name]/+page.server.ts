@@ -1,6 +1,8 @@
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
-import { getSkillBySlug, getRecommendedSkills, loadSkillReadmeFromR2 } from '$lib/server/db/utils';
+import { getSkillBySlug } from '$lib/server/db/business/detail';
+import { getRecommendedSkills } from '$lib/server/db/business/recommend';
+import { loadSkillReadmeFromR2 } from '$lib/server/db/business/readme';
 import { getCached } from '$lib/server/cache';
 import { renderReadmeMarkdown } from '$lib/server/text/markdown';
 import { setPublicPageCache } from '$lib/server/cache/page';

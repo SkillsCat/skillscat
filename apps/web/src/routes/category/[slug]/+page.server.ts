@@ -1,7 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { getCategoryBySlug, type Category } from '$lib/constants/categories';
-import { getSkillsByCategoryPaginated } from '$lib/server/db/utils';
+import { getSkillsByCategoryPaginated } from '$lib/server/db/business/lists';
 import { getCached } from '$lib/server/cache';
 import { setPublicPageCache } from '$lib/server/cache/page';
 

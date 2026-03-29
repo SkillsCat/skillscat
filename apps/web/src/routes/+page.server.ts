@@ -1,10 +1,6 @@
 import type { PageServerLoad } from './$types';
-import {
-  getTrendingSkills,
-  getRecentSkills,
-  getTopSkills,
-  getStats,
-} from '$lib/server/db/utils';
+import { getTrendingSkills, getRecentSkills, getTopSkills } from '$lib/server/db/business/lists';
+import { getStats } from '$lib/server/db/business/stats';
 import { getCached } from '$lib/server/cache';
 import { setPublicPageCache } from '$lib/server/cache/page';
 import {

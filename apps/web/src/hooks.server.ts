@@ -4,7 +4,7 @@ import { building } from '$app/environment';
 import type { Handle, ResolveOptions } from '@sveltejs/kit';
 import { runRequestSecurity, shouldNoIndexPath } from '$lib/server/security/request';
 import { getCachedText, peekCachedText, putCachedText, setCacheVersion } from '$lib/server/cache';
-import { getSkillBySlug } from '$lib/server/db/utils';
+import { getSkillBySlug } from '$lib/server/db/business/detail';
 import {
   shouldForceDefaultLocaleForPublicPage,
   shouldUseDefaultLocaleForIndexablePage,

@@ -45,6 +45,7 @@ export interface SkillDetail extends SkillCardData {
   createdAt: number;
   indexedAt: number;
   license?: string | null;
+  security?: SkillSecuritySummary | null;
   // Author info
   authorUsername?: string | null;
   authorDisplayName?: string | null;
@@ -66,6 +67,13 @@ export interface SkillDetail extends SkillCardData {
 export interface SkillInstallCliMethod {
   id: 'skillscat' | 'skills';
   command: string;
+}
+
+export type SecurityRiskLevel = 'low' | 'mid' | 'high' | 'fatal';
+
+export interface SkillSecuritySummary {
+  aiRiskLevel?: SecurityRiskLevel | null;
+  vtRiskLevel?: SecurityRiskLevel | null;
 }
 
 export interface SkillInstallData {
