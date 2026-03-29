@@ -28,7 +28,14 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
   const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
-  const resolved = await resolveSkillDetail({ db, request, locals, waitUntil }, slug);
+  const resolved = await resolveSkillDetail({
+    db,
+    r2: platform?.env?.R2,
+    request,
+    locals,
+    waitUntil,
+    includeRecommendSkills: false,
+  }, slug);
 
   if (!resolved.data) {
     return json(

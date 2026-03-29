@@ -5,6 +5,7 @@ import {
   getSkillPageCacheInvalidationKeys,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
+import { getSkillDetailCacheKeys } from '$lib/server/skill/detail';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import { isSkillOwner } from '$lib/server/auth/permissions';
 import { getRepo } from '$lib/server/github-client/rest';
@@ -189,7 +190,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
     .all<{ category_slug: string }>();
 
   const cacheKeys = new Set<string>([
-    `api:skill:${skill.slug}`,
+    ...getSkillDetailCacheKeys(skill.slug),
     `api:skill-files:${skill.slug}`,
     `skill:${skillId}`,
     `recommend:${skillId}`,

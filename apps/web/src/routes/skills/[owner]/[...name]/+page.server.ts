@@ -6,6 +6,13 @@ import { renderReadmeMarkdown } from '$lib/server/text/markdown';
 import { setPublicPageCache } from '$lib/server/cache/page';
 import { CATEGORIES } from '$lib/constants/categories';
 import type { Category } from '$lib/constants/categories';
+import { normalizeRecommendAlgoVersion } from '$lib/server/ranking/recommend-precompute';
+import {
+  readCachedRecommendSkills,
+  RECOMMEND_ONLINE_CACHE_TTL_SECONDS,
+  readRecommendRefreshState,
+  shouldRefreshPrecomputedRecommend,
+} from '$lib/server/ranking/recommend-cache';
 import { buildSkillPathFromOwnerAndName, buildSkillSlug, encodeSkillSlugForPath, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
 import type { SkillCardData, SkillDetail } from '$lib/types';
 import { buildSkillInstallData } from '$lib/skill-install';
@@ -20,7 +27,6 @@ const SEO_DESCRIPTION_STOP_WORDS = new Set([
 const MAX_SEO_DESCRIPTION_SCAN_CHARS = 500;
 const MAX_SEO_TITLE_LENGTH = 68;
 const MAX_SEO_DESCRIPTION_LENGTH = 160;
-const RECOMMEND_SKILLS_CACHE_TTL = 3600;
 // Keyed by skill ID + readme version, so entries are immutable after a skill update.
 const README_HTML_CACHE_TTL = 60 * 60 * 24 * 30;
 
@@ -308,6 +314,9 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     R2: platform?.env?.R2,
     KV: platform?.env?.KV,
   };
+  const recommendAlgoVersion = normalizeRecommendAlgoVersion(
+    (platform?.env as { RECOMMEND_ALGO_VERSION?: string } | undefined)?.RECOMMEND_ALGO_VERSION
+  );
 
   const userId = locals.user?.id || null;
 
@@ -353,12 +362,62 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     if (!skill) {
       setHeaders({
         'X-Skillscat-Status-Override': '404',
-        'Cache-Control': 'no-store',
       });
       return finish(createNotFoundResult());
     }
 
     const shouldDeferUserState = skill.visibility === 'public';
+    const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
+    const cachedRecommendSkillsResult = skill.visibility === 'public'
+      ? await timed(
+        'recommend_cached',
+        async () => {
+          try {
+            return await readCachedRecommendSkills({
+              skillId: skill.id,
+              r2: env.R2,
+              algoVersion: recommendAlgoVersion,
+              waitUntil,
+              limit: 10,
+            });
+          } catch (cachedRecommendError) {
+            console.warn('Failed to read cached recommend skills:', cachedRecommendError);
+            return {
+              recommendSkills: null,
+              hit: false,
+              algoVersion: recommendAlgoVersion,
+            };
+          }
+        },
+        'cache+r2'
+      )
+      : null;
+    const cachedRecommendSkills = cachedRecommendSkillsResult?.recommendSkills ?? null;
+    const encodedSlug = skill.visibility === 'public'
+      ? encodeSkillSlugForPath(skill.slug)
+      : null;
+
+    if (skill.visibility === 'public' && cachedRecommendSkills !== null && waitUntil && encodedSlug) {
+      const recommendRefreshState = await timed(
+        'recommend_state',
+        () => readRecommendRefreshState(env.DB, skill.id),
+        'db'
+      );
+
+      if (shouldRefreshPrecomputedRecommend(recommendRefreshState, recommendAlgoVersion)) {
+        serverTimings.push({ name: 'recommend_refresh_scheduled', dur: 0, desc: 'stale-hit' });
+        waitUntil(
+          fetch(`/api/skills/${encodedSlug}/recommend`, {
+            headers: { accept: 'application/json' },
+          })
+            .then(() => undefined)
+            .catch((recommendRefreshError) => {
+              console.warn('Failed background refresh trigger for recommend skills:', recommendRefreshError);
+            })
+        );
+      }
+    }
+
     setPublicPageCache({
       setHeaders,
       request,
@@ -373,14 +432,17 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       setHeaders({ [PUBLIC_SKILL_HTML_CACHE_HEADER]: '1' });
     }
 
-    const deferRecommendSkills = Boolean(isDataRequest);
+    const deferRecommendSkills = skill.visibility === 'public' && cachedRecommendSkills === null;
     const recommendSkillsPromise = deferRecommendSkills
       ? Promise.resolve<SkillCardData[]>([])
       : timed(
         'recommend',
         async () => {
+          if (cachedRecommendSkills !== null) {
+            return cachedRecommendSkills;
+          }
+
           if (skill.visibility === 'public') {
-            const encodedSlug = encodeSkillSlugForPath(skill.slug);
             if (encodedSlug) {
               try {
                 const response = await fetch(`/api/skills/${encodedSlug}/recommend`, {
@@ -414,7 +476,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
               },
               false
             ),
-            RECOMMEND_SKILLS_CACHE_TTL
+            RECOMMEND_ONLINE_CACHE_TTL_SECONDS
           );
           return data;
         },
