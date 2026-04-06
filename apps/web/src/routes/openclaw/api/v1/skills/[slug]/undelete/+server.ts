@@ -6,8 +6,7 @@ import { canWriteSkill } from '$lib/server/auth/permissions';
 import { buildOpenClawResponseHeaders } from '$lib/server/openclaw/registry';
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 import { readOpenClawManifest, writeOpenClawManifest } from '$lib/server/openclaw/compat-store';
-import { invalidateCache } from '$lib/server/cache';
-import { getCategoryPageCacheKey } from '$lib/server/cache/categories';
+import { invalidateCategoryCaches } from '$lib/server/cache/categories';
 import { syncCategoryPublicStats } from '$lib/server/db/business/stats';
 
 interface SkillRow {
@@ -96,9 +95,7 @@ export const POST: RequestHandler = async ({ params, platform, request, locals }
   await invalidateOpenClawSkillCaches(skill.id, skill.slug);
 
   if (categorySlugs.length > 0) {
-    await Promise.all(
-      categorySlugs.map((categorySlug) => invalidateCache(getCategoryPageCacheKey(categorySlug)))
-    );
+    await invalidateCategoryCaches(categorySlugs);
   }
 
   return json(
