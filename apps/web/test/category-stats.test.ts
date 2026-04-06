@@ -80,6 +80,9 @@ function createCategoryStatsDb(): DatabaseSync {
       max_freshness_ts INTEGER,
       updated_at INTEGER NOT NULL DEFAULT 0
     );
+
+    CREATE INDEX skill_categories_category_skill_idx
+      ON skill_categories (category_slug, skill_id);
   `);
 
   return sqlite;

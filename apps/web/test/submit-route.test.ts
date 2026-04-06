@@ -20,6 +20,27 @@ interface MockExistingSkill {
 function buildDbMock(existingByPath: Record<string, MockExistingSkill> = {}) {
   return {
     prepare: vi.fn((sql: string) => {
+      if (sql.includes("COALESCE(skill_path, '') IN (")) {
+        return {
+          bind: (_owner: string, _repo: string, ...skillPaths: string[]) => ({
+            all: vi.fn(async () => ({
+              results: skillPaths.flatMap((skillPath) => {
+                const existing = existingByPath[skillPath];
+                if (!existing) return [];
+                return [{
+                  id: existing.id ?? 'skill_existing',
+                  slug: existing.slug,
+                  tier: existing.tier,
+                  next_update_at: existing.nextUpdateAt ?? null,
+                  indexed_at: existing.indexedAt ?? null,
+                  normalizedSkillPath: skillPath,
+                }];
+              }),
+            })),
+          }),
+        };
+      }
+
       if (sql.includes('SELECT id, slug, tier')) {
         return {
           bind: (_owner: string, _repo: string, skillPath: string) => ({
@@ -811,6 +832,15 @@ describe('submit route', () => {
       repoName: 'toolbox',
       skillPath: 'skills/alpha',
     }), expect.anything());
+    expect(
+      db.prepare.mock.calls.filter(([sql]) => sql.includes("COALESCE(skill_path, '') IN ("))
+    ).toHaveLength(1);
+    expect(
+      db.prepare.mock.calls.filter(([sql]) =>
+        sql.includes('SELECT id, slug, tier, next_update_at, indexed_at FROM skills')
+        && sql.includes("COALESCE(skill_path, '') = ?")
+      )
+    ).toHaveLength(0);
   });
 
   it('returns existing results for root submit when root and nested skills already exist without requiring a queue', async () => {

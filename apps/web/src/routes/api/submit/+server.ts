@@ -198,6 +198,10 @@ interface ExistingSkillState {
   indexed_at?: number | null;
 }
 
+interface ExistingSkillStateByPathRow extends ExistingSkillState {
+  normalizedSkillPath: string;
+}
+
 interface SubmitResultEntry {
   path: string;
   status: 'queued' | 'exists' | 'resurrected' | 'failed';
@@ -210,6 +214,47 @@ function normalizeSubmitRefreshTier(tier: string | null | undefined): SubmitRefr
     return tier;
   }
   return 'cold';
+}
+
+async function loadExistingSkillStatesByPath(
+  db: D1Database,
+  owner: string,
+  repo: string,
+  skillPaths: string[]
+): Promise<Map<string, ExistingSkillState>> {
+  const normalizedPaths = Array.from(new Set(skillPaths.map((skillPath) => skillPath || '')));
+  if (normalizedPaths.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = normalizedPaths.map(() => '?').join(',');
+  const result = await db.prepare(`
+    SELECT
+      id,
+      slug,
+      tier,
+      next_update_at,
+      indexed_at,
+      COALESCE(skill_path, '') AS normalizedSkillPath
+    FROM skills
+    WHERE repo_owner = ? AND repo_name = ?
+      AND COALESCE(skill_path, '') IN (${placeholders})
+  `)
+    .bind(owner, repo, ...normalizedPaths)
+    .all<ExistingSkillStateByPathRow>();
+
+  return new Map(
+    (result.results || []).map((row) => [
+      row.normalizedSkillPath,
+      {
+        id: row.id,
+        slug: row.slug,
+        tier: row.tier,
+        next_update_at: row.next_update_at ?? null,
+        indexed_at: row.indexed_at ?? null,
+      } satisfies ExistingSkillState,
+    ])
+  );
 }
 
 function shouldQueueExistingSkillRefreshOnSubmit(
@@ -1212,6 +1257,20 @@ async function submitMultipleSkills({
 }): Promise<Response> {
   const results: SubmitResultEntry[] = [];
   const now = Date.now();
+  let existingByPath: Map<string, ExistingSkillState> | null = null;
+
+  if (db) {
+    try {
+      existingByPath = await loadExistingSkillStatesByPath(
+        db,
+        owner,
+        repo,
+        skills.map((skill) => skill.skillPath || '')
+      );
+    } catch (err) {
+      log.error(`Failed to prefetch existing skill states: ${owner}/${repo}`, err);
+    }
+  }
 
   for (let i = 0; i < skills.length; i++) {
     const skill = skills[i];
@@ -1220,13 +1279,15 @@ async function submitMultipleSkills({
     try {
       // Check if already exists
       if (db) {
-        const existing = await db.prepare(`
-          SELECT id, slug, tier, next_update_at, indexed_at FROM skills
-          WHERE repo_owner = ? AND repo_name = ?
-          AND COALESCE(skill_path, '') = ?
-        `)
-          .bind(owner, repo, skillPath || '')
-          .first<ExistingSkillState>();
+        const existing = existingByPath
+          ? (existingByPath.get(skillPath || '') ?? null)
+          : await db.prepare(`
+              SELECT id, slug, tier, next_update_at, indexed_at FROM skills
+              WHERE repo_owner = ? AND repo_name = ?
+              AND COALESCE(skill_path, '') = ?
+            `)
+              .bind(owner, repo, skillPath || '')
+              .first<ExistingSkillState>();
 
         if (existing) {
           if (existing.tier === 'archived') {

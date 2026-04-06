@@ -67,10 +67,11 @@ async function loadCategoryAggregates(
       sc.category_slug AS category_slug,
       COUNT(*) AS count,
       MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at)) AS max_ts
-    FROM skill_categories sc
-    JOIN skills s ON s.id = sc.skill_id
-    WHERE s.visibility = 'public'
-      AND sc.category_slug IN (${placeholders})
+    FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+    JOIN skills s
+      ON s.id = sc.skill_id
+     AND s.visibility = 'public'
+    WHERE sc.category_slug IN (${placeholders})
     GROUP BY sc.category_slug
   `)
     .bind(...categorySlugs)
