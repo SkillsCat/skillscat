@@ -1,9 +1,14 @@
 import type { RequestHandler } from './$types';
 import { Resvg } from '@cf-wasm/resvg';
+import { normalizePublicAvatarUrl } from '$lib/avatar';
 import { SITE_NAME, SITE_DESCRIPTION, SITE_OG_DEFAULT_SUBTITLE, SITE_URL } from '$lib/seo/constants';
 import { OG_IMAGE_VERSION } from '$lib/seo/og';
-import { getSkillBySlug } from '$lib/server/db/business/detail';
-import type { DbEnv } from '$lib/server/db/shared/types';
+import { getCachedBinary } from '$lib/server/cache';
+import {
+  fetchPublicBinaryAsset,
+  fetchPublicDataUri,
+  fetchPublicTextAsset,
+} from '$lib/server/cache/public-assets';
 import { getCategoryBySlug } from '$lib/constants/categories';
 import { buildSkillscatInstallCommand, splitShellCommand } from '$lib/skill-install';
 
@@ -14,6 +19,13 @@ const DEFAULT_SUBTITLE = SITE_OG_DEFAULT_SUBTITLE;
 const DEFAULT_TAG = 'skills.cat';
 const VERSIONED_CACHE_CONTROL = 'public, max-age=31536000, s-maxage=31536000, immutable';
 const DEFAULT_CACHE_CONTROL = 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800';
+const VERSIONED_CACHE_TTL_SECONDS = 31536000;
+const DEFAULT_CACHE_TTL_SECONDS = 86400;
+const PUBLIC_FONT_ASSET_TTL_SECONDS = 30 * 24 * 60 * 60;
+const PUBLIC_IMAGE_ASSET_TTL_SECONDS = 7 * 24 * 60 * 60;
+const GOOGLE_TTF_USER_AGENT = 'Mozilla/5.0 (Linux; U; Android 4.4.2; en-us) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30';
+
+type WaitUntilFn = (promise: Promise<unknown>) => void;
 
 const COLOR = {
   primary: '#d4842a',
@@ -59,14 +71,53 @@ const DEFAULT_OG: OgData = {
 
 // --- Data resolvers ---
 
-async function resolveSkill(slug: string, env: DbEnv): Promise<OgData | null> {
-  if (!env.DB) return null;
-  const skill = await getSkillBySlug(env, slug, null);
+interface OgSkillRow {
+  name: string;
+  slug: string;
+  description: string | null;
+  repo_owner: string;
+  repo_name: string;
+  skill_path: string | null;
+  stars: number | null;
+  source_type: 'github' | 'upload' | null;
+  visibility: string | null;
+  author_display_name: string | null;
+  author_avatar: string | null;
+  category_slug: string | null;
+}
+
+async function resolveSkill(slug: string, db: D1Database): Promise<OgData | null> {
+  const skill = await db.prepare(`
+    SELECT
+      s.name,
+      s.slug,
+      s.description,
+      s.repo_owner,
+      s.repo_name,
+      s.skill_path,
+      s.stars,
+      s.source_type,
+      s.visibility,
+      a.display_name AS author_display_name,
+      a.avatar_url AS author_avatar,
+      (
+        SELECT sc.category_slug
+        FROM skill_categories sc
+        WHERE sc.skill_id = s.id
+        LIMIT 1
+      ) AS category_slug
+    FROM skills s
+    LEFT JOIN authors a ON a.username = s.repo_owner
+    WHERE s.slug = ?
+    LIMIT 1
+  `)
+    .bind(slug)
+    .first<OgSkillRow>();
+
   if (!skill || skill.visibility === 'private') return null;
-  const author = skill.authorDisplayName || skill.repoOwner || '';
-  const categories = skill.categories || [];
-  const firstCat = categories.length > 0 ? getCategoryBySlug(categories[0]) : null;
-  const avatarUrl = skill.authorAvatar || `https://github.com/${skill.repoOwner}.png?size=128`;
+  const author = skill.author_display_name || skill.repo_owner || '';
+  const firstCat = skill.category_slug ? getCategoryBySlug(skill.category_slug) : null;
+  const avatarUrl = skill.author_avatar || `https://github.com/${skill.repo_owner}.png?size=128`;
   return {
     title: skill.name,
     subtitle: skill.description || `AI agent skill: ${skill.name}`,
@@ -77,10 +128,10 @@ async function resolveSkill(slug: string, env: DbEnv): Promise<OgData | null> {
     installCommand: buildSkillscatInstallCommand({
       slug: skill.slug,
       skillName: skill.name,
-      skillPath: skill.skillPath,
-      sourceType: skill.sourceType,
-      repoOwner: skill.repoOwner,
-      repoName: skill.repoName,
+      skillPath: skill.skill_path || '',
+      sourceType: skill.source_type || 'github',
+      repoOwner: skill.repo_owner,
+      repoName: skill.repo_name,
     }),
   };
 }
@@ -134,12 +185,14 @@ function resolveCategory(slug: string): OgData | null {
 }
 
 async function resolveOgData(
-  type: string, slug: string, env: DbEnv,
+  type: string,
+  slug: string,
+  db: D1Database | undefined,
 ): Promise<OgData | null> {
   switch (type) {
-    case 'skill': return resolveSkill(slug, env);
-    case 'user': return env.DB ? resolveUser(slug, env.DB) : null;
-    case 'org': return env.DB ? resolveOrg(slug, env.DB) : null;
+    case 'skill': return db ? resolveSkill(slug, db) : null;
+    case 'user': return db ? resolveUser(slug, db) : null;
+    case 'org': return db ? resolveOrg(slug, db) : null;
     case 'category': return resolveCategory(slug);
     case 'page': return STATIC_PAGES[slug] ?? null;
     default: return null;
@@ -190,6 +243,21 @@ function buildOgEtag(type: string, slug: string, version: string): string {
   const safeVersion = normalizeEtagPart(version, 'none');
   const digest = fnv1aHex(`${safeType}\u001f${safeSlug}\u001f${safeVersion}`);
   return `"og:${OG_IMAGE_VERSION}:${digest}"`;
+}
+
+function encodeOgCacheKeyPart(value: string, fallback: string): string {
+  const normalized = value.trim();
+  return encodeURIComponent(normalized || fallback);
+}
+
+function buildOgCacheKey(type: string, slug: string, version: string): string {
+  return [
+    'og:image',
+    OG_IMAGE_VERSION,
+    encodeOgCacheKeyPart(type, 'default'),
+    encodeOgCacheKeyPart(slug, 'default'),
+    encodeOgCacheKeyPart(version, 'default'),
+  ].join(':');
 }
 
 function wrapLines(text: string, maxCharsPerLine: number, maxLines: number): string[] {
@@ -381,46 +449,56 @@ let fontDataUri: string | null = null;
 let logoDataUri: string | null = null;
 const LOGO_CANDIDATE_PATHS = ['/favicon-128x128.png', '/favicon-256x256.png'] as const;
 
-async function loadFont(): Promise<{ buffer: Uint8Array; dataUri: string }> {
+async function loadFont(waitUntil?: WaitUntilFn): Promise<{ buffer: Uint8Array; dataUri: string }> {
   if (fontBuffer && fontDataUri) return { buffer: fontBuffer, dataUri: fontDataUri };
   // Fetch TTF for resvg (it doesn't support woff2).
   // Use CSS v1 API + Android 4.x UA — Google Fonts serves TTF to these clients.
-  const css = await fetch(
-    'https://fonts.googleapis.com/css?family=Poppins:700',
-    { headers: { 'User-Agent': 'Mozilla/5.0 (Linux; U; Android 4.4.2; en-us) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30' } },
-  ).then((r) => r.text());
+  const { data: css } = await fetchPublicTextAsset({
+    url: 'https://fonts.googleapis.com/css?family=Poppins:700',
+    cacheKeyPrefix: 'asset:og:font-css:poppins-700',
+    ttlSeconds: PUBLIC_FONT_ASSET_TTL_SECONDS,
+    waitUntil,
+    headers: {
+      'User-Agent': GOOGLE_TTF_USER_AGENT,
+    },
+  });
   const urlMatch = css.match(/src:\s*[^;]*url\(([^)]+)\)/);
   if (!urlMatch) throw new Error('Failed to extract font URL');
-  const buf = await fetch(urlMatch[1]).then((r) => r.arrayBuffer());
-  fontBuffer = new Uint8Array(buf);
+  const { data } = await fetchPublicBinaryAsset({
+    url: urlMatch[1],
+    cacheKeyPrefix: 'asset:og:font-file:poppins-700',
+    ttlSeconds: PUBLIC_FONT_ASSET_TTL_SECONDS,
+    waitUntil,
+  });
+  fontBuffer = data;
   let binary = '';
   for (let i = 0; i < fontBuffer.length; i++) binary += String.fromCharCode(fontBuffer[i]);
   fontDataUri = `data:font/truetype;base64,${btoa(binary)}`;
   return { buffer: fontBuffer, dataUri: fontDataUri };
 }
 
-async function fetchImageDataUri(url: string): Promise<string | null> {
+async function fetchImageDataUri(url: string, waitUntil?: WaitUntilFn): Promise<string | null> {
+  const normalizedUrl = normalizePublicAvatarUrl(url, 128) || url;
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const buf = await res.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-    const ct = res.headers.get('content-type') || 'image/png';
-    return `data:${ct};base64,${btoa(binary)}`;
+    const { dataUri } = await fetchPublicDataUri({
+      url: normalizedUrl,
+      cacheKeyPrefix: 'asset:og:image-data-uri',
+      ttlSeconds: PUBLIC_IMAGE_ASSET_TTL_SECONDS,
+      waitUntil,
+    });
+    return dataUri;
   } catch {
     return null;
   }
 }
 
-async function getLogoDataUri(origin: string): Promise<string> {
+async function getLogoDataUri(origin: string, waitUntil?: WaitUntilFn): Promise<string> {
   if (logoDataUri) return logoDataUri;
 
   const baseUrls = Array.from(new Set([origin, SITE_URL]));
   for (const baseUrl of baseUrls) {
     for (const logoPath of LOGO_CANDIDATE_PATHS) {
-      const dataUri = await fetchImageDataUri(`${baseUrl}${logoPath}`);
+      const dataUri = await fetchImageDataUri(`${baseUrl}${logoPath}`, waitUntil);
       if (dataUri) {
         logoDataUri = dataUri;
         return logoDataUri;
@@ -569,7 +647,10 @@ export const GET: RequestHandler = async ({ url, platform, request }) => {
   const version = url.searchParams.get('v')?.trim() || '';
   const hasVersion = version.length > 0;
   const cacheControl = hasVersion ? VERSIONED_CACHE_CONTROL : DEFAULT_CACHE_CONTROL;
+  const cacheTtl = hasVersion ? VERSIONED_CACHE_TTL_SECONDS : DEFAULT_CACHE_TTL_SECONDS;
   const etag = buildOgEtag(type, slug, version);
+  const cacheKey = buildOgCacheKey(type, slug, version);
+  const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
 
   const ifNoneMatch = request.headers.get('if-none-match');
   const matchesEtag = Boolean(
@@ -586,51 +667,62 @@ export const GET: RequestHandler = async ({ url, platform, request }) => {
       headers: {
         ETag: etag,
         'Cache-Control': cacheControl,
+        'X-Cache': 'REVALIDATED',
         'X-Content-Type-Options': 'nosniff',
       },
     });
   }
 
-  const env: DbEnv = {
-    DB: platform?.env?.DB,
-    R2: platform?.env?.R2,
-    KV: platform?.env?.KV,
-    CACHE_VERSION: platform?.env?.CACHE_VERSION,
-  };
+  const { data: pngData, hit } = await getCachedBinary(
+    cacheKey,
+    async () => {
+      let data: OgData;
+      try {
+        data = (type && slug ? await resolveOgData(type, slug, platform?.env?.DB) : null) ?? DEFAULT_OG;
+      } catch {
+        data = DEFAULT_OG;
+      }
 
-  let data: OgData;
-  try {
-    data = (type && slug ? await resolveOgData(type, slug, env) : null) ?? DEFAULT_OG;
-  } catch {
-    data = DEFAULT_OG;
-  }
+      const title = truncate(data.title, 120) || DEFAULT_TITLE;
+      const subtitle = truncate(data.subtitle, 180) || DEFAULT_SUBTITLE;
+      const showSubtitle = Boolean(subtitle);
+      const tag = truncate(data.tag, 32);
+      const author = truncate(data.author, 60);
 
-  const title = truncate(data.title, 120) || DEFAULT_TITLE;
-  const subtitle = truncate(data.subtitle, 180) || DEFAULT_SUBTITLE;
-  const showSubtitle = Boolean(subtitle);
-  const tag = truncate(data.tag, 32);
-  const author = truncate(data.author, 60);
+      const [fontData, logo, avatar] = await Promise.all([
+        loadFont(waitUntil),
+        getLogoDataUri(url.origin, waitUntil),
+        data.avatarUrl ? fetchImageDataUri(data.avatarUrl, waitUntil) : Promise.resolve(null),
+      ]);
 
-  const [fontData, logo, avatar] = await Promise.all([
-    loadFont(),
-    getLogoDataUri(url.origin),
-    data.avatarUrl ? fetchImageDataUri(data.avatarUrl) : Promise.resolve(null),
-  ]);
+      const svg = buildSvg(title, subtitle, tag, author, data.stars, data.installCommand, showSubtitle, fontData.dataUri, logo, avatar);
 
-  const svg = buildSvg(title, subtitle, tag, author, data.stars, data.installCommand, showSubtitle, fontData.dataUri, logo, avatar);
+      const resvg = new Resvg(svg, {
+        fitTo: { mode: 'width', value: 1200 },
+        font: { fontBuffers: [fontData.buffer] },
+      });
 
-  const resvg = new Resvg(svg, {
-    fitTo: { mode: 'width', value: 1200 },
-    font: { fontBuffers: [fontData.buffer] },
-  });
-  const pngData = resvg.render().asPng();
-
-  return new Response(pngData.buffer as ArrayBuffer, {
-    headers: {
-      'Content-Type': 'image/png',
-      ETag: etag,
-      'Cache-Control': cacheControl,
-      'X-Content-Type-Options': 'nosniff',
+      return resvg.render().asPng();
     },
-  });
+    cacheTtl,
+    {
+      contentType: 'image/png',
+      waitUntil,
+    }
+  );
+
+  const responseBody = Uint8Array.from(pngData);
+
+  return new Response(
+    new Blob([responseBody], { type: 'image/png' }),
+    {
+      headers: {
+        'Content-Type': 'image/png',
+        ETag: etag,
+        'Cache-Control': cacheControl,
+        'X-Cache': hit ? 'HIT' : 'MISS',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    },
+  );
 };

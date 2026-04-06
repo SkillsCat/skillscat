@@ -17,6 +17,7 @@ let activeCacheVersion = DEFAULT_CACHE_VERSION;
 const pendingJsonFetches = new Map<string, Promise<unknown>>();
 const pendingTextFetches = new Map<string, Promise<string>>();
 const pendingBinaryFetches = new Map<string, Promise<Uint8Array>>();
+const pendingResponseFetches = new Map<string, Promise<Response>>();
 
 function normalizeCacheVersion(version: string | undefined | null): string {
   const normalized = (version || '').trim();
@@ -38,6 +39,17 @@ function buildTextCacheResponse(data: string, ttl: number, contentType = 'text/p
       'Cache-Control': `public, max-age=${ttl}`,
       'Content-Type': contentType,
     },
+  });
+}
+
+function cloneResponseWithCacheHeaders(response: Response, ttl: number): Response {
+  const headers = new Headers(response.headers);
+  headers.set('Cache-Control', `public, max-age=${ttl}`);
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
   });
 }
 
@@ -330,6 +342,77 @@ export async function getCachedBinary(
     return { data, hit: false };
   } finally {
     pendingBinaryFetches.delete(versionedKey);
+  }
+}
+
+/**
+ * Get a cached Response while preserving response headers like Content-Type.
+ */
+export async function getCachedResponse(
+  cacheKey: string,
+  fetcher: () => Promise<Response>,
+  ttl: number,
+  options?: {
+    waitUntil?: WaitUntilFn;
+    shouldCache?: (response: Response) => boolean;
+  }
+): Promise<{ response: Response; hit: boolean }> {
+  const versionedKey = getVersionedCacheKey(cacheKey);
+
+  try {
+    const cache = caches.default;
+    const versionedRequest = buildCacheRequest(versionedKey);
+    const legacyRequest = buildCacheRequest(cacheKey);
+
+    const cached = await cache.match(versionedRequest);
+    if (cached) {
+      return { response: cached, hit: true };
+    }
+
+    const legacyCached = await cache.match(legacyRequest);
+    if (legacyCached) {
+      const promoted = legacyCached.clone();
+      scheduleCacheWrite(cache.put(versionedRequest, promoted), options?.waitUntil);
+      return { response: legacyCached, hit: true };
+    }
+  } catch {
+    // Cache API not available or error
+  }
+
+  const inFlight = pendingResponseFetches.get(versionedKey);
+  if (inFlight) {
+    const response = await inFlight;
+    return { response: response.clone(), hit: false };
+  }
+
+  const shouldCache = options?.shouldCache ?? ((response: Response) => response.ok);
+
+  const fetchPromise = (async (): Promise<Response> => {
+    const response = await fetcher();
+
+    if (shouldCache(response)) {
+      try {
+        const cache = caches.default;
+        const cacheUrl = buildCacheRequest(versionedKey);
+        scheduleCacheWrite(
+          cache.put(cacheUrl, cloneResponseWithCacheHeaders(response.clone(), ttl)),
+          options?.waitUntil,
+        );
+      } catch {
+        // Ignore cache write errors.
+      }
+    }
+
+    return response.clone();
+  })();
+
+  pendingResponseFetches.set(versionedKey, fetchPromise);
+
+  try {
+    const response = await fetchPromise;
+    return { response: response.clone(), hit: false };
+  } finally {
+    pendingResponseFetches.delete(versionedKey);
   }
 }
 

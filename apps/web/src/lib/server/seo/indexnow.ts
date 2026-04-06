@@ -67,7 +67,7 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   return Math.max(1, Math.floor(numeric));
 }
 
-function isIndexNowEnabled(env: IndexNowEnvLike | undefined): boolean {
+export function isIndexNowEnabled(env: IndexNowEnvLike | undefined): boolean {
   const key = env?.INDEXNOW_KEY?.trim();
   if (!key) return false;
   return parseBooleanEnv(env?.INDEXNOW_ENABLED, true);

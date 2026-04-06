@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { resolvePublicAvatarUrl } from '$lib/avatar';
+
   type Size = "xs" | "sm" | "md" | "lg" | "xl";
   type Shape = "circle" | "squircle";
 
@@ -37,34 +39,13 @@
     xl: { px: 120, github: 240 },
   };
 
-  function normalizeGithubAvatarUrl(url: string | null, requestedSize: number): string | null {
-    if (!url) return null;
-
-    try {
-      const normalized = new URL(url);
-      if (normalized.hostname !== 'avatars.githubusercontent.com') {
-        return url;
-      }
-
-      const currentSize = Number(normalized.searchParams.get('s'));
-      if (!Number.isFinite(currentSize) || currentSize > requestedSize) {
-        normalized.searchParams.set('s', String(requestedSize));
-      }
-
-      return normalized.toString();
-    } catch {
-      return url;
-    }
-  }
-
   const imageUrl = $derived(
-    normalizeGithubAvatarUrl(
-      src ||
-        (useGithubFallback && fallback
-          ? `https://avatars.githubusercontent.com/${fallback}?s=${sizeMap[size].github}`
-          : null),
-      sizeMap[size].github,
-    ),
+    resolvePublicAvatarUrl({
+      src,
+      fallback,
+      useGithubFallback,
+      requestedSize: sizeMap[size].github,
+    }),
   );
 
   const placeholder = $derived(
