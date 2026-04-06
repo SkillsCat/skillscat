@@ -5,6 +5,7 @@ import {
   getSkillPageCacheInvalidationKeys,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
+import { getCategoryPageCacheKey } from '$lib/server/cache/categories';
 import { getSkillDetailCacheKeys } from '$lib/server/skill/detail';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import { isSkillOwner } from '$lib/server/auth/permissions';
@@ -14,6 +15,7 @@ import {
   resolveIndexNowOwnerHandle,
   scheduleIndexNowSubmission,
 } from '$lib/server/seo/indexnow';
+import { syncCategoryPublicStats } from '$lib/server/db/business/stats';
 
 /**
  * Verify that a GitHub repo exists and belongs to the user
@@ -189,6 +191,14 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
     .bind(skillId)
     .all<{ category_slug: string }>();
 
+  const categorySlugs = (categoryRows.results || [])
+    .map((row) => row.category_slug)
+    .filter((slug): slug is string => typeof slug === 'string' && slug.length > 0);
+
+  if (categorySlugs.length > 0) {
+    await syncCategoryPublicStats(db, categorySlugs);
+  }
+
   const cacheKeys = new Set<string>([
     ...getSkillDetailCacheKeys(skill.slug),
     `api:skill-files:${skill.slug}`,
@@ -198,10 +208,8 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
     ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
   ]);
 
-  for (const row of categoryRows.results || []) {
-    if (row.category_slug) {
-      cacheKeys.add(`page:category:v1:${row.category_slug}:1`);
-    }
+  for (const categorySlug of categorySlugs) {
+    cacheKeys.add(getCategoryPageCacheKey(categorySlug));
   }
 
   await Promise.all(Array.from(cacheKeys, (cacheKey) => invalidateCache(cacheKey)));

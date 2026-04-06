@@ -9,6 +9,7 @@ import {
   getSkillPageCacheInvalidationKeys,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
+import { getCategoryPageCacheKey } from '$lib/server/cache/categories';
 import { getSkillDetailCacheKeys } from '$lib/server/skill/detail';
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 import {
@@ -16,6 +17,7 @@ import {
   resolveIndexNowOwnerHandle,
   scheduleIndexNowSubmission,
 } from '$lib/server/seo/indexnow';
+import { syncCategoryPublicStats } from '$lib/server/db/business/stats';
 
 export interface DeleteSkillArtifactsInput {
   db: D1Database;
@@ -208,6 +210,14 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
 
   await db.prepare('DELETE FROM skills WHERE id = ?').bind(skill.id).run();
 
+  if (categorySlugs.length > 0) {
+    try {
+      await syncCategoryPublicStats(db, categorySlugs);
+    } catch (error) {
+      console.error(`Failed to sync category public stats for deleted skill ${skill.id}:`, error);
+    }
+  }
+
   try {
     await deleteR2Artifacts(r2, buildSkillR2DeletePlan(skill, skillRow?.file_structure || null));
   } catch (error) {
@@ -225,7 +235,7 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
     ]);
 
     for (const categorySlug of categorySlugs) {
-      cacheKeys.add(`page:category:v1:${categorySlug}:1`);
+      cacheKeys.add(getCategoryPageCacheKey(categorySlug));
     }
 
     await Promise.all(Array.from(cacheKeys, (cacheKey) => invalidateCache(cacheKey)));

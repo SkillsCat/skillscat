@@ -6,11 +6,18 @@ import { canWriteSkill } from '$lib/server/auth/permissions';
 import { buildOpenClawResponseHeaders } from '$lib/server/openclaw/registry';
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 import { readOpenClawManifest, writeOpenClawManifest } from '$lib/server/openclaw/compat-store';
+import { invalidateCache } from '$lib/server/cache';
+import { getCategoryPageCacheKey } from '$lib/server/cache/categories';
+import { syncCategoryPublicStats } from '$lib/server/db/business/stats';
 
 interface SkillRow {
   id: string;
   slug: string;
   sourceType: string;
+}
+
+interface SkillCategoryRow {
+  category_slug: string;
 }
 
 export const POST: RequestHandler = async ({ params, platform, request, locals }) => {
@@ -57,7 +64,24 @@ export const POST: RequestHandler = async ({ params, platform, request, locals }
   }
 
   const now = Date.now();
+  const categoryRows = await db.prepare(`
+    SELECT category_slug FROM skill_categories WHERE skill_id = ?
+  `)
+    .bind(skill.id)
+    .all<SkillCategoryRow>();
+  const categorySlugs = Array.from(
+    new Set(
+      (categoryRows.results || [])
+        .map((row) => row.category_slug)
+        .filter((slug): slug is string => typeof slug === 'string' && slug.length > 0)
+    )
+  );
+
   await db.prepare(`UPDATE skills SET visibility = 'public', updated_at = ? WHERE id = ?`).bind(now, skill.id).run();
+
+  if (categorySlugs.length > 0) {
+    await syncCategoryPublicStats(db, categorySlugs, now);
+  }
 
   const manifest = await readOpenClawManifest(r2, params.slug);
   if (manifest) {
@@ -70,6 +94,12 @@ export const POST: RequestHandler = async ({ params, platform, request, locals }
   }
 
   await invalidateOpenClawSkillCaches(skill.id, skill.slug);
+
+  if (categorySlugs.length > 0) {
+    await Promise.all(
+      categorySlugs.map((categorySlug) => invalidateCache(getCategoryPageCacheKey(categorySlug)))
+    );
+  }
 
   return json(
     { ok: true },

@@ -1,4 +1,6 @@
 import { buildGithubSkillR2Key, buildUploadSkillR2Key } from '$lib/skill-path';
+import { invalidateCategoryCaches } from '$lib/server/cache/categories';
+import { syncCategoryPublicStats } from '$lib/server/db/business/stats';
 import { findSkillArchiveObjectKey } from '$lib/server/skill/archive';
 
 interface ArchiveData {
@@ -61,6 +63,12 @@ export async function restoreArchivedSkillFromR2(params: {
   }
 
   const archiveData = await archiveObj.json() as ArchiveData;
+  const categorySlugs = Array.from(
+    new Set(
+      (archiveData.categories || [])
+        .filter((slug): slug is string => typeof slug === 'string' && slug.length > 0)
+    )
+  );
   const skillLocation = await db.prepare(`
     SELECT slug, source_type, repo_owner, repo_name, skill_path
     FROM skills
@@ -90,13 +98,18 @@ export async function restoreArchivedSkillFromR2(params: {
     .bind(nextTier, stars, now, now, skillId)
     .run();
 
-  for (const categorySlug of archiveData.categories || []) {
+  for (const categorySlug of categorySlugs) {
     await db.prepare(`
       INSERT OR IGNORE INTO skill_categories (skill_id, category_slug)
       VALUES (?, ?)
     `)
       .bind(skillId, categorySlug)
       .run();
+  }
+
+  if (categorySlugs.length > 0) {
+    await syncCategoryPublicStats(db, categorySlugs, now);
+    await invalidateCategoryCaches(categorySlugs);
   }
 
   await r2.delete(archivePath);

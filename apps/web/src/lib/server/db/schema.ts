@@ -536,8 +536,19 @@ export const categories = sqliteTable('categories', {
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
-  index('categories_type_idx').on(table.type)
+  index('categories_type_idx').on(table.type),
+  index('categories_ai_suggested_skill_count_idx')
+    .on(sql.raw('skill_count DESC'), table.slug)
+    .where(sql`${table.type} = 'ai-suggested' AND ${table.skillCount} > 0`)
 ]);
+
+// ========== Public Category Stats ==========
+export const categoryPublicStats = sqliteTable('category_public_stats', {
+  categorySlug: text('category_slug').primaryKey(),
+  publicSkillCount: integer('public_skill_count').notNull().default(0),
+  maxFreshnessTs: integer('max_freshness_ts', { mode: 'timestamp_ms' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+});
 
 // ========== Skill Tags (from SKILL.md frontmatter) ==========
 export const skillTags = sqliteTable('skill_tags', {

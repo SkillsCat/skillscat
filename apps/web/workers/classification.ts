@@ -28,6 +28,8 @@ import {
 } from './shared/ai/openrouter';
 import { createLogger } from './shared/utils';
 import { buildGithubSkillR2Keys, buildUploadSkillR2Key } from '../src/lib/skill-path';
+import { invalidateCategoryCaches } from '../src/lib/server/cache/categories';
+import { syncCategoryPublicStats } from '../src/lib/server/db/business/stats';
 import { markRecommendDirty } from '../src/lib/server/ranking/recommend-precompute';
 import { markSearchDirty } from '../src/lib/server/ranking/search-precompute';
 
@@ -636,27 +638,21 @@ async function saveClassification(
     .bind(method, now, skillId)
     .run();
 
-  // Keep categories.skill_count consistent with actual public skill mappings.
   const affectedCategorySlugs = new Set<string>([
     ...previousCategorySlugs,
     ...Array.from(assignedCategorySlugs),
   ]);
 
-  for (const categorySlug of affectedCategorySlugs) {
-    await env.DB.prepare(`
-      UPDATE categories
-      SET skill_count = (
-        SELECT COUNT(*)
-        FROM skill_categories sc
-        INNER JOIN skills s ON s.id = sc.skill_id
-        WHERE sc.category_slug = categories.slug
-          AND s.visibility = 'public'
-      ),
-      updated_at = ?
-      WHERE slug = ?
-    `)
-      .bind(now, categorySlug)
-      .run();
+  try {
+    await syncCategoryPublicStats(env.DB, affectedCategorySlugs, now);
+  } catch (error) {
+    log.error('Failed to sync category public stats:', error);
+  }
+
+  try {
+    await invalidateCategoryCaches(affectedCategorySlugs);
+  } catch (error) {
+    log.error('Failed to invalidate category caches after classification:', error);
   }
 
   await markRecommendDirty(env.DB, skillId, now);

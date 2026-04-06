@@ -375,14 +375,11 @@ export async function getExpandedCoreSitemapPages(
   const categoryPlaceholders = categorySlugs.map(() => '?').join(', ');
   const categoryCounts = await db.prepare(`
     SELECT
-      sc.category_slug AS slug,
-      COUNT(*) AS count,
-      MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at)) AS max_ts
-    FROM skill_categories sc
-    JOIN skills s ON s.id = sc.skill_id
-    WHERE s.visibility = 'public'
-      AND sc.category_slug IN (${categoryPlaceholders})
-    GROUP BY sc.category_slug
+      category_slug AS slug,
+      public_skill_count AS count,
+      max_freshness_ts AS max_ts
+    FROM category_public_stats
+    WHERE category_slug IN (${categoryPlaceholders})
   `)
     .bind(...categorySlugs)
     .all<CategoryCountRow>();

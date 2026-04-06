@@ -127,6 +127,13 @@
       "when": 1775493292214,
       "tag": "0017_open_captain_midlands",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1775494637384,
+      "tag": "0018_goofy_black_widow",
+      "breakpoints": true
     }
   ]
 }

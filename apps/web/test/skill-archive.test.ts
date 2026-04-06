@@ -21,6 +21,12 @@ class SqliteD1Statement {
     return (this.db.prepare(this.sql).get(...this.params) as T | undefined) ?? null;
   }
 
+  async all<T>() {
+    return {
+      results: this.db.prepare(this.sql).all(...this.params) as T[],
+    };
+  }
+
   async run() {
     this.db.prepare(this.sql).run(...this.params);
     return { success: true };
@@ -77,10 +83,13 @@ describe('skill archive helpers', () => {
         repo_owner TEXT,
         repo_name TEXT,
         skill_path TEXT,
+        visibility TEXT,
         tier TEXT,
         stars INTEGER,
+        last_commit_at INTEGER,
         last_accessed_at INTEGER,
-        updated_at INTEGER
+        updated_at INTEGER,
+        indexed_at INTEGER
       );
 
       CREATE TABLE skill_categories (
@@ -89,8 +98,32 @@ describe('skill archive helpers', () => {
         PRIMARY KEY (skill_id, category_slug)
       );
 
+      CREATE TABLE categories (
+        id TEXT PRIMARY KEY NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        description TEXT,
+        type TEXT NOT NULL,
+        suggested_by_skill_id TEXT,
+        skill_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT 0
+      );
+
+      CREATE TABLE category_public_stats (
+        category_slug TEXT PRIMARY KEY NOT NULL,
+        public_skill_count INTEGER NOT NULL DEFAULT 0,
+        max_freshness_ts INTEGER,
+        updated_at INTEGER NOT NULL DEFAULT 0
+      );
+
+      INSERT INTO categories (id, slug, name, description, type)
+      VALUES
+        ('cat-automation', 'automation', 'Automation', NULL, 'ai-suggested'),
+        ('cat-git', 'git', 'Git', NULL, 'ai-suggested');
+
       INSERT INTO skills (
-        id, slug, source_type, repo_owner, repo_name, skill_path, tier, stars
+        id, slug, source_type, repo_owner, repo_name, skill_path, visibility, tier, stars, last_commit_at, updated_at, indexed_at
       ) VALUES (
         'skill-123',
         'alice/toolbox/.claude',
@@ -98,8 +131,12 @@ describe('skill archive helpers', () => {
         'alice',
         'toolbox',
         '.claude',
+        'public',
         'archived',
-        1
+        1,
+        1712000000000,
+        1712000000000,
+        1712000000000
       );
     `);
 
@@ -162,6 +199,36 @@ describe('skill archive helpers', () => {
     `).all()).toEqual([
       { category_slug: 'automation' },
       { category_slug: 'git' },
+    ]);
+    expect(sqlite.prepare(`
+      SELECT category_slug, public_skill_count, max_freshness_ts
+      FROM category_public_stats
+      ORDER BY category_slug ASC
+    `).all()).toEqual([
+      {
+        category_slug: 'automation',
+        public_skill_count: 1,
+        max_freshness_ts: 1712000000000,
+      },
+      {
+        category_slug: 'git',
+        public_skill_count: 1,
+        max_freshness_ts: 1712000000000,
+      },
+    ]);
+    expect(sqlite.prepare(`
+      SELECT slug, skill_count
+      FROM categories
+      ORDER BY slug ASC
+    `).all()).toEqual([
+      {
+        slug: 'automation',
+        skill_count: 1,
+      },
+      {
+        slug: 'git',
+        skill_count: 1,
+      },
     ]);
   });
 });

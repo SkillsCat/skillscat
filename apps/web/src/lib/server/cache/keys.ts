@@ -40,6 +40,7 @@ export const PUBLIC_DISCOVERY_PAGE_CACHE_KEYS = [
   HOME_CRITICAL_CACHE_KEY,
   ...HOME_HTML_CACHE_KEYS,
   PUBLIC_SKILLS_STATS_CACHE_KEY,
+  'api:categories',
   'page:trending:v1:1',
   'page:recent:v1:1',
   'page:top:v1:1',

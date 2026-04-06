@@ -16,9 +16,12 @@ import {
   invalidateOpenClawSkillCaches,
   resolveOpenClawJsonCache,
 } from '$lib/server/openclaw/cache';
+import { invalidateCache } from '$lib/server/cache';
+import { getCategoryPageCacheKey } from '$lib/server/cache/categories';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { canWriteSkill } from '$lib/server/auth/permissions';
 import { readOpenClawManifest, writeOpenClawManifest } from '$lib/server/openclaw/compat-store';
+import { syncCategoryPublicStats } from '$lib/server/db/business/stats';
 
 interface SkillStatsRow {
   stars: number | null;
@@ -30,6 +33,10 @@ interface SkillDeleteRow {
   id: string;
   slug: string;
   sourceType: string;
+}
+
+interface SkillCategoryRow {
+  category_slug: string;
 }
 
 export const GET: RequestHandler = async ({ params, platform, request, locals }) => {
@@ -179,19 +186,43 @@ export const DELETE: RequestHandler = async ({ params, platform, request, locals
     throw error(403, 'You do not have permission to delete this skill.');
   }
 
-  await db.prepare(`UPDATE skills SET visibility = 'private', updated_at = ? WHERE id = ?`).bind(Date.now(), skill.id).run();
+  const now = Date.now();
+  const categoryRows = await db.prepare(`
+    SELECT category_slug FROM skill_categories WHERE skill_id = ?
+  `)
+    .bind(skill.id)
+    .all<SkillCategoryRow>();
+  const categorySlugs = Array.from(
+    new Set(
+      (categoryRows.results || [])
+        .map((row) => row.category_slug)
+        .filter((slug): slug is string => typeof slug === 'string' && slug.length > 0)
+    )
+  );
+
+  await db.prepare(`UPDATE skills SET visibility = 'private', updated_at = ? WHERE id = ?`).bind(now, skill.id).run();
+
+  if (categorySlugs.length > 0) {
+    await syncCategoryPublicStats(db, categorySlugs, now);
+  }
 
   const manifest = await readOpenClawManifest(r2, params.slug);
   if (manifest) {
     await writeOpenClawManifest(r2, {
       ...manifest,
       deleted: true,
-      deletedAt: Date.now(),
-      updatedAt: Date.now(),
+      deletedAt: now,
+      updatedAt: now,
     });
   }
 
   await invalidateOpenClawSkillCaches(skill.id, skill.slug);
+
+  if (categorySlugs.length > 0) {
+    await Promise.all(
+      categorySlugs.map((categorySlug) => invalidateCache(getCategoryPageCacheKey(categorySlug)))
+    );
+  }
 
   return json(
     { ok: true },

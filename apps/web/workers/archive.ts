@@ -11,6 +11,8 @@
 
 import type { BaseEnv } from './shared/types';
 import { buildGithubSkillR2Keys, buildUploadSkillR2Key } from '../src/lib/skill-path';
+import { invalidateCategoryCaches } from '../src/lib/server/cache/categories';
+import { syncCategoryPublicStats } from '../src/lib/server/db/business/stats';
 
 interface ArchiveEnv extends BaseEnv {}
 
@@ -117,7 +119,7 @@ async function findArchiveCandidates(env: ArchiveEnv): Promise<SkillToArchive[]>
 async function archiveSkill(
   env: ArchiveEnv,
   skill: SkillToArchive
-): Promise<boolean> {
+): Promise<{ archived: boolean; categorySlugs: string[] }> {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -178,10 +180,16 @@ async function archiveSkill(
       .bind(skill.id)
       .run();
 
-    return true;
+    return {
+      archived: true,
+      categorySlugs: categories.results.map((entry) => entry.category_slug),
+    };
   } catch (error) {
     console.error(`Failed to archive skill ${skill.id}:`, error);
-    return false;
+    return {
+      archived: false,
+      categorySlugs: [],
+    };
   }
 }
 
@@ -222,15 +230,35 @@ export default {
 
     let archived = 0;
     let failed = 0;
+    const affectedCategorySlugs = new Set<string>();
 
     // Archive each skill
     for (const skill of candidates) {
-      const success = await archiveSkill(env, skill);
-      if (success) {
+      const result = await archiveSkill(env, skill);
+      if (result.archived) {
         archived++;
+        for (const categorySlug of result.categorySlugs) {
+          if (categorySlug) {
+            affectedCategorySlugs.add(categorySlug);
+          }
+        }
         console.log(`Archived skill: ${skill.slug}`);
       } else {
         failed++;
+      }
+    }
+
+    if (affectedCategorySlugs.size > 0) {
+      try {
+        await syncCategoryPublicStats(env.DB, affectedCategorySlugs);
+      } catch (error) {
+        console.error('Failed to sync category public stats after archive run:', error);
+      }
+
+      try {
+        await invalidateCategoryCaches(affectedCategorySlugs);
+      } catch (error) {
+        console.error('Failed to invalidate category caches after archive run:', error);
       }
     }
 

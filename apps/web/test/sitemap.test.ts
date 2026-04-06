@@ -47,7 +47,7 @@ function createDbMock(rows: {
         };
       }
 
-      if (normalized.includes('FROM skill_categories sc') && normalized.includes('GROUP BY sc.category_slug')) {
+      if (normalized.includes('FROM category_public_stats') && normalized.includes('public_skill_count AS count')) {
         return {
           bind() {
             return {
