@@ -193,6 +193,9 @@ pnpm --filter ./apps/cli typecheck
 - 未经用户明确确认，不得自行执行任何 `git commit`、`git push`、创建 PR、打 tag、`pnpm deploy`、`pnpm deploy:workers`、`pnpm publish:cli`、`wrangler deploy`、上线发布或其他会产生提交、发布、部署结果的操作。
 - 即使代码已经修改完成，默认也只停留在本地工作区变更和必要验证阶段；所有提交、推送、发布、部署动作都必须先征得用户确认。
 - 如果任务看起来“顺手就该提交/发布”，也不能自行假设，必须先向用户确认再执行。
+- 提交信息必须使用 Conventional Commits 风格，并按 `feat: xxx`、`fix: xxx` 这种格式书写；不要使用不带类型前缀的提交信息。
+- 提交时应按逻辑边界拆分；如果用户要求“单独提交某一块修改”，只 stage 与该主题直接相关的文件，不要把工作区里的其他改动混入同一个 commit。
+- 如果当前工作区是 dirty 状态，提交前必须重新检查 `git status`、`git diff --staged`，确认 staged 内容只包含本次要提交的范围。
 
 ### 1. Migration 规范
 
