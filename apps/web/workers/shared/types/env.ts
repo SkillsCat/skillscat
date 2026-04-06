@@ -78,6 +78,7 @@ export interface SearchPrecomputeEnv {
 }
 
 export interface SecurityAnalysisEnv extends BaseEnv {
+  INDEXING_QUEUE?: Queue<IndexingMessage>;
   OPENROUTER_API_KEY?: string;
   SECURITY_FREE_MODEL?: string;
   SECURITY_FREE_MODELS?: string;

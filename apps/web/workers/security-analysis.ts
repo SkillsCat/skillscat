@@ -49,6 +49,14 @@ const DEFAULT_MAX_AI_TEXT_BYTES = 48_000;
 const DEFAULT_HEURISTIC_THRESHOLD = 4.5;
 const DEFAULT_STABILITY_ROUNDS = 2;
 const VT_MAX_BUNDLE_BYTES = 32 * 1024 * 1024;
+const DEFAULT_REINDEX_BACKFILL_LIMIT = 25;
+const SECURITY_REINDEX_BACKFILL_TTL_SECONDS = 6 * 60 * 60;
+const SKILL_HAS_SECURITY_SOURCE_SQL = `
+  (
+    COALESCE(s.file_structure, '') != ''
+    OR COALESCE(s.readme, '') != ''
+  )
+`;
 
 interface ExistingScanRow {
   id: string;
@@ -96,6 +104,14 @@ interface VirusTotalDecision {
   status: string;
   priority: number;
   nextAttemptAt: number | null;
+}
+
+interface SecurityReindexBackfillCandidate {
+  id: string;
+  repoOwner: string;
+  repoName: string;
+  skillPath: string | null;
+  updatedAt: number;
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
@@ -1007,6 +1023,44 @@ async function updateStateAfterFailure(
     .run();
 }
 
+async function markSecurityAnalysisBlockedForMissingContent(
+  db: D1Database,
+  params: {
+    skillId: string;
+    errorMessage: string;
+    now: number;
+  }
+): Promise<void> {
+  await db.prepare(`
+    INSERT INTO skill_security_state (
+      skill_id,
+      dirty,
+      next_update_at,
+      status,
+      last_error,
+      last_error_at,
+      created_at,
+      updated_at
+    )
+    VALUES (?, 0, NULL, 'blocked', ?, ?, ?, ?)
+    ON CONFLICT(skill_id) DO UPDATE SET
+      dirty = 0,
+      next_update_at = NULL,
+      status = excluded.status,
+      last_error = excluded.last_error,
+      last_error_at = excluded.last_error_at,
+      updated_at = excluded.updated_at
+  `)
+    .bind(
+      params.skillId,
+      params.errorMessage.slice(0, 4000),
+      params.now,
+      params.now,
+      params.now,
+    )
+    .run();
+}
+
 async function deferSecurityAnalysisForOpenRouterFreePause(
   db: D1Database,
   params: {
@@ -1082,7 +1136,14 @@ async function processSecurityMessage(message: SecurityAnalysisMessage, env: Sec
   const contentFingerprint = state?.content_fingerprint
     || (directoryFiles.length > 0 ? await buildSecurityContentFingerprint(directoryFiles) : null);
   if (!contentFingerprint) {
-    throw new Error(`Missing content fingerprint for skill ${message.skillId}`);
+    const errorMessage = `Security analysis blocked until indexed content is available for skill ${message.skillId}`;
+    await markSecurityAnalysisBlockedForMissingContent(env.DB, {
+      skillId: message.skillId,
+      errorMessage,
+      now,
+    });
+    log.warn(errorMessage);
+    return;
   }
 
   const reportSummary = await refreshSkillSecurityReportSummary(env.DB, skill.id, now);
@@ -1214,7 +1275,14 @@ async function processSecurityMessage(message: SecurityAnalysisMessage, env: Sec
   }));
 
   if (securityFiles.length === 0) {
-    throw new Error(`No files available for security analysis: ${skill.id}`);
+    const errorMessage = `Security analysis blocked until file metadata is available for skill ${skill.id}`;
+    await markSecurityAnalysisBlockedForMissingContent(env.DB, {
+      skillId: skill.id,
+      errorMessage,
+      now,
+    });
+    log.warn(errorMessage);
+    return;
   }
 
   const heuristic = runSecurityHeuristics(securityFiles);
@@ -1398,13 +1466,18 @@ async function processSecurityMessage(message: SecurityAnalysisMessage, env: Sec
   );
 }
 
-async function loadDueSkillIds(db: D1Database, now: number, limit: number): Promise<string[]> {
+export async function loadDueSkillIds(db: D1Database, now: number, limit: number): Promise<string[]> {
   const existing = await db.prepare(`
     SELECT skill_id AS id
-    FROM skill_security_state
-    WHERE dirty = 1
-      AND (next_update_at IS NULL OR next_update_at <= ?)
-    ORDER BY COALESCE(next_update_at, 0) ASC, updated_at ASC
+    FROM skill_security_state ss
+    INNER JOIN skills s ON s.id = ss.skill_id
+    WHERE ss.dirty = 1
+      AND (ss.next_update_at IS NULL OR ss.next_update_at <= ?)
+      AND (
+        ss.content_fingerprint IS NOT NULL
+        OR ${SKILL_HAS_SECURITY_SOURCE_SQL}
+      )
+    ORDER BY COALESCE(ss.next_update_at, 0) ASC, ss.updated_at ASC
     LIMIT ?
   `)
     .bind(now, limit)
@@ -1421,6 +1494,7 @@ async function loadDueSkillIds(db: D1Database, now: number, limit: number): Prom
     FROM skills s
     LEFT JOIN skill_security_state ss ON ss.skill_id = s.id
     WHERE ss.skill_id IS NULL
+      AND ${SKILL_HAS_SECURITY_SOURCE_SQL}
     ORDER BY s.updated_at DESC
     LIMIT ?
   `)
@@ -1432,6 +1506,95 @@ async function loadDueSkillIds(db: D1Database, now: number, limit: number): Prom
   }
 
   return Array.from(ids);
+}
+
+export async function loadSecurityReindexBackfillCandidates(
+  db: D1Database,
+  limit: number
+): Promise<SecurityReindexBackfillCandidate[]> {
+  const result = await db.prepare(`
+    SELECT
+      s.id,
+      s.repo_owner AS repoOwner,
+      s.repo_name AS repoName,
+      s.skill_path AS skillPath,
+      s.updated_at AS updatedAt
+    FROM skills s
+    LEFT JOIN skill_security_state ss ON ss.skill_id = s.id
+    WHERE s.source_type = 'github'
+      AND s.repo_owner IS NOT NULL
+      AND s.repo_name IS NOT NULL
+      AND COALESCE(s.file_structure, '') = ''
+      AND COALESCE(s.readme, '') = ''
+      AND (
+        ss.skill_id IS NULL
+        OR ss.content_fingerprint IS NULL
+      )
+    ORDER BY s.updated_at DESC
+    LIMIT ?
+  `)
+    .bind(limit)
+    .all<SecurityReindexBackfillCandidate>();
+
+  return result.results || [];
+}
+
+function getSecurityReindexBackfillKey(candidate: SecurityReindexBackfillCandidate): string {
+  return `security-analysis:reindex-backfill:${candidate.id}:${candidate.updatedAt}`;
+}
+
+async function wasSecurityReindexBackfillQueued(
+  env: Pick<SecurityAnalysisEnv, 'KV'>,
+  key: string
+): Promise<boolean> {
+  return (await env.KV.get(key)) !== null;
+}
+
+async function markSecurityReindexBackfillQueued(
+  env: Pick<SecurityAnalysisEnv, 'KV'>,
+  key: string
+): Promise<void> {
+  await env.KV.put(key, '1', {
+    expirationTtl: SECURITY_REINDEX_BACKFILL_TTL_SECONDS,
+  });
+}
+
+export async function queueSecurityReindexBackfill(
+  env: SecurityAnalysisEnv,
+  limit: number = DEFAULT_REINDEX_BACKFILL_LIMIT
+): Promise<number> {
+  if (!env.INDEXING_QUEUE) {
+    return 0;
+  }
+
+  const candidates = await loadSecurityReindexBackfillCandidates(env.DB, limit);
+  let queued = 0;
+  const submittedAt = new Date().toISOString();
+
+  for (const candidate of candidates) {
+    const dedupeKey = getSecurityReindexBackfillKey(candidate);
+    if (await wasSecurityReindexBackfillQueued(env, dedupeKey)) {
+      continue;
+    }
+
+    try {
+      await env.INDEXING_QUEUE.send({
+        type: 'check_skill',
+        repoOwner: candidate.repoOwner,
+        repoName: candidate.repoName,
+        skillPath: candidate.skillPath || '',
+        submittedBy: 'security-analysis-backfill',
+        submittedAt,
+        forceReindex: true,
+      });
+      await markSecurityReindexBackfillQueued(env, dedupeKey);
+      queued += 1;
+    } catch (error) {
+      log.error(`Failed to queue indexing backfill for ${candidate.id}:`, error);
+    }
+  }
+
+  return queued;
 }
 
 export default {
@@ -1465,10 +1628,8 @@ export default {
     env: SecurityAnalysisEnv,
     _ctx: ExecutionContext
   ): Promise<void> {
-    const dueSkillIds = await loadDueSkillIds(env.DB, Date.now(), 10);
-    if (dueSkillIds.length === 0) {
-      return;
-    }
+    const now = Date.now();
+    const dueSkillIds = await loadDueSkillIds(env.DB, now, 10);
 
     for (const skillId of dueSkillIds) {
       try {
@@ -1488,6 +1649,11 @@ export default {
           now: Date.now(),
         });
       }
+    }
+
+    const reindexQueued = await queueSecurityReindexBackfill(env);
+    if (reindexQueued > 0) {
+      log.log(`Queued ${reindexQueued} indexing backfill tasks for security recovery`);
     }
   },
 };

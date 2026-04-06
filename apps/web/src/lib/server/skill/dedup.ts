@@ -41,6 +41,8 @@ export interface PrivateSkillGithubConversionInput {
   stars: number;
   forks: number;
   contentHash: string;
+  commitSha: string | null;
+  fileStructure: string | null;
   lastCommitAt: number | null;
   skillMdFirstCommitAt: number | null;
   repoCreatedAt: number | null;
@@ -182,6 +184,8 @@ export async function convertPrivateSkillToPublicGithub(
       stars = ?,
       forks = ?,
       content_hash = ?,
+      commit_sha = ?,
+      file_structure = ?,
       readme = NULL,
       last_commit_at = ?,
       skill_md_first_commit_at = ?,
@@ -200,6 +204,8 @@ export async function convertPrivateSkillToPublicGithub(
       input.stars,
       input.forks,
       input.contentHash,
+      input.commitSha,
+      input.fileStructure,
       input.lastCommitAt,
       input.skillMdFirstCommitAt,
       input.repoCreatedAt,

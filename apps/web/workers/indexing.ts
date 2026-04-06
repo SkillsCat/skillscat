@@ -27,7 +27,6 @@ import {
   getContentsApiUrl,
   generateId,
   generateSlug,
-  checkSlugCollision,
   createLogger,
   isTextFile,
   decodeBase64ToUtf8,
@@ -58,6 +57,7 @@ import {
 } from '../src/lib/server/security/state';
 import {
   buildIndexNowSkillUrls,
+  isIndexNowEnabled,
   loadIndexNowSkillTarget,
   scheduleIndexNowSubmission,
 } from '../src/lib/server/seo/indexnow';
@@ -78,6 +78,7 @@ const MAX_FILE_SIZE = 512 * 1024;  // 单文件最大 512KB
 const MAX_TOTAL_SIZE = 5 * 1024 * 1024; // 总大小最大 5MB
 const MAX_DISCOVERED_SKILLS_PER_REPO = 100;
 const INDEXING_PROCESSED_TTL_SECONDS = 30 * 24 * 60 * 60;
+const INDEXING_PENDING_TTL_SECONDS = 6 * 60 * 60;
 
 async function invalidatePublicDiscoveryCaches(reason: string): Promise<void> {
   try {
@@ -114,6 +115,52 @@ interface ParsedSkillMd {
 interface ResolvedSkillMetadata {
   name: string;
   description: string | null;
+}
+
+interface IndexingBatchContext {
+  repoInfoByRepo: Map<string, Promise<GitHubRepo | null>>;
+  latestCommitByRepoRef: Map<string, Promise<{ sha: string; branch: string } | null>>;
+  repositoryTreeByRepoRef: Map<string, Promise<GitHubTreeResponse>>;
+  skillCommitDatesByPath: Map<string, Promise<{ lastCommitAt: number | null; firstCommitAt: number | null }>>;
+}
+
+function createIndexingBatchContext(): IndexingBatchContext {
+  return {
+    repoInfoByRepo: new Map(),
+    latestCommitByRepoRef: new Map(),
+    repositoryTreeByRepoRef: new Map(),
+    skillCommitDatesByPath: new Map(),
+  };
+}
+
+function getRepoCacheKey(owner: string, repo: string): string {
+  return `${owner.toLowerCase()}/${repo.toLowerCase()}`;
+}
+
+function getRepoRefCacheKey(owner: string, repo: string, ref: string): string {
+  return `${getRepoCacheKey(owner, repo)}#${ref.toLowerCase()}`;
+}
+
+function getSkillCommitDatesCacheKey(owner: string, repo: string, skillMdPath: string): string {
+  return `${getRepoCacheKey(owner, repo)}:${skillMdPath.toLowerCase()}`;
+}
+
+function getOrCreateBatchPromise<T>(
+  cache: Map<string, Promise<T>>,
+  key: string,
+  loader: () => Promise<T>
+): Promise<T> {
+  const existing = cache.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const pending = loader().catch((error) => {
+    cache.delete(key);
+    throw error;
+  });
+  cache.set(key, pending);
+  return pending;
 }
 
 function getLineIndent(line: string): number {
@@ -435,6 +482,8 @@ async function checkAndConvertPrivateSkill(
   repo: GitHubRepo,
   skillMetadata: ResolvedSkillMetadata,
   persistenceMetadata: SkillPersistenceMetadata,
+  commitSha: string,
+  fileStructure: FileStructure,
   skillPath: string | null,
   env: IndexingEnv
 ): Promise<{ converted: boolean; skillId?: string; slug?: string }> {
@@ -460,11 +509,13 @@ async function checkAndConvertPrivateSkill(
     stars: repo.stargazers_count,
     forks: repo.forks_count,
     contentHash: persistenceMetadata.contentHash,
+    commitSha,
+    fileStructure: JSON.stringify(fileStructure),
     lastCommitAt: persistenceMetadata.lastCommitAt,
     skillMdFirstCommitAt: persistenceMetadata.skillMdFirstCommitAt,
     repoCreatedAt: persistenceMetadata.repoCreatedAt,
     indexedAt: now,
-    updatedAt: now,
+    updatedAt: persistenceMetadata.lastCommitAt ?? now,
   });
 
   log.log(`Converted private skill to public: ${existingPrivate.slug} (${existingPrivate.id})`);
@@ -620,12 +671,12 @@ function getSkillPathFromSkillMdPath(path: string): string | null {
   return skillPath || null;
 }
 
-async function scanRepositorySkillPaths(
+async function getRepositoryTree(
   owner: string,
   name: string,
   branch: string,
   env: IndexingEnv
-): Promise<string[]> {
+): Promise<GitHubTreeResponse> {
   const treeUrl = `https://api.github.com/repos/${owner}/${name}/git/trees/${branch}?recursive=1`;
   const treeData = await githubFetch<GitHubTreeResponse>(treeUrl, {
     token: env.GITHUB_TOKEN,
@@ -637,6 +688,24 @@ async function scanRepositorySkillPaths(
     throw new Error('Failed to fetch repository tree for skill path scan');
   }
 
+  return treeData;
+}
+
+async function getRepositoryTreeCached(
+  owner: string,
+  name: string,
+  branch: string,
+  env: IndexingEnv,
+  batchContext: IndexingBatchContext
+): Promise<GitHubTreeResponse> {
+  return getOrCreateBatchPromise(
+    batchContext.repositoryTreeByRepoRef,
+    getRepoRefCacheKey(owner, name, branch),
+    () => getRepositoryTree(owner, name, branch, env)
+  );
+}
+
+function scanRepositorySkillPathsFromTree(treeData: GitHubTreeResponse): string[] {
   const discoveredPaths = new Set<string>();
   for (const item of treeData.tree) {
     if (item.type !== 'blob') continue;
@@ -657,96 +726,98 @@ async function scanRepositorySkillPaths(
   });
 }
 
+async function scanRepositorySkillPaths(
+  owner: string,
+  name: string,
+  branch: string,
+  env: IndexingEnv,
+  batchContext: IndexingBatchContext
+): Promise<string[]> {
+  const treeData = await getRepositoryTreeCached(owner, name, branch, env, batchContext);
+  return scanRepositorySkillPathsFromTree(treeData);
+}
+
 /**
  * Get stored commit SHA from database
  */
-async function getStoredCommitSha(
+export interface ExistingSkillSnapshot {
+  id: string;
+  slug: string;
+  sourceType: string;
+  visibility: string;
+  repoOwner: string | null;
+  repoName: string | null;
+  skillPath: string | null;
+  stars: number;
+  commitSha: string | null;
+  fileStructure: string | null;
+  lastCommitAt: number | null;
+  skillMdFirstCommitAt: number | null;
+  repoCreatedAt: number | null;
+  createdAt: number;
+  indexedAt: number | null;
+}
+
+export async function getExistingSkillSnapshot(
   owner: string,
   name: string,
   skillPath: string | null,
   env: IndexingEnv
-): Promise<string | null> {
+): Promise<ExistingSkillSnapshot | null> {
   const normalizedPath = skillPath || '';
 
   const result = await env.DB.prepare(`
-    SELECT commit_sha FROM skills
+    SELECT
+      id,
+      slug,
+      source_type AS sourceType,
+      visibility,
+      repo_owner AS repoOwner,
+      repo_name AS repoName,
+      skill_path AS skillPath,
+      stars,
+      commit_sha AS commitSha,
+      file_structure AS fileStructure,
+      last_commit_at AS lastCommitAt,
+      skill_md_first_commit_at AS skillMdFirstCommitAt,
+      repo_created_at AS repoCreatedAt,
+      created_at AS createdAt,
+      indexed_at AS indexedAt
+    FROM skills
     WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, '') = ?
     LIMIT 1
   `)
     .bind(owner, name, normalizedPath)
-    .first<{ commit_sha: string | null }>();
+    .first<ExistingSkillSnapshot>();
 
-  return result?.commit_sha || null;
+  return result || null;
 }
 
 /**
  * Get stored blob SHAs from previous indexed file structure.
  */
-async function getStoredFileShas(
-  owner: string,
-  name: string,
-  skillPath: string | null,
-  env: IndexingEnv
-): Promise<Map<string, string>> {
-  const normalizedPath = skillPath || '';
+export function extractStoredFileShas(
+  fileStructure: string | null,
+  repoLabel: string
+): Map<string, string> {
   const shas = new Map<string, string>();
 
-  const result = await env.DB.prepare(`
-    SELECT file_structure FROM skills
-    WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, '') = ?
-    LIMIT 1
-  `)
-    .bind(owner, name, normalizedPath)
-    .first<{ file_structure: string | null }>();
-
-  if (!result?.file_structure) {
+  if (!fileStructure) {
     return shas;
   }
 
   try {
-    const parsed = JSON.parse(result.file_structure) as { files?: Array<{ path?: string; sha?: string }> };
+    const parsed = JSON.parse(fileStructure) as { files?: Array<{ path?: string; sha?: string }> };
     for (const file of parsed.files || []) {
       if (file.path && file.sha) {
         shas.set(file.path, file.sha);
       }
     }
   } catch (err) {
-    log.warn(`Failed to parse stored file_structure for ${owner}/${name}:`, err);
+    log.warn(`Failed to parse stored file_structure for ${repoLabel}:`, err);
   }
 
   return shas;
-}
-
-/**
- * Check if skill needs update based on commit SHA
- */
-async function needsUpdate(
-  owner: string,
-  name: string,
-  skillPath: string | null,
-  latestCommitSha: string,
-  forceReindex: boolean,
-  env: IndexingEnv
-): Promise<boolean> {
-  if (forceReindex) {
-    log.log(`Force reindex requested for ${owner}/${name}`);
-    return true;
-  }
-
-  const storedSha = await getStoredCommitSha(owner, name, skillPath, env);
-
-  if (!storedSha) {
-    log.log(`No stored commit SHA for ${owner}/${name}, needs full index`);
-    return true;
-  }
-
-  if (storedSha !== latestCommitSha) {
-    log.log(`Commit SHA changed: ${storedSha} -> ${latestCommitSha}`);
-    return true;
-  }
-
-  log.log(`Commit SHA unchanged: ${latestCommitSha}, skipping content fetch`);
-  return false;
 }
 
 /**
@@ -755,22 +826,11 @@ async function needsUpdate(
 async function fetchDirectoryFiles(
   owner: string,
   name: string,
-  branch: string,
   skillPath: string | null,
+  treeData: GitHubTreeResponse,
   env: IndexingEnv,
   previousFileShas?: Map<string, string>
 ): Promise<{ files: DirectoryFile[]; textContents: Map<string, string> }> {
-  const treeUrl = `https://api.github.com/repos/${owner}/${name}/git/trees/${branch}?recursive=1`;
-  const treeData = await githubFetch<GitHubTreeResponse>(treeUrl, {
-    token: env.GITHUB_TOKEN,
-    apiVersion: env.GITHUB_API_VERSION,
-    userAgent: 'SkillsCat-Indexing-Worker/1.0',
-  });
-
-  if (!treeData) {
-    throw new Error('Failed to fetch repository tree');
-  }
-
   const files: DirectoryFile[] = [];
   const textContents = new Map<string, string>();
 
@@ -899,9 +959,6 @@ async function cacheDirectoryFiles(
   log.log(`Cached ${textContents.size} text files to R2 with prefix: ${r2Prefix}`);
 }
 
-/**
- * Update skill metadata with commit SHA, file structure, and last commit date
- */
 async function updateSkillMetadata(
   skillId: string,
   commitSha: string,
@@ -925,10 +982,6 @@ async function updateSkillMetadata(
   log.log(`Updated skill metadata: ${skillId}, commitSha: ${commitSha}, files: ${fileStructure.files.length}, lastCommitAt: ${lastCommitAt}`);
 }
 
-// ============================================
-// Repository & Skill Functions
-// ============================================
-
 async function getRepoInfo(
   owner: string,
   name: string,
@@ -939,6 +992,19 @@ async function getRepoInfo(
     apiVersion: env.GITHUB_API_VERSION,
     userAgent: 'SkillsCat-Indexing-Worker/1.0',
   });
+}
+
+async function getRepoInfoCached(
+  owner: string,
+  name: string,
+  env: IndexingEnv,
+  batchContext: IndexingBatchContext
+): Promise<GitHubRepo | null> {
+  return getOrCreateBatchPromise(
+    batchContext.repoInfoByRepo,
+    getRepoCacheKey(owner, name),
+    () => getRepoInfo(owner, name, env)
+  );
 }
 
 async function getSkillMd(
@@ -967,72 +1033,11 @@ async function getSkillMd(
   return null;
 }
 
-async function skillExists(
-  owner: string,
-  name: string,
-  skillPath: string | null,
-  env: IndexingEnv
-): Promise<boolean> {
-  // Normalize skillPath: null and empty string are treated the same
-  const normalizedPath = skillPath || '';
-
-  const result = await env.DB.prepare(
-    'SELECT id FROM skills WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, \'\') = ? LIMIT 1'
-  )
-    .bind(owner, name, normalizedPath)
-    .first();
-
-  return result !== null;
-}
-
 interface SkillPersistenceMetadata {
   contentHash: string;
   lastCommitAt: number | null;
   skillMdFirstCommitAt: number | null;
   repoCreatedAt: number | null;
-}
-
-interface SkillIdentityRecord {
-  id: string;
-  slug: string;
-  sourceType: string;
-  visibility: string;
-  repoOwner: string | null;
-  repoName: string | null;
-  skillPath: string | null;
-  stars: number;
-  lastCommitAt: number | null;
-  skillMdFirstCommitAt: number | null;
-  repoCreatedAt: number | null;
-  createdAt: number;
-  indexedAt: number | null;
-}
-
-async function getSkillIdentityRecord(
-  skillId: string,
-  env: IndexingEnv
-): Promise<SkillIdentityRecord | null> {
-  return env.DB.prepare(`
-    SELECT
-      id,
-      slug,
-      source_type as sourceType,
-      visibility,
-      repo_owner as repoOwner,
-      repo_name as repoName,
-      skill_path as skillPath,
-      stars,
-      last_commit_at as lastCommitAt,
-      skill_md_first_commit_at as skillMdFirstCommitAt,
-      repo_created_at as repoCreatedAt,
-      created_at as createdAt,
-      indexed_at as indexedAt
-    FROM skills
-    WHERE id = ?
-    LIMIT 1
-  `)
-    .bind(skillId)
-    .first<SkillIdentityRecord>();
 }
 
 async function upsertAuthor(
@@ -1069,14 +1074,17 @@ async function createSkill(
   skillMetadata: ResolvedSkillMetadata,
   env: IndexingEnv,
   persistenceMetadata: SkillPersistenceMetadata,
+  commitSha: string,
+  fileStructure: FileStructure,
   skillPath?: string,
   frontmatter?: SkillFrontmatter | null
-): Promise<string> {
+): Promise<{ id: string; slug: string; createdAt: number; existingSnapshot?: ExistingSkillSnapshot }> {
   const skillId = generateId();
   const now = Date.now();
+  const updatedAt = persistenceMetadata.lastCommitAt ?? now;
+  const serializedFileStructure = JSON.stringify(fileStructure);
   const { name, description } = skillMetadata;
 
-  // Generate slug with collision handling
   const normalizedPath = skillPath || '';
   const baseSlug = generateSlug(repo.owner.login, repo.name, normalizedPath || undefined);
   const slugCandidates: string[] = [];
@@ -1086,7 +1094,6 @@ async function createSkill(
   }
   slugCandidates.push(baseSlug);
 
-  // Deterministic suffix avoids infinite retries if sanitized slugs collide across repos.
   const repoSuffix = repo.id.toString(36);
   slugCandidates.push(`${baseSlug}-${repoSuffix}`);
   for (let i = 2; i <= 10; i++) {
@@ -1099,18 +1106,13 @@ async function createSkill(
     if (seen.has(candidateSlug)) continue;
     seen.add(candidateSlug);
 
-    // Fast pre-check to avoid obvious unique conflicts.
-    if (await checkSlugCollision(env.DB, candidateSlug)) {
-      continue;
-    }
-
     try {
       await env.DB.prepare(`
         INSERT INTO skills (
           id, name, slug, description, repo_owner, repo_name, skill_path, github_url,
-          stars, forks, trending_score, content_hash, last_commit_at,
-          skill_md_first_commit_at, repo_created_at, created_at, updated_at, indexed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          stars, forks, trending_score, content_hash, commit_sha, file_structure,
+          last_commit_at, skill_md_first_commit_at, repo_created_at, created_at, updated_at, indexed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
         .bind(
           skillId,
@@ -1125,35 +1127,43 @@ async function createSkill(
           repo.forks_count,
           0,
           persistenceMetadata.contentHash,
+          commitSha,
+          serializedFileStructure,
           persistenceMetadata.lastCommitAt,
           persistenceMetadata.skillMdFirstCommitAt,
           persistenceMetadata.repoCreatedAt,
           now,
-          now,
+          updatedAt,
           now
         )
         .run();
 
-      return skillId;
+      return {
+        id: skillId,
+        slug: candidateSlug,
+        createdAt: now,
+      };
     } catch (error) {
       const message = String(error);
 
-      // Another worker could have inserted the same repo/path first.
       if (message.includes('skills_repo_path_unique') || (message.includes('repo_owner') && message.includes('repo_name'))) {
-        const existing = await env.DB.prepare(`
-          SELECT id FROM skills
-          WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, '') = ?
-          LIMIT 1
-        `)
-          .bind(repo.owner.login, repo.name, normalizedPath)
-          .first<{ id: string }>();
+        const existing = await getExistingSkillSnapshot(
+          repo.owner.login,
+          repo.name,
+          normalizedPath,
+          env
+        );
 
         if (existing?.id) {
-          return existing.id;
+          return {
+            id: existing.id,
+            slug: existing.slug,
+            createdAt: existing.createdAt,
+            existingSnapshot: existing,
+          };
         }
       }
 
-      // Slug conflict could still happen under concurrent inserts, try next candidate.
       if (message.includes('skills_slug_unique') || message.includes('skills.slug')) {
         continue;
       }
@@ -1166,16 +1176,17 @@ async function createSkill(
 }
 
 async function updateSkill(
-  owner: string,
-  name: string,
-  skillPath: string | null,
+  skillId: string,
   repo: GitHubRepo,
   skillMetadata: ResolvedSkillMetadata,
   persistenceMetadata: SkillPersistenceMetadata,
+  commitSha: string,
+  fileStructure: FileStructure,
   env: IndexingEnv
 ): Promise<string | null> {
   const now = Date.now();
-  const normalizedPath = skillPath || '';
+  const updatedAt = persistenceMetadata.lastCommitAt ?? now;
+  const serializedFileStructure = JSON.stringify(fileStructure);
 
   const result = await env.DB.prepare(`
     UPDATE skills SET
@@ -1184,11 +1195,14 @@ async function updateSkill(
       stars = ?,
       forks = ?,
       content_hash = ?,
-      last_commit_at = ?,
+      commit_sha = ?,
+      file_structure = ?,
+      last_commit_at = COALESCE(?, last_commit_at),
       skill_md_first_commit_at = ?,
       repo_created_at = ?,
-      indexed_at = ?
-    WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, '') = ?
+      indexed_at = ?,
+      updated_at = COALESCE(?, updated_at)
+    WHERE id = ?
     RETURNING id
   `)
     .bind(
@@ -1197,13 +1211,14 @@ async function updateSkill(
       repo.stargazers_count,
       repo.forks_count,
       persistenceMetadata.contentHash,
+      commitSha,
+      serializedFileStructure,
       persistenceMetadata.lastCommitAt,
       persistenceMetadata.skillMdFirstCommitAt,
       persistenceMetadata.repoCreatedAt,
       now,
-      owner,
-      name,
-      normalizedPath,
+      updatedAt,
+      skillId,
     )
     .first<{ id: string }>();
 
@@ -1211,72 +1226,44 @@ async function updateSkill(
 }
 
 async function updateSkillMetricsOnly(
-  owner: string,
-  name: string,
-  skillPath: string | null,
+  skillId: string,
   repo: GitHubRepo,
   env: IndexingEnv
 ): Promise<string | null> {
   const now = Date.now();
-  const normalizedPath = skillPath || '';
 
   const result = await env.DB.prepare(`
     UPDATE skills SET
       stars = ?,
       forks = ?,
       indexed_at = ?
-    WHERE repo_owner = ? AND repo_name = ? AND COALESCE(skill_path, '') = ?
+    WHERE id = ?
     RETURNING id
   `)
     .bind(
       repo.stargazers_count,
       repo.forks_count,
       now,
-      owner,
-      name,
-      normalizedPath,
+      skillId,
     )
     .first<{ id: string }>();
 
   return result?.id || null;
 }
 
-function mapSkillRecordToCanonicalCandidate(skill: SkillIdentityRecord): CanonicalSkillCandidate {
-  return {
-    id: skill.id,
-    slug: skill.slug,
-    repoOwner: skill.repoOwner,
-    repoName: skill.repoName,
-    skillPath: skill.skillPath,
-    sourceType: skill.sourceType,
-    visibility: skill.visibility,
-    stars: skill.stars,
-    lastCommitAt: skill.lastCommitAt,
-    skillMdFirstCommitAt: skill.skillMdFirstCommitAt,
-    repoCreatedAt: skill.repoCreatedAt,
-    createdAt: skill.createdAt,
-    indexedAt: skill.indexedAt,
-  };
-}
-
 async function reconcileCanonicalDuplicateGroup(
-  skillId: string,
+  currentSkill: CanonicalSkillCandidate,
   normalizedHash: string,
   bundleManifestHash: string,
   env: IndexingEnv
 ): Promise<{ kept: boolean; canonicalId: string | null; removedIds: string[] }> {
-  const currentSkill = await getSkillIdentityRecord(skillId, env);
-  if (!currentSkill) {
-    return { kept: false, canonicalId: null, removedIds: [] };
-  }
-
   const existingCandidates = await findPublicGithubCanonicalCandidates(
     env.DB,
     normalizedHash,
     bundleManifestHash,
-    skillId
+    currentSkill.id
   );
-  const allCandidates = [mapSkillRecordToCanonicalCandidate(currentSkill), ...existingCandidates];
+  const allCandidates = [currentSkill, ...existingCandidates];
   const canonical = chooseCanonicalSkillCandidate(allCandidates);
 
   if (!canonical) {
@@ -1307,6 +1294,52 @@ async function reconcileCanonicalDuplicateGroup(
     kept: canonical.id === currentSkill.id,
     canonicalId: canonical.id,
     removedIds: losers.map((candidate) => candidate.id),
+  };
+}
+
+function buildCanonicalCandidateFromExistingSnapshot(
+  snapshot: ExistingSkillSnapshot,
+  overrides?: Partial<Pick<CanonicalSkillCandidate, 'stars' | 'lastCommitAt' | 'skillMdFirstCommitAt' | 'repoCreatedAt' | 'indexedAt'>>
+): CanonicalSkillCandidate {
+  return {
+    id: snapshot.id,
+    slug: snapshot.slug,
+    repoOwner: snapshot.repoOwner,
+    repoName: snapshot.repoName,
+    skillPath: snapshot.skillPath,
+    sourceType: snapshot.sourceType,
+    visibility: snapshot.visibility,
+    stars: overrides?.stars ?? snapshot.stars,
+    lastCommitAt: overrides?.lastCommitAt ?? snapshot.lastCommitAt,
+    skillMdFirstCommitAt: overrides?.skillMdFirstCommitAt ?? snapshot.skillMdFirstCommitAt,
+    repoCreatedAt: overrides?.repoCreatedAt ?? snapshot.repoCreatedAt,
+    createdAt: snapshot.createdAt,
+    indexedAt: overrides?.indexedAt ?? snapshot.indexedAt,
+  };
+}
+
+function buildCanonicalCandidateForNewGithubSkill(params: {
+  skillId: string;
+  slug: string;
+  repo: GitHubRepo;
+  skillPath: string | null;
+  persistenceMetadata: SkillPersistenceMetadata;
+  now: number;
+}): CanonicalSkillCandidate {
+  return {
+    id: params.skillId,
+    slug: params.slug,
+    repoOwner: params.repo.owner.login,
+    repoName: params.repo.name,
+    skillPath: params.skillPath,
+    sourceType: 'github',
+    visibility: 'public',
+    stars: params.repo.stargazers_count,
+    lastCommitAt: params.persistenceMetadata.lastCommitAt,
+    skillMdFirstCommitAt: params.persistenceMetadata.skillMdFirstCommitAt,
+    repoCreatedAt: params.persistenceMetadata.repoCreatedAt,
+    createdAt: params.now,
+    indexedAt: params.now,
   };
 }
 
@@ -1410,6 +1443,25 @@ function buildProcessedCandidateKey(
   return `indexing:processed:${owner.toLowerCase()}/${repo.toLowerCase()}:${(skillPath || '').toLowerCase()}:${headSha.toLowerCase()}`;
 }
 
+function buildPendingCandidateKey(
+  owner: string,
+  repo: string,
+  skillPath: string | null | undefined,
+  headSha: string
+): string {
+  return `indexing:pending:${owner.toLowerCase()}/${repo.toLowerCase()}:${(skillPath || '').toLowerCase()}:${headSha.toLowerCase()}`;
+}
+
+function buildRepoMetricsSyncedKey(
+  owner: string,
+  repo: string,
+  headSha: string,
+  stars: number,
+  forks: number
+): string {
+  return `indexing:repo-metrics:${owner.toLowerCase()}/${repo.toLowerCase()}:${headSha.toLowerCase()}:${stars}:${forks}`;
+}
+
 async function wasCandidateProcessed(env: IndexingEnv, key: string): Promise<boolean> {
   return (await env.KV.get(key)) !== null;
 }
@@ -1420,7 +1472,31 @@ async function markCandidateProcessed(env: IndexingEnv, key: string): Promise<vo
   });
 }
 
-async function queueDiscoveredSkillPaths(
+async function wasCandidatePending(env: IndexingEnv, key: string): Promise<boolean> {
+  return (await env.KV.get(key)) !== null;
+}
+
+async function markCandidatePending(env: IndexingEnv, key: string): Promise<void> {
+  await env.KV.put(key, '1', {
+    expirationTtl: INDEXING_PENDING_TTL_SECONDS,
+  });
+}
+
+async function clearCandidatePending(env: IndexingEnv, key: string): Promise<void> {
+  await env.KV.delete(key);
+}
+
+async function wasRepoMetricsSynced(env: IndexingEnv, key: string): Promise<boolean> {
+  return (await env.KV.get(key)) !== null;
+}
+
+async function markRepoMetricsSynced(env: IndexingEnv, key: string): Promise<void> {
+  await env.KV.put(key, '1', {
+    expirationTtl: INDEXING_PROCESSED_TTL_SECONDS,
+  });
+}
+
+export async function queueDiscoveredSkillPaths(
   message: IndexingMessage,
   owner: string,
   repo: string,
@@ -1434,22 +1510,33 @@ async function queueDiscoveredSkillPaths(
     if (!discoveredSkillPath) continue;
 
     const processedKey = buildProcessedCandidateKey(owner, repo, discoveredSkillPath, headSha);
-    if (!message.forceReindex && await wasCandidateProcessed(env, processedKey)) {
+    const pendingKey = buildPendingCandidateKey(owner, repo, discoveredSkillPath, headSha);
+    if (!message.forceReindex && (
+      await wasCandidateProcessed(env, processedKey)
+      || await wasCandidatePending(env, pendingKey)
+    )) {
       continue;
     }
 
-    await env.INDEXING_QUEUE.send({
-      type: 'check_skill',
-      repoOwner: owner,
-      repoName: repo,
-      skillPath: discoveredSkillPath,
-      submittedBy: message.submittedBy,
-      submittedAt: message.submittedAt,
-      forceReindex: message.forceReindex,
-      discoverySource: message.discoverySource,
-      discoveryFingerprint: message.discoveryFingerprint,
-    });
-    queued++;
+    await markCandidatePending(env, pendingKey);
+
+    try {
+      await env.INDEXING_QUEUE.send({
+        type: 'check_skill',
+        repoOwner: owner,
+        repoName: repo,
+        skillPath: discoveredSkillPath,
+        submittedBy: message.submittedBy,
+        submittedAt: message.submittedAt,
+        forceReindex: message.forceReindex,
+        discoverySource: message.discoverySource,
+        discoveryFingerprint: message.discoveryFingerprint,
+      });
+      queued++;
+    } catch (error) {
+      await clearCandidatePending(env, pendingKey);
+      throw error;
+    }
   }
 
   return queued;
@@ -1457,7 +1544,8 @@ async function queueDiscoveredSkillPaths(
 
 async function processMessage(
   message: IndexingMessage,
-  env: IndexingEnv
+  env: IndexingEnv,
+  batchContext: IndexingBatchContext
 ): Promise<void> {
   const { repoOwner, repoName, skillPath, forceReindex } = message;
   const source = message.submittedBy ? 'user-submit' : (message.discoverySource || 'github-events');
@@ -1465,7 +1553,7 @@ async function processMessage(
   log.log(`Processing repo: ${repoOwner}/${repoName} (source: ${source}, skillPath: ${skillPath || 'root'})`, JSON.stringify(message));
 
   // Step 1: Get repository info
-  const repo = await getRepoInfo(repoOwner, repoName, env);
+  const repo = await getRepoInfoCached(repoOwner, repoName, env, batchContext);
   if (!repo) {
     log.log(`Repo not found: ${repoOwner}/${repoName}`);
     return;
@@ -1486,11 +1574,15 @@ async function processMessage(
   log.log(`Repo info fetched: ${canonicalRepoOwner}/${canonicalRepoName}, stars: ${repo.stargazers_count}, fork: ${repo.fork}`);
 
   // Step 2: Get latest commit SHA
-  const latestCommit = await getLatestCommitSha(
-    canonicalRepoOwner,
-    canonicalRepoName,
-    env,
-    repo.default_branch
+  const latestCommit = await getOrCreateBatchPromise(
+    batchContext.latestCommitByRepoRef,
+    getRepoRefCacheKey(canonicalRepoOwner, canonicalRepoName, repo.default_branch || 'main'),
+    () => getLatestCommitSha(
+      canonicalRepoOwner,
+      canonicalRepoName,
+      env,
+      repo.default_branch
+    )
   );
   if (!latestCommit) {
     log.log(`Failed to get latest commit SHA: ${canonicalRepoOwner}/${canonicalRepoName}`);
@@ -1505,6 +1597,12 @@ async function processMessage(
     skillPath || null,
     latestCommit.sha
   );
+  const pendingCandidateKey = buildPendingCandidateKey(
+    canonicalRepoOwner,
+    canonicalRepoName,
+    skillPath || null,
+    latestCommit.sha
+  );
   if (!forceReindex && await wasCandidateProcessed(env, processedCandidateKey)) {
     log.log(`Skipping exact candidate already processed: ${processedCandidateKey}`);
     return;
@@ -1512,16 +1610,19 @@ async function processMessage(
 
   let shouldMarkProcessed = false;
   let discoveredRepositorySkillPaths: string[] | null = null;
+  let repositoryTree: GitHubTreeResponse | null = null;
 
   try {
     if (!skillPath) {
       try {
-        discoveredRepositorySkillPaths = await scanRepositorySkillPaths(
+        repositoryTree = await getRepositoryTreeCached(
           canonicalRepoOwner,
           canonicalRepoName,
           latestCommit.branch,
-          env
+          env,
+          batchContext
         );
+        discoveredRepositorySkillPaths = scanRepositorySkillPathsFromTree(repositoryTree);
         const queuedDiscoveredPaths = await queueDiscoveredSkillPaths(
           message,
           canonicalRepoOwner,
@@ -1538,34 +1639,53 @@ async function processMessage(
       }
     }
 
-    // Step 3: Check if update is needed
-    const exists = await skillExists(canonicalRepoOwner, canonicalRepoName, skillPath || null, env);
-    const shouldFetchContent = await needsUpdate(
+    // Step 3: Load the stored skill state once and derive update decisions from it.
+    const existingSkill = await getExistingSkillSnapshot(
       canonicalRepoOwner,
       canonicalRepoName,
       skillPath || null,
-      latestCommit.sha,
-      forceReindex || false,
       env
+    );
+    const shouldFetchContent = forceReindex
+      || !existingSkill
+      || existingSkill.commitSha !== latestCommit.sha;
+
+    if (forceReindex) {
+      log.log(`Force reindex requested for ${canonicalRepoOwner}/${canonicalRepoName}`);
+    } else if (!existingSkill) {
+      log.log(`No stored commit SHA for ${canonicalRepoOwner}/${canonicalRepoName}, needs full index`);
+    } else if (existingSkill.commitSha !== latestCommit.sha) {
+      log.log(`Commit SHA changed: ${existingSkill.commitSha} -> ${latestCommit.sha}`);
+    } else {
+      log.log(`Commit SHA unchanged: ${latestCommit.sha}, skipping content fetch`);
+    }
+
+    const repoMetricsSyncKey = buildRepoMetricsSyncedKey(
+      canonicalRepoOwner,
+      canonicalRepoName,
+      latestCommit.sha,
+      repo.stargazers_count,
+      repo.forks_count
     );
 
     // If skill exists and no content update needed, just update stars/forks
-    if (exists && !shouldFetchContent) {
+    if (existingSkill && !shouldFetchContent) {
       const updatedId = await updateSkillMetricsOnly(
-        canonicalRepoOwner,
-        canonicalRepoName,
-        skillPath || null,
+        existingSkill.id,
         repo,
         env
       );
       if (updatedId) {
-        await syncRepoMetricsForGithubSkills(
-          env.DB,
-          canonicalRepoOwner,
-          canonicalRepoName,
-          repo.stargazers_count,
-          repo.forks_count
-        );
+        if (!await wasRepoMetricsSynced(env, repoMetricsSyncKey)) {
+          await syncRepoMetricsForGithubSkills(
+            env.DB,
+            canonicalRepoOwner,
+            canonicalRepoName,
+            repo.stargazers_count,
+            repo.forks_count
+          );
+          await markRepoMetricsSynced(env, repoMetricsSyncKey);
+        }
         log.log(`Updated stars/forks only for skill: ${updatedId}`);
       }
       shouldMarkProcessed = true;
@@ -1579,7 +1699,8 @@ async function processMessage(
         canonicalRepoOwner,
         canonicalRepoName,
         latestCommit.branch,
-        env
+        env,
+        batchContext
       );
       const discoveredSkillPaths = repositorySkillPaths.filter((candidatePath) => candidatePath);
 
@@ -1619,16 +1740,26 @@ async function processMessage(
     // Step 5: Fetch all files from directory using Tree API
     let directoryFiles: DirectoryFile[] = [];
     let textContents = new Map<string, string>();
-    const previousFileShas = exists
-      ? await getStoredFileShas(canonicalRepoOwner, canonicalRepoName, skillPath || null, env)
+    const previousFileShas = existingSkill
+      ? extractStoredFileShas(
+        existingSkill.fileStructure,
+        `${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`
+      )
       : undefined;
 
     try {
-      const result = await fetchDirectoryFiles(
+      const treeForDirectory = repositoryTree || await getRepositoryTreeCached(
         canonicalRepoOwner,
         canonicalRepoName,
         latestCommit.branch,
+        env,
+        batchContext
+      );
+      const result = await fetchDirectoryFiles(
+        canonicalRepoOwner,
+        canonicalRepoName,
         skillPath || null,
+        treeForDirectory,
         env,
         previousFileShas
       );
@@ -1677,11 +1808,15 @@ async function processMessage(
     const skillMetadata = resolveSkillMetadata(repo, parsedSkillMd);
     const { fullHash, normalizedHash } = await computeSkillMdHashes(skillMdContent);
     const bundleManifestHash = await computeBundleManifestHash(directoryFiles, normalizedHash);
-    const { lastCommitAt, firstCommitAt } = await getSkillCommitDates(
-      canonicalRepoOwner,
-      canonicalRepoName,
-      skillMd.path,
-      env
+    const { lastCommitAt, firstCommitAt } = await getOrCreateBatchPromise(
+      batchContext.skillCommitDatesByPath,
+      getSkillCommitDatesCacheKey(canonicalRepoOwner, canonicalRepoName, skillMd.path),
+      () => getSkillCommitDates(
+        canonicalRepoOwner,
+        canonicalRepoName,
+        skillMd.path,
+        env
+      )
     );
     const persistenceMetadata: SkillPersistenceMetadata = {
       contentHash: fullHash,
@@ -1689,19 +1824,27 @@ async function processMessage(
       skillMdFirstCommitAt: firstCommitAt,
       repoCreatedAt: repo.created_at ? new Date(repo.created_at).getTime() : null,
     };
+    const fileStructure: FileStructure = {
+      commitSha: latestCommit.sha,
+      indexedAt: new Date().toISOString(),
+      files: directoryFiles,
+      fileTree: buildFileTree(directoryFiles),
+    };
+    const securityContentFingerprint = await buildSecurityContentFingerprint(directoryFiles);
 
     // Step 7: Create or update skill record.
     let skillId: string;
+    let currentCanonicalCandidate: CanonicalSkillCandidate | null = null;
     let shouldRunCanonicalDedup = true;
 
-    if (exists) {
+    if (existingSkill) {
       const updatedId = await updateSkill(
-        canonicalRepoOwner,
-        canonicalRepoName,
-        skillPath || null,
+        existingSkill.id,
         repo,
         skillMetadata,
         persistenceMetadata,
+        latestCommit.sha,
+        fileStructure,
         env
       );
       if (!updatedId) {
@@ -1709,6 +1852,13 @@ async function processMessage(
         return;
       }
       skillId = updatedId;
+      currentCanonicalCandidate = buildCanonicalCandidateFromExistingSnapshot(existingSkill, {
+        stars: repo.stargazers_count,
+        lastCommitAt: persistenceMetadata.lastCommitAt,
+        skillMdFirstCommitAt: persistenceMetadata.skillMdFirstCommitAt,
+        repoCreatedAt: persistenceMetadata.repoCreatedAt,
+        indexedAt: Date.now(),
+      });
       log.log(`Updated skill: ${skillId}`);
     } else {
       const curationResult = await checkAndConvertPrivateSkill(
@@ -1717,6 +1867,8 @@ async function processMessage(
         repo,
         skillMetadata,
         persistenceMetadata,
+        latestCommit.sha,
+        fileStructure,
         skillPath || null,
         env
       );
@@ -1728,19 +1880,48 @@ async function processMessage(
       } else {
         const authorId = await upsertAuthor(repo, env);
         log.log(`Author upserted: ${authorId}`);
-        skillId = await createSkill(repo, skillMetadata, env, persistenceMetadata, skillPath, frontmatter);
+        const createResult = await createSkill(
+          repo,
+          skillMetadata,
+          env,
+          persistenceMetadata,
+          latestCommit.sha,
+          fileStructure,
+          skillPath,
+          frontmatter
+        );
+        skillId = createResult.id;
+        currentCanonicalCandidate = createResult.existingSnapshot
+          ? buildCanonicalCandidateFromExistingSnapshot(createResult.existingSnapshot, {
+            stars: repo.stargazers_count,
+            lastCommitAt: persistenceMetadata.lastCommitAt,
+            skillMdFirstCommitAt: persistenceMetadata.skillMdFirstCommitAt,
+            repoCreatedAt: persistenceMetadata.repoCreatedAt,
+            indexedAt: Date.now(),
+          })
+          : buildCanonicalCandidateForNewGithubSkill({
+            skillId: createResult.id,
+            slug: createResult.slug,
+            repo,
+            skillPath: skillPath || null,
+            persistenceMetadata,
+            now: createResult.createdAt,
+          });
         log.log(`Created skill: ${skillId}`);
         await invalidatePublicDiscoveryCaches(`github publish ${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`);
       }
     }
 
-    await syncRepoMetricsForGithubSkills(
-      env.DB,
-      canonicalRepoOwner,
-      canonicalRepoName,
-      repo.stargazers_count,
-      repo.forks_count
-    );
+    if (!await wasRepoMetricsSynced(env, repoMetricsSyncKey)) {
+      await syncRepoMetricsForGithubSkills(
+        env.DB,
+        canonicalRepoOwner,
+        canonicalRepoName,
+        repo.stargazers_count,
+        repo.forks_count
+      );
+      await markRepoMetricsSynced(env, repoMetricsSyncKey);
+    }
 
     await storeSkillHashes(env.DB, skillId, {
       fullHash,
@@ -1749,9 +1930,9 @@ async function processMessage(
     });
     log.log(`Stored skill hashes for ${skillId}`);
 
-    if (shouldRunCanonicalDedup) {
+    if (shouldRunCanonicalDedup && currentCanonicalCandidate) {
       const dedupResult = await reconcileCanonicalDuplicateGroup(
-        skillId,
+        currentCanonicalCandidate,
         normalizedHash,
         bundleManifestHash,
         env
@@ -1801,28 +1982,21 @@ async function processMessage(
       throw r2Error;
     }
 
-    // Step 9: Update commit_sha, file_structure, and last_commit_at
-    const fileStructure: FileStructure = {
-      commitSha: latestCommit.sha,
-      indexedAt: new Date().toISOString(),
-      files: directoryFiles,
-      fileTree: buildFileTree(directoryFiles),
-    };
-    const securityContentFingerprint = await buildSecurityContentFingerprint(directoryFiles);
-
     await updateSkillMetadata(skillId, latestCommit.sha, fileStructure, lastCommitAt, env);
 
-    try {
-      const indexNowTarget = await loadIndexNowSkillTarget(env.DB, skillId);
-      if (indexNowTarget) {
-        await scheduleIndexNowSubmission({
-          env,
-          urls: buildIndexNowSkillUrls(indexNowTarget, env),
-          source: `indexing:${indexNowTarget.slug}`,
-        });
+    if (isIndexNowEnabled(env)) {
+      try {
+        const indexNowTarget = await loadIndexNowSkillTarget(env.DB, skillId);
+        if (indexNowTarget) {
+          await scheduleIndexNowSubmission({
+            env,
+            urls: buildIndexNowSkillUrls(indexNowTarget, env),
+            source: `indexing:${indexNowTarget.slug}`,
+          });
+        }
+      } catch (indexNowError) {
+        log.error(`Failed to enqueue IndexNow update for ${skillId}`, indexNowError);
       }
-    } catch (indexNowError) {
-      log.error(`Failed to enqueue IndexNow update for ${skillId}`, indexNowError);
     }
 
     // Mark recommend candidates dirty after content/tags/metadata updates.
@@ -1872,6 +2046,7 @@ async function processMessage(
     shouldMarkProcessed = true;
   } finally {
     if (shouldMarkProcessed && !forceReindex) {
+      await clearCandidatePending(env, pendingCandidateKey);
       await markCandidateProcessed(env, processedCandidateKey);
     }
   }
@@ -1885,6 +2060,7 @@ export default {
   ): Promise<void> {
     log.log(`Processing batch of ${batch.messages.length} messages`);
     const seenInBatch = new Set<string>();
+    const batchContext = createIndexingBatchContext();
 
     for (const message of batch.messages) {
       const dedupKey = getMessageDedupKey(message.body);
@@ -1901,7 +2077,7 @@ export default {
           log.log(`Processing deduped queue candidate: ${dedupKey}`);
         }
         log.log(`Processing message ID: ${message.id}`);
-        await processMessage(message.body, env);
+        await processMessage(message.body, env, batchContext);
         message.ack();
         log.log(`Message acknowledged: ${message.id}`);
       } catch (error) {

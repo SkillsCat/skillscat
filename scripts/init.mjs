@@ -669,6 +669,10 @@ max_batch_timeout = 60
 max_retries = 3
 dead_letter_queue = "skillscat-security-analysis-dlq"
 
+[[env.production.queues.producers]]
+binding = "INDEXING_QUEUE"
+queue = "skillscat-indexing"
+
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "skillscat-db"
