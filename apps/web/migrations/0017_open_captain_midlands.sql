@@ -1,0 +1,2 @@
+CREATE INDEX `skills_public_repo_owner_sitemap_freshness_idx` ON `skills` (`repo_owner`,CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC) WHERE "skills"."visibility" = 'public' AND "skills"."repo_owner" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX `skills_public_org_sitemap_freshness_idx` ON `skills` (`org_id`,CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC) WHERE "skills"."visibility" = 'public' AND "skills"."org_id" IS NOT NULL;

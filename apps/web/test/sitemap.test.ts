@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildSitemapCacheControl,
   buildSitemapIndexEntries,
+  buildSitemapPublicPaths,
   getExpandedCoreSitemapPages,
+  getSitemapHotCacheTtlSeconds,
+  getSitemapSharedMaxAgeSeconds,
   MAX_CORE_CATEGORY_SITEMAP_PAGES,
   MAX_CORE_LIST_SITEMAP_PAGES,
   PUBLIC_LIST_PAGE_SIZE,
+  SITEMAP_DYNAMIC_BROWSER_MAX_AGE_SECONDS,
+  SITEMAP_DYNAMIC_CACHE_TTL,
+  SITEMAP_DYNAMIC_SHARED_MAX_AGE_SECONDS,
+  SITEMAP_DYNAMIC_STALE_WHILE_REVALIDATE_SECONDS,
   loadProfilesSitemapPage,
   loadRecentOrgsSitemapPages,
   loadRecentProfilesSitemapPages,
@@ -131,6 +139,53 @@ describe('buildSitemapIndexEntries', () => {
   });
 });
 
+describe('sitemap cache warmup settings', () => {
+  it('keeps sitemap hot cache alive beyond the refresh interval', () => {
+    expect(getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, 3600)).toBe(3900);
+    expect(getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, 600)).toBe(900);
+  });
+
+  it('extends shared cache control to cover the refresh interval', () => {
+    const cacheControl = buildSitemapCacheControl({
+      browserMaxAgeSeconds: SITEMAP_DYNAMIC_BROWSER_MAX_AGE_SECONDS,
+      sharedMaxAgeSeconds: getSitemapSharedMaxAgeSeconds(
+        SITEMAP_DYNAMIC_SHARED_MAX_AGE_SECONDS,
+        3600
+      ),
+      staleWhileRevalidateSeconds: SITEMAP_DYNAMIC_STALE_WHILE_REVALIDATE_SECONDS,
+    });
+
+    expect(cacheControl).toBe(
+      'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400'
+    );
+  });
+
+  it('includes every public sitemap path for route prewarming', () => {
+    expect(buildSitemapPublicPaths({
+      dynamic: {
+        skills: { count: 10001, pages: 3, lastmod: '2026-03-18' },
+        profiles: { count: 0, pages: 0 },
+        orgs: { count: 1, pages: 1, lastmod: '2026-03-17' },
+      },
+      recent: {
+        skills: { count: 8, lastmod: '2026-03-19' },
+        profiles: { count: 0 },
+        orgs: { count: 2, lastmod: '2026-03-18' },
+      },
+    })).toEqual([
+      '/sitemap.xml',
+      '/sitemaps/core.xml',
+      '/sitemaps/recent-skills.xml',
+      '/sitemaps/recent-profiles.xml',
+      '/sitemaps/recent-orgs.xml',
+      '/sitemaps/skills-1.xml',
+      '/sitemaps/skills-2.xml',
+      '/sitemaps/skills-3.xml',
+      '/sitemaps/orgs-1.xml',
+    ]);
+  });
+});
+
 describe('loadRecentSkillsSitemapPages', () => {
   it('returns recently changed public skill detail urls ordered by freshness', async () => {
     const now = Date.parse('2026-03-19T00:00:00.000Z');
@@ -194,8 +249,10 @@ describe('profile and org sitemap freshness', () => {
     const db = {
       prepare(query: string) {
         const normalized = query.replace(/\s+/g, ' ').trim();
-        expect(normalized).toContain("JOIN skills s ON s.visibility = 'public' AND s.repo_owner = a.username");
-        expect(normalized).toContain('CASE WHEN a.updated_at > MAX');
+        expect(normalized).toContain('SELECT a.username AS entity_label');
+        expect(normalized).toContain('INDEXED BY skills_public_repo_owner_sitemap_freshness_idx');
+        expect(normalized).toContain("WHERE s.visibility = 'public' AND s.repo_owner = a.username");
+        expect(normalized).toContain('ORDER BY entity_label ASC');
 
         return {
           bind(limit: number, offset: number) {
@@ -206,7 +263,7 @@ describe('profile and org sitemap freshness', () => {
               all: async () => ({
                 results: [
                   {
-                    username: 'backrunner',
+                    entity_label: 'backrunner',
                     freshness_ts: Date.parse('2026-03-18T00:00:00.000Z'),
                   },
                 ],
@@ -234,19 +291,22 @@ describe('profile and org sitemap freshness', () => {
     const db = {
       prepare(query: string) {
         const normalized = query.replace(/\s+/g, ' ').trim();
-        expect(normalized).toContain('WHERE freshness_ts >= ?');
-        expect(normalized).toContain('ORDER BY freshness_ts DESC, username ASC');
+        expect(normalized).toContain('SELECT a.username AS entity_label');
+        expect(normalized).toContain('a.updated_at >= ?');
+        expect(normalized).toContain('INDEXED BY skills_public_repo_owner_sitemap_freshness_idx');
+        expect(normalized).toContain('ORDER BY freshness_ts DESC, entity_label ASC');
 
         return {
-          bind(cutoff: number, limit: number) {
-            expect(cutoff).toBe(Date.parse('2026-03-05T00:00:00.000Z'));
+          bind(cutoffForAuthor: number, cutoffForSkill: number, limit: number) {
+            expect(cutoffForAuthor).toBe(Date.parse('2026-03-05T00:00:00.000Z'));
+            expect(cutoffForSkill).toBe(Date.parse('2026-03-05T00:00:00.000Z'));
             expect(limit).toBe(1000);
 
             return {
               all: async () => ({
                 results: [
                   {
-                    username: 'backrunner',
+                    entity_label: 'backrunner',
                     freshness_ts: Date.parse('2026-03-18T00:00:00.000Z'),
                   },
                 ],
@@ -274,19 +334,22 @@ describe('profile and org sitemap freshness', () => {
     const db = {
       prepare(query: string) {
         const normalized = query.replace(/\s+/g, ' ').trim();
-        expect(normalized).toContain("JOIN skills s ON s.org_id = o.id AND s.visibility = 'public'");
-        expect(normalized).toContain('ORDER BY freshness_ts DESC, slug ASC');
+        expect(normalized).toContain('SELECT o.slug AS entity_label');
+        expect(normalized).toContain('INDEXED BY skills_public_org_sitemap_freshness_idx');
+        expect(normalized).toContain("WHERE s.visibility = 'public' AND s.org_id = o.id");
+        expect(normalized).toContain('ORDER BY freshness_ts DESC, entity_label ASC');
 
         return {
-          bind(cutoff: number, limit: number) {
-            expect(cutoff).toBe(Date.parse('2026-03-05T00:00:00.000Z'));
+          bind(cutoffForOrg: number, cutoffForSkill: number, limit: number) {
+            expect(cutoffForOrg).toBe(Date.parse('2026-03-05T00:00:00.000Z'));
+            expect(cutoffForSkill).toBe(Date.parse('2026-03-05T00:00:00.000Z'));
             expect(limit).toBe(1000);
 
             return {
               all: async () => ({
                 results: [
                   {
-                    slug: 'skillscat',
+                    entity_label: 'skillscat',
                     freshness_ts: Date.parse('2026-03-17T00:00:00.000Z'),
                   },
                 ],

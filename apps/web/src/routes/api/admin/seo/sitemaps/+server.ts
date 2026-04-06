@@ -10,6 +10,7 @@ const SITEMAP_REFRESH_STATE_KEY = 'seo:sitemaps:full-refresh:v1';
 let inflightRefresh: Promise<{
   refreshed: string[];
   removed: string[];
+  paths: string[];
 }> | null = null;
 
 export const POST: RequestHandler = async ({ request, platform }) => {
@@ -53,6 +54,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
       nextEligibleAt,
       refreshed: [],
       removed: [],
+      paths: [],
     });
   }
 
@@ -61,6 +63,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
       db,
       r2,
       waitUntil,
+      refreshMinIntervalSeconds: minIntervalSeconds,
     }).finally(() => {
       inflightRefresh = null;
     });
@@ -81,5 +84,6 @@ export const POST: RequestHandler = async ({ request, platform }) => {
     lastRefreshAt: refreshedAt,
     refreshed: summary.refreshed,
     removed: summary.removed,
+    paths: summary.paths,
   });
 };

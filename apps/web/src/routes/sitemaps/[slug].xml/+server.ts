@@ -1,22 +1,29 @@
 import type { RequestHandler } from './$types';
 import {
-  normalizeSitemapRefreshMinIntervalSeconds,
-  SITEMAP_CORE_CACHE_CONTROL,
-  SITEMAP_CORE_CACHE_TTL,
-  SITEMAP_DYNAMIC_CACHE_CONTROL,
-  SITEMAP_DYNAMIC_CACHE_TTL,
   type SitemapPage,
   SitemapNotFoundError,
   buildMissingSitemapResponse,
+  buildSitemapCacheControl,
   getExpandedCoreSitemapPages,
   buildUrlSetXml,
   createCachedSitemapResponse,
+  getSitemapHotCacheTtlSeconds,
+  getSitemapSharedMaxAgeSeconds,
   loadOrgsSitemapPage,
   loadProfilesSitemapPage,
   loadRecentOrgsSitemapPages,
   loadRecentProfilesSitemapPages,
   loadRecentSkillsSitemapPages,
   loadSkillsSitemapPage,
+  normalizeSitemapRefreshMinIntervalSeconds,
+  SITEMAP_CORE_BROWSER_MAX_AGE_SECONDS,
+  SITEMAP_CORE_CACHE_TTL,
+  SITEMAP_CORE_SHARED_MAX_AGE_SECONDS,
+  SITEMAP_CORE_STALE_WHILE_REVALIDATE_SECONDS,
+  SITEMAP_DYNAMIC_BROWSER_MAX_AGE_SECONDS,
+  SITEMAP_DYNAMIC_CACHE_TTL,
+  SITEMAP_DYNAMIC_SHARED_MAX_AGE_SECONDS,
+  SITEMAP_DYNAMIC_STALE_WHILE_REVALIDATE_SECONDS,
 } from '$lib/server/seo/sitemap';
 
 const DYNAMIC_KIND_PATTERN = /^(skills|profiles|orgs)-([1-9]\d*)$/;
@@ -27,15 +34,23 @@ export const GET: RequestHandler = async ({ params, platform }) => {
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
   const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
-  const snapshotMaxAgeSeconds = normalizeSitemapRefreshMinIntervalSeconds(
+  const refreshMinIntervalSeconds = normalizeSitemapRefreshMinIntervalSeconds(
     platform?.env?.SITEMAP_REFRESH_MIN_INTERVAL_SECONDS
   );
+  const snapshotMaxAgeSeconds = refreshMinIntervalSeconds;
 
   if (slug === 'core') {
     return createCachedSitemapResponse({
       cacheKey: 'sitemap:core:xml',
-      ttl: SITEMAP_CORE_CACHE_TTL,
-      cacheControl: SITEMAP_CORE_CACHE_CONTROL,
+      ttl: getSitemapHotCacheTtlSeconds(SITEMAP_CORE_CACHE_TTL, refreshMinIntervalSeconds),
+      cacheControl: buildSitemapCacheControl({
+        browserMaxAgeSeconds: SITEMAP_CORE_BROWSER_MAX_AGE_SECONDS,
+        sharedMaxAgeSeconds: getSitemapSharedMaxAgeSeconds(
+          SITEMAP_CORE_SHARED_MAX_AGE_SECONDS,
+          refreshMinIntervalSeconds
+        ),
+        staleWhileRevalidateSeconds: SITEMAP_CORE_STALE_WHILE_REVALIDATE_SECONDS,
+      }),
       debugTag: 'core',
       r2,
       snapshotMaxAgeSeconds,
@@ -52,8 +67,15 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 
     return createCachedSitemapResponse({
       cacheKey: `sitemap:recent:${kind}:xml`,
-      ttl: SITEMAP_DYNAMIC_CACHE_TTL,
-      cacheControl: SITEMAP_DYNAMIC_CACHE_CONTROL,
+      ttl: getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, refreshMinIntervalSeconds),
+      cacheControl: buildSitemapCacheControl({
+        browserMaxAgeSeconds: SITEMAP_DYNAMIC_BROWSER_MAX_AGE_SECONDS,
+        sharedMaxAgeSeconds: getSitemapSharedMaxAgeSeconds(
+          SITEMAP_DYNAMIC_SHARED_MAX_AGE_SECONDS,
+          refreshMinIntervalSeconds
+        ),
+        staleWhileRevalidateSeconds: SITEMAP_DYNAMIC_STALE_WHILE_REVALIDATE_SECONDS,
+      }),
       debugTag: `recent-${kind}`,
       r2,
       snapshotMaxAgeSeconds,
@@ -89,8 +111,15 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 
   return createCachedSitemapResponse({
     cacheKey: `sitemap:${kind}:${page}:xml`,
-    ttl: SITEMAP_DYNAMIC_CACHE_TTL,
-    cacheControl: SITEMAP_DYNAMIC_CACHE_CONTROL,
+    ttl: getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, refreshMinIntervalSeconds),
+    cacheControl: buildSitemapCacheControl({
+      browserMaxAgeSeconds: SITEMAP_DYNAMIC_BROWSER_MAX_AGE_SECONDS,
+      sharedMaxAgeSeconds: getSitemapSharedMaxAgeSeconds(
+        SITEMAP_DYNAMIC_SHARED_MAX_AGE_SECONDS,
+        refreshMinIntervalSeconds
+      ),
+      staleWhileRevalidateSeconds: SITEMAP_DYNAMIC_STALE_WHILE_REVALIDATE_SECONDS,
+    }),
     debugTag: `${kind}-${page}`,
     r2,
     snapshotMaxAgeSeconds,

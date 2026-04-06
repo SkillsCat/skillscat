@@ -187,6 +187,18 @@ export const skills = sqliteTable('skills', {
       table.slug
     )
     .where(sql`${table.visibility} = 'public'`),
+  index('skills_public_repo_owner_sitemap_freshness_idx')
+    .on(
+      table.repoOwner,
+      sql.raw('CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC')
+    )
+    .where(sql`${table.visibility} = 'public' AND ${table.repoOwner} IS NOT NULL`),
+  index('skills_public_org_sitemap_freshness_idx')
+    .on(
+      table.orgId,
+      sql.raw('CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END DESC')
+    )
+    .where(sql`${table.visibility} = 'public' AND ${table.orgId} IS NOT NULL`),
   index('skills_public_openclaw_trending_rank_idx')
     .on(
       sql.raw('trending_score DESC'),

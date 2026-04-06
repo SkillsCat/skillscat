@@ -6,22 +6,25 @@ export const SITE_URL = 'https://skills.cat';
 // Keep each sitemap comfortably small so bots can fetch them quickly even on cold builds.
 export const SITEMAP_URL_LIMIT = 5000;
 
+export const SITEMAP_INDEX_BROWSER_MAX_AGE_SECONDS = 300;
+export const SITEMAP_INDEX_SHARED_MAX_AGE_SECONDS = 600;
+export const SITEMAP_INDEX_STALE_WHILE_REVALIDATE_SECONDS = 3600;
+export const SITEMAP_DYNAMIC_BROWSER_MAX_AGE_SECONDS = 300;
+export const SITEMAP_DYNAMIC_SHARED_MAX_AGE_SECONDS = 900;
+export const SITEMAP_DYNAMIC_STALE_WHILE_REVALIDATE_SECONDS = 86400;
+export const SITEMAP_CORE_BROWSER_MAX_AGE_SECONDS = 3600;
+export const SITEMAP_CORE_SHARED_MAX_AGE_SECONDS = 86400;
+export const SITEMAP_CORE_STALE_WHILE_REVALIDATE_SECONDS = 604800;
 export const SITEMAP_INDEX_CACHE_TTL = 600;
 export const SITEMAP_DYNAMIC_CACHE_TTL = 900;
 export const SITEMAP_CORE_CACHE_TTL = 86400;
 export const DEFAULT_SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = 3600;
+export const SITEMAP_HOT_CACHE_TTL_BUFFER_SECONDS = 300;
 export const PUBLIC_LIST_PAGE_SIZE = 24;
 export const MAX_CORE_LIST_SITEMAP_PAGES = 10;
 export const MAX_CORE_CATEGORY_SITEMAP_PAGES = 5;
 export const RECENT_SITEMAP_WINDOW_DAYS = 14;
 export const RECENT_SITEMAP_URL_LIMIT = 1000;
-
-export const SITEMAP_INDEX_CACHE_CONTROL =
-  'public, max-age=300, s-maxage=600, stale-while-revalidate=3600';
-export const SITEMAP_DYNAMIC_CACHE_CONTROL =
-  'public, max-age=300, s-maxage=900, stale-while-revalidate=86400';
-export const SITEMAP_CORE_CACHE_CONTROL =
-  'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800';
 
 const inflightSitemapBuilds = new Map<string, Promise<string>>();
 const SITEMAP_SNAPSHOT_PREFIX = 'cache/sitemaps/v1';
@@ -95,6 +98,26 @@ interface CachedSitemapSnapshot {
   generatedAt?: number;
 }
 
+interface EntitySitemapQueryConfig {
+  table: 'authors' | 'organizations';
+  alias: 'a' | 'o';
+  labelColumn: 'username' | 'slug';
+  entityMatchColumn: 'username' | 'id';
+  matchColumn: 'repo_owner' | 'org_id';
+  baseWhere: string;
+  indexName: string;
+  pathPrefix: '/u/' | '/org/';
+  pagePriority: string;
+  pageChangefreq: ChangeFrequency;
+  recentPriority: string;
+  recentChangefreq: ChangeFrequency;
+}
+
+interface EntityFreshnessRow {
+  entity_label: string;
+  freshness_ts: number | null;
+}
+
 export class SitemapNotFoundError extends Error {
   constructor(message = 'Sitemap not found') {
     super(message);
@@ -125,6 +148,85 @@ export function normalizeSitemapRefreshMinIntervalSeconds(
 
   return Math.min(Math.max(Math.floor(numeric), 300), 86400);
 }
+
+export function getSitemapHotCacheTtlSeconds(
+  baseTtlSeconds: number,
+  refreshMinIntervalSeconds: number
+): number {
+  const normalizedBaseTtl = Math.max(0, Math.floor(baseTtlSeconds));
+  const normalizedRefreshMinInterval = normalizeSitemapRefreshMinIntervalSeconds(
+    refreshMinIntervalSeconds
+  );
+
+  return Math.max(
+    normalizedBaseTtl,
+    normalizedRefreshMinInterval + SITEMAP_HOT_CACHE_TTL_BUFFER_SECONDS
+  );
+}
+
+export function getSitemapSharedMaxAgeSeconds(
+  baseSharedMaxAgeSeconds: number,
+  refreshMinIntervalSeconds: number
+): number {
+  return Math.max(
+    Math.max(0, Math.floor(baseSharedMaxAgeSeconds)),
+    normalizeSitemapRefreshMinIntervalSeconds(refreshMinIntervalSeconds)
+  );
+}
+
+export function buildSitemapCacheControl(options: {
+  browserMaxAgeSeconds: number;
+  sharedMaxAgeSeconds: number;
+  staleWhileRevalidateSeconds: number;
+}): string {
+  const browserMaxAgeSeconds = Math.max(0, Math.floor(options.browserMaxAgeSeconds));
+  const sharedMaxAgeSeconds = Math.max(0, Math.floor(options.sharedMaxAgeSeconds));
+  const staleWhileRevalidateSeconds = Math.max(0, Math.floor(options.staleWhileRevalidateSeconds));
+
+  return `public, max-age=${browserMaxAgeSeconds}, s-maxage=${sharedMaxAgeSeconds}, stale-while-revalidate=${staleWhileRevalidateSeconds}`;
+}
+
+function buildSkillFreshnessExpr(alias = 's'): string {
+  return `CASE WHEN ${alias}.last_commit_at IS NULL THEN ${alias}.updated_at ELSE ${alias}.last_commit_at END`;
+}
+
+function buildSkillFreshnessCase(updatedExpr: string, skillFreshnessExpr: string): string {
+  return `CASE
+    WHEN ${updatedExpr} > COALESCE(${skillFreshnessExpr}, 0)
+      THEN ${updatedExpr}
+    ELSE ${skillFreshnessExpr}
+  END`;
+}
+
+const PROFILE_SITEMAP_QUERY_CONFIG: EntitySitemapQueryConfig = {
+  table: 'authors',
+  alias: 'a',
+  labelColumn: 'username',
+  entityMatchColumn: 'username',
+  matchColumn: 'repo_owner',
+  baseWhere: 'a.username IS NOT NULL',
+  indexName: 'skills_public_repo_owner_sitemap_freshness_idx',
+  pathPrefix: '/u/',
+  pagePriority: '0.5',
+  pageChangefreq: 'weekly',
+  recentPriority: '0.6',
+  recentChangefreq: 'daily',
+};
+
+const ORG_SITEMAP_QUERY_CONFIG: EntitySitemapQueryConfig = {
+  table: 'organizations',
+  alias: 'o',
+  labelColumn: 'slug',
+  entityMatchColumn: 'id',
+  matchColumn: 'org_id',
+  baseWhere: '1 = 1',
+  indexName: 'skills_public_org_sitemap_freshness_idx',
+  pathPrefix: '/org/',
+  pagePriority: '0.55',
+  pageChangefreq: 'daily',
+  recentPriority: '0.65',
+  recentChangefreq: 'daily',
+};
 
 export function toIsoDate(timestamp: unknown): string | undefined {
   const numeric = Number(timestamp);
@@ -324,6 +426,206 @@ function getRecentCutoffTimestamp(now = Date.now()): number {
   return now - (RECENT_SITEMAP_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 }
 
+function getEntityLabelExpr(config: EntitySitemapQueryConfig, alias = config.alias): string {
+  return `${alias}.${config.labelColumn}`;
+}
+
+function getEntityMatchExpr(config: EntitySitemapQueryConfig, alias = config.alias): string {
+  return `${alias}.${config.entityMatchColumn}`;
+}
+
+function getEntityUpdatedExpr(alias: string): string {
+  return `${alias}.updated_at`;
+}
+
+function buildEntityHasAnyPublicSkillsExists(
+  config: EntitySitemapQueryConfig,
+  matchExpr: string
+): string {
+  return `EXISTS (
+    SELECT 1
+    FROM skills s INDEXED BY ${config.indexName}
+    WHERE s.visibility = 'public'
+      AND s.${config.matchColumn} = ${matchExpr}
+    LIMIT 1
+  )`;
+}
+
+function buildEntityHasRecentPublicSkillsExists(
+  config: EntitySitemapQueryConfig,
+  matchExpr: string
+): string {
+  return `EXISTS (
+    SELECT 1
+    FROM skills s INDEXED BY ${config.indexName}
+    WHERE s.visibility = 'public'
+      AND s.${config.matchColumn} = ${matchExpr}
+      AND ${buildSkillFreshnessExpr('s')} >= ?
+    LIMIT 1
+  )`;
+}
+
+function buildEntityLatestSkillFreshnessSubquery(
+  config: EntitySitemapQueryConfig,
+  matchExpr: string
+): string {
+  return `(
+    SELECT ${buildSkillFreshnessExpr('s')}
+    FROM skills s INDEXED BY ${config.indexName}
+    WHERE s.visibility = 'public'
+      AND s.${config.matchColumn} = ${matchExpr}
+    ORDER BY ${buildSkillFreshnessExpr('s')} DESC
+    LIMIT 1
+  )`;
+}
+
+async function getDynamicEntitySitemapStats(
+  db: SitemapDb,
+  config: EntitySitemapQueryConfig
+): Promise<DynamicSitemapStats> {
+  const entityUpdatedExpr = getEntityUpdatedExpr(config.alias);
+  const entityMatchExpr = getEntityMatchExpr(config);
+  const skillFreshnessExpr = 'skill_freshness_ts';
+
+  const row = await db.prepare(`
+    WITH entity_skill_freshness AS (
+      SELECT
+        ${entityUpdatedExpr} AS updated_at,
+        ${buildEntityLatestSkillFreshnessSubquery(config, entityMatchExpr)} AS ${skillFreshnessExpr}
+      FROM ${config.table} ${config.alias}
+      WHERE ${config.baseWhere}
+        AND ${buildEntityHasAnyPublicSkillsExists(config, entityMatchExpr)}
+    )
+    SELECT
+      COUNT(*) AS count,
+      MAX(${buildSkillFreshnessCase('updated_at', skillFreshnessExpr)}) AS max_ts
+    FROM entity_skill_freshness
+  `).bind().first<CountAndMaxRow>();
+
+  const count = Math.max(0, toNumber(row?.count));
+  return {
+    count,
+    pages: Math.ceil(count / SITEMAP_URL_LIMIT),
+    lastmod: toIsoDate(row?.max_ts),
+  };
+}
+
+async function getRecentEntitySitemapStats(
+  db: SitemapDb,
+  config: EntitySitemapQueryConfig,
+  recentCutoffTimestamp: number
+): Promise<RecentSitemapStats> {
+  const entityUpdatedExpr = getEntityUpdatedExpr(config.alias);
+  const entityMatchExpr = getEntityMatchExpr(config);
+  const skillFreshnessExpr = 'skill_freshness_ts';
+
+  const row = await db.prepare(`
+    WITH recent_entities AS (
+      SELECT
+        ${entityUpdatedExpr} AS updated_at,
+        ${buildEntityLatestSkillFreshnessSubquery(config, entityMatchExpr)} AS ${skillFreshnessExpr}
+      FROM ${config.table} ${config.alias}
+      WHERE ${config.baseWhere}
+        AND (
+          ${entityUpdatedExpr} >= ?
+          OR ${buildEntityHasRecentPublicSkillsExists(config, entityMatchExpr)}
+        )
+    )
+    SELECT
+      COUNT(*) AS count,
+      MAX(${buildSkillFreshnessCase('updated_at', skillFreshnessExpr)}) AS max_ts
+    FROM recent_entities
+    WHERE ${skillFreshnessExpr} IS NOT NULL
+  `).bind(recentCutoffTimestamp, recentCutoffTimestamp).first<CountAndMaxRow>();
+
+  return {
+    count: Math.max(0, toNumber(row?.count)),
+    lastmod: toIsoDate(row?.max_ts),
+  };
+}
+
+async function loadEntitySitemapPage(
+  db: SitemapDb,
+  config: EntitySitemapQueryConfig,
+  page: number
+): Promise<SitemapPage[]> {
+  const offset = (page - 1) * SITEMAP_URL_LIMIT;
+  const entityUpdatedExpr = getEntityUpdatedExpr(config.alias);
+  const entityMatchExpr = getEntityMatchExpr(config);
+  const skillFreshnessExpr = 'skill_freshness_ts';
+  const labelExpr = getEntityLabelExpr(config);
+
+  const rows = await db.prepare(`
+    WITH paged_entities AS (
+      SELECT
+        ${labelExpr} AS entity_label,
+        ${entityUpdatedExpr} AS updated_at,
+        ${buildEntityLatestSkillFreshnessSubquery(config, entityMatchExpr)} AS ${skillFreshnessExpr}
+      FROM ${config.table} ${config.alias}
+      WHERE ${config.baseWhere}
+        AND ${buildEntityHasAnyPublicSkillsExists(config, entityMatchExpr)}
+      ORDER BY ${labelExpr} ASC
+      LIMIT ? OFFSET ?
+    )
+    SELECT
+      entity_label,
+      ${buildSkillFreshnessCase('updated_at', skillFreshnessExpr)} AS freshness_ts
+    FROM paged_entities
+    ORDER BY entity_label ASC
+  `)
+    .bind(SITEMAP_URL_LIMIT, offset)
+    .all<EntityFreshnessRow>();
+
+  return (rows.results || []).map((row) => ({
+    url: `${config.pathPrefix}${encodeURIComponent(row.entity_label)}`,
+    priority: config.pagePriority,
+    changefreq: config.pageChangefreq,
+    lastmod: toIsoDate(row.freshness_ts),
+  }));
+}
+
+async function loadRecentEntitySitemapPages(
+  db: SitemapDb,
+  config: EntitySitemapQueryConfig,
+  recentCutoffTimestamp: number
+): Promise<SitemapPage[]> {
+  const entityUpdatedExpr = getEntityUpdatedExpr(config.alias);
+  const entityMatchExpr = getEntityMatchExpr(config);
+  const skillFreshnessExpr = 'skill_freshness_ts';
+  const labelExpr = getEntityLabelExpr(config);
+
+  const rows = await db.prepare(`
+    WITH recent_entities AS (
+      SELECT
+        ${labelExpr} AS entity_label,
+        ${entityUpdatedExpr} AS updated_at,
+        ${buildEntityLatestSkillFreshnessSubquery(config, entityMatchExpr)} AS ${skillFreshnessExpr}
+      FROM ${config.table} ${config.alias}
+      WHERE ${config.baseWhere}
+        AND (
+          ${entityUpdatedExpr} >= ?
+          OR ${buildEntityHasRecentPublicSkillsExists(config, entityMatchExpr)}
+        )
+    )
+    SELECT
+      entity_label,
+      ${buildSkillFreshnessCase('updated_at', skillFreshnessExpr)} AS freshness_ts
+    FROM recent_entities
+    WHERE ${skillFreshnessExpr} IS NOT NULL
+    ORDER BY freshness_ts DESC, entity_label ASC
+    LIMIT ?
+  `)
+    .bind(recentCutoffTimestamp, recentCutoffTimestamp, RECENT_SITEMAP_URL_LIMIT)
+    .all<EntityFreshnessRow>();
+
+  return (rows.results || []).map((row) => ({
+    url: `${config.pathPrefix}${encodeURIComponent(row.entity_label)}`,
+    priority: config.recentPriority,
+    changefreq: config.recentChangefreq,
+    lastmod: toIsoDate(row.freshness_ts),
+  }));
+}
+
 export async function getSitemapIndexStats(
   db: SitemapDb | undefined,
   now = Date.now()
@@ -344,86 +646,22 @@ export async function getSitemapIndexStats(
   }
 
   const recentCutoffTimestamp = getRecentCutoffTimestamp(now);
-  const [skillsRow, profilesRow, orgsRow, recentSkillsRow, recentProfilesRow, recentOrgsRow] = await Promise.all([
+  const [skillsRow, profilesStats, orgsStats, recentSkillsRow, recentProfilesStats, recentOrgsStats] = await Promise.all([
     db.prepare(`
-      SELECT COUNT(*) AS count, MAX(COALESCE(last_commit_at, updated_at, indexed_at)) AS max_ts
+      SELECT COUNT(*) AS count, MAX(${buildSkillFreshnessExpr()}) AS max_ts
       FROM skills
       WHERE visibility = 'public'
     `).bind().first<CountAndMaxRow>(),
+    getDynamicEntitySitemapStats(db, PROFILE_SITEMAP_QUERY_CONFIG),
+    getDynamicEntitySitemapStats(db, ORG_SITEMAP_QUERY_CONFIG),
     db.prepare(`
-      SELECT COUNT(*) AS count, MAX(freshness_ts) AS max_ts
-      FROM (
-        SELECT
-          CASE
-            WHEN a.updated_at > MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-              THEN a.updated_at
-            ELSE MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-          END AS freshness_ts
-        FROM authors a
-        JOIN skills s
-          ON s.visibility = 'public'
-         AND s.repo_owner = a.username
-        WHERE a.username IS NOT NULL
-        GROUP BY a.id, a.updated_at
-      )
-    `).bind().first<CountAndMaxRow>(),
-    db.prepare(`
-      SELECT COUNT(*) AS count, MAX(freshness_ts) AS max_ts
-      FROM (
-        SELECT
-          CASE
-            WHEN o.updated_at > MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-              THEN o.updated_at
-            ELSE MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-          END AS freshness_ts
-        FROM organizations o
-        JOIN skills s
-          ON s.org_id = o.id
-         AND s.visibility = 'public'
-        GROUP BY o.id, o.updated_at
-      )
-    `).bind().first<CountAndMaxRow>(),
-    db.prepare(`
-      SELECT COUNT(*) AS count, MAX(COALESCE(last_commit_at, updated_at, indexed_at)) AS max_ts
+      SELECT COUNT(*) AS count, MAX(${buildSkillFreshnessExpr()}) AS max_ts
       FROM skills
       WHERE visibility = 'public'
-        AND COALESCE(last_commit_at, updated_at, indexed_at) >= ?
+        AND ${buildSkillFreshnessExpr()} >= ?
     `).bind(recentCutoffTimestamp).first<CountAndMaxRow>(),
-    db.prepare(`
-      SELECT COUNT(*) AS count, MAX(freshness_ts) AS max_ts
-      FROM (
-        SELECT
-          CASE
-            WHEN a.updated_at > MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-              THEN a.updated_at
-            ELSE MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-          END AS freshness_ts
-        FROM authors a
-        JOIN skills s
-          ON s.visibility = 'public'
-         AND s.repo_owner = a.username
-        WHERE a.username IS NOT NULL
-        GROUP BY a.id, a.updated_at
-      )
-      WHERE freshness_ts >= ?
-    `).bind(recentCutoffTimestamp).first<CountAndMaxRow>(),
-    db.prepare(`
-      SELECT COUNT(*) AS count, MAX(freshness_ts) AS max_ts
-      FROM (
-        SELECT
-          CASE
-            WHEN o.updated_at > MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-              THEN o.updated_at
-            ELSE MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-          END AS freshness_ts
-        FROM organizations o
-        JOIN skills s
-          ON s.org_id = o.id
-         AND s.visibility = 'public'
-        GROUP BY o.id, o.updated_at
-      )
-      WHERE freshness_ts >= ?
-    `).bind(recentCutoffTimestamp).first<CountAndMaxRow>(),
+    getRecentEntitySitemapStats(db, PROFILE_SITEMAP_QUERY_CONFIG, recentCutoffTimestamp),
+    getRecentEntitySitemapStats(db, ORG_SITEMAP_QUERY_CONFIG, recentCutoffTimestamp),
   ]);
 
   const toDynamicStats = (row: CountAndMaxRow | null): DynamicSitemapStats => {
@@ -443,13 +681,13 @@ export async function getSitemapIndexStats(
   return {
     dynamic: {
       skills: toDynamicStats(skillsRow),
-      profiles: toDynamicStats(profilesRow),
-      orgs: toDynamicStats(orgsRow),
+      profiles: profilesStats,
+      orgs: orgsStats,
     },
     recent: {
       skills: toRecentStats(recentSkillsRow),
-      profiles: toRecentStats(recentProfilesRow),
-      orgs: toRecentStats(recentOrgsRow),
+      profiles: recentProfilesStats,
+      orgs: recentOrgsStats,
     },
   };
 }
@@ -477,6 +715,10 @@ export function buildSitemapIndexEntries(stats: SitemapIndexStats): SitemapIndex
   }
 
   return entries;
+}
+
+export function buildSitemapPublicPaths(stats: SitemapIndexStats): string[] {
+  return ['/sitemap.xml', ...buildSitemapIndexEntries(stats).map((entry) => entry.url)];
 }
 
 export async function loadSkillsSitemapPage(
@@ -515,33 +757,7 @@ export async function loadProfilesSitemapPage(
 ): Promise<SitemapPage[]> {
   if (!db) return [];
 
-  const offset = (page - 1) * SITEMAP_URL_LIMIT;
-  const profiles = await db.prepare(`
-    SELECT
-      a.username,
-      CASE
-        WHEN a.updated_at > MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-          THEN a.updated_at
-        ELSE MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-      END AS freshness_ts
-    FROM authors a
-    JOIN skills s
-      ON s.visibility = 'public'
-     AND s.repo_owner = a.username
-    WHERE a.username IS NOT NULL
-    GROUP BY a.id, a.username, a.updated_at
-    ORDER BY a.username ASC
-    LIMIT ? OFFSET ?
-  `)
-    .bind(SITEMAP_URL_LIMIT, offset)
-    .all<{ username: string; freshness_ts: number | null }>();
-
-  return (profiles.results || []).map((profile) => ({
-    url: `/u/${encodeURIComponent(profile.username)}`,
-    priority: '0.5',
-    changefreq: 'weekly',
-    lastmod: toIsoDate(profile.freshness_ts),
-  }));
+  return loadEntitySitemapPage(db, PROFILE_SITEMAP_QUERY_CONFIG, page);
 }
 
 export async function loadOrgsSitemapPage(
@@ -550,32 +766,7 @@ export async function loadOrgsSitemapPage(
 ): Promise<SitemapPage[]> {
   if (!db) return [];
 
-  const offset = (page - 1) * SITEMAP_URL_LIMIT;
-  const orgs = await db.prepare(`
-    SELECT
-      o.slug,
-      CASE
-        WHEN o.updated_at > MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-          THEN o.updated_at
-        ELSE MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-      END AS freshness_ts
-    FROM organizations o
-    JOIN skills s
-      ON s.org_id = o.id
-     AND s.visibility = 'public'
-    GROUP BY o.id, o.slug, o.updated_at
-    ORDER BY o.slug ASC
-    LIMIT ? OFFSET ?
-  `)
-    .bind(SITEMAP_URL_LIMIT, offset)
-    .all<{ slug: string; freshness_ts: number | null }>();
-
-  return (orgs.results || []).map((org) => ({
-    url: `/org/${encodeURIComponent(org.slug)}`,
-    priority: '0.55',
-    changefreq: 'daily',
-    lastmod: toIsoDate(org.freshness_ts),
-  }));
+  return loadEntitySitemapPage(db, ORG_SITEMAP_QUERY_CONFIG, page);
 }
 
 export async function loadRecentSkillsSitemapPages(
@@ -591,10 +782,10 @@ export async function loadRecentSkillsSitemapPages(
       updated_at,
       indexed_at,
       last_commit_at,
-      COALESCE(last_commit_at, updated_at, indexed_at) AS sort_ts
+      ${buildSkillFreshnessExpr()} AS sort_ts
     FROM skills
     WHERE visibility = 'public'
-      AND COALESCE(last_commit_at, updated_at, indexed_at) >= ?
+      AND ${buildSkillFreshnessExpr()} >= ?
     ORDER BY sort_ts DESC, slug ASC
     LIMIT ?
   `)
@@ -622,36 +813,7 @@ export async function loadRecentProfilesSitemapPages(
   if (!db) return [];
 
   const recentCutoffTimestamp = getRecentCutoffTimestamp(now);
-  const profiles = await db.prepare(`
-    SELECT username, freshness_ts
-    FROM (
-      SELECT
-        a.username AS username,
-        CASE
-          WHEN a.updated_at > MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-            THEN a.updated_at
-          ELSE MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-        END AS freshness_ts
-      FROM authors a
-      JOIN skills s
-        ON s.visibility = 'public'
-       AND s.repo_owner = a.username
-      WHERE a.username IS NOT NULL
-      GROUP BY a.id, a.username, a.updated_at
-    )
-    WHERE freshness_ts >= ?
-    ORDER BY freshness_ts DESC, username ASC
-    LIMIT ?
-  `)
-    .bind(recentCutoffTimestamp, RECENT_SITEMAP_URL_LIMIT)
-    .all<{ username: string; freshness_ts: number | null }>();
-
-  return (profiles.results || []).map((profile) => ({
-    url: `/u/${encodeURIComponent(profile.username)}`,
-    priority: '0.6',
-    changefreq: 'daily',
-    lastmod: toIsoDate(profile.freshness_ts),
-  }));
+  return loadRecentEntitySitemapPages(db, PROFILE_SITEMAP_QUERY_CONFIG, recentCutoffTimestamp);
 }
 
 export async function loadRecentOrgsSitemapPages(
@@ -661,35 +823,7 @@ export async function loadRecentOrgsSitemapPages(
   if (!db) return [];
 
   const recentCutoffTimestamp = getRecentCutoffTimestamp(now);
-  const orgs = await db.prepare(`
-    SELECT slug, freshness_ts
-    FROM (
-      SELECT
-        o.slug AS slug,
-        CASE
-          WHEN o.updated_at > MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-            THEN o.updated_at
-          ELSE MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at))
-        END AS freshness_ts
-      FROM organizations o
-      JOIN skills s
-        ON s.org_id = o.id
-       AND s.visibility = 'public'
-      GROUP BY o.id, o.slug, o.updated_at
-    )
-    WHERE freshness_ts >= ?
-    ORDER BY freshness_ts DESC, slug ASC
-    LIMIT ?
-  `)
-    .bind(recentCutoffTimestamp, RECENT_SITEMAP_URL_LIMIT)
-    .all<{ slug: string; freshness_ts: number | null }>();
-
-  return (orgs.results || []).map((org) => ({
-    url: `/org/${encodeURIComponent(org.slug)}`,
-    priority: '0.65',
-    changefreq: 'daily',
-    lastmod: toIsoDate(org.freshness_ts),
-  }));
+  return loadRecentEntitySitemapPages(db, ORG_SITEMAP_QUERY_CONFIG, recentCutoffTimestamp);
 }
 
 function buildSitemapSnapshotKey(cacheKey: string): string {
@@ -829,14 +963,19 @@ export async function refreshSitemapSnapshot(options: {
 export interface SitemapRefreshSummary {
   refreshed: string[];
   removed: string[];
+  paths: string[];
 }
 
 export async function refreshAllSitemapSnapshots(options: {
   db: SitemapDb | undefined;
   r2?: R2Bucket;
   waitUntil?: WaitUntilFn;
+  refreshMinIntervalSeconds?: number;
 }): Promise<SitemapRefreshSummary> {
   const { db, r2, waitUntil } = options;
+  const refreshMinIntervalSeconds = normalizeSitemapRefreshMinIntervalSeconds(
+    options.refreshMinIntervalSeconds
+  );
   const stats = await getSitemapIndexStats(db);
   const refreshed: string[] = [];
   const removed: string[] = [];
@@ -859,14 +998,14 @@ export async function refreshAllSitemapSnapshots(options: {
 
   await refresh({
     cacheKey: 'sitemap:index:xml',
-    ttl: SITEMAP_INDEX_CACHE_TTL,
+    ttl: getSitemapHotCacheTtlSeconds(SITEMAP_INDEX_CACHE_TTL, refreshMinIntervalSeconds),
     debugTag: 'index',
     fetcher: async () => buildSitemapIndexXml(buildSitemapIndexEntries(stats)),
   });
 
   await refresh({
     cacheKey: 'sitemap:core:xml',
-    ttl: SITEMAP_CORE_CACHE_TTL,
+    ttl: getSitemapHotCacheTtlSeconds(SITEMAP_CORE_CACHE_TTL, refreshMinIntervalSeconds),
     debugTag: 'core',
     fetcher: async () => buildUrlSetXml(await getExpandedCoreSitemapPages(db)),
   });
@@ -875,7 +1014,7 @@ export async function refreshAllSitemapSnapshots(options: {
     const recentCacheKey = `sitemap:recent:${kind}:xml`;
     await refresh({
       cacheKey: recentCacheKey,
-      ttl: SITEMAP_DYNAMIC_CACHE_TTL,
+      ttl: getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, refreshMinIntervalSeconds),
       debugTag: `recent-${kind}`,
       fetcher: async () => {
         let pages: SitemapPage[];
@@ -900,7 +1039,7 @@ export async function refreshAllSitemapSnapshots(options: {
       const cacheKey = `sitemap:${kind}:${page}:xml`;
       await refresh({
         cacheKey,
-        ttl: SITEMAP_DYNAMIC_CACHE_TTL,
+        ttl: getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, refreshMinIntervalSeconds),
         debugTag: `${kind}-${page}`,
         fetcher: async () => {
           let pages: SitemapPage[];
@@ -929,7 +1068,11 @@ export async function refreshAllSitemapSnapshots(options: {
     removed.push(...await cleanupStaleDynamicSitemapSnapshots(r2, kind, stats.dynamic[kind].pages));
   }
 
-  return { refreshed, removed };
+  return {
+    refreshed,
+    removed,
+    paths: buildSitemapPublicPaths(stats),
+  };
 }
 
 export function buildMissingSitemapResponse(): Response {

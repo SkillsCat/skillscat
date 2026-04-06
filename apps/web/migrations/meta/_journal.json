@@ -120,6 +120,13 @@
       "when": 1773854779886,
       "tag": "0016_mute_pretty_boy",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1775493292214,
+      "tag": "0017_open_captain_midlands",
+      "breakpoints": true
     }
   ]
 }
