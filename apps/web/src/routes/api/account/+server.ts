@@ -1,5 +1,112 @@
 import { json, error } from '@sveltejs/kit';
+import type { D1Database } from '@cloudflare/workers-types';
 import type { RequestHandler } from './$types';
+
+interface OwnedOrganizationRow {
+  id: string;
+  public_skills_count: number;
+}
+
+interface ReplacementOwnerRow {
+  org_id: string;
+  user_id: string;
+}
+
+interface OrganizationPrivateSkillRow {
+  org_id: string;
+  id: string;
+}
+
+async function loadOwnedOrganizations(
+  db: D1Database,
+  userId: string
+): Promise<OwnedOrganizationRow[]> {
+  const result = await db.prepare(`
+    SELECT
+      o.id,
+      COUNT(s.id) AS public_skills_count
+    FROM organizations o
+    LEFT JOIN skills s
+      ON s.org_id = o.id
+     AND s.visibility = 'public'
+    WHERE o.owner_id = ?
+    GROUP BY o.id
+  `)
+    .bind(userId)
+    .all<OwnedOrganizationRow>();
+
+  return result.results || [];
+}
+
+async function loadReplacementOwnersByOrg(
+  db: D1Database,
+  orgIds: string[],
+  excludedUserId: string
+): Promise<Map<string, string>> {
+  if (orgIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = orgIds.map(() => '?').join(',');
+  const result = await db.prepare(`
+    WITH ranked_members AS (
+      SELECT
+        om.org_id,
+        om.user_id,
+        ROW_NUMBER() OVER (
+          PARTITION BY om.org_id
+          ORDER BY
+            CASE om.role
+              WHEN 'owner' THEN 0
+              WHEN 'admin' THEN 1
+              ELSE 2
+            END,
+            om.joined_at ASC
+        ) AS rn
+      FROM org_members om
+      WHERE om.org_id IN (${placeholders})
+        AND om.user_id != ?
+    )
+    SELECT org_id, user_id
+    FROM ranked_members
+    WHERE rn = 1
+  `)
+    .bind(...orgIds, excludedUserId)
+    .all<ReplacementOwnerRow>();
+
+  return new Map((result.results || []).map((row) => [row.org_id, row.user_id]));
+}
+
+async function loadOrganizationPrivateSkillIds(
+  db: D1Database,
+  orgIds: string[]
+): Promise<Map<string, string[]>> {
+  if (orgIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = orgIds.map(() => '?').join(',');
+  const result = await db.prepare(`
+    SELECT org_id, id
+    FROM skills
+    WHERE org_id IN (${placeholders})
+      AND visibility != 'public'
+  `)
+    .bind(...orgIds)
+    .all<OrganizationPrivateSkillRow>();
+
+  const privateSkillIdsByOrg = new Map<string, string[]>();
+  for (const row of result.results || []) {
+    const existing = privateSkillIdsByOrg.get(row.org_id);
+    if (existing) {
+      existing.push(row.id);
+    } else {
+      privateSkillIdsByOrg.set(row.org_id, [row.id]);
+    }
+  }
+
+  return privateSkillIdsByOrg;
+}
 
 /**
  * DELETE /api/account - Soft delete user account
@@ -86,42 +193,26 @@ export const DELETE: RequestHandler = async ({ locals, platform }) => {
     `).bind(userId).run();
 
     // 8. Handle organizations
-    // Get organizations owned by this user
-    const ownedOrgsResult = await db.prepare(`
-      SELECT o.id,
-        (SELECT COUNT(*) FROM skills s WHERE s.org_id = o.id AND s.visibility = 'public') as public_skills_count
-      FROM organizations o
-      WHERE o.owner_id = ?
-    `).bind(userId).all<{ id: string; public_skills_count: number }>();
+    const ownedOrganizations = await loadOwnedOrganizations(db, userId);
+    const orgIdsWithPublicSkills = ownedOrganizations
+      .filter((org) => Number(org.public_skills_count) > 0)
+      .map((org) => org.id);
+    const replacementOwnersByOrg = await loadReplacementOwnersByOrg(db, orgIdsWithPublicSkills, userId);
+    const orgPrivateSkillIdsByOrg = await loadOrganizationPrivateSkillIds(db, orgIdsWithPublicSkills);
 
-    for (const org of ownedOrgsResult.results) {
+    for (const org of ownedOrganizations) {
       if (org.public_skills_count > 0) {
         // Keep orgs with public skills: transfer ownership if possible.
-        const replacementOwner = await db.prepare(`
-          SELECT user_id
-          FROM org_members
-          WHERE org_id = ? AND user_id != ?
-          ORDER BY
-            CASE role
-              WHEN 'owner' THEN 0
-              WHEN 'admin' THEN 1
-              ELSE 2
-            END,
-            joined_at ASC
-          LIMIT 1
-        `)
-          .bind(org.id, userId)
-          .first<{ user_id: string }>();
-
+        const replacementOwnerUserId = replacementOwnersByOrg.get(org.id) || null;
         const transferAt = Date.now();
 
-        if (replacementOwner?.user_id) {
+        if (replacementOwnerUserId) {
           await db.prepare(`
             UPDATE organizations
             SET owner_id = ?, updated_at = ?
             WHERE id = ?
           `)
-            .bind(replacementOwner.user_id, transferAt, org.id)
+            .bind(replacementOwnerUserId, transferAt, org.id)
             .run();
 
           await db.prepare(`
@@ -129,16 +220,12 @@ export const DELETE: RequestHandler = async ({ locals, platform }) => {
             SET role = 'owner'
             WHERE org_id = ? AND user_id = ?
           `)
-            .bind(org.id, replacementOwner.user_id)
+            .bind(org.id, replacementOwnerUserId)
             .run();
         } else {
           // No remaining member to transfer to.
           // Treat org as deleted: remove non-public org skills, keep public skills.
-          const orgPrivateSkillsResult = await db.prepare(`
-            SELECT id FROM skills WHERE org_id = ? AND visibility != 'public'
-          `).bind(org.id).all<{ id: string }>();
-
-          const orgPrivateSkillIds = orgPrivateSkillsResult.results.map(s => s.id);
+          const orgPrivateSkillIds = orgPrivateSkillIdsByOrg.get(org.id) || [];
           if (orgPrivateSkillIds.length > 0) {
             for (const skillId of orgPrivateSkillIds) {
               await db.prepare(`DELETE FROM skill_categories WHERE skill_id = ?`).bind(skillId).run();

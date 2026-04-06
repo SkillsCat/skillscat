@@ -150,7 +150,7 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
         ),
         missing_state AS (
           SELECT s.id as skill_id
-          FROM skills s
+          FROM skills s INDEXED BY skills_public_non_archived_indexed_idx
           LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
           WHERE rs.skill_id IS NULL
             AND s.visibility = 'public'
@@ -519,7 +519,7 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
         ),
         missing_state AS (
           SELECT s.id as skill_id
-          FROM skills s
+          FROM skills s INDEXED BY skills_public_non_archived_indexed_idx
           LEFT JOIN skill_search_state ss ON ss.skill_id = s.id
           WHERE ss.skill_id IS NULL
             AND s.visibility = 'public'

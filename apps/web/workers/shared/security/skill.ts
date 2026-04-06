@@ -58,6 +58,11 @@ interface FileStructurePayload {
   files?: DirectoryFile[];
 }
 
+export interface LoadedSecuritySkillState {
+  skill: SecuritySkillRow | null;
+  state: SecurityStateRow | null;
+}
+
 function decodeBase64ToBytes(base64: string): Uint8Array {
   const normalized = base64.replace(/\n/g, '');
   const binary = atob(normalized);
@@ -109,7 +114,7 @@ export function getSkillR2Keys(
 export async function loadSecuritySkill(
   db: D1Database,
   skillId: string
-): Promise<{ skill: SecuritySkillRow | null; state: SecurityStateRow | null }> {
+): Promise<LoadedSecuritySkillState> {
   const row = await db.prepare(`
     SELECT
       s.id,
@@ -151,6 +156,66 @@ export async function loadSecuritySkill(
     .bind(skillId)
     .first<SecuritySkillRow & SecurityStateRow>();
 
+  return mapLoadedSecuritySkillState(row);
+}
+
+export async function loadSecuritySkills(
+  db: D1Database,
+  skillIds: string[]
+): Promise<Map<string, LoadedSecuritySkillState>> {
+  if (skillIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = skillIds.map(() => '?').join(',');
+  const result = await db.prepare(`
+    SELECT
+      s.id,
+      s.slug,
+      s.repo_owner,
+      s.repo_name,
+      s.skill_path,
+      s.readme,
+      s.visibility,
+      s.source_type,
+      s.stars,
+      s.trending_score,
+      s.tier,
+      s.file_structure,
+      s.updated_at,
+      ss.skill_id,
+      ss.content_fingerprint,
+      ss.dirty,
+      ss.next_update_at,
+      ss.status,
+      ss.open_security_report_count,
+      ss.report_risk_level,
+      ss.premium_due_reason,
+      ss.premium_requested_fingerprint,
+      ss.premium_last_analyzed_fingerprint,
+      ss.vt_eligibility,
+      ss.vt_priority,
+      ss.vt_status,
+      ss.vt_next_attempt_at,
+      ss.current_total_score,
+      ss.current_risk_level,
+      ss.current_free_scan_id,
+      ss.current_premium_scan_id
+    FROM skills s
+    LEFT JOIN skill_security_state ss ON ss.skill_id = s.id
+    WHERE s.id IN (${placeholders})
+  `)
+    .bind(...skillIds)
+    .all<SecuritySkillRow & SecurityStateRow>();
+
+  return new Map(
+    (result.results || []).map((row) => [row.id, mapLoadedSecuritySkillState(row)])
+  );
+}
+
+function mapLoadedSecuritySkillState(
+  row: (SecuritySkillRow & SecurityStateRow) | null | undefined
+): LoadedSecuritySkillState {
   if (!row) {
     return { skill: null, state: null };
   }

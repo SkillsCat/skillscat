@@ -77,24 +77,75 @@ interface ClassificationSkillStorageLocation {
   readme: string | null;
 }
 
+interface ClassificationSkillStorageRow extends ClassificationSkillStorageLocation {
+  id: string;
+}
+
+async function loadClassificationSkillStorageLocations(
+  env: Pick<ClassificationEnv, 'DB'>,
+  skillIds: string[]
+): Promise<Map<string, ClassificationSkillStorageLocation>> {
+  if (skillIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = skillIds.map(() => '?').join(',');
+  const result = await env.DB.prepare(`
+    SELECT id, slug, source_type, repo_owner, repo_name, skill_path, readme
+    FROM skills
+    WHERE id IN (${placeholders})
+  `)
+    .bind(...skillIds)
+    .all<ClassificationSkillStorageRow>();
+
+  return new Map(
+    (result.results || []).map((row) => [
+      row.id,
+      {
+        slug: row.slug,
+        source_type: row.source_type,
+        repo_owner: row.repo_owner,
+        repo_name: row.repo_name,
+        skill_path: row.skill_path,
+        readme: row.readme,
+      } satisfies ClassificationSkillStorageLocation,
+    ])
+  );
+}
+
+function needsClassificationSkillStoragePreload(message: ClassificationMessageWithMeta): boolean {
+  if (!message.skillId) {
+    return false;
+  }
+
+  if (message.isReclassification) {
+    return true;
+  }
+
+  return tryDirectCategoryMatch(message.frontmatterCategories) === null;
+}
+
 export async function loadSkillMdForClassification(
   env: Pick<ClassificationEnv, 'DB' | 'R2'>,
   skillId: string,
-  skillMdPath: string
+  skillMdPath: string,
+  preloadedSkill: ClassificationSkillStorageLocation | null | undefined = undefined
 ): Promise<string | null> {
   const directObject = await env.R2.get(skillMdPath);
   if (directObject) {
     return directObject.text();
   }
 
-  const skill = await env.DB.prepare(`
-    SELECT slug, source_type, repo_owner, repo_name, skill_path, readme
-    FROM skills
-    WHERE id = ?
-    LIMIT 1
-  `)
-    .bind(skillId)
-    .first<ClassificationSkillStorageLocation>();
+  const skill = preloadedSkill !== undefined
+    ? preloadedSkill
+    : await env.DB.prepare(`
+      SELECT slug, source_type, repo_owner, repo_name, skill_path, readme
+      FROM skills
+      WHERE id = ?
+      LIMIT 1
+    `)
+      .bind(skillId)
+      .first<ClassificationSkillStorageLocation>();
 
   if (!skill) {
     return null;
@@ -683,7 +734,8 @@ async function recordClassificationMetric(
 
 async function processMessage(
   message: ClassificationMessageWithMeta,
-  env: ClassificationEnv
+  env: ClassificationEnv,
+  preloadedSkill: ClassificationSkillStorageLocation | null | undefined = undefined
 ): Promise<void> {
   const { skillId, repoOwner, repoName, skillMdPath, stars = 0, tags = [], frontmatterCategories, isReclassification } = message;
 
@@ -738,7 +790,7 @@ async function processMessage(
 
   // Get SKILL.md content
   log.log(`Fetching SKILL.md from R2: ${skillMdPath}`);
-  const skillMdContent = await loadSkillMdForClassification(env, skillId, skillMdPath);
+  const skillMdContent = await loadSkillMdForClassification(env, skillId, skillMdPath, preloadedSkill);
   if (!skillMdContent) {
     log.error(`SKILL.md not found in R2: ${skillMdPath}`);
     return;
@@ -777,11 +829,29 @@ export default {
     _ctx: ExecutionContext
   ): Promise<void> {
     log.log(`Processing batch of ${batch.messages.length} messages`);
+    let preloadedSkillsById = new Map<string, ClassificationSkillStorageLocation>();
+    const skillIdsToPreload = Array.from(new Set(
+      batch.messages
+        .map((message) => message.body)
+        .filter(needsClassificationSkillStoragePreload)
+        .map((message) => message.skillId)
+        .filter(Boolean)
+    ));
+    if (skillIdsToPreload.length > 0) {
+      try {
+        preloadedSkillsById = await loadClassificationSkillStorageLocations(env, skillIdsToPreload);
+      } catch (error) {
+        log.warn('Failed to preload classification skill storage locations, falling back to per-message lookups', error);
+      }
+    }
 
     for (const message of batch.messages) {
       try {
         log.log(`Processing message ID: ${message.id}`);
-        await processMessage(message.body, env);
+        const preloadedSkill = preloadedSkillsById.has(message.body.skillId)
+          ? (preloadedSkillsById.get(message.body.skillId) ?? null)
+          : undefined;
+        await processMessage(message.body, env, preloadedSkill);
         message.ack();
         log.log(`Message acknowledged: ${message.id}`);
       } catch (error) {

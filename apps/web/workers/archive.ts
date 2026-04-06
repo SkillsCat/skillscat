@@ -35,6 +35,36 @@ interface SkillToArchive {
   indexed_at: number;
 }
 
+async function loadArchiveCategorySlugsBySkillId(
+  env: Pick<ArchiveEnv, 'DB'>,
+  skillIds: string[]
+): Promise<Map<string, string[]>> {
+  if (skillIds.length === 0) {
+    return new Map();
+  }
+
+  const placeholders = skillIds.map(() => '?').join(',');
+  const result = await env.DB.prepare(`
+    SELECT skill_id, category_slug
+    FROM skill_categories
+    WHERE skill_id IN (${placeholders})
+  `)
+    .bind(...skillIds)
+    .all<{ skill_id: string; category_slug: string }>();
+
+  const categorySlugsBySkillId = new Map<string, string[]>();
+  for (const row of result.results || []) {
+    const existing = categorySlugsBySkillId.get(row.skill_id);
+    if (existing) {
+      existing.push(row.category_slug);
+    } else {
+      categorySlugsBySkillId.set(row.skill_id, [row.category_slug]);
+    }
+  }
+
+  return categorySlugsBySkillId;
+}
+
 /**
  * Find skills that should be archived
  */
@@ -118,19 +148,15 @@ async function findArchiveCandidates(env: ArchiveEnv): Promise<SkillToArchive[]>
  */
 async function archiveSkill(
   env: ArchiveEnv,
-  skill: SkillToArchive
+  skill: SkillToArchive,
+  preloadedCategorySlugs: string[] | undefined = undefined
 ): Promise<{ archived: boolean; categorySlugs: string[] }> {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
 
   try {
-    // Get categories
-    const categories = await env.DB.prepare(`
-      SELECT category_slug FROM skill_categories WHERE skill_id = ?
-    `)
-      .bind(skill.id)
-      .all<{ category_slug: string }>();
+    const categorySlugs = preloadedCategorySlugs ?? [];
 
     // Get SKILL.md content from R2
     let skillMdContent: string | null = null;
@@ -150,7 +176,7 @@ async function archiveSkill(
     // Create archive object
     const archiveData = {
       ...skill,
-      categories: categories.results.map(c => c.category_slug),
+      categories: categorySlugs,
       skillMdContent,
       archivedAt: now.toISOString(),
     };
@@ -182,7 +208,7 @@ async function archiveSkill(
 
     return {
       archived: true,
-      categorySlugs: categories.results.map((entry) => entry.category_slug),
+      categorySlugs,
     };
   } catch (error) {
     console.error(`Failed to archive skill ${skill.id}:`, error);
@@ -231,10 +257,14 @@ export default {
     let archived = 0;
     let failed = 0;
     const affectedCategorySlugs = new Set<string>();
+    const categorySlugsBySkillId = await loadArchiveCategorySlugsBySkillId(
+      env,
+      candidates.map((skill) => skill.id)
+    );
 
     // Archive each skill
     for (const skill of candidates) {
-      const result = await archiveSkill(env, skill);
+      const result = await archiveSkill(env, skill, categorySlugsBySkillId.get(skill.id) || []);
       if (result.archived) {
         archived++;
         for (const categorySlug of result.categorySlugs) {

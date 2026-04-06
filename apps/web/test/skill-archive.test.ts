@@ -97,6 +97,7 @@ describe('skill archive helpers', () => {
         category_slug TEXT NOT NULL,
         PRIMARY KEY (skill_id, category_slug)
       );
+      CREATE INDEX skill_categories_category_skill_idx ON skill_categories (category_slug, skill_id);
 
       CREATE TABLE categories (
         id TEXT PRIMARY KEY NOT NULL,

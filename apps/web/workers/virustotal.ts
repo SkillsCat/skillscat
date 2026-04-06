@@ -4,8 +4,8 @@ import { createLogger } from './shared/utils';
 import {
   buildSkillBundleFiles,
   buildStoredZip,
-  loadSecuritySkill,
   sha256Hex,
+  type SecuritySkillRow,
 } from './shared/security';
 import {
   normalizeVirusTotalStats,
@@ -18,7 +18,7 @@ const DEFAULT_MINUTE_REQUEST_BUDGET = 4;
 const DEFAULT_UPLOAD_MAX_BYTES = 32 * 1024 * 1024;
 const DEFAULT_VT_CLAIM_LEASE_MS = 10 * 60 * 1000;
 
-interface PendingVirusTotalRow {
+interface PendingVirusTotalRow extends SecuritySkillRow {
   skill_id: string;
   vt_status: string;
   vt_priority: number;
@@ -26,7 +26,6 @@ interface PendingVirusTotalRow {
   vt_bundle_sha256: string | null;
   vt_next_attempt_at: number | null;
   open_security_report_count: number | null;
-  stars: number | null;
 }
 
 function hasBytes<T extends { bytes?: Uint8Array }>(file: T): file is T & { bytes: Uint8Array } {
@@ -174,7 +173,19 @@ async function loadPendingSkills(db: D1Database, now: number): Promise<PendingVi
       ss.vt_bundle_sha256,
       ss.vt_next_attempt_at,
       ss.open_security_report_count,
-      s.stars
+      s.id,
+      s.slug,
+      s.repo_owner,
+      s.repo_name,
+      s.skill_path,
+      s.readme,
+      s.visibility,
+      s.source_type,
+      s.stars,
+      s.trending_score,
+      s.tier,
+      s.file_structure,
+      s.updated_at
     FROM skill_security_state ss
     INNER JOIN skills s ON s.id = ss.skill_id
     WHERE ss.vt_eligibility = 'eligible'
@@ -299,10 +310,21 @@ async function processPendingSkill(
   }
 
   const now = Date.now();
-  const { skill } = await loadSecuritySkill(env.DB, row.skill_id);
-  if (!skill) {
-    return;
-  }
+  const skill: SecuritySkillRow = {
+    id: row.id,
+    slug: row.slug,
+    repo_owner: row.repo_owner,
+    repo_name: row.repo_name,
+    skill_path: row.skill_path,
+    readme: row.readme,
+    visibility: row.visibility,
+    source_type: row.source_type,
+    stars: row.stars,
+    trending_score: row.trending_score,
+    tier: row.tier,
+    file_structure: row.file_structure,
+    updated_at: row.updated_at,
+  };
 
   let bundleSha256 = row.vt_bundle_sha256;
   let bundleBytes: Uint8Array | null = null;

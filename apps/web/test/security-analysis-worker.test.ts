@@ -113,26 +113,31 @@ describe('security analysis worker helpers', () => {
     const env = {
       DB: {
         prepare: (sql: string) => {
-          if (sql.includes('FROM skills s')) {
+          if (sql.includes('FROM skills s') && sql.includes('WHERE s.id IN')) {
             return {
-              bind: () => ({
-                first: async () => ({
-                  id: 'skill-1',
-                  slug: 'owner/skill-1',
-                  repo_owner: 'owner',
-                  repo_name: 'repo',
-                  skill_path: null,
-                  readme: null,
-                  visibility: 'public',
-                  source_type: 'github',
-                  stars: 10,
-                  trending_score: 1,
-                  tier: 'cool',
-                  file_structure: null,
-                  updated_at: 1_000,
-                  skill_id: null,
-                }),
-              }),
+              bind: (...args: unknown[]) => {
+                expect(args).toEqual(['skill-1']);
+                return {
+                  all: async () => ({
+                    results: [{
+                      id: 'skill-1',
+                      slug: 'owner/skill-1',
+                      repo_owner: 'owner',
+                      repo_name: 'repo',
+                      skill_path: null,
+                      readme: null,
+                      visibility: 'public',
+                      source_type: 'github',
+                      stars: 10,
+                      trending_score: 1,
+                      tier: 'cool',
+                      file_structure: null,
+                      updated_at: 1_000,
+                      skill_id: null,
+                    }],
+                  }),
+                };
+              },
             };
           }
 
@@ -179,6 +184,225 @@ describe('security analysis worker helpers', () => {
 
     expect(acked).toBe(1);
     expect(retried).toBe(0);
+    expect(writes).toEqual([{
+      skillId: 'skill-1',
+      errorMessage: 'Security analysis blocked until indexed content is available for skill skill-1',
+    }]);
+  });
+
+  it('batch-loads security skill state once for distinct queue messages', async () => {
+    const writes: Array<{ skillId: string; errorMessage: string }> = [];
+    const skillLoadSqls: string[] = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => {
+          if (sql.includes('FROM skills s') && sql.includes('WHERE s.id IN')) {
+            skillLoadSqls.push(sql);
+            return {
+              bind: (...args: unknown[]) => {
+                expect(args).toEqual(['skill-1', 'skill-2']);
+                return {
+                  all: async () => ({
+                    results: [
+                      {
+                        id: 'skill-1',
+                        slug: 'owner/skill-1',
+                        repo_owner: 'owner',
+                        repo_name: 'repo',
+                        skill_path: null,
+                        readme: null,
+                        visibility: 'public',
+                        source_type: 'github',
+                        stars: 10,
+                        trending_score: 1,
+                        tier: 'cool',
+                        file_structure: null,
+                        updated_at: 1_000,
+                        skill_id: null,
+                      },
+                      {
+                        id: 'skill-2',
+                        slug: 'owner/skill-2',
+                        repo_owner: 'owner',
+                        repo_name: 'repo',
+                        skill_path: null,
+                        readme: null,
+                        visibility: 'public',
+                        source_type: 'github',
+                        stars: 5,
+                        trending_score: 1,
+                        tier: 'cool',
+                        file_structure: null,
+                        updated_at: 1_000,
+                        skill_id: null,
+                      },
+                    ],
+                  }),
+                };
+              },
+            };
+          }
+
+          if (sql.includes('INSERT INTO skill_security_state')) {
+            return {
+              bind: (...args: unknown[]) => {
+                writes.push({
+                  skillId: String(args[0]),
+                  errorMessage: String(args[1]),
+                });
+                return {
+                  run: async () => ({ meta: { changes: 1 } }),
+                };
+              },
+            };
+          }
+
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      },
+      KV: {} as never,
+      R2: {} as never,
+    } as never;
+
+    let acked = 0;
+    await securityAnalysisWorker.queue({
+      messages: [
+        {
+          id: 'msg-1',
+          body: {
+            type: 'analyze_security',
+            skillId: 'skill-1',
+            trigger: 'manual',
+            requestedTier: 'auto',
+          },
+          ack: () => {
+            acked += 1;
+          },
+          retry: () => {
+            throw new Error('Unexpected retry for skill-1');
+          },
+        },
+        {
+          id: 'msg-2',
+          body: {
+            type: 'analyze_security',
+            skillId: 'skill-2',
+            trigger: 'manual',
+            requestedTier: 'auto',
+          },
+          ack: () => {
+            acked += 1;
+          },
+          retry: () => {
+            throw new Error('Unexpected retry for skill-2');
+          },
+        },
+      ],
+    } as never, env, {} as never);
+
+    expect(acked).toBe(2);
+    expect(skillLoadSqls).toHaveLength(1);
+    expect(writes).toEqual([
+      {
+        skillId: 'skill-1',
+        errorMessage: 'Security analysis blocked until indexed content is available for skill skill-1',
+      },
+      {
+        skillId: 'skill-2',
+        errorMessage: 'Security analysis blocked until indexed content is available for skill skill-2',
+      },
+    ]);
+  });
+
+  it('falls back to per-message security lookups when batch preload fails', async () => {
+    const writes: Array<{ skillId: string; errorMessage: string }> = [];
+    const sqls: string[] = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => {
+          sqls.push(sql);
+
+          if (sql.includes('FROM skills s') && sql.includes('WHERE s.id IN')) {
+            return {
+              bind: () => ({
+                all: async () => {
+                  throw new Error('preload failed');
+                },
+              }),
+            };
+          }
+
+          if (sql.includes('FROM skills s') && sql.includes('WHERE s.id = ?')) {
+            return {
+              bind: (...args: unknown[]) => {
+                expect(args).toEqual(['skill-1']);
+                return {
+                  first: async () => ({
+                    id: 'skill-1',
+                    slug: 'owner/skill-1',
+                    repo_owner: 'owner',
+                    repo_name: 'repo',
+                    skill_path: null,
+                    readme: null,
+                    visibility: 'public',
+                    source_type: 'github',
+                    stars: 10,
+                    trending_score: 1,
+                    tier: 'cool',
+                    file_structure: null,
+                    updated_at: 1_000,
+                    skill_id: null,
+                  }),
+                };
+              },
+            };
+          }
+
+          if (sql.includes('INSERT INTO skill_security_state')) {
+            return {
+              bind: (...args: unknown[]) => {
+                writes.push({
+                  skillId: String(args[0]),
+                  errorMessage: String(args[1]),
+                });
+                return {
+                  run: async () => ({ meta: { changes: 1 } }),
+                };
+              },
+            };
+          }
+
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      },
+      KV: {} as never,
+      R2: {} as never,
+    } as never;
+
+    let acked = 0;
+    let retried = 0;
+    await securityAnalysisWorker.queue({
+      messages: [{
+        id: 'msg-preload-fallback',
+        body: {
+          type: 'analyze_security',
+          skillId: 'skill-1',
+          trigger: 'manual',
+          requestedTier: 'auto',
+        },
+        ack: () => {
+          acked += 1;
+        },
+        retry: () => {
+          retried += 1;
+        },
+      }],
+    } as never, env, {} as never);
+
+    expect(acked).toBe(1);
+    expect(retried).toBe(0);
+    expect(sqls.some((sql) => sql.includes('WHERE s.id IN'))).toBe(true);
+    expect(sqls.some((sql) => sql.includes('WHERE s.id = ?'))).toBe(true);
     expect(writes).toEqual([{
       skillId: 'skill-1',
       errorMessage: 'Security analysis blocked until indexed content is available for skill skill-1',

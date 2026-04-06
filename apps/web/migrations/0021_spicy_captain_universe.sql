@@ -1,0 +1,1 @@
+CREATE INDEX `skills_public_non_archived_indexed_idx` ON `skills` (indexed_at DESC,`id`) WHERE "skills"."visibility" = 'public' AND "skills"."tier" != 'archived';

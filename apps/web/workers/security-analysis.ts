@@ -19,6 +19,7 @@ import {
   buildSkillBundleFiles,
   getSkillDirectoryFiles,
   loadSecuritySkill,
+  loadSecuritySkills,
   loadSkillTextFilesFromR2,
 } from './shared/security';
 import {
@@ -1124,9 +1125,13 @@ async function deferSecurityAnalysisForOpenRouterFreePause(
     .run();
 }
 
-async function processSecurityMessage(message: SecurityAnalysisMessage, env: SecurityAnalysisEnv): Promise<void> {
+async function processSecurityMessage(
+  message: SecurityAnalysisMessage,
+  env: SecurityAnalysisEnv,
+  preloadedSkillState: Awaited<ReturnType<typeof loadSecuritySkill>> | undefined = undefined
+): Promise<void> {
   const now = Date.now();
-  const { skill, state } = await loadSecuritySkill(env.DB, message.skillId);
+  const { skill, state } = preloadedSkillState ?? await loadSecuritySkill(env.DB, message.skillId);
   if (!skill) {
     log.warn(`Security analysis skipped, skill not found: ${message.skillId}`);
     return;
@@ -1491,7 +1496,7 @@ export async function loadDueSkillIds(db: D1Database, now: number, limit: number
   const remaining = limit - ids.size;
   const missing = await db.prepare(`
     SELECT s.id
-    FROM skills s
+    FROM skills s INDEXED BY skills_security_source_updated_idx
     LEFT JOIN skill_security_state ss ON ss.skill_id = s.id
     WHERE ss.skill_id IS NULL
       AND ${SKILL_HAS_SECURITY_SOURCE_SQL}
@@ -1519,7 +1524,7 @@ export async function loadSecurityReindexBackfillCandidates(
       s.repo_name AS repoName,
       s.skill_path AS skillPath,
       s.updated_at AS updatedAt
-    FROM skills s
+    FROM skills s INDEXED BY skills_security_reindex_backfill_idx
     LEFT JOIN skill_security_state ss ON ss.skill_id = s.id
     WHERE s.source_type = 'github'
       AND s.repo_owner IS NOT NULL
@@ -1597,6 +1602,22 @@ export async function queueSecurityReindexBackfill(
   return queued;
 }
 
+async function preloadSecuritySkillStates(
+  db: D1Database,
+  skillIds: string[]
+): Promise<Map<string, Awaited<ReturnType<typeof loadSecuritySkill>>>> {
+  if (skillIds.length === 0) {
+    return new Map();
+  }
+
+  try {
+    return await loadSecuritySkills(db, skillIds);
+  } catch (error) {
+    log.warn('Failed to preload security skill states, falling back to per-message lookups', error);
+    return new Map();
+  }
+}
+
 export default {
   async queue(
     batch: MessageBatch<SecurityAnalysisMessage>,
@@ -1604,10 +1625,28 @@ export default {
     _ctx: ExecutionContext
   ): Promise<void> {
     log.log(`Processing security batch of ${batch.messages.length} messages`);
+    const skillIdCounts = new Map<string, number>();
+    for (const message of batch.messages) {
+      const skillId = message.body.skillId;
+      skillIdCounts.set(skillId, (skillIdCounts.get(skillId) || 0) + 1);
+    }
+    const preloadedSkillStates = await preloadSecuritySkillStates(
+      env.DB,
+      Array.from(skillIdCounts.entries())
+        .filter(([, count]) => count === 1)
+        .map(([skillId]) => skillId)
+    );
 
     for (const message of batch.messages) {
       try {
-        await processSecurityMessage(message.body, env);
+        const preloadedSkillState = skillIdCounts.get(message.body.skillId) === 1
+          ? (
+            preloadedSkillStates.has(message.body.skillId)
+              ? (preloadedSkillStates.get(message.body.skillId) ?? { skill: null, state: null })
+              : undefined
+          )
+          : undefined;
+        await processSecurityMessage(message.body, env, preloadedSkillState);
         message.ack();
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1630,6 +1669,7 @@ export default {
   ): Promise<void> {
     const now = Date.now();
     const dueSkillIds = await loadDueSkillIds(env.DB, now, 10);
+    const preloadedSkillStates = await preloadSecuritySkillStates(env.DB, dueSkillIds);
 
     for (const skillId of dueSkillIds) {
       try {
@@ -1638,7 +1678,9 @@ export default {
           skillId,
           trigger: 'manual',
           requestedTier: 'auto',
-        }, env);
+        }, env, preloadedSkillStates.has(skillId)
+          ? (preloadedSkillStates.get(skillId) ?? { skill: null, state: null })
+          : undefined);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         log.error(`Scheduled security analysis failed for ${skillId}:`, error);
