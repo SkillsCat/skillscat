@@ -27,14 +27,15 @@ import {
   getSkillHtmlCacheKey,
   getSkillPublicHintCacheKey,
 } from '$lib/server/cache/keys';
+import { getPublicDiscoveryHtmlCacheKey } from '$lib/server/cache/public-html';
 
 const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
 const STATUS_OVERRIDE_HEADER = 'X-Skillscat-Status-Override';
 const AUTHOR_LINK_COOKIE = 'sc-author-linked';
 const AUTHOR_LINK_COOKIE_TTL_SECONDS = 24 * 60 * 60;
 const PUBLIC_SKILL_HTML_CACHE_HEADER = 'X-Skillscat-Public-Skill-Cache';
-const HOME_HTML_CACHE_TTL_SECONDS = 30;
-const HOME_HTML_CACHE_STALE_WHILE_REVALIDATE_SECONDS = 120;
+const HOME_HTML_CACHE_TTL_SECONDS = 60;
+const PUBLIC_DISCOVERY_HTML_CACHE_TTL_SECONDS = 60;
 const SKILL_HTML_CACHE_TTL_SECONDS = 60;
 const SKILL_PUBLIC_HINT_CACHE_TTL_SECONDS = 60 * 30;
 const OPENCLAW_HOME_CACHE_KEY = 'ua:openclaw:home:v1';
@@ -161,7 +162,32 @@ function isSkillHtmlCacheableRequest(event: Parameters<Handle>[0]['event']): boo
     && event.route.id === '/skills/[owner]/[...name]';
 }
 
-function applyHomeHtmlCacheHeaders(
+function resolvePublicDiscoveryHtmlCacheKey(
+  event: Parameters<Handle>[0]['event']
+): string | null {
+  return getPublicDiscoveryHtmlCacheKey({
+    routeId: event.route.id,
+    locale: event.locals.locale,
+    searchParams: event.url.searchParams,
+    params: {
+      slug: event.params.slug,
+    },
+  });
+}
+
+function isPublicDiscoveryRouteRequest(event: Parameters<Handle>[0]['event']): boolean {
+  return ['GET', 'HEAD'].includes(event.request.method)
+    && !event.isDataRequest
+    && resolvePublicDiscoveryHtmlCacheKey(event) !== null;
+}
+
+function isPublicDiscoveryHtmlCacheableRequest(event: Parameters<Handle>[0]['event']): boolean {
+  return event.request.method === 'GET'
+    && !event.isDataRequest
+    && resolvePublicDiscoveryHtmlCacheKey(event) !== null;
+}
+
+function applySharedPublicHtmlCacheHeaders(
   response: Response,
   locale: SupportedLocale,
   cacheStatus: 'HIT' | 'MISS'
@@ -213,7 +239,34 @@ async function maybeRespondWithCachedHomeHtml(
     return null;
   }
 
-  return applyHomeHtmlCacheHeaders(
+  return applySharedPublicHtmlCacheHeaders(
+    new Response(cachedHtml, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+      },
+    }),
+    event.locals.locale,
+    'HIT'
+  );
+}
+
+async function maybeRespondWithCachedPublicDiscoveryHtml(
+  event: Parameters<Handle>[0]['event']
+): Promise<Response | null> {
+  const cacheKey = isPublicDiscoveryHtmlCacheableRequest(event)
+    ? resolvePublicDiscoveryHtmlCacheKey(event)
+    : null;
+  if (!cacheKey) {
+    return null;
+  }
+
+  const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+  const cachedHtml = await peekCachedText(cacheKey, { waitUntil });
+  if (!cachedHtml) {
+    return null;
+  }
+
+  return applySharedPublicHtmlCacheHeaders(
     new Response(cachedHtml, {
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
@@ -281,6 +334,52 @@ function maybeWriteHomeHtmlCache(
       getHomeHtmlCacheKey(event.locals.locale),
       html,
       HOME_HTML_CACHE_TTL_SECONDS,
+      {
+        waitUntil,
+        contentType: 'text/html; charset=utf-8',
+      }
+    );
+  })();
+
+  if (waitUntil) {
+    waitUntil(cacheWrite);
+    return;
+  }
+
+  void cacheWrite;
+}
+
+function maybeWritePublicDiscoveryHtmlCache(
+  event: Parameters<Handle>[0]['event'],
+  response: Response
+): void {
+  const cacheKey = isPublicDiscoveryHtmlCacheableRequest(event)
+    ? resolvePublicDiscoveryHtmlCacheKey(event)
+    : null;
+  if (!cacheKey) {
+    return;
+  }
+
+  if (!response.ok) {
+    return;
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('text/html')) {
+    return;
+  }
+
+  const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+  const cacheWrite = (async () => {
+    const html = await response.text();
+    if (!html) {
+      return;
+    }
+
+    await putCachedText(
+      cacheKey,
+      html,
+      PUBLIC_DISCOVERY_HTML_CACHE_TTL_SECONDS,
       {
         waitUntil,
         contentType: 'text/html; charset=utf-8',
@@ -662,6 +761,11 @@ export const handle: Handle = async ({ event, resolve }) => {
     return applyResponseSecurityHeaders(event.url.pathname, cachedSkillResponse);
   }
 
+  const cachedPublicDiscoveryResponse = await maybeRespondWithCachedPublicDiscoveryHtml(event);
+  if (cachedPublicDiscoveryResponse) {
+    return applyResponseSecurityHeaders(event.url.pathname, cachedPublicDiscoveryResponse);
+  }
+
   if (env?.DB) {
     const skillOwner = getSkillOwnerFromPathname(event.url.pathname);
     if (skillOwner) {
@@ -675,27 +779,44 @@ export const handle: Handle = async ({ event, resolve }) => {
 
   const shouldSkipAuthForHome = isHomeRouteRequest(event);
   const shouldSkipAuthForSharedSkill = await shouldSkipAuthForSharedSkillHtml(event);
+  const shouldSkipAuthForPublicDiscovery = isPublicDiscoveryRouteRequest(event);
 
   // During build or if env is not available, skip auth
-  if (building || !env?.DB || shouldSkipAuthForHome || shouldSkipAuthForSharedSkill) {
+  if (
+    building
+    || !env?.DB
+    || shouldSkipAuthForHome
+    || shouldSkipAuthForSharedSkill
+    || shouldSkipAuthForPublicDiscovery
+  ) {
     event.locals.auth = async () => ({ user: null });
     event.locals.session = null;
     event.locals.user = null;
     const response = await resolve(event, withHtmlLangTransform(event.locals.htmlLang));
-    const cacheWriteCandidate = isHomeHtmlCacheableRequest(event) ? response.clone() : null;
+    const homeCacheWriteCandidate = isHomeHtmlCacheableRequest(event) ? response.clone() : null;
+    const publicDiscoveryCacheWriteCandidate = isPublicDiscoveryHtmlCacheableRequest(event)
+      ? response.clone()
+      : null;
     const skillCacheWriteCandidate = isSkillHtmlCacheableRequest(event) ? response.clone() : null;
+    const shouldApplySharedPublicHtmlOptimization = (
+      isHomeHtmlCacheableRequest(event) || isPublicDiscoveryHtmlCacheableRequest(event)
+    ) && isHtmlResponse(response);
     const shouldApplySkillHtmlOptimization = response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) === '1'
       && isHtmlResponse(response);
-    const optimizedResponse = isHomeHtmlCacheableRequest(event)
-      ? applyHomeHtmlCacheHeaders(response, event.locals.locale, 'MISS')
+    const optimizedResponse = shouldApplySharedPublicHtmlOptimization
+      ? applySharedPublicHtmlCacheHeaders(response, event.locals.locale, 'MISS')
       : shouldApplySkillHtmlOptimization
         ? applySkillHtmlCacheHeaders(response, event.locals.locale, 'MISS')
         : response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) === '1'
           ? cloneResponseWithoutHeader(response, PUBLIC_SKILL_HTML_CACHE_HEADER)
           : response;
 
-    if (cacheWriteCandidate) {
-      maybeWriteHomeHtmlCache(event, cacheWriteCandidate);
+    if (homeCacheWriteCandidate) {
+      maybeWriteHomeHtmlCache(event, homeCacheWriteCandidate);
+    }
+
+    if (publicDiscoveryCacheWriteCandidate) {
+      maybeWritePublicDiscoveryHtmlCache(event, publicDiscoveryCacheWriteCandidate);
     }
 
     if (skillCacheWriteCandidate) {

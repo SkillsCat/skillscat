@@ -4,6 +4,8 @@ import {
   CACHE_NAMES,
   STATIC_PATTERNS,
   API_CACHE_CONFIGS,
+  PAGE_DATA_CACHE_CONFIGS,
+  PUBLIC_ASSET_CACHE_CONFIGS,
   NO_CACHE_PATTERNS,
   type ApiCacheConfig,
 } from './cache-config';
@@ -72,18 +74,24 @@ export async function networkFirst(
  */
 export async function staleWhileRevalidate(
   request: Request,
-  config: ApiCacheConfig
+  config: ApiCacheConfig,
+  options?: {
+    cacheName?: string;
+    shouldCacheResponse?: (response: Response) => boolean;
+    waitUntil?: (promise: Promise<unknown>) => void;
+  }
 ): Promise<Response> {
-  const cache = await caches.open(CACHE_NAMES.api);
+  const cache = await caches.open(options?.cacheName || CACHE_NAMES.api);
   const cached = await cache.match(request);
 
   const now = Date.now();
+  const shouldCacheResponse = options?.shouldCacheResponse ?? ((response: Response) => response.ok);
 
   // Background refresh function
   const updateCache = async () => {
     try {
       const response = await fetch(request);
-      if (response.ok) {
+      if (response.ok && shouldCacheResponse(response)) {
         // Persist the cache timestamp on the stored response
         const headers = new Headers(response.headers);
         headers.set(CACHE_TIME_HEADER, now.toString());
@@ -95,6 +103,8 @@ export async function staleWhileRevalidate(
         });
 
         await cache.put(request, cachedResponse);
+      } else if (response.ok) {
+        await cache.delete(request);
       }
     } catch {
       // Silently ignore refresh failures
@@ -112,7 +122,12 @@ export async function staleWhileRevalidate(
 
     // Cache entry is stale but still within the stale-while-revalidate window
     if (age < config.maxAge + config.staleWhileRevalidate) {
-      updateCache();
+      const refresh = updateCache();
+      if (options?.waitUntil) {
+        options.waitUntil(refresh);
+      } else {
+        void refresh;
+      }
       return cached;
     }
   }
@@ -120,7 +135,7 @@ export async function staleWhileRevalidate(
   // No cache or fully expired cache: wait for the network response
   const response = await fetch(request);
 
-  if (response.ok) {
+  if (response.ok && shouldCacheResponse(response)) {
     const headers = new Headers(response.headers);
     headers.set(CACHE_TIME_HEADER, now.toString());
 
@@ -130,7 +145,9 @@ export async function staleWhileRevalidate(
       headers,
     });
 
-    cache.put(request, cachedResponse);
+    await cache.put(request, cachedResponse);
+  } else if (response.ok) {
+    await cache.delete(request);
   }
 
   return response;
@@ -214,6 +231,14 @@ export function getApiCacheConfig(pathname: string): ApiCacheConfig | null {
 
   // Find the first matching cache config
   return API_CACHE_CONFIGS.find((config) => config.test(pathname)) || null;
+}
+
+export function getPageDataCacheConfig(pathname: string): ApiCacheConfig | null {
+  return PAGE_DATA_CACHE_CONFIGS.find((config) => config.test(pathname)) || null;
+}
+
+export function getPublicAssetCacheConfig(pathname: string): ApiCacheConfig | null {
+  return PUBLIC_ASSET_CACHE_CONFIGS.find((config) => config.test(pathname)) || null;
 }
 
 /**

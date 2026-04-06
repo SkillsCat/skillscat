@@ -9,7 +9,7 @@ import {
   getSkillPageCacheInvalidationKeys,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
-import { getCategoryPageCacheKey } from '$lib/server/cache/categories';
+import { getCategoryPageCacheInvalidationKeys } from '$lib/server/cache/categories';
 import { getSkillDetailCacheKeys } from '$lib/server/skill/detail';
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 import {
@@ -235,7 +235,9 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
     ]);
 
     for (const categorySlug of categorySlugs) {
-      cacheKeys.add(getCategoryPageCacheKey(categorySlug));
+      for (const cacheKey of getCategoryPageCacheInvalidationKeys(categorySlug)) {
+        cacheKeys.add(cacheKey);
+      }
     }
 
     await Promise.all(Array.from(cacheKeys, (cacheKey) => invalidateCache(cacheKey)));

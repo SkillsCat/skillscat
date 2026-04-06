@@ -6,6 +6,7 @@ import {
   getSkillPageCacheInvalidationKeys,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
+import { invalidateCategoryCaches } from '$lib/server/cache/categories';
 import { buildUploadSkillR2Key } from '$lib/skill-path';
 import { decodeBase64Utf8 } from '$lib/server/text/codec';
 import {
@@ -480,6 +481,10 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
         ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
         ...getSkillPageCacheInvalidationKeys(slug),
       ].map((cacheKey) => invalidateCache(cacheKey)));
+
+      if ((validation.categories || []).length > 0) {
+        await invalidateCategoryCaches(validation.categories || []);
+      }
     } catch (cacheError) {
       console.error(`Failed to invalidate public discovery caches for uploaded skill ${skillId}:`, cacheError);
     }

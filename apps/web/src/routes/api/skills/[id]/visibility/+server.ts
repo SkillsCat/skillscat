@@ -5,7 +5,7 @@ import {
   getSkillPageCacheInvalidationKeys,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
-import { getCategoryPageCacheKey } from '$lib/server/cache/categories';
+import { getCategoryPageCacheInvalidationKeys } from '$lib/server/cache/categories';
 import { getSkillDetailCacheKeys } from '$lib/server/skill/detail';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import { isSkillOwner } from '$lib/server/auth/permissions';
@@ -209,7 +209,9 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
   ]);
 
   for (const categorySlug of categorySlugs) {
-    cacheKeys.add(getCategoryPageCacheKey(categorySlug));
+    for (const cacheKey of getCategoryPageCacheInvalidationKeys(categorySlug)) {
+      cacheKeys.add(cacheKey);
+    }
   }
 
   await Promise.all(Array.from(cacheKeys, (cacheKey) => invalidateCache(cacheKey)));

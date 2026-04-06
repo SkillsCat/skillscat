@@ -5,10 +5,13 @@ import { getCached } from '$lib/server/cache';
 import { setPublicPageCache } from '$lib/server/cache/page';
 import {
   HOME_CRITICAL_CACHE_KEY,
+  HOME_RECENT_CACHE_KEY,
+  HOME_TOP_CACHE_KEY,
   PUBLIC_SKILLS_STATS_CACHE_KEY,
 } from '$lib/server/cache/keys';
 
 const PUBLIC_SKILLS_STATS_TTL_SECONDS = 120;
+const HOME_LIST_CACHE_TTL_SECONDS = 30;
 
 export const load: PageServerLoad = async ({ platform, setHeaders, locals, request }) => {
   setPublicPageCache({
@@ -49,7 +52,19 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
 
   return {
     ...critical,
-    recent: getRecentSkills(env, 12).catch(() => []),
-    top: getTopSkills(env, 12).catch(() => []),
+    recent: getCached(
+      HOME_RECENT_CACHE_KEY,
+      () => getRecentSkills(env, 12),
+      HOME_LIST_CACHE_TTL_SECONDS
+    )
+      .then(({ data }) => data)
+      .catch(() => []),
+    top: getCached(
+      HOME_TOP_CACHE_KEY,
+      () => getTopSkills(env, 12),
+      HOME_LIST_CACHE_TTL_SECONDS
+    )
+      .then(({ data }) => data)
+      .catch(() => []),
   };
 };

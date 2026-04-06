@@ -10,6 +10,7 @@ export const CACHE_NAMES = {
   api: `skillscat-api-v${SW_VERSION}`,
   pages: `skillscat-pages-v${SW_VERSION}`,
   pageData: `skillscat-page-data-v${SW_VERSION}`,
+  publicAssets: `skillscat-public-assets-v${SW_VERSION}`,
 } as const;
 
 // Static asset match patterns (Cache First)
@@ -45,12 +46,21 @@ export const API_CACHE_CONFIGS = [
   createConfig(/^\/api\/categories$/, 5 * 60 * 1000, 10 * 60 * 1000),
   createConfig(/^\/api\/skills$/, 1 * 60 * 1000, 2 * 60 * 1000),
   createConfig(/^\/api\/skills\/[^/]+$/, 5 * 60 * 1000, 10 * 60 * 1000),
+  createConfig(/^\/api\/skills\/.+\/recommend$/, 30 * 60 * 1000, 24 * 60 * 60 * 1000),
   createConfig(/^\/api\/skills\/[^/]+\/files$/, 5 * 60 * 1000, 10 * 60 * 1000),
   createConfig(/^\/api\/skills\/[^/]+\/download$/, 60 * 60 * 1000, 2 * 60 * 60 * 1000),
   createConfig(/^\/api\/search/, 30 * 1000, 90 * 1000),
   createConfig(/^\/api\/registry\/search/, 30 * 1000, 90 * 1000),
   createConfig(/^\/api\/registry\/skill\//, 5 * 60 * 1000, 10 * 60 * 1000),
 ];
+
+export const PAGE_DATA_CACHE_CONFIGS = [
+  createConfig(/^\/skills\/.+\/__data\.json$/, 2 * 60 * 1000, 15 * 60 * 1000),
+];
+
+export const PUBLIC_ASSET_CACHE_CONFIGS = [
+  createConfig(/^\/avatar$/, 7 * 24 * 60 * 60 * 1000, 30 * 24 * 60 * 60 * 1000),
+] as const;
 
 // Route patterns that must never be cached by the SW
 export const NO_CACHE_PATTERNS: RegExp[] = [

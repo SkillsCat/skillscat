@@ -16,7 +16,7 @@ vi.mock('$lib/server/cache/page', () => ({
   setPublicPageCache,
 }));
 
-vi.mock('$lib/server/db/utils', () => ({
+vi.mock('$lib/server/db/business/lists', () => ({
   getRecentSkillsPaginated,
   getTrendingSkillsPaginated,
   getTopSkillsPaginated,
@@ -24,6 +24,7 @@ vi.mock('$lib/server/db/utils', () => ({
 }));
 
 vi.mock('$lib/constants/categories', () => ({
+  CATEGORIES: [],
   getCategoryBySlug,
 }));
 

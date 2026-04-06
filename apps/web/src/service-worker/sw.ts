@@ -11,6 +11,8 @@ import {
   isExplicitlyPublicResponse,
   hasSessionCookie,
   getApiCacheConfig,
+  getPageDataCacheConfig,
+  getPublicAssetCacheConfig,
   cleanupOldCaches,
 } from './cache-strategies';
 
@@ -58,6 +60,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Public avatar proxy: aggressively reuse in-browser cache to avoid repeat Worker hits.
+  if (isSameOrigin) {
+    const assetConfig = getPublicAssetCacheConfig(url.pathname);
+    if (assetConfig) {
+      event.respondWith(
+        staleWhileRevalidate(request, assetConfig, {
+          cacheName: CACHE_NAMES.publicAssets,
+          waitUntil: event.waitUntil.bind(event),
+        })
+      );
+      return;
+    }
+  }
+
   // Page navigations: Network First (cache only explicitly public responses)
   if (isSameOrigin && isNavigationRequest(request)) {
     event.respondWith(
@@ -68,6 +84,18 @@ self.addEventListener('fetch', (event) => {
 
   // SvelteKit page data (__data.json): Network First with offline fallback
   if (isSameOrigin && isSvelteKitDataRequest(url)) {
+    const pageDataConfig = getPageDataCacheConfig(url.pathname);
+    if (pageDataConfig) {
+      event.respondWith(
+        staleWhileRevalidate(request, pageDataConfig, {
+          cacheName: CACHE_NAMES.pageData,
+          shouldCacheResponse: isExplicitlyPublicResponse,
+          waitUntil: event.waitUntil.bind(event),
+        })
+      );
+      return;
+    }
+
     event.respondWith(
       networkFirst(request, CACHE_NAMES.pageData, isExplicitlyPublicResponse)
     );
@@ -85,7 +113,9 @@ self.addEventListener('fetch', (event) => {
     const config = getApiCacheConfig(url.pathname);
 
     if (config) {
-      event.respondWith(staleWhileRevalidate(request, config));
+      event.respondWith(staleWhileRevalidate(request, config, {
+        waitUntil: event.waitUntil.bind(event),
+      }));
       return;
     }
   }
