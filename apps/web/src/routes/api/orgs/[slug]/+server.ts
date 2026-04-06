@@ -1,5 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { invalidateCache } from '$lib/server/cache';
+import { getOrgPageSnapshotCacheKey } from '$lib/server/cache/keys';
 
 /**
  * GET /api/orgs/[slug] - Get organization details
@@ -62,8 +64,8 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
 
   // Non-members should only see public skill counts
   const skillCountQuery = userRole
-    ? `SELECT COUNT(*) as count FROM skills WHERE org_id = ?`
-    : `SELECT COUNT(*) as count FROM skills WHERE org_id = ? AND visibility = 'public'`;
+    ? `SELECT COUNT(*) as count FROM skills INDEXED BY skills_org_stars_created_idx WHERE org_id = ?`
+    : `SELECT COUNT(*) as count FROM skills INDEXED BY skills_org_visibility_stars_created_idx WHERE org_id = ? AND visibility = 'public'`;
   const skillCount = await db.prepare(skillCountQuery)
     .bind(org.id)
     .first<{ count: number }>();
@@ -139,6 +141,8 @@ export const PUT: RequestHandler = async ({ locals, platform, params, request })
     .bind(displayName, description, avatarUrl, Date.now(), slug)
     .run();
 
+  await invalidateCache(getOrgPageSnapshotCacheKey(slug));
+
   return json({
     success: true,
     message: 'Organization updated successfully',
@@ -181,7 +185,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, params }) => {
 
   // Check if org has skills
   const skillCount = await db.prepare(`
-    SELECT COUNT(*) as count FROM skills WHERE org_id = ?
+    SELECT COUNT(*) as count FROM skills INDEXED BY skills_org_stars_created_idx WHERE org_id = ?
   `)
     .bind(org.id)
     .first<{ count: number }>();
@@ -195,6 +199,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, params }) => {
 
   // Delete organization
   await db.prepare(`DELETE FROM organizations WHERE id = ?`).bind(org.id).run();
+  await invalidateCache(getOrgPageSnapshotCacheKey(slug));
 
   return json({
     success: true,

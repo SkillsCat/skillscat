@@ -3,7 +3,9 @@ import type { RequestHandler } from './$types';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import { invalidateCache } from '$lib/server/cache';
 import {
+  getOrgPageSnapshotCacheKey,
   getSkillPageCacheInvalidationKeys,
+  getSkillSourceCacheKey,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
 import { invalidateCategoryCaches } from '$lib/server/cache/categories';
@@ -479,6 +481,8 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     try {
       await Promise.all([
         ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
+        getSkillSourceCacheKey(slug),
+        ...(orgSlug ? [getOrgPageSnapshotCacheKey(orgSlug)] : []),
         ...getSkillPageCacheInvalidationKeys(slug),
       ].map((cacheKey) => invalidateCache(cacheKey)));
 

@@ -283,37 +283,29 @@
     loadedError = null;
 
     try {
-      const [orgRes, membersRes, skillsRes] = await Promise.all([
-        fetch(`/api/orgs/${slug}`),
-        fetch(`/api/orgs/${slug}/members`),
-        fetch(`/api/orgs/${slug}/skills`),
-      ]);
+      const response = await fetch(`/api/orgs/${slug}/page`);
+      const next = (await response.json()) as {
+        org?: Org | null;
+        members?: Member[];
+        skills?: Skill[];
+        error?: string | null;
+        errorKind?: OrgPageErrorKind | null;
+      };
 
-      if (orgRes.ok) {
-        const data = (await orgRes.json()) as { organization?: Org };
-        loadedOrg = data.organization ?? null;
-        loadedError = data.organization ? null : copy.org.notFoundMessage;
-        loadedErrorKind = data.organization ? null : 'not_found';
-        if (!data.organization) {
-          return;
-        }
-      } else {
+      loadedOrg = next.org ?? null;
+      loadedMembers = next.members || [];
+      loadedSkills = next.skills || [];
+      loadedErrorKind = next.errorKind ?? null;
+      loadedError = next.error ?? null;
+
+      if (!response.ok) {
         loadedOrg = null;
-        loadedErrorKind = orgRes.status === 404 ? 'not_found' : 'temporary_failure';
-        loadedError = orgRes.status === 404
+        loadedMembers = [];
+        loadedSkills = [];
+        loadedErrorKind = response.status === 404 ? 'not_found' : (next.errorKind ?? 'temporary_failure');
+        loadedError = response.status === 404
           ? copy.org.notFoundMessage
           : copy.org.temporaryUnavailableMessage;
-        return;
-      }
-
-      if (membersRes.ok) {
-        const data = (await membersRes.json()) as { members?: Member[] };
-        loadedMembers = data.members || [];
-      }
-
-      if (skillsRes.ok) {
-        const data = (await skillsRes.json()) as { skills?: Skill[] };
-        loadedSkills = data.skills || [];
       }
     } catch {
       loadedErrorKind = 'temporary_failure';

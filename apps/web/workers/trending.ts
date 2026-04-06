@@ -31,12 +31,16 @@ import {
   markSkillSecurityPremiumDue,
   queueSecurityAnalysis,
 } from '../src/lib/server/security/state';
+import {
+  buildSkillMetricDate,
+} from '../src/lib/server/skill/metrics';
 
 const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
 const AI_CLASSIFICATION_THRESHOLD = 100; // Stars threshold for AI classification
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 const SKILL_REFRESH_SELECT_COLUMNS = getSkillRefreshSelectColumns();
+const DAILY_METRICS_RETENTION_DAYS = 95;
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw || '', 10);
@@ -584,7 +588,11 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
     const sevenDaysAgo = now - 7 * 86400000;
     const thirtyDaysAgo = now - 30 * 86400000;
     const ninetyDaysAgo = now - 90 * 86400000;
-    const cleanupBefore = now - 95 * 86400000;
+    const sevenDaysAgoDate = buildSkillMetricDate(sevenDaysAgo);
+    const thirtyDaysAgoDate = buildSkillMetricDate(thirtyDaysAgo);
+    const ninetyDaysAgoDate = buildSkillMetricDate(ninetyDaysAgo);
+    const cleanupBefore = now - DAILY_METRICS_RETENTION_DAYS * 86400000;
+    const cleanupBeforeDate = buildSkillMetricDate(cleanupBefore);
     const rateLimitedCleanupBefore = now - 7 * 86400000;
 
     // Keep event table bounded so daily aggregation stays cheap.
@@ -602,19 +610,54 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
       .bind(cleanupBefore, rateLimitedCleanupBefore)
       .run();
 
-    const aggregated = await env.DB.prepare(`
-      SELECT
-        skill_id as skillId,
-        SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as sum7d,
-        SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as sum30d,
-        COUNT(*) as sum90d
-      FROM user_actions
-      WHERE action_type IN ('download', 'install')
-        AND skill_id IS NOT NULL
-        AND created_at >= ?
-      GROUP BY skill_id
+    await env.DB.prepare(`
+      DELETE FROM skill_daily_metrics
+      WHERE metric_date < ?
     `)
-      .bind(sevenDaysAgo, thirtyDaysAgo, ninetyDaysAgo)
+      .bind(cleanupBeforeDate)
+      .run();
+
+    const aggregated = await env.DB.prepare(`
+      WITH combined AS (
+        SELECT
+          skill_id as skillId,
+          SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as sum7d,
+          SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as sum30d,
+          COUNT(*) as sum90d
+        FROM user_actions
+        WHERE action_type IN ('download', 'install')
+          AND skill_id IS NOT NULL
+          AND created_at >= ?
+        GROUP BY skill_id
+
+        UNION ALL
+
+        SELECT
+          skill_id as skillId,
+          SUM(CASE WHEN metric_date >= ? THEN download_count + install_count ELSE 0 END) as sum7d,
+          SUM(CASE WHEN metric_date >= ? THEN download_count + install_count ELSE 0 END) as sum30d,
+          SUM(download_count + install_count) as sum90d
+        FROM skill_daily_metrics
+        WHERE metric_date >= ?
+          AND (download_count != 0 OR install_count != 0)
+        GROUP BY skill_id
+      )
+      SELECT
+        skillId,
+        SUM(sum7d) as sum7d,
+        SUM(sum30d) as sum30d,
+        SUM(sum90d) as sum90d
+      FROM combined
+      GROUP BY skillId
+    `)
+      .bind(
+        sevenDaysAgo,
+        thirtyDaysAgo,
+        ninetyDaysAgo,
+        sevenDaysAgoDate,
+        thirtyDaysAgoDate,
+        ninetyDaysAgoDate
+      )
       .all<{ skillId: string; sum7d: number; sum30d: number; sum90d: number }>();
 
     if ((aggregated.results || []).length === 0) {
@@ -659,8 +702,15 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
             AND ua.skill_id IS NOT NULL
             AND ua.created_at >= ?
         )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM skill_daily_metrics sdm
+          WHERE sdm.skill_id = skills.id
+            AND sdm.metric_date >= ?
+            AND (sdm.download_count != 0 OR sdm.install_count != 0)
+        )
     `)
-      .bind(ninetyDaysAgo)
+      .bind(ninetyDaysAgo, ninetyDaysAgoDate)
       .run();
 
     await env.KV.put('dl:last_flush_actions', today, { expirationTtl: 86400 });

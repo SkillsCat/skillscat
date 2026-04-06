@@ -1,5 +1,18 @@
 import { isCrawlerLikeRequest } from '$lib/server/request-client';
 
+const ACCESS_DEDUPE_WINDOW_MS = 30 * 60 * 1000;
+const MAX_ACCESS_DEDUPE_ENTRIES = 10_000;
+
+const recentAccessByClient = new Map<string, number>();
+
+function pruneExpiredEntries(map: Map<string, number>, now: number, windowMs: number): void {
+  for (const [key, timestamp] of map.entries()) {
+    if (now - timestamp > windowMs) {
+      map.delete(key);
+    }
+  }
+}
+
 export function shouldTrackSkillAccess(request: Request): boolean {
   const purpose = `${request.headers.get('purpose') || ''} ${request.headers.get('sec-purpose') || ''}`.toLowerCase();
   if (purpose.includes('prefetch')) {
@@ -34,4 +47,28 @@ export function getSkillAccessClientKey(request: Request, userId: string | null)
   }
 
   return ua ? `ua:${ua}` : undefined;
+}
+
+export function shouldRecordSkillAccess(
+  skillId: string,
+  clientKey: string | undefined,
+  now: number = Date.now()
+): boolean {
+  if (!clientKey) {
+    return true;
+  }
+
+  const dedupeKey = `${skillId}:${clientKey}`;
+  const lastSeen = recentAccessByClient.get(dedupeKey);
+
+  if (lastSeen && now - lastSeen < ACCESS_DEDUPE_WINDOW_MS) {
+    return false;
+  }
+
+  recentAccessByClient.set(dedupeKey, now);
+  if (recentAccessByClient.size > MAX_ACCESS_DEDUPE_ENTRIES) {
+    pruneExpiredEntries(recentAccessByClient, now, ACCESS_DEDUPE_WINDOW_MS);
+  }
+
+  return true;
 }

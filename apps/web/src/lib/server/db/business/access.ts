@@ -1,4 +1,5 @@
 import type { DbEnv } from '$lib/server/db/shared/types';
+import { shouldRecordSkillAccess } from '$lib/server/skill/access';
 
 // Tier configuration (must match workers/types.ts)
 const TIER_CONFIG = {
@@ -24,14 +25,11 @@ const TIER_CONFIG = {
   },
 } as const;
 
-type SkillTier = keyof typeof TIER_CONFIG;
+export type SkillTier = keyof typeof TIER_CONFIG;
 
-const ACCESS_DEDUPE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 const NEEDS_UPDATE_MARK_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-const MAX_ACCESS_DEDUPE_ENTRIES = 10_000;
 const MAX_MARKED_UPDATE_ENTRIES = 5_000;
 
-const recentAccessByClient = new Map<string, number>();
 const recentNeedsUpdateMark = new Map<string, number>();
 
 function pruneExpiredEntries(map: Map<string, number>, now: number, windowMs: number): void {
@@ -40,28 +38,6 @@ function pruneExpiredEntries(map: Map<string, number>, now: number, windowMs: nu
       map.delete(key);
     }
   }
-}
-
-function shouldSkipAccessCount(
-  skillId: string,
-  clientKey: string | undefined,
-  now: number
-): boolean {
-  if (!clientKey) return false;
-
-  const dedupeKey = `${skillId}:${clientKey}`;
-  const lastSeen = recentAccessByClient.get(dedupeKey);
-
-  if (lastSeen && now - lastSeen < ACCESS_DEDUPE_WINDOW_MS) {
-    return true;
-  }
-
-  recentAccessByClient.set(dedupeKey, now);
-  if (recentAccessByClient.size > MAX_ACCESS_DEDUPE_ENTRIES) {
-    pruneExpiredEntries(recentAccessByClient, now, ACCESS_DEDUPE_WINDOW_MS);
-  }
-
-  return false;
 }
 
 function shouldWriteNeedsUpdateMarker(skillId: string, now: number): boolean {
@@ -78,6 +54,41 @@ function shouldWriteNeedsUpdateMarker(skillId: string, now: number): boolean {
   return true;
 }
 
+export function getSkillUpdateInterval(tier: SkillTier | null | undefined): number {
+  const normalizedTier = tier || 'cold';
+  return TIER_CONFIG[normalizedTier]?.updateInterval || TIER_CONFIG.cold.updateInterval;
+}
+
+export function shouldMarkSkillNeedsUpdate(input: {
+  tier: SkillTier | null | undefined;
+  nextUpdateAt: number | null;
+  lastAccessedAt: number | null;
+  occurredAt: number;
+}): boolean {
+  const tier = input.tier || 'cold';
+  const updateInterval = getSkillUpdateInterval(tier);
+
+  return (
+    !input.nextUpdateAt ||
+    input.nextUpdateAt < input.occurredAt ||
+    (tier === 'cold' && (!input.lastAccessedAt || input.occurredAt - input.lastAccessedAt > updateInterval))
+  );
+}
+
+export async function markSkillNeedsUpdate(
+  env: Pick<DbEnv, 'KV'>,
+  skillId: string,
+  now: number
+): Promise<void> {
+  if (!env.KV || !shouldWriteNeedsUpdateMarker(skillId, now)) {
+    return;
+  }
+
+  await env.KV.put(`needs_update:${skillId}`, '1', {
+    expirationTtl: 60 * 60,
+  });
+}
+
 /**
  * Record skill access and check if update is needed
  * This is called asynchronously when a user views a skill detail page
@@ -85,12 +96,15 @@ function shouldWriteNeedsUpdateMarker(skillId: string, now: number): boolean {
 export async function recordSkillAccess(
   env: DbEnv,
   skillId: string,
-  clientKey?: string
+  clientKey?: string,
+  options?: {
+    skipClientDedupe?: boolean;
+  }
 ): Promise<void> {
   if (!env.DB) return;
 
   const now = Date.now();
-  if (shouldSkipAccessCount(skillId, clientKey, now)) {
+  if (!options?.skipClientDedupe && !shouldRecordSkillAccess(skillId, clientKey, now)) {
     return;
   }
 
@@ -120,28 +134,21 @@ export async function recordSkillAccess(
       .bind(now, skillId)
       .run();
 
-    // Check if update is needed based on tier
-    const tier = skill.tier || 'cold';
-    const updateInterval = TIER_CONFIG[tier]?.updateInterval || TIER_CONFIG.cold.updateInterval;
-
     // Handle archived skills - check for resurrection
+    const tier = skill.tier || 'cold';
     if (tier === 'archived') {
       // Trigger resurrection check asynchronously
-      checkAndResurrect(env, skillId).catch(console.error);
+      queueArchivedSkillResurrectionCheck(env, skillId).catch(console.error);
       return;
     }
 
-    // Check if skill needs update
-    const needsUpdate =
-      !skill.next_update_at ||
-      skill.next_update_at < now ||
-      (tier === 'cold' && (!skill.last_accessed_at || now - skill.last_accessed_at > updateInterval));
-
-    if (needsUpdate && env.KV && shouldWriteNeedsUpdateMarker(skillId, now)) {
-      // Mark for update in KV (will be processed by trending worker)
-      await env.KV.put(`needs_update:${skillId}`, '1', {
-        expirationTtl: 60 * 60, // 1 hour TTL
-      });
+    if (shouldMarkSkillNeedsUpdate({
+      tier,
+      nextUpdateAt: skill.next_update_at,
+      lastAccessedAt: skill.last_accessed_at,
+      occurredAt: now,
+    })) {
+      await markSkillNeedsUpdate(env, skillId, now);
     }
   } catch (error) {
     console.error('Error recording skill access:', error);
@@ -152,7 +159,7 @@ export async function recordSkillAccess(
  * Check if an archived skill should be resurrected
  * Called when a user accesses an archived skill
  */
-async function checkAndResurrect(env: DbEnv, skillId: string): Promise<void> {
+export async function queueArchivedSkillResurrectionCheck(env: DbEnv, skillId: string): Promise<void> {
   // If resurrection worker URL is configured, call it
   if (env.RESURRECTION_WORKER_URL && env.WORKER_SECRET) {
     try {

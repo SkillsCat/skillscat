@@ -6,7 +6,9 @@ import {
 } from '$lib/skill-path';
 import { invalidateCache } from '$lib/server/cache';
 import {
+  getOrgPageSnapshotCacheKey,
   getSkillPageCacheInvalidationKeys,
+  getSkillSourceCacheKey,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
 import { getCategoryPageCacheInvalidationKeys } from '$lib/server/cache/categories';
@@ -230,9 +232,14 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
       `api:skill-files:${skill.slug}`,
       `skill:${skill.id}`,
       `recommend:${skill.id}`,
+      getSkillSourceCacheKey(skill.slug),
       ...getSkillPageCacheInvalidationKeys(skill.slug),
       ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
     ]);
+
+    if (skillRow?.org_slug) {
+      cacheKeys.add(getOrgPageSnapshotCacheKey(skillRow.org_slug));
+    }
 
     for (const categorySlug of categorySlugs) {
       for (const cacheKey of getCategoryPageCacheInvalidationKeys(categorySlug)) {

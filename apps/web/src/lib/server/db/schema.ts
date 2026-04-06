@@ -234,6 +234,9 @@ export const skills = sqliteTable('skills', {
       table.slug
     )
     .where(sql`${table.visibility} = 'public'`),
+  index('skills_public_non_archived_indexed_idx')
+    .on(sql.raw('indexed_at DESC'), table.id)
+    .where(sql`${table.visibility} = 'public' AND ${table.tier} != 'archived'`),
   index('skills_public_archive_candidates_idx')
     .on(
       table.tier,
@@ -242,6 +245,18 @@ export const skills = sqliteTable('skills', {
       sql.raw('CASE WHEN last_commit_at IS NULL THEN 0 ELSE last_commit_at END')
     )
     .where(sql`${table.visibility} = 'public'`),
+  index('skills_security_source_updated_idx')
+    .on(sql.raw('updated_at DESC'), table.id)
+    .where(sql`COALESCE(${table.fileStructure}, '') != '' OR COALESCE(${table.readme}, '') != ''`),
+  index('skills_security_reindex_backfill_idx')
+    .on(sql.raw('updated_at DESC'), table.id)
+    .where(
+      sql`${table.sourceType} = 'github'
+        AND ${table.repoOwner} IS NOT NULL
+        AND ${table.repoName} IS NOT NULL
+        AND COALESCE(${table.fileStructure}, '') = ''
+        AND COALESCE(${table.readme}, '') = ''`
+    ),
   // Unique constraint for multi-skill repos (same repo can have multiple skills with different paths)
   uniqueIndex('skills_repo_path_unique').on(
     table.repoOwner,
@@ -585,6 +600,21 @@ export const userActions = sqliteTable('user_actions', {
   index('user_actions_action_skill_created_idx').on(table.actionType, table.skillId, table.createdAt)
 ]);
 
+// ========== Daily Skill Metrics ==========
+export const skillDailyMetrics = sqliteTable('skill_daily_metrics', {
+  skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  metricDate: text('metric_date').notNull(), // UTC date in YYYY-MM-DD
+  accessCount: integer('access_count').notNull().default(0),
+  downloadCount: integer('download_count').notNull().default(0),
+  installCount: integer('install_count').notNull().default(0),
+  lastAccessedAt: integer('last_accessed_at', { mode: 'timestamp_ms' }),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  primaryKey({ columns: [table.skillId, table.metricDate] }),
+  index('skill_daily_metrics_date_idx').on(table.metricDate),
+  index('skill_daily_metrics_skill_date_idx').on(table.skillId, table.metricDate)
+]);
+
 // ========== Device Codes (CLI Device Authorization Flow) ==========
 export const deviceCodes = sqliteTable('device_codes', {
   id: text('id').primaryKey(),
@@ -689,6 +719,7 @@ export type CategoryRecord = typeof categories.$inferSelect;
 export type NewCategoryRecord = typeof categories.$inferInsert;
 export type Favorite = typeof favorites.$inferSelect;
 export type UserAction = typeof userActions.$inferSelect;
+export type SkillDailyMetric = typeof skillDailyMetrics.$inferSelect;
 export type DeviceCode = typeof deviceCodes.$inferSelect;
 export type NewDeviceCode = typeof deviceCodes.$inferInsert;
 export type RefreshToken = typeof refreshTokens.$inferSelect;

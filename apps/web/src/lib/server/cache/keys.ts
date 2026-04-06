@@ -9,6 +9,10 @@ export const DISCOVERY_HTML_CACHE_KEY_PREFIX = 'page:discovery:html:v1';
 export const SKILL_HTML_CACHE_KEY_PREFIX = 'page:skill:html:v1';
 export const SKILL_PUBLIC_HINT_CACHE_KEY_PREFIX = 'page:skill:public:v1';
 export const PUBLIC_SKILLS_STATS_CACHE_KEY = 'stats:public-skills:v1';
+export const ORG_PAGE_SNAPSHOT_CACHE_KEY_PREFIX = 'page:org:snapshot:v1';
+export const SKILL_SOURCE_CACHE_KEY_PREFIX = 'api:skill-source:v1';
+export const PUBLIC_SKILL_FILE_CACHE_KEY_PREFIX = 'api:skill-file:v1';
+export const PUBLIC_SKILL_DOWNLOAD_CACHE_KEY_PREFIX = 'api:skill-download:v1';
 
 export function getHomeHtmlCacheKey(locale: SupportedLocale): string {
   return `${HOME_HTML_CACHE_KEY_PREFIX}:${locale}`;
@@ -49,6 +53,38 @@ export function getSkillHtmlCacheKeys(slug: string): string[] {
 
 export function getSkillPublicHintCacheKey(slug: string): string {
   return `${SKILL_PUBLIC_HINT_CACHE_KEY_PREFIX}:${encodeCacheKeySegment(slug)}`;
+}
+
+export function getOrgPageSnapshotCacheKey(slug: string): string {
+  return `${ORG_PAGE_SNAPSHOT_CACHE_KEY_PREFIX}:${encodeCacheKeySegment(slug)}`;
+}
+
+export function getSkillSourceCacheKey(slug: string): string {
+  return `${SKILL_SOURCE_CACHE_KEY_PREFIX}:${encodeCacheKeySegment(slug)}`;
+}
+
+function encodeCacheVersionToken(value: number | string | null | undefined): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return '0';
+  }
+
+  return Math.floor(numeric).toString();
+}
+
+export function getPublicSkillFileCacheKey(
+  slug: string,
+  filePath: string,
+  versionToken?: number | string | null
+): string {
+  return `${PUBLIC_SKILL_FILE_CACHE_KEY_PREFIX}:${encodeCacheKeySegment(slug)}:${encodeCacheKeySegment(filePath)}:${encodeCacheVersionToken(versionToken)}`;
+}
+
+export function getPublicSkillDownloadCacheKey(
+  slug: string,
+  versionToken?: number | string | null
+): string {
+  return `${PUBLIC_SKILL_DOWNLOAD_CACHE_KEY_PREFIX}:${encodeCacheKeySegment(slug)}:${encodeCacheVersionToken(versionToken)}`;
 }
 
 export function getSkillPageCacheInvalidationKeys(slug: string): string[] {

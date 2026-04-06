@@ -1,16 +1,13 @@
 import type { PageServerLoad } from './$types';
 import { setPublicPageCache } from '$lib/server/cache/page';
 
-const CACHE_TTL = 300;
-const CACHE_TTL_NOT_FOUND = 60;
-
 interface Org {
   id: string;
   name: string;
   slug: string;
-  displayName: string;
-  description: string;
-  avatarUrl: string;
+  displayName: string | null;
+  description: string | null;
+  avatarUrl: string | null;
   verified: boolean;
   createdAt?: number;
   updatedAt?: number;
@@ -21,8 +18,8 @@ interface Org {
 
 interface Member {
   userId: string;
-  name: string;
-  image: string;
+  name: string | null;
+  image: string | null;
   role: string;
 }
 
@@ -30,7 +27,7 @@ interface Skill {
   id: string;
   name: string;
   slug: string;
-  description: string;
+  description: string | null;
   visibility: 'public' | 'private' | 'unlisted';
   stars: number;
   updatedAt?: number;
@@ -38,7 +35,7 @@ interface Skill {
 
 type OrgPageErrorKind = 'not_found' | 'temporary_failure';
 
-export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, request, platform }) => {
+export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, request }) => {
   setPublicPageCache({
     setHeaders,
     request,
@@ -49,9 +46,6 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
   });
 
   const slug = params.slug;
-  const cache = platform?.caches?.default;
-  const useAnonDataCache = !locals.user;
-  const cacheKey = `org-page:${slug}`;
   const fallback = {
     slug,
     org: null as Org | null,
@@ -61,62 +55,22 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
     errorKind: 'temporary_failure' as OrgPageErrorKind,
   };
 
-  if (useAnonDataCache && cache) {
-    try {
-      const cached = await cache.match(new Request(`https://cache/${cacheKey}`));
-      if (cached) {
-        const data = await cached.json() as Partial<typeof fallback> & {
-          errorKind?: OrgPageErrorKind | null;
-        };
-        const inferredErrorKind = data.errorKind
-          ?? (
-            data.error === 'Organization not found'
-              ? 'not_found'
-              : (data.error ? 'temporary_failure' : null)
-          );
-
-        if (inferredErrorKind === 'not_found') {
-          setHeaders({ 'X-Skillscat-Status-Override': '404' });
-          return {
-            slug,
-            org: data.org ?? null,
-            members: data.members ?? [],
-            skills: data.skills ?? [],
-            error: data.error ?? 'Organization not found',
-            errorKind: 'not_found' as OrgPageErrorKind,
-          };
-        }
-
-        if (inferredErrorKind === 'temporary_failure') {
-          setHeaders({
-            'X-Skillscat-Status-Override': '500',
-            'Cache-Control': 'no-store',
-          });
-        }
-
-        return {
-          slug,
-          org: data.org ?? null,
-          members: data.members ?? [],
-          skills: data.skills ?? [],
-          error: data.error ?? null,
-          errorKind: inferredErrorKind,
-        };
-      }
-    } catch {
-      // Cache miss or unavailable cache API
-    }
-  }
-
   try {
-    const [orgRes, membersRes, skillsRes] = await Promise.all([
-      fetch(`/api/orgs/${slug}`),
-      fetch(`/api/orgs/${slug}/members`),
-      fetch(`/api/orgs/${slug}/skills`),
-    ]);
+    const response = await fetch(`/api/orgs/${slug}/page`);
+    let data = fallback;
 
-    if (!orgRes.ok) {
-      if (orgRes.status === 404) {
+    try {
+      data = await response.json() as typeof fallback;
+    } catch {
+      data = {
+        ...fallback,
+        error: response.status === 404 ? 'Organization not found' : fallback.error,
+        errorKind: response.status === 404 ? 'not_found' : fallback.errorKind,
+      };
+    }
+
+    if (!response.ok) {
+      if (response.status === 404) {
         setHeaders({ 'X-Skillscat-Status-Override': '404' });
       } else {
         setHeaders({
@@ -124,57 +78,16 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
           'Cache-Control': 'no-store',
         });
       }
-      const result = {
-        ...fallback,
-        error: orgRes.status === 404 ? 'Organization not found' : 'Failed to load organization',
-        errorKind: orgRes.status === 404 ? 'not_found' as OrgPageErrorKind : 'temporary_failure' as OrgPageErrorKind,
-      };
-      if (orgRes.status === 404 && useAnonDataCache && cache) {
-        const response = new Response(JSON.stringify(result), {
-          headers: { 'Cache-Control': `public, max-age=${CACHE_TTL_NOT_FOUND}` },
-        });
-        platform?.context?.waitUntil(cache.put(new Request(`https://cache/${cacheKey}`), response));
-      }
-      return result;
     }
 
-    const orgData = await orgRes.json() as { organization?: Org };
-    if (!orgData.organization) {
-      setHeaders({ 'X-Skillscat-Status-Override': '404' });
-      return {
-        ...fallback,
-        error: 'Organization not found',
-        errorKind: 'not_found',
-      };
-    }
-
-    let members: Member[] = [];
-    if (membersRes.ok) {
-      const membersData = await membersRes.json() as { members?: Member[] };
-      members = membersData.members || [];
-    }
-
-    let skills: Skill[] = [];
-    if (skillsRes.ok) {
-      const skillsData = await skillsRes.json() as { skills?: Skill[] };
-      skills = skillsData.skills || [];
-    }
-
-    const result = {
+    return {
       slug,
-      org: orgData.organization,
-      members,
-      skills,
-      error: null,
-      errorKind: null,
+      org: data.org ?? null,
+      members: data.members ?? [],
+      skills: data.skills ?? [],
+      error: data.error ?? null,
+      errorKind: data.errorKind ?? null,
     };
-    if (useAnonDataCache && cache) {
-      const response = new Response(JSON.stringify(result), {
-        headers: { 'Cache-Control': `public, max-age=${CACHE_TTL}` },
-      });
-      platform?.context?.waitUntil(cache.put(new Request(`https://cache/${cacheKey}`), response));
-    }
-    return result;
   } catch {
     setHeaders({
       'X-Skillscat-Status-Override': '500',

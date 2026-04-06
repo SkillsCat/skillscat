@@ -2,7 +2,9 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { invalidateCache } from '$lib/server/cache';
 import {
+  getOrgPageSnapshotCacheKey,
   getSkillPageCacheInvalidationKeys,
+  getSkillSourceCacheKey,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
 import { getCategoryPageCacheInvalidationKeys } from '$lib/server/cache/categories';
@@ -204,9 +206,14 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
     `api:skill-files:${skill.slug}`,
     `skill:${skillId}`,
     `recommend:${skillId}`,
+    getSkillSourceCacheKey(skill.slug),
     ...getSkillPageCacheInvalidationKeys(skill.slug),
     ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
   ]);
+
+  if (skill.org_slug) {
+    cacheKeys.add(getOrgPageSnapshotCacheKey(skill.org_slug));
+  }
 
   for (const categorySlug of categorySlugs) {
     for (const cacheKey of getCategoryPageCacheInvalidationKeys(categorySlug)) {

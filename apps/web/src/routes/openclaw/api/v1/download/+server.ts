@@ -21,6 +21,10 @@ import {
   isOpenClawImmutableVersionRequest,
   resolveOpenClawBinaryCache,
 } from '$lib/server/openclaw/cache';
+import {
+  buildSkillMetricMessage,
+  enqueueSkillMetric,
+} from '$lib/server/skill/metrics';
 
 export const GET: RequestHandler = async ({ url, platform, request, locals }) => {
   const slug = decodeClawHubCompatSlug(url.searchParams.get('slug') ?? '');
@@ -104,26 +108,6 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
   }
   const selectedVersion = versionState.selectedVersion;
 
-  const recordDownload = () => {
-    const telemetryWrite = database
-      .prepare(`
-          INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
-          VALUES (?, NULL, ?, 'download', ?)
-        `)
-      .bind(crypto.randomUUID(), skill.id, Date.now())
-      .run()
-      .catch(() => {
-        // non-critical compatibility telemetry
-      });
-
-    if (waitUntil) {
-      waitUntil(telemetryWrite);
-      return;
-    }
-
-    void telemetryWrite;
-  };
-
   try {
     const buildZipBuffer = async () => {
       const fallbackFiles = await resolveOpenClawBundleFiles({
@@ -154,7 +138,41 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
       contentType: 'application/zip',
     });
 
-    recordDownload();
+    const occurredAt = Date.now();
+    if (!enqueueSkillMetric(
+      platform?.env?.METRICS_QUEUE,
+      buildSkillMetricMessage('download', skill.id, { occurredAt }),
+      {
+        waitUntil,
+        onError: () => database
+          .prepare(`
+            INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
+            VALUES (?, NULL, ?, 'download', ?)
+          `)
+          .bind(crypto.randomUUID(), skill.id, occurredAt)
+          .run()
+          .catch(() => {
+            // non-critical compatibility telemetry
+          }),
+      }
+    )) {
+      const telemetryWrite = database
+        .prepare(`
+          INSERT INTO user_actions (id, user_id, skill_id, action_type, created_at)
+          VALUES (?, NULL, ?, 'download', ?)
+        `)
+        .bind(crypto.randomUUID(), skill.id, occurredAt)
+        .run()
+        .catch(() => {
+          // non-critical compatibility telemetry
+        });
+
+      if (waitUntil) {
+        waitUntil(telemetryWrite);
+      } else {
+        void telemetryWrite;
+      }
+    }
 
     return new Response(cached.data as unknown as BodyInit, {
       headers: {

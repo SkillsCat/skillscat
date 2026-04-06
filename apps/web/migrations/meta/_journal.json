@@ -134,6 +134,27 @@
       "when": 1775494637384,
       "tag": "0018_goofy_black_widow",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1775497939035,
+      "tag": "0019_eager_ezekiel",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1775499094015,
+      "tag": "0020_condemned_lifeguard",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1775499667379,
+      "tag": "0021_spicy_captain_universe",
+      "breakpoints": true
     }
   ]
 }

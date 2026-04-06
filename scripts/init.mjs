@@ -39,6 +39,7 @@ const PRODUCTION_WORKER_NAMES = {
   'wrangler.indexing.toml': 'skillscat-indexing-production',
   'wrangler.classification.toml': 'skillscat-classification-production',
   'wrangler.security-analysis.toml': 'skillscat-security-analysis-production',
+  'wrangler.metrics.toml': 'skillscat-metrics-production',
   'wrangler.trending.toml': 'skillscat-trending-production',
   'wrangler.virustotal.toml': 'skillscat-virustotal-production',
   'wrangler.search-precompute.toml': 'skillscat-search-precompute-production',
@@ -54,6 +55,7 @@ const CONFIG_FILES = [
   'wrangler.indexing.toml',
   'wrangler.classification.toml',
   'wrangler.security-analysis.toml',
+  'wrangler.metrics.toml',
   'wrangler.trending.toml',
   'wrangler.virustotal.toml',
   'wrangler.search-precompute.toml',
@@ -81,6 +83,7 @@ const KV_REQUIRED_WORKERS = new Set([
   'indexing',
   'classification',
   'security-analysis',
+  'metrics',
   'trending',
   'virustotal',
   'tier-recalc',
@@ -94,6 +97,7 @@ const QUEUE_REQUIRED_WORKERS = new Set([
   'indexing',
   'classification',
   'security-analysis',
+  'metrics',
   'trending',
 ]);
 
@@ -103,6 +107,7 @@ const REQUIRED_SECRETS_BY_WORKER = {
   indexing: ['GITHUB_TOKEN'],
   classification: [],
   'security-analysis': ['GITHUB_TOKEN'],
+  metrics: [],
   trending: ['GITHUB_TOKEN'],
   virustotal: ['GITHUB_TOKEN'],
   'search-precompute': ['WORKER_SECRET'],
@@ -117,6 +122,7 @@ const OPTIONAL_SECRETS_BY_WORKER = {
   indexing: ['INDEXNOW_KEY'],
   classification: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY'],
   'security-analysis': ['OPENROUTER_API_KEY'],
+  metrics: [],
   trending: [],
   virustotal: ['VIRUSTOTAL_API_KEY'],
   'search-precompute': [],
@@ -557,6 +563,10 @@ queue = "skillscat-classification"
 binding = "SECURITY_ANALYSIS_QUEUE"
 queue = "skillscat-security-analysis"
 
+[[env.production.queues.producers]]
+binding = "METRICS_QUEUE"
+queue = "skillscat-metrics"
+
 [env.production.vars]
 PUBLIC_APP_URL = "https://your-domain.com"
 CACHE_VERSION = "v1"
@@ -693,6 +703,26 @@ SECURITY_MAX_AI_FILES = "8"
 SECURITY_MAX_AI_TEXT_BYTES = "48000"
 SECURITY_STABILITY_ROUNDS = "2"
 SECURITY_HEURISTIC_THRESHOLD = "4.5"
+`.trim(),
+  'wrangler.metrics.toml': `
+[env.production]
+name = "skillscat-metrics-production"
+
+[[env.production.queues.consumers]]
+queue = "skillscat-metrics"
+max_batch_size = 100
+max_batch_timeout = 30
+max_retries = 3
+dead_letter_queue = "skillscat-metrics-dlq"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "<your-production-kv-namespace-id>"
 `.trim(),
   'wrangler.trending.toml': `
 [env.production]
@@ -1756,7 +1786,7 @@ ${colors.cyan}╔═════════════════════
         logInfo('- KV: skillscat-kv');
       }
       if (requiredResources.needsQueues) {
-        logInfo('- Queues: skillscat-indexing, skillscat-classification, skillscat-security-analysis, skillscat-indexing-dlq, skillscat-classification-dlq, skillscat-security-analysis-dlq');
+        logInfo('- Queues: skillscat-indexing, skillscat-classification, skillscat-security-analysis, skillscat-metrics, skillscat-indexing-dlq, skillscat-classification-dlq, skillscat-security-analysis-dlq, skillscat-metrics-dlq');
       }
 
       if (requiredResources.needsD1) {
@@ -1799,9 +1829,11 @@ ${colors.cyan}╔═════════════════════
           'skillscat-indexing',
           'skillscat-classification',
           'skillscat-security-analysis',
+          'skillscat-metrics',
           'skillscat-indexing-dlq',
           'skillscat-classification-dlq',
           'skillscat-security-analysis-dlq',
+          'skillscat-metrics-dlq',
         ];
 
         for (const queue of queues) {
@@ -2227,9 +2259,17 @@ ${colors.cyan}╔═════════════════════
                 logError(`Failed to create security analysis queue: ${securityAnalysisQueueResult.error}`);
               }
 
+              const metricsQueueResult = await createQueue('skillscat-metrics');
+              if (metricsQueueResult.success) {
+                logSuccess('Queue created: skillscat-metrics');
+              } else {
+                logError(`Failed to create metrics queue: ${metricsQueueResult.error}`);
+              }
+
               await createQueue('skillscat-indexing-dlq');
               await createQueue('skillscat-classification-dlq');
               await createQueue('skillscat-security-analysis-dlq');
+              await createQueue('skillscat-metrics-dlq');
             }
 
             // 更新 wrangler 配置文件

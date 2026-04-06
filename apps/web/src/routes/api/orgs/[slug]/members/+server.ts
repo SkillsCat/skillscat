@@ -1,5 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { invalidateCache } from '$lib/server/cache';
+import { getOrgPageSnapshotCacheKey } from '$lib/server/cache/keys';
 
 function normalizeInviteRole(value: unknown): 'admin' | 'member' {
   if (value === undefined || value === null || value === '') {
@@ -198,6 +200,8 @@ export const POST: RequestHandler = async ({ locals, platform, params, request }
     )
     .run();
 
+  await invalidateCache(getOrgPageSnapshotCacheKey(slug));
+
   return json({
     success: true,
     message: `Invitation sent to @${cleanUsername}`,
@@ -270,6 +274,8 @@ export const DELETE: RequestHandler = async ({ locals, platform, params, request
   if (result.meta.changes === 0) {
     throw error(404, 'Member not found');
   }
+
+  await invalidateCache(getOrgPageSnapshotCacheKey(slug));
 
   return json({
     success: true,

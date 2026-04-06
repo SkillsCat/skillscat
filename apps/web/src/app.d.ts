@@ -12,6 +12,7 @@ declare global {
         INDEXING_QUEUE: Queue;
         CLASSIFICATION_QUEUE: Queue;
         SECURITY_ANALYSIS_QUEUE: Queue;
+        METRICS_QUEUE: Queue;
         GITHUB_CLIENT_ID: string;
         GITHUB_CLIENT_SECRET: string;
         BETTER_AUTH_SECRET: string;

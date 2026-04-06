@@ -1,0 +1,50 @@
+# Metrics Worker 配置
+# 复制此文件为 wrangler.metrics.toml 并填入你的配置
+# 消费 metrics 队列，汇总 access/download/install 指标
+
+name = "skillscat-metrics"
+main = "workers/metrics.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[[queues.consumers]]
+queue = "skillscat-metrics"
+max_batch_size = 100
+max_batch_timeout = 30
+max_retries = 3
+dead_letter_queue = "skillscat-metrics-dlq"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-database-id>"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "<your-kv-namespace-id>"
+
+[env.production]
+name = "skillscat-metrics-production"
+
+[[env.production.queues.consumers]]
+queue = "skillscat-metrics"
+max_batch_size = 100
+max_batch_timeout = 30
+max_retries = 3
+dead_letter_queue = "skillscat-metrics-dlq"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "skillscat-db"
+database_id = "<your-production-database-id>"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "<your-production-kv-namespace-id>"

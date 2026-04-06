@@ -4,7 +4,6 @@ const setPublicPageCache = vi.fn();
 const getSkillBySlug = vi.fn();
 const getRecommendedSkills = vi.fn();
 const loadSkillReadmeFromR2 = vi.fn();
-const recordSkillAccess = vi.fn();
 const getCached = vi.fn();
 const renderReadmeMarkdown = vi.fn((value: string) => value);
 const readCachedRecommendSkills = vi.fn();
@@ -15,11 +14,16 @@ vi.mock('$lib/server/cache/page', () => ({
   setPublicPageCache,
 }));
 
-vi.mock('$lib/server/db/utils', () => ({
+vi.mock('$lib/server/db/business/detail', () => ({
   getSkillBySlug,
+}));
+
+vi.mock('$lib/server/db/business/recommend', () => ({
   getRecommendedSkills,
+}));
+
+vi.mock('$lib/server/db/business/readme', () => ({
   loadSkillReadmeFromR2,
-  recordSkillAccess,
 }));
 
 vi.mock('$lib/server/cache', () => ({
