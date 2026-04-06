@@ -169,6 +169,9 @@ export async function convertPrivateSkillToPublicGithub(
 ): Promise<void> {
   const normalizedSkillPath = input.skillPath || '';
   const updatedAt = input.updatedAt ?? input.indexedAt;
+  const normalizedDescription = input.description ?? null;
+  const normalizedCommitSha = input.commitSha ?? null;
+  const normalizedFileStructure = input.fileStructure ?? null;
 
   await db.prepare(`
     UPDATE skills
@@ -196,7 +199,7 @@ export async function convertPrivateSkillToPublicGithub(
   `)
     .bind(
       input.name,
-      input.description,
+      normalizedDescription,
       input.repoOwner,
       input.repoName,
       normalizedSkillPath,
@@ -204,8 +207,8 @@ export async function convertPrivateSkillToPublicGithub(
       input.stars,
       input.forks,
       input.contentHash,
-      input.commitSha,
-      input.fileStructure,
+      normalizedCommitSha,
+      normalizedFileStructure,
       input.lastCommitAt,
       input.skillMdFirstCommitAt,
       input.repoCreatedAt,

@@ -66,6 +66,7 @@ function createHashDb() {
       stars INTEGER DEFAULT 0,
       forks INTEGER DEFAULT 0,
       content_hash TEXT,
+      commit_sha TEXT,
       last_commit_at INTEGER,
       skill_md_first_commit_at INTEGER,
       repo_created_at INTEGER,
