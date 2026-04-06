@@ -1,5 +1,5 @@
 import type { SkillCardData } from '$lib/types';
-import { addCategoriesToSkills } from '$lib/server/db/shared/skills';
+import { addAuthorAvatarsToSkills, addCategoriesToSkills } from '$lib/server/db/shared/skills';
 import { timedTask } from '$lib/server/db/shared/timing';
 import type { DbEnv, SkillListRow, TimingCollector } from '$lib/server/db/shared/types';
 
@@ -40,6 +40,7 @@ export async function getRecommendedSkills(
   if (!db) return [];
 
   const MIN_CANDIDATES = limit * 2;
+  const MAX_SCORING_CANDIDATES = MIN_CANDIDATES + 4;
   const hasCategories = categories.length > 0;
 
   // Step 1: Get current skill's tags
@@ -72,10 +73,6 @@ export async function getRecommendedSkills(
     s.stars, s.forks, s.trending_score as trendingScore,
     COALESCE(s.last_commit_at, s.updated_at) as updatedAt, s.last_commit_at as lastCommitAt`;
 
-  const SKILL_COLUMNS_WITH_AUTHOR = `
-    ${SKILL_COLUMNS_BASE},
-    a.avatar_url as authorAvatar`;
-
   const addCandidates = (rows: RecommendSkillCandidateRow[], tier: number) => {
     for (const row of rows) {
       if (!candidateMap.has(row.id)) {
@@ -86,33 +83,38 @@ export async function getRecommendedSkills(
   };
 
   const excludePlaceholders = () => excludeIds.map(() => '?').join(',');
+  const getTierFetchLimit = (baseFloor: number, headroom: number, maxCap: number) => {
+    const remaining = Math.max(MIN_CANDIDATES - candidateMap.size, 0);
+    return Math.max(baseFloor, Math.min(maxCap, remaining + headroom));
+  };
 
   // Tier 1: Category overlap
   if (hasCategories) {
     const catPh = categories.map(() => '?').join(',');
     const exPh = excludePlaceholders();
+    const tier1Limit = getTierFetchLimit(limit, 4, 24);
     const result = await timedTask(
       timingCollector,
       'rel_t1',
       () => db.prepare(`
-      WITH matched AS (
+      WITH matched_ids AS (
         SELECT
-          ${SKILL_COLUMNS_BASE},
-          COUNT(sc.category_slug) as sharedCategoryCount
-        FROM skill_categories sc
-        CROSS JOIN skills s
-        WHERE s.id = sc.skill_id
-          AND sc.category_slug IN (${catPh})
-          AND s.id NOT IN (${exPh})
-          AND s.visibility = 'public'
-        GROUP BY s.id
+          sc.skill_id as skillId,
+          COUNT(*) as sharedCategoryCount
+        FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+        WHERE sc.category_slug IN (${catPh})
+          AND sc.skill_id NOT IN (${exPh})
+        GROUP BY sc.skill_id
       )
-      SELECT matched.*, a.avatar_url as authorAvatar
-      FROM matched
-      LEFT JOIN authors a ON matched.repoOwner = a.username
-      ORDER BY matched.sharedCategoryCount DESC, matched.trendingScore DESC
-      LIMIT 30
-    `).bind(...categories, ...excludeIds).all<RecommendSkillCandidateRow>(),
+      SELECT
+        ${SKILL_COLUMNS_BASE},
+        matched.sharedCategoryCount
+      FROM matched_ids matched
+      JOIN skills s ON s.id = matched.skillId
+      WHERE s.visibility = 'public'
+      ORDER BY matched.sharedCategoryCount DESC, s.trending_score DESC
+      LIMIT ?
+    `).bind(...categories, ...excludeIds, tier1Limit).all<RecommendSkillCandidateRow>(),
       'tier1 category overlap'
     );
     addCandidates(result.results, 1);
@@ -122,28 +124,29 @@ export async function getRecommendedSkills(
   if (hasTags && candidateMap.size < MIN_CANDIDATES) {
     const tagPh = skillTags.map(() => '?').join(',');
     const exPh = excludePlaceholders();
+    const tier2Limit = getTierFetchLimit(Math.max(5, Math.ceil(limit / 2)), 2, 12);
     const result = await timedTask(
       timingCollector,
       'rel_t2',
       () => db.prepare(`
-      WITH matched AS (
+      WITH matched_ids AS (
         SELECT
-          ${SKILL_COLUMNS_BASE},
-          COUNT(st.tag) as sharedTagCount
-        FROM skill_tags st
-        CROSS JOIN skills s
-        WHERE s.id = st.skill_id
-          AND st.tag IN (${tagPh})
-          AND s.id NOT IN (${exPh})
-          AND s.visibility = 'public'
-        GROUP BY s.id
+          st.skill_id as skillId,
+          COUNT(*) as sharedTagCount
+        FROM skill_tags st INDEXED BY skill_tags_tag_skill_idx
+        WHERE st.tag IN (${tagPh})
+          AND st.skill_id NOT IN (${exPh})
+        GROUP BY st.skill_id
       )
-      SELECT matched.*, a.avatar_url as authorAvatar
-      FROM matched
-      LEFT JOIN authors a ON matched.repoOwner = a.username
-      ORDER BY matched.sharedTagCount DESC, matched.trendingScore DESC
-      LIMIT 20
-    `).bind(...skillTags, ...excludeIds).all<RecommendSkillCandidateRow>(),
+      SELECT
+        ${SKILL_COLUMNS_BASE},
+        matched.sharedTagCount
+      FROM matched_ids matched
+      JOIN skills s ON s.id = matched.skillId
+      WHERE s.visibility = 'public'
+      ORDER BY matched.sharedTagCount DESC, s.trending_score DESC
+      LIMIT ?
+    `).bind(...skillTags, ...excludeIds, tier2Limit).all<RecommendSkillCandidateRow>(),
       'tier2 tag overlap'
     );
     addCandidates(result.results, 2);
@@ -152,19 +155,19 @@ export async function getRecommendedSkills(
   // Tier 3: Same author
   if (repoOwner && candidateMap.size < MIN_CANDIDATES) {
     const exPh = excludePlaceholders();
+    const tier3Limit = getTierFetchLimit(3, 1, 6);
     const result = await timedTask(
       timingCollector,
       'rel_t3',
       () => db.prepare(`
-      SELECT ${SKILL_COLUMNS_WITH_AUTHOR}
+      SELECT ${SKILL_COLUMNS_BASE}
       FROM skills s
-      LEFT JOIN authors a ON s.repo_owner = a.username
       WHERE s.repo_owner = ?
         AND s.id NOT IN (${exPh})
         AND s.visibility = 'public'
       ORDER BY s.trending_score DESC
-      LIMIT 10
-    `).bind(repoOwner, ...excludeIds).all<RecommendSkillCandidateRow>(),
+      LIMIT ?
+    `).bind(repoOwner, ...excludeIds, tier3Limit).all<RecommendSkillCandidateRow>(),
       'tier3 same author'
     );
     addCandidates(result.results, 3);
@@ -173,18 +176,18 @@ export async function getRecommendedSkills(
   // Tier 4: Trending fallback
   if (candidateMap.size < MIN_CANDIDATES) {
     const exPh = excludePlaceholders();
+    const tier4Limit = getTierFetchLimit(4, 2, 8);
     const result = await timedTask(
       timingCollector,
       'rel_t4',
       () => db.prepare(`
-      SELECT ${SKILL_COLUMNS_WITH_AUTHOR}
+      SELECT ${SKILL_COLUMNS_BASE}
       FROM skills s
-      LEFT JOIN authors a ON s.repo_owner = a.username
       WHERE s.id NOT IN (${exPh})
         AND s.visibility = 'public'
       ORDER BY s.trending_score DESC
-      LIMIT 15
-    `).bind(...excludeIds).all<RecommendSkillCandidateRow>(),
+      LIMIT ?
+    `).bind(...excludeIds, tier4Limit).all<RecommendSkillCandidateRow>(),
       'tier4 trending fallback'
     );
     addCandidates(result.results, 4);
@@ -192,7 +195,15 @@ export async function getRecommendedSkills(
 
   if (candidateMap.size === 0) return [];
 
-  const allCandidates = Array.from(candidateMap.values());
+  const allCandidates = Array.from(candidateMap.values())
+    .sort((a, b) =>
+      a.tier - b.tier
+      || (b.data.sharedCategoryCount || 0) - (a.data.sharedCategoryCount || 0)
+      || (b.data.sharedTagCount || 0) - (a.data.sharedTagCount || 0)
+      || (b.data.trendingScore || 0) - (a.data.trendingScore || 0)
+      || (b.data.stars || 0) - (a.data.stars || 0)
+    )
+    .slice(0, MAX_SCORING_CANDIDATES);
   const allIds = allCandidates.map((c) => c.data.id);
 
   // Step 3: Batch enrichment queries
@@ -203,10 +214,13 @@ export async function getRecommendedSkills(
   const nonTier1Ids = allCandidates
     .filter((c) => c.tier !== 1)
     .map((c) => c.data.id);
+  const nonTier2Ids = allCandidates
+    .filter((c) => c.tier !== 2)
+    .map((c) => c.data.id);
 
-  const tagOverlapPromise = hasTags
+  const tagOverlapPromise = hasTags && nonTier2Ids.length > 0
     ? (async () => {
-      const idPh = allIds.map(() => '?').join(',');
+      const idPh = nonTier2Ids.map(() => '?').join(',');
       const tagPh = skillTags.map(() => '?').join(',');
       const tagResult = await timedTask(
         timingCollector,
@@ -216,7 +230,7 @@ export async function getRecommendedSkills(
       FROM skill_tags
       WHERE skill_id IN (${idPh}) AND tag IN (${tagPh})
       GROUP BY skill_id
-    `).bind(...allIds, ...skillTags).all<OverlapCountRow>(),
+    `).bind(...nonTier2Ids, ...skillTags).all<OverlapCountRow>(),
         'tag overlap batch'
       );
       for (const row of tagResult.results) {
@@ -313,13 +327,25 @@ export async function getRecommendedSkills(
 
   if (!includeCategories) {
     timingCollector?.('rel_add_cats', 0, 'skipped');
-    return top.map((skill) => ({ ...skill, categories: [] }));
+    return timedTask(
+      timingCollector,
+      'rel_add_auth',
+      () => addAuthorAvatarsToSkills(db, top.map((skill) => ({ ...skill, categories: [] }))),
+      'hydrate author avatars'
+    );
   }
 
-  return timedTask(
+  const skillsWithCategories = await timedTask(
     timingCollector,
     'rel_add_cats',
     () => addCategoriesToSkills(db, top),
     'hydrate categories'
+  );
+
+  return timedTask(
+    timingCollector,
+    'rel_add_auth',
+    () => addAuthorAvatarsToSkills(db, skillsWithCategories),
+    'hydrate author avatars'
   );
 }

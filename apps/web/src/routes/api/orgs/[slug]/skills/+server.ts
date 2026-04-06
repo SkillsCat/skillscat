@@ -74,26 +74,26 @@ export const GET: RequestHandler = async ({ locals, platform, request, params, u
   if (isMember) {
     query = `
       SELECT id, name, slug, description, visibility, stars,
-             COALESCE(last_commit_at, updated_at, indexed_at) AS updatedAt
-      FROM skills
+             CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END AS updatedAt
+      FROM skills INDEXED BY skills_org_stars_created_idx
       WHERE org_id = ?
       ORDER BY stars DESC, created_at DESC
       LIMIT ? OFFSET ?
     `;
     bindings = [org.id, queryLimit, offset];
-    countQuery = `SELECT COUNT(*) as count FROM skills WHERE org_id = ?`;
+    countQuery = `SELECT COUNT(*) as count FROM skills INDEXED BY skills_org_stars_created_idx WHERE org_id = ?`;
     countBindings = [org.id];
   } else {
     query = `
       SELECT id, name, slug, description, visibility, stars,
-             COALESCE(last_commit_at, updated_at, indexed_at) AS updatedAt
-      FROM skills
+             CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END AS updatedAt
+      FROM skills INDEXED BY skills_org_visibility_stars_created_idx
       WHERE org_id = ? AND visibility = 'public'
       ORDER BY stars DESC, created_at DESC
       LIMIT ? OFFSET ?
     `;
     bindings = [org.id, queryLimit, offset];
-    countQuery = `SELECT COUNT(*) as count FROM skills WHERE org_id = ? AND visibility = 'public'`;
+    countQuery = `SELECT COUNT(*) as count FROM skills INDEXED BY skills_org_visibility_stars_created_idx WHERE org_id = ? AND visibility = 'public'`;
     countBindings = [org.id];
   }
 

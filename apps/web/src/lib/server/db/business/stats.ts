@@ -66,7 +66,7 @@ async function loadCategoryAggregates(
     SELECT
       sc.category_slug AS category_slug,
       COUNT(*) AS count,
-      MAX(COALESCE(s.last_commit_at, s.updated_at, s.indexed_at)) AS max_ts
+      MAX(CASE WHEN s.last_commit_at IS NULL THEN s.updated_at ELSE s.last_commit_at END) AS max_ts
     FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
     JOIN skills s
       ON s.id = sc.skill_id

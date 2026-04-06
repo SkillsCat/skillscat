@@ -332,7 +332,7 @@ export async function getExpandedCoreSitemapPages(
   if (!db) return basePages;
 
   const publicSkillsRow = await db.prepare(`
-    SELECT COUNT(*) AS count, MAX(COALESCE(last_commit_at, updated_at, indexed_at)) AS max_ts
+    SELECT COUNT(*) AS count, MAX(${buildSkillFreshnessExpr()}) AS max_ts
     FROM skills
     WHERE visibility = 'public'
   `).bind().first<CountAndMaxRow>();
@@ -435,44 +435,15 @@ function getEntityUpdatedExpr(alias: string): string {
   return `${alias}.updated_at`;
 }
 
-function buildEntityHasAnyPublicSkillsExists(
-  config: EntitySitemapQueryConfig,
-  matchExpr: string
-): string {
-  return `EXISTS (
-    SELECT 1
+function buildEntitySkillFreshnessCte(config: EntitySitemapQueryConfig): string {
+  return `skill_freshness AS (
+    SELECT
+      s.${config.matchColumn} AS entity_key,
+      MAX(${buildSkillFreshnessExpr('s')}) AS skill_freshness_ts
     FROM skills s INDEXED BY ${config.indexName}
     WHERE s.visibility = 'public'
-      AND s.${config.matchColumn} = ${matchExpr}
-    LIMIT 1
-  )`;
-}
-
-function buildEntityHasRecentPublicSkillsExists(
-  config: EntitySitemapQueryConfig,
-  matchExpr: string
-): string {
-  return `EXISTS (
-    SELECT 1
-    FROM skills s INDEXED BY ${config.indexName}
-    WHERE s.visibility = 'public'
-      AND s.${config.matchColumn} = ${matchExpr}
-      AND ${buildSkillFreshnessExpr('s')} >= ?
-    LIMIT 1
-  )`;
-}
-
-function buildEntityLatestSkillFreshnessSubquery(
-  config: EntitySitemapQueryConfig,
-  matchExpr: string
-): string {
-  return `(
-    SELECT ${buildSkillFreshnessExpr('s')}
-    FROM skills s INDEXED BY ${config.indexName}
-    WHERE s.visibility = 'public'
-      AND s.${config.matchColumn} = ${matchExpr}
-    ORDER BY ${buildSkillFreshnessExpr('s')} DESC
-    LIMIT 1
+      AND s.${config.matchColumn} IS NOT NULL
+    GROUP BY s.${config.matchColumn}
   )`;
 }
 
@@ -485,13 +456,14 @@ async function getDynamicEntitySitemapStats(
   const skillFreshnessExpr = 'skill_freshness_ts';
 
   const row = await db.prepare(`
-    WITH entity_skill_freshness AS (
+    WITH ${buildEntitySkillFreshnessCte(config)},
+    entity_skill_freshness AS (
       SELECT
         ${entityUpdatedExpr} AS updated_at,
-        ${buildEntityLatestSkillFreshnessSubquery(config, entityMatchExpr)} AS ${skillFreshnessExpr}
+        sf.${skillFreshnessExpr} AS ${skillFreshnessExpr}
       FROM ${config.table} ${config.alias}
+      JOIN skill_freshness sf ON sf.entity_key = ${entityMatchExpr}
       WHERE ${config.baseWhere}
-        AND ${buildEntityHasAnyPublicSkillsExists(config, entityMatchExpr)}
     )
     SELECT
       COUNT(*) AS count,
@@ -517,15 +489,17 @@ async function getRecentEntitySitemapStats(
   const skillFreshnessExpr = 'skill_freshness_ts';
 
   const row = await db.prepare(`
-    WITH recent_entities AS (
+    WITH ${buildEntitySkillFreshnessCte(config)},
+    recent_entities AS (
       SELECT
         ${entityUpdatedExpr} AS updated_at,
-        ${buildEntityLatestSkillFreshnessSubquery(config, entityMatchExpr)} AS ${skillFreshnessExpr}
+        sf.${skillFreshnessExpr} AS ${skillFreshnessExpr}
       FROM ${config.table} ${config.alias}
+      JOIN skill_freshness sf ON sf.entity_key = ${entityMatchExpr}
       WHERE ${config.baseWhere}
         AND (
           ${entityUpdatedExpr} >= ?
-          OR ${buildEntityHasRecentPublicSkillsExists(config, entityMatchExpr)}
+          OR sf.${skillFreshnessExpr} >= ?
         )
     )
     SELECT
@@ -553,14 +527,15 @@ async function loadEntitySitemapPage(
   const labelExpr = getEntityLabelExpr(config);
 
   const rows = await db.prepare(`
-    WITH paged_entities AS (
+    WITH ${buildEntitySkillFreshnessCte(config)},
+    paged_entities AS (
       SELECT
         ${labelExpr} AS entity_label,
         ${entityUpdatedExpr} AS updated_at,
-        ${buildEntityLatestSkillFreshnessSubquery(config, entityMatchExpr)} AS ${skillFreshnessExpr}
+        sf.${skillFreshnessExpr} AS ${skillFreshnessExpr}
       FROM ${config.table} ${config.alias}
+      JOIN skill_freshness sf ON sf.entity_key = ${entityMatchExpr}
       WHERE ${config.baseWhere}
-        AND ${buildEntityHasAnyPublicSkillsExists(config, entityMatchExpr)}
       ORDER BY ${labelExpr} ASC
       LIMIT ? OFFSET ?
     )
@@ -592,16 +567,18 @@ async function loadRecentEntitySitemapPages(
   const labelExpr = getEntityLabelExpr(config);
 
   const rows = await db.prepare(`
-    WITH recent_entities AS (
+    WITH ${buildEntitySkillFreshnessCte(config)},
+    recent_entities AS (
       SELECT
         ${labelExpr} AS entity_label,
         ${entityUpdatedExpr} AS updated_at,
-        ${buildEntityLatestSkillFreshnessSubquery(config, entityMatchExpr)} AS ${skillFreshnessExpr}
+        sf.${skillFreshnessExpr} AS ${skillFreshnessExpr}
       FROM ${config.table} ${config.alias}
+      JOIN skill_freshness sf ON sf.entity_key = ${entityMatchExpr}
       WHERE ${config.baseWhere}
         AND (
           ${entityUpdatedExpr} >= ?
-          OR ${buildEntityHasRecentPublicSkillsExists(config, entityMatchExpr)}
+          OR sf.${skillFreshnessExpr} >= ?
         )
     )
     SELECT

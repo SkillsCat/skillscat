@@ -100,7 +100,15 @@ async function fetchRecommendedSkills(db: D1Database, skill: SkillDetail): Promi
   }
 
   const recommendResult = await db.prepare(`
-    WITH matched AS (
+    WITH matched_ids AS (
+      SELECT
+        sc.skill_id as skillId
+      FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+      WHERE sc.category_slug IN (${skill.categories.map(() => '?').join(',')})
+        AND sc.skill_id != ?
+      GROUP BY sc.skill_id
+    ),
+    matched AS (
       SELECT
         s.id,
         s.name,
@@ -112,13 +120,9 @@ async function fetchRecommendedSkills(db: D1Database, skill: SkillDetail): Promi
         s.forks,
         s.trending_score as trendingScore,
         COALESCE(s.last_commit_at, s.updated_at) as updatedAt
-      FROM skill_categories sc
-      CROSS JOIN skills s
-      WHERE s.id = sc.skill_id
-        AND sc.category_slug IN (${skill.categories.map(() => '?').join(',')})
-        AND s.id != ?
-        AND s.visibility = 'public'
-      GROUP BY s.id
+      FROM matched_ids m
+      JOIN skills s ON s.id = m.skillId
+      WHERE s.visibility = 'public'
       ORDER BY s.trending_score DESC
       LIMIT 6
     )

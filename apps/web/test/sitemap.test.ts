@@ -250,8 +250,10 @@ describe('profile and org sitemap freshness', () => {
       prepare(query: string) {
         const normalized = query.replace(/\s+/g, ' ').trim();
         expect(normalized).toContain('SELECT a.username AS entity_label');
+        expect(normalized).toContain('WITH skill_freshness AS (');
         expect(normalized).toContain('INDEXED BY skills_public_repo_owner_sitemap_freshness_idx');
-        expect(normalized).toContain("WHERE s.visibility = 'public' AND s.repo_owner = a.username");
+        expect(normalized).toContain("WHERE s.visibility = 'public' AND s.repo_owner IS NOT NULL");
+        expect(normalized).toContain('JOIN skill_freshness sf ON sf.entity_key = a.username');
         expect(normalized).toContain('ORDER BY entity_label ASC');
 
         return {
@@ -335,8 +337,10 @@ describe('profile and org sitemap freshness', () => {
       prepare(query: string) {
         const normalized = query.replace(/\s+/g, ' ').trim();
         expect(normalized).toContain('SELECT o.slug AS entity_label');
+        expect(normalized).toContain('WITH skill_freshness AS (');
         expect(normalized).toContain('INDEXED BY skills_public_org_sitemap_freshness_idx');
-        expect(normalized).toContain("WHERE s.visibility = 'public' AND s.org_id = o.id");
+        expect(normalized).toContain("WHERE s.visibility = 'public' AND s.org_id IS NOT NULL");
+        expect(normalized).toContain('JOIN skill_freshness sf ON sf.entity_key = o.id');
         expect(normalized).toContain('ORDER BY freshness_ts DESC, entity_label ASC');
 
         return {

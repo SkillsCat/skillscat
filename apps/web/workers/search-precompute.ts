@@ -174,10 +174,9 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
           rs.precomputed_at,
           rs.algo_version
         FROM candidate_ids c
-        CROSS JOIN skills s
+        JOIN skills s ON s.id = c.skill_id
         LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
-        WHERE s.id = c.skill_id
-          AND s.visibility = 'public'
+        WHERE s.visibility = 'public'
           AND s.tier != 'archived'
         ORDER BY
           COALESCE(rs.dirty, 1) DESC,
@@ -221,10 +220,9 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
           rs.precomputed_at,
           rs.algo_version
         FROM candidate_ids c
-        CROSS JOIN skills s
+        JOIN skills s ON s.id = c.skill_id
         LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
-        WHERE s.id = c.skill_id
-          AND s.visibility = 'public'
+        WHERE s.visibility = 'public'
           AND s.tier != 'archived'
         ORDER BY
           COALESCE(rs.dirty, 1) DESC,
@@ -564,10 +562,9 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
           ss.precomputed_at,
           ss.algo_version
         FROM candidate_ids c
-        CROSS JOIN skills s
+        JOIN skills s ON s.id = c.skill_id
         LEFT JOIN skill_search_state ss ON ss.skill_id = s.id
-        WHERE s.id = c.skill_id
-          AND s.visibility = 'public'
+        WHERE s.visibility = 'public'
           AND s.tier != 'archived'
         ORDER BY
           COALESCE(ss.dirty, 1) DESC,
@@ -630,10 +627,9 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
           ss.precomputed_at,
           ss.algo_version
         FROM candidate_ids c
-        CROSS JOIN skills s
+        JOIN skills s ON s.id = c.skill_id
         LEFT JOIN skill_search_state ss ON ss.skill_id = s.id
-        WHERE s.id = c.skill_id
-          AND s.visibility = 'public'
+        WHERE s.visibility = 'public'
           AND s.tier != 'archived'
         ORDER BY
           COALESCE(ss.dirty, 1) DESC,

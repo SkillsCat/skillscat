@@ -89,6 +89,49 @@ export async function hydrateCachedSkills(
   });
 }
 
+export async function addAuthorAvatarsToSkills(
+  db: D1Database,
+  skills: SkillCardData[]
+): Promise<SkillCardData[]> {
+  if (skills.length === 0) return [];
+
+  const repoOwners = Array.from(new Set(
+    skills
+      .map((skill) => skill.repoOwner)
+      .filter((owner): owner is string => typeof owner === 'string' && owner.length > 0)
+  ));
+
+  if (repoOwners.length === 0) return skills;
+
+  const placeholders = repoOwners.map(() => '?').join(',');
+  const authors = await db.prepare(`
+    SELECT username, avatar_url as authorAvatar
+    FROM authors
+    WHERE username IN (${placeholders})
+  `)
+    .bind(...repoOwners)
+    .all<{ username: string; authorAvatar: string | null }>();
+
+  const avatarMap = new Map<string, string>();
+  for (const row of authors.results || []) {
+    if (row.authorAvatar) {
+      avatarMap.set(row.username, row.authorAvatar);
+    }
+  }
+
+  return skills.map((skill) => {
+    const authorAvatar = avatarMap.get(skill.repoOwner) ?? skill.authorAvatar ?? undefined;
+    if (authorAvatar === skill.authorAvatar) {
+      return skill;
+    }
+
+    return {
+      ...skill,
+      authorAvatar,
+    };
+  });
+}
+
 export async function addCategoriesToSkills(
   db: D1Database,
   skills: SkillListRow[]

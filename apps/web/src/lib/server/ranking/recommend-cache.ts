@@ -10,8 +10,8 @@ import {
 
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 
-export const RECOMMEND_ONLINE_CACHE_TTL_SECONDS = 6 * 60 * 60;
-export const RECOMMEND_PRECOMPUTED_READ_CACHE_TTL_SECONDS = 30 * 60;
+export const RECOMMEND_ONLINE_CACHE_TTL_SECONDS = 12 * 60 * 60;
+export const RECOMMEND_PRECOMPUTED_READ_CACHE_TTL_SECONDS = 6 * 60 * 60;
 
 export interface RecommendRefreshStateRow {
   recommendDirty: number | null;

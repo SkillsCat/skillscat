@@ -6,6 +6,9 @@ import { buildPrefixRange, type PrefixRange } from '$lib/server/text/prefix-rang
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+const REGISTRY_SEARCH_CACHE_TTL_SECONDS = 15 * 60;
+const REGISTRY_SEARCH_CACHE_VERSION = 'v2';
+const MAX_SHARED_CACHE_OFFSET = 80;
 const MAX_QUERY_LENGTH = 120;
 const MAX_CATEGORY_LENGTH = 64;
 const MAX_QUERY_TOKENS = 8;
@@ -52,6 +55,13 @@ function parseClampedInt(raw: unknown, fallback: number, min: number, max: numbe
     return fallback;
   }
   return Math.min(Math.max(parsed, min), max);
+}
+
+function normalizeRegistrySearchCacheLimit(limit: number): number {
+  if (limit <= 10) return 10;
+  if (limit <= 20) return 20;
+  if (limit <= 50) return 50;
+  return 100;
 }
 
 function parseNonNegativeInt(raw: unknown, fallback: number): number {
@@ -216,19 +226,25 @@ export async function resolveRegistrySearch(
   }
 
   const canCache = !canIncludePrivate;
+  const cacheLimit = normalizeRegistrySearchCacheLimit(input.limit);
+  const canUseSharedCache = canCache && input.offset <= MAX_SHARED_CACHE_OFFSET;
 
-  if (canCache) {
-    const cacheKey = `search:${input.query}:${input.category}:${input.limit}:${input.offset}`;
+  if (canUseSharedCache) {
+    const cacheKey = `search:${REGISTRY_SEARCH_CACHE_VERSION}:${input.query}:${input.category}:${cacheLimit}:${input.offset}`;
     const cached = await getCached(
       cacheKey,
-      async () => fetchSearchResults(db, input, []),
-      30,
+      async () => fetchSearchResults(db, { ...input, limit: cacheLimit }, []),
+      REGISTRY_SEARCH_CACHE_TTL_SECONDS,
       { waitUntil }
     );
+    const skills = cached.data.skills.slice(0, input.limit);
 
     return {
-      data: cached.data,
-      cacheControl: 'public, max-age=30, stale-while-revalidate=90',
+      data: {
+        ...cached.data,
+        skills,
+      },
+      cacheControl: `public, max-age=${REGISTRY_SEARCH_CACHE_TTL_SECONDS}, stale-while-revalidate=3600`,
       cacheStatus: cached.hit ? 'HIT' : 'MISS',
     };
   }
@@ -459,10 +475,9 @@ async function fetchSearchResults(
   const pageIdsResult = input.category
     ? await db.prepare(`
       SELECT s.id
-      FROM skill_categories sc
-      CROSS JOIN skills s
-      WHERE s.id = sc.skill_id
-        AND sc.category_slug = ?
+      FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+      JOIN skills s ON s.id = sc.skill_id
+      WHERE sc.category_slug = ?
         AND ${visibilityFilter.sql}
         ${queryFilterSql}
       ORDER BY s.trending_score DESC
@@ -492,10 +507,9 @@ async function fetchSearchResults(
     const countResult = input.category
       ? await db.prepare(`
         SELECT COUNT(*) as total
-        FROM skill_categories sc
-        CROSS JOIN skills s
-        WHERE s.id = sc.skill_id
-          AND sc.category_slug = ?
+        FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+        JOIN skills s ON s.id = sc.skill_id
+        WHERE sc.category_slug = ?
           AND ${visibilityFilter.sql}
           ${queryFilterSql}
       `)

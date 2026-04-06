@@ -425,10 +425,9 @@ export async function getSkillsByCategory(
           WHEN s.classification_method = 'keyword' THEN 2
           ELSE 3
         END as classificationRank
-      FROM skill_categories sc
-      CROSS JOIN skills s
-      WHERE s.id = sc.skill_id
-        AND sc.category_slug = ?
+      FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+      JOIN skills s ON s.id = sc.skill_id
+      WHERE sc.category_slug = ?
         AND s.visibility = 'public'
       ORDER BY classificationRank ASC, s.trending_score DESC
       LIMIT ? OFFSET ?
@@ -450,10 +449,9 @@ export async function getSkillsByCategory(
   } else {
     const countResult = await env.DB.prepare(`
       SELECT COUNT(*) as total
-      FROM skill_categories sc
-      CROSS JOIN skills s
-      WHERE s.id = sc.skill_id
-        AND sc.category_slug = ?
+      FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+      JOIN skills s ON s.id = sc.skill_id
+      WHERE sc.category_slug = ?
         AND s.visibility = 'public'
     `)
       .bind(categorySlug)

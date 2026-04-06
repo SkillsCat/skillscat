@@ -91,9 +91,8 @@ export async function searchSkills(
       COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       a.avatar_url as authorAvatar
     FROM dedup_ids d
-    CROSS JOIN skills s
+    JOIN skills s ON s.id = d.id
     LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE s.id = d.id
     ORDER BY
       CASE
         WHEN LOWER(s.name) = ? THEN 0

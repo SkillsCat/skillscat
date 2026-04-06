@@ -25,7 +25,7 @@ import {
 
 const RECOMMEND_RESPONSE_LIMIT = 6;
 const RECOMMEND_CACHE_LIMIT = 10;
-const PUBLIC_RECOMMEND_MAX_AGE_SECONDS = 1800; // 30 minutes
+const PUBLIC_RECOMMEND_MAX_AGE_SECONDS = 4 * 60 * 60; // 4 hours
 const PUBLIC_RECOMMEND_STALE_WHILE_REVALIDATE_SECONDS = 86400; // 1 day
 
 function buildPublicRecommendCacheControl(): string {

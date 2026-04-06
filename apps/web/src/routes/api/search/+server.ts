@@ -11,8 +11,8 @@ const MAX_QUERY_LENGTH = 120;
 const MAX_CATEGORY_LENGTH = 64;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 20;
-const SEARCH_CACHE_TTL_SECONDS = 45;
-const SEARCH_CACHE_KEY_VERSION = 'v8';
+const SEARCH_CACHE_TTL_SECONDS = 15 * 60;
+const SEARCH_CACHE_KEY_VERSION = 'v9';
 const TERM_CANDIDATE_LIMIT_MULTIPLIER = 4;
 const PREFIX_CANDIDATE_LIMIT_MULTIPLIER = 3;
 const CATEGORY_CANDIDATE_LIMIT_MULTIPLIER = 2;
@@ -88,6 +88,12 @@ function parseLimit(rawLimit: string | null): number {
     return DEFAULT_LIMIT;
   }
   return Math.min(Math.max(parsed, 1), MAX_LIMIT);
+}
+
+function normalizeSearchCacheLimit(limit: number): number {
+  if (limit <= 5) return 5;
+  if (limit <= 10) return 10;
+  return 20;
 }
 
 function normalizeCategory(value: string | null): string {
@@ -399,11 +405,10 @@ async function fetchTermCandidates(
       matched.matchedTermCount as matchedTermCount,
       matched.matchedTermWeight as matchedTermWeight
     FROM matched_terms matched
-    CROSS JOIN skills s
+    JOIN skills s ON s.id = matched.skillId
     LEFT JOIN authors a ON s.repo_owner = a.username
     ${searchStateJoinSql}
-    WHERE s.id = matched.skillId
-      AND s.visibility = 'public'
+    WHERE s.visibility = 'public'
     ORDER BY
       matched.matchedTermCount DESC,
       matched.matchedTermWeight DESC,
@@ -471,11 +476,10 @@ async function fetchTermCandidates(
       matched.matchedTermCount as matchedTermCount,
       matched.matchedTermWeight as matchedTermWeight
     FROM matched_terms matched
-    CROSS JOIN skills s
+    JOIN skills s ON s.id = matched.skillId
     LEFT JOIN authors a ON s.repo_owner = a.username
     ${searchStateJoinSql}
-    WHERE s.id = matched.skillId
-      AND s.visibility = 'public'
+    WHERE s.visibility = 'public'
       ${exclusion.sql}
     ORDER BY
       matched.matchedTermCount DESC,
@@ -725,7 +729,7 @@ async function fetchCategoryCandidates(
       SELECT
         sc.skill_id as skillId,
         COUNT(*) as matchedCategoryCount
-      FROM skill_categories sc
+      FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
       WHERE sc.category_slug IN (${placeholders})
       GROUP BY sc.skill_id
     )
@@ -747,11 +751,10 @@ async function fetchCategoryCandidates(
       s.tier,
       matched.matchedCategoryCount as matchedCategoryCount
     FROM matched_categories matched
-    CROSS JOIN skills s
+    JOIN skills s ON s.id = matched.skillId
     LEFT JOIN authors a ON s.repo_owner = a.username
     ${searchStateJoinSql}
-    WHERE s.id = matched.skillId
-      AND s.visibility = 'public'
+    WHERE s.visibility = 'public'
       ${exclusion.sql}
     ORDER BY
       matched.matchedCategoryCount DESC,
@@ -863,6 +866,8 @@ export const GET: RequestHandler = async ({ url, platform }) => {
     const query = normalizeText((url.searchParams.get('q') || '').slice(0, MAX_QUERY_LENGTH));
     const category = normalizeCategory(url.searchParams.get('category'));
     const limit = parseLimit(url.searchParams.get('pageSize') ?? url.searchParams.get('limit'));
+    const cacheLimit = normalizeSearchCacheLimit(limit);
+    const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
 
     if (!query || query.length < MIN_QUERY_LENGTH) {
       return json({
@@ -877,33 +882,35 @@ export const GET: RequestHandler = async ({ url, platform }) => {
 
     const db = platform?.env?.DB;
     const { data, hit } = await getCached(
-      `api:search:${SEARCH_CACHE_KEY_VERSION}:${query}:${category || '_'}:${limit}`,
+      `api:search:${SEARCH_CACHE_KEY_VERSION}:${query}:${category || '_'}:${cacheLimit}`,
       async () => {
         if (!db) {
           return { skills: [], categories: [], total: 0 } satisfies SearchSuggestionsResult;
         }
 
         try {
-          return await fetchSuggestions(db, query, limit, category);
+          return await fetchSuggestions(db, query, cacheLimit, category);
         } catch {
           return { skills: [], categories: [], total: 0 } satisfies SearchSuggestionsResult;
         }
       },
-      SEARCH_CACHE_TTL_SECONDS
+      SEARCH_CACHE_TTL_SECONDS,
+      { waitUntil }
     );
+    const skills = data.skills.slice(0, limit);
 
     return json({
       success: true,
       data: {
-        skills: data.skills,
+        skills,
         categories: data.categories
       },
       meta: {
-        total: data.total
+        total: skills.length
       }
     } satisfies ApiResponse<{ skills: SearchSuggestionSkill[]; categories: SearchSuggestionCategory[] }>, {
       headers: {
-        'Cache-Control': `public, max-age=${SEARCH_CACHE_TTL_SECONDS}, stale-while-revalidate=90`,
+        'Cache-Control': `public, max-age=${SEARCH_CACHE_TTL_SECONDS}, stale-while-revalidate=3600`,
         'X-Cache': hit ? 'HIT' : 'MISS'
       }
     });

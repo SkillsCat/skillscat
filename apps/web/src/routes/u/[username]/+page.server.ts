@@ -1,8 +1,8 @@
 import type { PageServerLoad } from './$types';
 import { setPublicPageCache } from '$lib/server/cache/page';
 
-const CACHE_TTL = 300; // 5 minutes
-const CACHE_TTL_NOT_FOUND = 60; // 1 minute for 404s
+const CACHE_TTL = 30 * 60; // 30 minutes
+const CACHE_TTL_NOT_FOUND = 5 * 60; // 5 minutes for 404s
 
 interface UserProfileLoadResult {
   profile: UserProfile | null;
@@ -59,8 +59,8 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
     setHeaders,
     request,
     isAuthenticated: Boolean(locals.user),
-    sMaxAge: 120,
-    staleWhileRevalidate: 600,
+    sMaxAge: CACHE_TTL,
+    staleWhileRevalidate: 3600,
     varyByLanguageHeader: false,
   });
 
@@ -146,7 +146,7 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
         s.description,
         s.stars,
         COALESCE(s.last_commit_at, s.updated_at) as updatedAt
-      FROM skills s
+      FROM skills s INDEXED BY skills_owner_visibility_stars_idx
       WHERE s.owner_id = ? AND s.visibility = 'public'
       ORDER BY s.stars DESC, COALESCE(s.last_commit_at, s.updated_at) DESC
     `)
@@ -246,7 +246,7 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
       s.description,
       s.stars,
       COALESCE(s.last_commit_at, s.updated_at) as updatedAt
-    FROM skills s
+    FROM skills s INDEXED BY skills_visibility_repo_owner_idx
     WHERE s.repo_owner = ? AND s.visibility = 'public'
     ORDER BY s.stars DESC, COALESCE(s.last_commit_at, s.updated_at) DESC
   `)
