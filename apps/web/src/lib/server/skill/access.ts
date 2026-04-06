@@ -1,4 +1,4 @@
-const BOT_UA_PATTERN = /\b(bot|crawler|spider|slurp|preview|headless|lighthouse)\b/i;
+import { isCrawlerLikeRequest } from '$lib/server/request-client';
 
 export function shouldTrackSkillAccess(request: Request): boolean {
   const purpose = `${request.headers.get('purpose') || ''} ${request.headers.get('sec-purpose') || ''}`.toLowerCase();
@@ -11,7 +11,7 @@ export function shouldTrackSkillAccess(request: Request): boolean {
     return false;
   }
 
-  return !BOT_UA_PATTERN.test(ua);
+  return !isCrawlerLikeRequest(request);
 }
 
 export function getSkillAccessClientKey(request: Request, userId: string | null): string | undefined {

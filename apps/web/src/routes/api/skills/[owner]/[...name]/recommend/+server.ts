@@ -6,6 +6,7 @@ import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
 import { getRecommendedSkills } from '$lib/server/db/business/recommend';
 import { isOpenClawUserAgent } from '$lib/server/openclaw/agent-markdown';
+import { isCrawlerLikeRequest } from '$lib/server/request-client';
 import { buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
 import {
   buildRecommendPrecomputedCacheKey,
@@ -29,6 +30,14 @@ const PUBLIC_RECOMMEND_STALE_WHILE_REVALIDATE_SECONDS = 86400; // 1 day
 
 function buildPublicRecommendCacheControl(): string {
   return `public, max-age=${PUBLIC_RECOMMEND_MAX_AGE_SECONDS}, stale-while-revalidate=${PUBLIC_RECOMMEND_STALE_WHILE_REVALIDATE_SECONDS}`;
+}
+
+function shouldSuppressRealtimeFallback(request: Request, tier: string | null | undefined): boolean {
+  if (!isCrawlerLikeRequest(request)) {
+    return false;
+  }
+
+  return tier !== 'hot' && tier !== 'warm';
 }
 
 interface RuntimeEnv {
@@ -179,6 +188,9 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
 
     let skillCategories: string[] | null = null;
     let skillTags: string[] | null = null;
+    const suppressRealtimeFallback = !forceRefresh
+      && skill.visibility === 'public'
+      && shouldSuppressRealtimeFallback(request, skill.tier);
     const loadSkillSignals = async (): Promise<{ categories: string[]; tags: string[] }> => {
       if (skillCategories && skillTags) {
         return { categories: skillCategories, tags: skillTags };
@@ -333,8 +345,13 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       );
 
       if (precomputedRecommendSkills !== null) {
-        if (shouldRefreshPrecomputedRecommend(skill, algoVersion, now)) {
+        if (
+          shouldRefreshPrecomputedRecommend(skill, algoVersion, now)
+          && !suppressRealtimeFallback
+        ) {
           refreshInBackground();
+        } else if (suppressRealtimeFallback) {
+          serverTimings.push({ name: 'refresh_suppressed', dur: 0, desc: 'crawler-cold-skip' });
         }
 
         return json({
@@ -351,19 +368,28 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
         });
       }
 
-      if (isOpenClawRequest) {
-        serverTimings.push({ name: 'fallback_online', dur: 0, desc: 'openclaw-cache-only' });
+      if (isOpenClawRequest || suppressRealtimeFallback) {
+        const headers: Record<string, string> = {
+          'Cache-Control': buildPublicRecommendCacheControl(),
+          'X-Cache': precomputedCacheHit ? 'HIT' : 'MISS',
+          'Server-Timing': buildServerTimingHeader(),
+        };
+        if (suppressRealtimeFallback) {
+          headers.Vary = 'User-Agent';
+        }
+
+        serverTimings.push({
+          name: 'fallback_online',
+          dur: 0,
+          desc: isOpenClawRequest ? 'openclaw-cache-only' : 'crawler-cold-skip'
+        });
         return json({
           success: true,
           data: {
             recommendSkills: [],
           },
         } satisfies ApiResponse<{ recommendSkills: SkillCardData[] }>, {
-          headers: {
-            'Cache-Control': buildPublicRecommendCacheControl(),
-            'X-Cache': precomputedCacheHit ? 'HIT' : 'MISS',
-            'Server-Timing': buildServerTimingHeader(),
-          },
+          headers,
         });
       }
     }
