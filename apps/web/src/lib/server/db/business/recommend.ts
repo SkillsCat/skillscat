@@ -1,3 +1,4 @@
+import type { D1Database } from '@cloudflare/workers-types';
 import type { SkillCardData } from '$lib/types';
 import { addAuthorAvatarsToSkills, addCategoriesToSkills } from '$lib/server/db/shared/skills';
 import { timedTask } from '$lib/server/db/shared/timing';
@@ -12,10 +13,207 @@ interface OverlapCountRow {
   cnt: number;
 }
 
+interface CategoryStatRow {
+  categorySlug: string;
+  publicSkillCount: number;
+  topSkillIdsJson: string | null;
+}
+
+interface RecommendCategoryDiscovery {
+  orderedCategories: string[];
+  publicSkillCounts: Map<string, number>;
+  seedSharedCategoryCounts: Map<string, number>;
+  seedSkillIds: string[];
+  fallbackCategories: string[];
+  hasMissingStats: boolean;
+  estimatedPoolSize: number;
+}
+
 interface RecommendSkillCandidateRow extends SkillListRow {
   lastCommitAt: number | null;
   sharedCategoryCount?: number;
   sharedTagCount?: number;
+}
+
+interface RecommendCategorySeedCandidate {
+  skillId: string;
+  sharedCategoryCount: number;
+  rarityScore: number;
+  bestRank: number;
+  firstCategoryIndex: number;
+}
+
+const EXACT_CATEGORY_OVERLAP_POOL_MAX = 2000;
+const MAX_CATEGORY_SEED_IDS = 192;
+
+function parseRecommendSeedSkillIds(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function buildRecommendCategorySeedCandidates(
+  orderedCategories: string[],
+  categorySeedIds: ReadonlyMap<string, string[]>,
+  maxIds: number = MAX_CATEGORY_SEED_IDS
+): RecommendCategorySeedCandidate[] {
+  const seedCandidates = new Map<string, RecommendCategorySeedCandidate>();
+
+  for (const [categoryIndex, category] of orderedCategories.entries()) {
+    const seedIds = categorySeedIds.get(category) || [];
+    const rarityScoreBase = orderedCategories.length - categoryIndex;
+
+    for (const [rank, skillId] of seedIds.entries()) {
+      const existing = seedCandidates.get(skillId);
+      if (existing) {
+        existing.sharedCategoryCount += 1;
+        existing.rarityScore += rarityScoreBase;
+        existing.bestRank = Math.min(existing.bestRank, rank);
+        continue;
+      }
+
+      seedCandidates.set(skillId, {
+        skillId,
+        sharedCategoryCount: 1,
+        rarityScore: rarityScoreBase,
+        bestRank: rank,
+        firstCategoryIndex: categoryIndex,
+      });
+    }
+  }
+
+  return Array.from(seedCandidates.values())
+    .sort((a, b) =>
+      b.sharedCategoryCount - a.sharedCategoryCount
+      || b.rarityScore - a.rarityScore
+      || a.bestRank - b.bestRank
+      || a.firstCategoryIndex - b.firstCategoryIndex
+      || a.skillId.localeCompare(b.skillId)
+    )
+    .slice(0, maxIds);
+}
+
+export function mergeRecommendCategorySeedSkillIds(
+  orderedCategories: string[],
+  categorySeedIds: ReadonlyMap<string, string[]>,
+  maxIds: number = MAX_CATEGORY_SEED_IDS
+): string[] {
+  return buildRecommendCategorySeedCandidates(orderedCategories, categorySeedIds, maxIds)
+    .map((candidate) => candidate.skillId);
+}
+
+export function orderRecommendDiscoveryCategories(
+  categories: string[],
+  publicSkillCounts: ReadonlyMap<string, number | null | undefined>
+): string[] {
+  const seen = new Set<string>();
+  return categories
+    .filter((category): category is string => {
+      if (typeof category !== 'string' || category.length === 0 || seen.has(category)) {
+        return false;
+      }
+      seen.add(category);
+      return true;
+    })
+    .map((category, index) => ({
+      category,
+      index,
+      publicSkillCount: publicSkillCounts.get(category),
+    }))
+    .sort((a, b) => {
+      const aCount = Number.isFinite(a.publicSkillCount) ? Number(a.publicSkillCount) : Number.MAX_SAFE_INTEGER;
+      const bCount = Number.isFinite(b.publicSkillCount) ? Number(b.publicSkillCount) : Number.MAX_SAFE_INTEGER;
+      return aCount - bCount || a.index - b.index;
+    })
+    .map((entry) => entry.category);
+}
+
+async function loadRecommendDiscoveryCategories(
+  db: D1Database,
+  categories: string[],
+  timingCollector?: TimingCollector
+): Promise<RecommendCategoryDiscovery> {
+  const normalizedCategories = orderRecommendDiscoveryCategories(categories, new Map());
+  if (normalizedCategories.length === 0) {
+    return {
+      orderedCategories: normalizedCategories,
+      publicSkillCounts: new Map(),
+      seedSharedCategoryCounts: new Map(),
+      seedSkillIds: [],
+      fallbackCategories: [],
+      hasMissingStats: false,
+      estimatedPoolSize: 0,
+    };
+  }
+
+  const placeholders = normalizedCategories.map(() => '?').join(',');
+
+  try {
+    const result = await timedTask(
+      timingCollector,
+      'rel_t1_stats',
+      () => db.prepare(`
+        SELECT
+          category_slug as categorySlug,
+          public_skill_count as publicSkillCount,
+          top_skill_ids_json as topSkillIdsJson
+        FROM category_public_stats
+        WHERE category_slug IN (${placeholders})
+      `).bind(...normalizedCategories).all<CategoryStatRow>(),
+      'category rarity'
+    );
+
+    const publicSkillCounts = new Map<string, number>();
+    const categorySeedIds = new Map<string, string[]>();
+    for (const row of result.results) {
+      publicSkillCounts.set(row.categorySlug, Number(row.publicSkillCount) || 0);
+      categorySeedIds.set(row.categorySlug, parseRecommendSeedSkillIds(row.topSkillIdsJson));
+    }
+
+    const orderedCategories = orderRecommendDiscoveryCategories(normalizedCategories, publicSkillCounts);
+    const hasMissingStats = orderedCategories.some((category) => !publicSkillCounts.has(category));
+    const estimatedPoolSize = orderedCategories.reduce((sum, category) => (
+      sum + (publicSkillCounts.get(category) ?? 0)
+    ), 0);
+    const fallbackCategories = orderedCategories.filter((category) => {
+      const count = publicSkillCounts.get(category);
+      const hasStats = count !== undefined;
+      const seedIds = categorySeedIds.get(category) || [];
+      const hasPotentialMatches = !hasStats || count > 0;
+      return hasPotentialMatches && seedIds.length === 0;
+    });
+    const seedCandidates = buildRecommendCategorySeedCandidates(orderedCategories, categorySeedIds);
+    const seedSharedCategoryCounts = new Map(
+      seedCandidates.map((candidate) => [candidate.skillId, candidate.sharedCategoryCount] as const)
+    );
+    const seedSkillIds = seedCandidates.map((candidate) => candidate.skillId);
+
+    return {
+      orderedCategories,
+      publicSkillCounts,
+      seedSharedCategoryCounts,
+      seedSkillIds,
+      fallbackCategories,
+      hasMissingStats,
+      estimatedPoolSize,
+    };
+  } catch (error) {
+    console.warn('Failed to load recommend category stats, using original order:', error);
+    return {
+      orderedCategories: normalizedCategories,
+      publicSkillCounts: new Map(),
+      seedSharedCategoryCounts: new Map(),
+      seedSkillIds: [],
+      fallbackCategories: normalizedCategories,
+      hasMissingStats: true,
+      estimatedPoolSize: Number.MAX_SAFE_INTEGER,
+    };
+  }
 }
 
 /**
@@ -90,34 +288,132 @@ export async function getRecommendedSkills(
 
   // Tier 1: Category overlap
   if (hasCategories) {
-    const catPh = categories.map(() => '?').join(',');
-    const exPh = excludePlaceholders();
-    const tier1Limit = getTierFetchLimit(limit, 4, 24);
-    const result = await timedTask(
-      timingCollector,
-      'rel_t1',
-      () => db.prepare(`
-      WITH matched_ids AS (
+    const discovery = await loadRecommendDiscoveryCategories(db, categories, timingCollector);
+    const categoryPlaceholders = discovery.orderedCategories.map(() => '?').join(',');
+
+    if (!discovery.hasMissingStats && discovery.estimatedPoolSize <= EXACT_CATEGORY_OVERLAP_POOL_MAX) {
+      const exPh = excludePlaceholders();
+      const tier1Limit = getTierFetchLimit(limit, 4, 24);
+      const result = await timedTask(
+        timingCollector,
+        'rel_t1',
+        () => db.prepare(`
+        WITH matched_ids AS (
+          SELECT
+            sc.skill_id as skillId,
+            COUNT(*) as sharedCategoryCount
+          FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+          WHERE sc.category_slug IN (${categoryPlaceholders})
+            AND sc.skill_id NOT IN (${exPh})
+          GROUP BY sc.skill_id
+        )
         SELECT
-          sc.skill_id as skillId,
-          COUNT(*) as sharedCategoryCount
-        FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
-        WHERE sc.category_slug IN (${catPh})
-          AND sc.skill_id NOT IN (${exPh})
-        GROUP BY sc.skill_id
-      )
-      SELECT
-        ${SKILL_COLUMNS_BASE},
-        matched.sharedCategoryCount
-      FROM matched_ids matched
-      JOIN skills s ON s.id = matched.skillId
-      WHERE s.visibility = 'public'
-      ORDER BY matched.sharedCategoryCount DESC, s.trending_score DESC
-      LIMIT ?
-    `).bind(...categories, ...excludeIds, tier1Limit).all<RecommendSkillCandidateRow>(),
-      'tier1 category overlap'
-    );
-    addCandidates(result.results, 1);
+          ${SKILL_COLUMNS_BASE},
+          matched.sharedCategoryCount
+        FROM matched_ids matched
+        CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
+        WHERE s.id = matched.skillId
+          AND s.visibility = 'public'
+        ORDER BY matched.sharedCategoryCount DESC, s.trending_score DESC
+        LIMIT ?
+      `).bind(...discovery.orderedCategories, ...excludeIds, tier1Limit).all<RecommendSkillCandidateRow>(),
+        'tier1 category overlap'
+      );
+      addCandidates(result.results, 1);
+    } else {
+      let seededTier1Candidates = false;
+
+      if (discovery.seedSkillIds.length > 0) {
+        const exPh = excludePlaceholders();
+        const seedPh = discovery.seedSkillIds.map(() => '?').join(',');
+        const result = await timedTask(
+          timingCollector,
+          'rel_t1',
+          () => db.prepare(`
+        SELECT
+          ${SKILL_COLUMNS_BASE}
+        FROM skills s INDEXED BY skills_visibility_id_idx
+        WHERE s.visibility = 'public'
+          AND s.id IN (${seedPh})
+          AND s.id NOT IN (${exPh})
+        ORDER BY s.trending_score DESC
+      `).bind(...discovery.seedSkillIds, ...excludeIds).all<RecommendSkillCandidateRow>(),
+          'tier1 precomputed category seeds'
+        );
+        addCandidates(
+          result.results.map((row) => ({
+            ...row,
+            sharedCategoryCount: discovery.seedSharedCategoryCounts.get(row.id) || 0,
+          })),
+          1
+        );
+        seededTier1Candidates = true;
+      }
+
+      if (discovery.fallbackCategories.length > 0) {
+        const fallbackCategoryPlaceholders = discovery.fallbackCategories.map(() => '?').join(',');
+        const exPh = excludePlaceholders();
+
+        if (seededTier1Candidates) {
+          const tier1SupplementLimit = Math.max(
+            MAX_SCORING_CANDIDATES,
+            Math.max(getTierFetchLimit(limit * 2, 8, 48), 24)
+          );
+          const result = await timedTask(
+            timingCollector,
+            'rel_t1',
+            () => db.prepare(`
+        WITH matched_ids AS (
+          SELECT
+            sc.skill_id as skillId,
+            COUNT(*) as sharedCategoryCount
+          FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+          WHERE sc.category_slug IN (${fallbackCategoryPlaceholders})
+            AND sc.skill_id NOT IN (${exPh})
+          GROUP BY sc.skill_id
+        )
+        SELECT
+          ${SKILL_COLUMNS_BASE},
+          matched.sharedCategoryCount
+        FROM matched_ids matched
+        CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
+        WHERE s.id = matched.skillId
+          AND s.visibility = 'public'
+        ORDER BY matched.sharedCategoryCount DESC, s.trending_score DESC
+        LIMIT ?
+      `).bind(...discovery.fallbackCategories, ...excludeIds, tier1SupplementLimit).all<RecommendSkillCandidateRow>(),
+            'tier1 supplemental category overlap'
+          );
+          addCandidates(result.results, 1);
+        } else {
+          const tier1Limit = Math.max(
+            24,
+            Math.max(getTierFetchLimit(limit * 3, 12, 48), MAX_SCORING_CANDIDATES * 2)
+          );
+          const result = await timedTask(
+            timingCollector,
+            'rel_t1',
+            () => db.prepare(`
+        SELECT
+          ${SKILL_COLUMNS_BASE}
+        FROM skills s INDEXED BY skills_visibility_trending_desc_idx
+        WHERE s.visibility = 'public'
+          AND s.id NOT IN (${exPh})
+          AND EXISTS (
+            SELECT 1
+            FROM skill_categories sc
+            WHERE sc.skill_id = s.id
+              AND sc.category_slug IN (${fallbackCategoryPlaceholders})
+          )
+        ORDER BY s.trending_score DESC
+        LIMIT ?
+      `).bind(...excludeIds, ...discovery.fallbackCategories, tier1Limit).all<RecommendSkillCandidateRow>(),
+            'tier1 seeded overlap fallback'
+          );
+          addCandidates(result.results, 1);
+        }
+      }
+    }
   }
 
   // Tier 2: Tag overlap
@@ -142,8 +438,9 @@ export async function getRecommendedSkills(
         ${SKILL_COLUMNS_BASE},
         matched.sharedTagCount
       FROM matched_ids matched
-      JOIN skills s ON s.id = matched.skillId
-      WHERE s.visibility = 'public'
+      CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
+      WHERE s.id = matched.skillId
+        AND s.visibility = 'public'
       ORDER BY matched.sharedTagCount DESC, s.trending_score DESC
       LIMIT ?
     `).bind(...skillTags, ...excludeIds, tier2Limit).all<RecommendSkillCandidateRow>(),
@@ -210,10 +507,6 @@ export async function getRecommendedSkills(
   const tagOverlapMap: Record<string, number> = {};
   const catOverlapMap: Record<string, number> = {};
 
-  // Category overlap for non-Tier-1 candidates
-  const nonTier1Ids = allCandidates
-    .filter((c) => c.tier !== 1)
-    .map((c) => c.data.id);
   const nonTier2Ids = allCandidates
     .filter((c) => c.tier !== 2)
     .map((c) => c.data.id);
@@ -239,9 +532,9 @@ export async function getRecommendedSkills(
     })()
     : Promise.resolve();
 
-  const categoryOverlapPromise = hasCategories && nonTier1Ids.length > 0
+  const categoryOverlapPromise = hasCategories && allIds.length > 0
     ? (async () => {
-      const idPh = nonTier1Ids.map(() => '?').join(',');
+      const idPh = allIds.map(() => '?').join(',');
       const catPh = categories.map(() => '?').join(',');
       const catResult = await timedTask(
         timingCollector,
@@ -251,7 +544,7 @@ export async function getRecommendedSkills(
       FROM skill_categories
       WHERE skill_id IN (${idPh}) AND category_slug IN (${catPh})
       GROUP BY skill_id
-    `).bind(...nonTier1Ids, ...categories).all<OverlapCountRow>(),
+    `).bind(...allIds, ...categories).all<OverlapCountRow>(),
         'category overlap batch'
       );
       for (const row of catResult.results) {
@@ -278,10 +571,7 @@ export async function getRecommendedSkills(
 
   const scoreStart = performance.now();
   const scored = allCandidates.map(({ data: c, tier }) => {
-    // Category score: Tier 1 has sharedCategoryCount from query, others from batch
-    const sharedCats = tier === 1
-      ? (c.sharedCategoryCount || 0)
-      : (catOverlapMap[c.id] || 0);
+    const sharedCats = catOverlapMap[c.id] || 0;
     const categoryScore = (sharedCats / totalCategories) * 100;
 
     // Tag score: Tier 2 has sharedTagCount from query, others from batch

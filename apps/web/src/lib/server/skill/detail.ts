@@ -3,11 +3,18 @@ import type { FileNode, SkillCardData, SkillDetail, SkillInstallData } from '$li
 import { getCached } from '$lib/server/cache';
 import { getAuthContext } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
+import { getRecommendedSkills } from '$lib/server/db/business/recommend';
 import { buildSkillInstallData } from '$lib/skill-install';
 import {
   readCachedRecommendSkills,
   RECOMMEND_ONLINE_CACHE_TTL_SECONDS,
 } from '$lib/server/ranking/recommend-cache';
+import {
+  buildOnlineRecommendCacheKey,
+  getRealtimeRecommendMode,
+  shouldLoadRecommendSignals,
+  type RealtimeRecommendMode,
+} from '$lib/server/ranking/recommend-runtime';
 
 const PUBLIC_CACHE_TTL_SECONDS = 300;
 const NO_RECOMMEND_SKILL_DETAIL_CACHE_SUFFIX = ':norecommend:v1';
@@ -34,6 +41,7 @@ interface SkillDetailRow {
   indexedAt: number;
   sourceType: string;
   visibility: string;
+  tier: string | null;
   categories: string | null;
   authorUsername: string | null;
   authorDisplayName: string | null;
@@ -94,78 +102,22 @@ function parseFileStructure(fileStructure: string | null): FileNode[] | null {
   }
 }
 
-async function fetchRecommendedSkills(db: D1Database, skill: SkillDetail): Promise<SkillCardData[]> {
-  if (skill.categories.length === 0) {
-    return [];
-  }
-
-  const recommendResult = await db.prepare(`
-    WITH matched_ids AS (
-      SELECT
-        sc.skill_id as skillId
-      FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
-      WHERE sc.category_slug IN (${skill.categories.map(() => '?').join(',')})
-        AND sc.skill_id != ?
-      GROUP BY sc.skill_id
-    ),
-    matched AS (
-      SELECT
-        s.id,
-        s.name,
-        s.slug,
-        s.description,
-        s.repo_owner as repoOwner,
-        s.repo_name as repoName,
-        s.stars,
-        s.forks,
-        s.trending_score as trendingScore,
-        COALESCE(s.last_commit_at, s.updated_at) as updatedAt
-      FROM matched_ids m
-      JOIN skills s ON s.id = m.skillId
-      WHERE s.visibility = 'public'
-      ORDER BY s.trending_score DESC
-      LIMIT 6
-    )
-    SELECT
-      matched.*,
-      (
-        SELECT GROUP_CONCAT(sc2.category_slug)
-        FROM skill_categories sc2
-        WHERE sc2.skill_id = matched.id
-      ) as categories,
-      a.avatar_url as authorAvatar
-    FROM matched
-    LEFT JOIN authors a ON matched.repoOwner = a.username
-    ORDER BY matched.trendingScore DESC
-  `).bind(...skill.categories, skill.id).all<{
-    id: string;
-    name: string;
-    slug: string;
-    description: string | null;
-    repoOwner: string;
-    repoName: string;
-    stars: number;
-    forks: number;
-    trendingScore: number;
-    updatedAt: number;
-    categories: string | null;
-    authorAvatar: string | null;
-  }>();
-
-  return (recommendResult.results || []).map((row) => ({
-    id: row.id,
-    name: row.name,
-    slug: row.slug,
-    description: row.description,
-    repoOwner: row.repoOwner,
-    repoName: row.repoName,
-    stars: row.stars,
-    forks: row.forks,
-    trendingScore: row.trendingScore,
-    updatedAt: row.updatedAt,
-    categories: row.categories ? row.categories.split(',') : [],
-    authorAvatar: row.authorAvatar || undefined
-  }));
+async function fetchRecommendedSkills(
+  db: D1Database,
+  skill: SkillDetail,
+  mode: RealtimeRecommendMode
+): Promise<SkillCardData[]> {
+  const shouldUseSignals = shouldLoadRecommendSignals(mode);
+  return getRecommendedSkills(
+    { DB: db },
+    skill.id,
+    shouldUseSignals ? skill.categories : [],
+    skill.repoOwner || '',
+    6,
+    undefined,
+    true,
+    shouldUseSignals ? null : []
+  );
 }
 
 async function resolveRecommendSkills(
@@ -175,6 +127,7 @@ async function resolveRecommendSkills(
     r2?: R2Bucket;
     waitUntil?: WaitUntilFn;
     recommendAlgoVersion?: string | null;
+    tier?: string | null;
   }
 ): Promise<SkillCardData[]> {
   if (skill.visibility === 'public') {
@@ -193,16 +146,17 @@ async function resolveRecommendSkills(
       console.warn(`Failed to read cached recommend skills for ${skill.slug}:`, error);
     }
 
+    const realtimeRecommendMode = getRealtimeRecommendMode(skill.visibility, options?.tier, false);
     const { data } = await getCached(
-      `recommend:${skill.id}`,
-      () => fetchRecommendedSkills(db, skill),
+      buildOnlineRecommendCacheKey(skill.id, realtimeRecommendMode),
+      () => fetchRecommendedSkills(db, skill, realtimeRecommendMode),
       RECOMMEND_ONLINE_CACHE_TTL_SECONDS,
       { waitUntil: options?.waitUntil }
     );
     return data;
   }
 
-  return fetchRecommendedSkills(db, skill);
+  return fetchRecommendedSkills(db, skill, 'full');
 }
 
 async function fetchSkillDetailPayload(
@@ -236,6 +190,7 @@ async function fetchSkillDetailPayload(
       s.indexed_at as indexedAt,
       s.source_type as sourceType,
       s.visibility,
+      s.tier,
       GROUP_CONCAT(sc.category_slug) as categories,
       a.username as authorUsername,
       a.display_name as authorDisplayName,
@@ -281,6 +236,7 @@ async function fetchSkillDetailPayload(
     authorTotalStars: row.authorTotalStars || undefined,
     visibility: (row.visibility as 'public' | 'private' | 'unlisted') || 'public',
     sourceType: (row.sourceType as 'github' | 'upload') || 'github',
+    tier: row.tier,
   };
 
   const includeRecommendSkills = options?.includeRecommendSkills !== false;
@@ -288,7 +244,7 @@ async function fetchSkillDetailPayload(
   return {
     skill,
     recommendSkills: includeRecommendSkills
-      ? await resolveRecommendSkills(db, skill, options)
+      ? await resolveRecommendSkills(db, skill, { ...options, tier: row.tier })
       : [],
     install: buildSkillInstallData(skill),
   };

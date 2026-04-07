@@ -13,6 +13,14 @@ interface CategoryAggregateRow {
   max_ts: number | null;
 }
 
+interface CategoryTopSkillRow {
+  skillId: string;
+}
+
+interface TableInfoRow {
+  name: string;
+}
+
 interface CategoryStatsCompletenessRow {
   count: number;
 }
@@ -26,6 +34,8 @@ export interface DynamicCategoryStat {
 }
 
 let pendingPredefinedCategoryStatsSync: Promise<void> | null = null;
+const CATEGORY_PUBLIC_TOP_SKILL_IDS_LIMIT = 96;
+let supportsCategoryTopSkillIdsColumn: boolean | null = null;
 
 function normalizeCategorySlugs(categorySlugs: Iterable<string>): string[] {
   return Array.from(
@@ -86,6 +96,46 @@ async function loadCategoryAggregates(
       },
     ])
   );
+}
+
+async function loadTopSkillIdsForCategory(
+  db: D1Database,
+  categorySlug: string,
+  limit: number = CATEGORY_PUBLIC_TOP_SKILL_IDS_LIMIT
+): Promise<string[]> {
+  if (!categorySlug || limit <= 0) return [];
+
+  const result = await db.prepare(`
+    SELECT sc.skill_id as skillId
+    FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+    JOIN skills s
+      ON s.id = sc.skill_id
+     AND s.visibility = 'public'
+    WHERE sc.category_slug = ?
+    ORDER BY s.trending_score DESC
+    LIMIT ?
+  `)
+    .bind(categorySlug, limit)
+    .all<CategoryTopSkillRow>();
+
+  return (result.results || [])
+    .map((row) => row.skillId)
+    .filter((skillId): skillId is string => typeof skillId === 'string' && skillId.length > 0);
+}
+
+async function hasCategoryTopSkillIdsColumn(db: D1Database): Promise<boolean> {
+  if (supportsCategoryTopSkillIdsColumn !== null) {
+    return supportsCategoryTopSkillIdsColumn;
+  }
+
+  try {
+    const result = await db.prepare(`PRAGMA table_info(category_public_stats)`).all<TableInfoRow>();
+    supportsCategoryTopSkillIdsColumn = (result.results || []).some((row) => row.name === 'top_skill_ids_json');
+  } catch {
+    supportsCategoryTopSkillIdsColumn = false;
+  }
+
+  return supportsCategoryTopSkillIdsColumn;
 }
 
 function buildCategoryStatsRecord(rows: Iterable<CategoryCountRow>): Record<string, number> {
@@ -208,22 +258,40 @@ export async function syncCategoryPublicStats(
   if (normalizedSlugs.length === 0) return;
 
   const aggregateMap = await loadCategoryAggregates(db, normalizedSlugs);
+  const includeTopSkillIds = await hasCategoryTopSkillIdsColumn(db);
 
   for (const slug of normalizedSlugs) {
     const aggregate = aggregateMap.get(slug);
     const count = aggregate?.count ?? 0;
     const maxTs = aggregate?.maxTs ?? null;
+    const topSkillIdsJson = includeTopSkillIds && count > 0
+      ? JSON.stringify(await loadTopSkillIdsForCategory(db, slug))
+      : JSON.stringify([]);
 
-    await db.prepare(`
-      INSERT INTO category_public_stats (category_slug, public_skill_count, max_freshness_ts, updated_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(category_slug) DO UPDATE SET
-        public_skill_count = excluded.public_skill_count,
-        max_freshness_ts = excluded.max_freshness_ts,
-        updated_at = excluded.updated_at
-    `)
-      .bind(slug, count, maxTs, now)
-      .run();
+    if (includeTopSkillIds) {
+      await db.prepare(`
+        INSERT INTO category_public_stats (category_slug, public_skill_count, top_skill_ids_json, max_freshness_ts, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(category_slug) DO UPDATE SET
+          public_skill_count = excluded.public_skill_count,
+          top_skill_ids_json = excluded.top_skill_ids_json,
+          max_freshness_ts = excluded.max_freshness_ts,
+          updated_at = excluded.updated_at
+      `)
+        .bind(slug, count, topSkillIdsJson, maxTs, now)
+        .run();
+    } else {
+      await db.prepare(`
+        INSERT INTO category_public_stats (category_slug, public_skill_count, max_freshness_ts, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(category_slug) DO UPDATE SET
+          public_skill_count = excluded.public_skill_count,
+          max_freshness_ts = excluded.max_freshness_ts,
+          updated_at = excluded.updated_at
+      `)
+        .bind(slug, count, maxTs, now)
+        .run();
+    }
 
     await db.prepare(`
       UPDATE categories

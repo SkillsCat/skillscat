@@ -12,6 +12,7 @@ import {
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
 import { getCategoryPageCacheInvalidationKeys } from '$lib/server/cache/categories';
+import { getOnlineRecommendCacheKeys } from '$lib/server/ranking/recommend-runtime';
 import { getSkillDetailCacheKeys } from '$lib/server/skill/detail';
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 import {
@@ -231,7 +232,7 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
       ...getSkillDetailCacheKeys(skill.slug),
       `api:skill-files:${skill.slug}`,
       `skill:${skill.id}`,
-      `recommend:${skill.id}`,
+      ...getOnlineRecommendCacheKeys(skill.id),
       getSkillSourceCacheKey(skill.slug),
       ...getSkillPageCacheInvalidationKeys(skill.slug),
       ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,

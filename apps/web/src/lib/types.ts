@@ -55,6 +55,7 @@ export interface SkillDetail extends SkillCardData {
   // Private skill fields
   visibility: 'public' | 'private' | 'unlisted';
   sourceType: 'github' | 'upload';
+  tier?: string | null;
   ownerId?: string | null;
   ownerName?: string | null;
   ownerAvatar?: string | null;

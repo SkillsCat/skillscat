@@ -16,12 +16,20 @@ import {
   shouldRefreshPrecomputedRecommend,
 } from '$lib/server/ranking/recommend-cache';
 import {
+  markRecommendDirty,
   markRecommendFallbackServed,
   normalizeRecommendAlgoVersion,
   upsertRecommendStateFailure,
   upsertRecommendStateSuccess,
   writeRecommendPrecomputedPayload,
 } from '$lib/server/ranking/recommend-precompute';
+import {
+  buildOnlineRecommendCacheKey,
+  getRealtimeRecommendMode,
+  shouldLoadRecommendSignals,
+  shouldMarkLightweightRecommendFallback,
+  type RealtimeRecommendMode,
+} from '$lib/server/ranking/recommend-runtime';
 
 const RECOMMEND_RESPONSE_LIMIT = 6;
 const RECOMMEND_CACHE_LIMIT = 10;
@@ -57,6 +65,7 @@ interface SkillContextRow {
   recommendNextUpdateAt: RecommendRefreshStateRow['recommendNextUpdateAt'];
   recommendPrecomputedAt: RecommendRefreshStateRow['recommendPrecomputedAt'];
   recommendAlgoVersion: RecommendRefreshStateRow['recommendAlgoVersion'];
+  recommendLastFallbackAt: number | null;
 }
 
 function hasStatus(errorValue: unknown): errorValue is { status: number } {
@@ -150,7 +159,8 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
         rs.dirty as recommendDirty,
         rs.next_update_at as recommendNextUpdateAt,
         rs.precomputed_at as recommendPrecomputedAt,
-        rs.algo_version as recommendAlgoVersion
+        rs.algo_version as recommendAlgoVersion,
+        rs.last_fallback_at as recommendLastFallbackAt
       FROM skills s
       LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
       WHERE s.slug = ?
@@ -223,9 +233,14 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
 
     const precomputedCacheKey = buildRecommendPrecomputedCacheKey(skill.id, algoVersion);
 
-    const computeRecommendOnline = async (useOnlineCache: boolean): Promise<SkillCardData[]> => {
+    const computeRecommendOnline = async (
+      useOnlineCache: boolean,
+      mode: RealtimeRecommendMode
+    ): Promise<SkillCardData[]> => {
       const runCompute = async () => {
-        const signals = await loadSkillSignals();
+        const signals = shouldLoadRecommendSignals(mode)
+          ? await loadSkillSignals()
+          : { categories: [], tags: [] };
         return getRecommendedSkills(
           { DB: db },
           skill.id,
@@ -245,7 +260,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       }
 
       const { data } = await getCached(
-        `recommend:${skill.id}`,
+        buildOnlineRecommendCacheKey(skill.id, mode),
         runCompute,
         RECOMMEND_ONLINE_CACHE_TTL_SECONDS
       );
@@ -311,7 +326,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       waitUntil(
         (async () => {
           try {
-            const refreshed = await computeRecommendOnline(false);
+            const refreshed = await computeRecommendOnline(false, 'full');
             await persistPrecomputed(refreshed);
           } catch (refreshError) {
             console.error('Failed background refresh for recommend precompute:', refreshError);
@@ -394,14 +409,46 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       }
     }
 
+    const realtimeRecommendMode = getRealtimeRecommendMode(skill.visibility, skill.tier, forceRefresh);
+    const shouldMarkLightweightFallback = realtimeRecommendMode === 'lightweight'
+      && shouldMarkLightweightRecommendFallback(skill.recommendLastFallbackAt, now);
+    const shouldQueueLightweightBackfill = skill.tier === 'cool';
     const recommendSkills = await timed(
       'fallback_online',
-      () => computeRecommendOnline(!forceRefresh),
-      forceRefresh ? 'force refresh' : 'online fallback'
+      () => computeRecommendOnline(!forceRefresh, realtimeRecommendMode),
+      forceRefresh
+        ? 'force refresh'
+        : realtimeRecommendMode === 'full'
+          ? 'online fallback'
+          : 'lightweight online fallback'
     );
 
     if (forceRefresh) {
       await persistPrecomputed(recommendSkills);
+    } else if (realtimeRecommendMode === 'lightweight' && shouldMarkLightweightFallback) {
+      const markPendingRefresh = async () => {
+        try {
+          if (shouldQueueLightweightBackfill) {
+            await markRecommendDirty(db, skill.id);
+          }
+          await markRecommendFallbackServed(db, skill.id);
+        } catch (backfillError) {
+          console.error('Failed lightweight fallback recommend refresh mark:', backfillError);
+        }
+      };
+
+      if (waitUntil) {
+        serverTimings.push({
+          name: 'backfill_scheduled',
+          dur: 0,
+          desc: shouldQueueLightweightBackfill ? 'lightweight-fallback' : 'lightweight-cold-skip'
+        });
+        waitUntil(markPendingRefresh());
+      } else {
+        await markPendingRefresh();
+      }
+    } else if (realtimeRecommendMode === 'lightweight') {
+      serverTimings.push({ name: 'backfill_skipped', dur: 0, desc: 'lightweight-cooldown' });
     } else if (waitUntil) {
       serverTimings.push({ name: 'backfill_scheduled', dur: 0, desc: 'fallback' });
       waitUntil(

@@ -118,6 +118,8 @@ pnpm install
 pnpm init:project
 ```
 
+This setup flow auto-generates local secrets such as `BETTER_AUTH_SECRET`, `WORKER_SECRET`, and `INDEXNOW_KEY` when needed.
+
 Optional setup modes:
 
 ```bash

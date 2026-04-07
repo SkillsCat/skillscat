@@ -24,7 +24,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execSync, spawnSync } from 'child_process';
 import { createInterface } from 'readline';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = resolve(__dirname, '..');
@@ -232,19 +232,45 @@ function getSelectedConfigFiles(selectedWorkerKeys) {
 }
 
 function getSelectedProductionWorkers(selectedConfigFiles, selectedWorkerKeys) {
-  const workers = new Set(
+  const workers = new Map(
     selectedConfigFiles
-      .map((configFile) => PRODUCTION_WORKER_NAMES[configFile])
+      .map((configFile) => {
+        const workerName = PRODUCTION_WORKER_NAMES[configFile];
+        if (!workerName) {
+          return null;
+        }
+
+        const workerKey = getWorkerKeyFromConfigFile(configFile);
+        return [workerName, {
+          name: workerName,
+          workerKey,
+          requiredSecrets: new Set(REQUIRED_SECRETS_BY_WORKER[workerKey] || []),
+          optionalSecrets: new Set(OPTIONAL_SECRETS_BY_WORKER[workerKey] || []),
+        }];
+      })
       .filter(Boolean)
   );
 
   // search-precompute calls back into the web worker's internal admin route,
   // so both sides must share the same WORKER_SECRET in production.
   if (!selectedWorkerKeys || selectedWorkerKeys.length === 0 || selectedWorkerKeys.includes('search-precompute')) {
-    workers.add(PRODUCTION_WORKER_NAMES['wrangler.preview.toml']);
+    const previewWorkerName = PRODUCTION_WORKER_NAMES['wrangler.preview.toml'];
+    const previewWorker = workers.get(previewWorkerName) || {
+      name: previewWorkerName,
+      workerKey: 'preview',
+      requiredSecrets: new Set(),
+      optionalSecrets: new Set(),
+    };
+    previewWorker.requiredSecrets.add('WORKER_SECRET');
+    workers.set(previewWorkerName, previewWorker);
   }
 
-  return Array.from(workers).filter(Boolean);
+  return Array.from(workers.values()).map((worker) => ({
+    name: worker.name,
+    workerKey: worker.workerKey,
+    requiredSecrets: Array.from(worker.requiredSecrets),
+    optionalSecrets: Array.from(worker.optionalSecrets),
+  }));
 }
 
 function getRequiredResources(selectedWorkerKeys) {
@@ -320,6 +346,10 @@ function getWranglerEnv(extra = {}) {
  */
 function generateSecret(length = 32) {
   return randomBytes(length).toString('base64url').slice(0, length);
+}
+
+function generateIndexNowKey() {
+  return randomUUID();
 }
 
 /**
@@ -799,9 +829,10 @@ APP_ORIGIN = "https://your-domain.com"
 SITEMAP_REFRESH_ENABLED = "1"
 SITEMAP_REFRESH_TIMEOUT_MS = "20000"
 RECOMMEND_PRECOMPUTE_ENABLED = "1"
-RECOMMEND_PRECOMPUTE_MAX_PER_RUN = "200"
-RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = "15000"
+RECOMMEND_PRECOMPUTE_MAX_PER_RUN = "500"
+RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = "25000"
 RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS = "2500"
+RECOMMEND_MISSING_STATE_SCAN_LIMIT = "500"
 RECOMMEND_ALGO_VERSION = "v1"
 SEARCH_PRECOMPUTE_ENABLED = "1"
 SEARCH_PRECOMPUTE_MAX_PER_RUN = "500"
@@ -1193,9 +1224,10 @@ function ensurePrecomputeWorkerEnvVars({
         SITEMAP_REFRESH_ENABLED: '1',
         SITEMAP_REFRESH_TIMEOUT_MS: '20000',
         RECOMMEND_PRECOMPUTE_ENABLED: '1',
-        RECOMMEND_PRECOMPUTE_MAX_PER_RUN: '200',
-        RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS: '15000',
+        RECOMMEND_PRECOMPUTE_MAX_PER_RUN: '500',
+        RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS: '25000',
         RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS: '2500',
+        RECOMMEND_MISSING_STATE_SCAN_LIMIT: '500',
         RECOMMEND_ALGO_VERSION: 'v1',
         SEARCH_PRECOMPUTE_ENABLED: '1',
         SEARCH_PRECOMPUTE_MAX_PER_RUN: '500',
@@ -1211,9 +1243,10 @@ function ensurePrecomputeWorkerEnvVars({
       SITEMAP_REFRESH_ENABLED: '1',
       SITEMAP_REFRESH_TIMEOUT_MS: '20000',
       RECOMMEND_PRECOMPUTE_ENABLED: '1',
-      RECOMMEND_PRECOMPUTE_MAX_PER_RUN: '200',
-      RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS: '15000',
+      RECOMMEND_PRECOMPUTE_MAX_PER_RUN: '500',
+      RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS: '25000',
       RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS: '2500',
+      RECOMMEND_MISSING_STATE_SCAN_LIMIT: '500',
       RECOMMEND_ALGO_VERSION: 'v1',
       SEARCH_PRECOMPUTE_ENABLED: '1',
       SEARCH_PRECOMPUTE_MAX_PER_RUN: '500',
@@ -1710,7 +1743,6 @@ async function main() {
     || needsOpenRouter
     || needsDeepSeek
     || needsVirusTotal
-    || needsIndexNowKey
     || (isProduction && needsProductionAppUrl);
   DRY_RUN = dryRun;
 
@@ -1999,11 +2031,17 @@ ${colors.cyan}╔═════════════════════
       if (needsVirusTotal) {
         lines.push('- VirusTotal: https://www.virustotal.com/gui/join-us (可选，public API 需要 API Key)');
       }
-      if (needsIndexNowKey) {
-        lines.push('- IndexNow: https://www.indexnow.org/documentation (可选，用于加速 Bing 等搜索引擎发现)');
-      }
       if (lines.length > 0) {
         console.log(`\n${colors.gray}以下变量需要手动配置:\n${lines.join('\n')}${colors.reset}\n`);
+      }
+
+      if (needsIndexNowKey) {
+        indexNowKey = existingVars.INDEXNOW_KEY || generateIndexNowKey();
+        if (existingVars.INDEXNOW_KEY) {
+          logInfo('Using existing INDEXNOW_KEY from .dev.vars');
+        } else {
+          logSuccess('Generated INDEXNOW_KEY');
+        }
       }
 
       if (DRY_RUN) {
@@ -2026,9 +2064,6 @@ ${colors.cyan}╔═════════════════════
         if (needsVirusTotal) {
           virusTotalApiKey = existingVars.VIRUSTOTAL_API_KEY || '';
         }
-        if (needsIndexNowKey) {
-          indexNowKey = existingVars.INDEXNOW_KEY || '';
-        }
         productionAppUrl = (isProduction && needsProductionAppUrl) ? 'https://your-domain.com' : '';
       } else {
         if (needsGitHubClientId) {
@@ -2048,9 +2083,6 @@ ${colors.cyan}╔═════════════════════
         }
         if (needsVirusTotal) {
           virusTotalApiKey = existingVars.VIRUSTOTAL_API_KEY || await ask(rl, 'VirusTotal API Key (可选，public API)', '');
-        }
-        if (needsIndexNowKey) {
-          indexNowKey = existingVars.INDEXNOW_KEY || await ask(rl, 'IndexNow Key (可选)', '');
         }
         if (isProduction && needsProductionAppUrl) {
           productionAppUrl = await ask(rl, 'Production PUBLIC_APP_URL', 'https://your-domain.com');
@@ -2103,25 +2135,46 @@ ${colors.cyan}╔═════════════════════
               logDryRun(`Simulating Cloudflare secret writes to ${selectedProductionWorkers.length} worker(s).`);
             }
 
-            const secrets = {};
-            if (needsBetterAuthSecret) secrets.BETTER_AUTH_SECRET = betterAuthSecret;
-            if (needsWorkerSecret) secrets.WORKER_SECRET = workerSecret;
-            if (needsGitHubClientId) secrets.GITHUB_CLIENT_ID = githubClientId;
-            if (needsGitHubClientSecret) secrets.GITHUB_CLIENT_SECRET = githubClientSecret;
-            if (needsGitHubToken) secrets.GITHUB_TOKEN = githubToken;
-            if (needsOpenRouter && openrouterApiKey) secrets.OPENROUTER_API_KEY = openrouterApiKey;
-            if (needsDeepSeek && deepseekApiKey) secrets.DEEPSEEK_API_KEY = deepseekApiKey;
-            if (needsVirusTotal && virusTotalApiKey) secrets.VIRUSTOTAL_API_KEY = virusTotalApiKey;
-            if (needsIndexNowKey && indexNowKey) secrets.INDEXNOW_KEY = indexNowKey;
-
             const secretErrors = [];
             for (const worker of selectedProductionWorkers) {
-              logInfo(`Setting secrets for ${worker}...`);
+              logInfo(`Setting secrets for ${worker.name}...`);
+              const workerRequiredSecrets = new Set(worker.requiredSecrets);
+              const workerOptionalSecrets = new Set(worker.optionalSecrets);
+              const secrets = {};
+
+              if (workerRequiredSecrets.has('BETTER_AUTH_SECRET') && betterAuthSecret) {
+                secrets.BETTER_AUTH_SECRET = betterAuthSecret;
+              }
+              if (workerRequiredSecrets.has('WORKER_SECRET') && workerSecret) {
+                secrets.WORKER_SECRET = workerSecret;
+              }
+              if (workerRequiredSecrets.has('GITHUB_CLIENT_ID') && githubClientId) {
+                secrets.GITHUB_CLIENT_ID = githubClientId;
+              }
+              if (workerRequiredSecrets.has('GITHUB_CLIENT_SECRET') && githubClientSecret) {
+                secrets.GITHUB_CLIENT_SECRET = githubClientSecret;
+              }
+              if (workerRequiredSecrets.has('GITHUB_TOKEN') && githubToken) {
+                secrets.GITHUB_TOKEN = githubToken;
+              }
+              if (workerOptionalSecrets.has('OPENROUTER_API_KEY') && openrouterApiKey) {
+                secrets.OPENROUTER_API_KEY = openrouterApiKey;
+              }
+              if (workerOptionalSecrets.has('DEEPSEEK_API_KEY') && deepseekApiKey) {
+                secrets.DEEPSEEK_API_KEY = deepseekApiKey;
+              }
+              if (workerOptionalSecrets.has('VIRUSTOTAL_API_KEY') && virusTotalApiKey) {
+                secrets.VIRUSTOTAL_API_KEY = virusTotalApiKey;
+              }
+              if (workerOptionalSecrets.has('INDEXNOW_KEY') && indexNowKey) {
+                secrets.INDEXNOW_KEY = indexNowKey;
+              }
+
               for (const [name, value] of Object.entries(secrets)) {
                 if (!value) continue;
-                const result = await setSecret(worker, name, value, 'production');
+                const result = await setSecret(worker.name, name, value, 'production');
                 if (!result.success) {
-                  const error = `Failed to set ${name} for ${worker}: ${result.error}`;
+                  const error = `Failed to set ${name} for ${worker.name}: ${result.error}`;
                   secretErrors.push(error);
                   logError(error);
                 }

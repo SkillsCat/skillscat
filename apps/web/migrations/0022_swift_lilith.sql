@@ -1,0 +1,1 @@
+ALTER TABLE `category_public_stats` ADD `top_skill_ids_json` text;

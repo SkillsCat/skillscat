@@ -18,6 +18,7 @@ import {
   scheduleIndexNowSubmission,
 } from '$lib/server/seo/indexnow';
 import { syncCategoryPublicStats } from '$lib/server/db/business/stats';
+import { getOnlineRecommendCacheKeys } from '$lib/server/ranking/recommend-runtime';
 
 /**
  * Verify that a GitHub repo exists and belongs to the user
@@ -205,7 +206,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
     ...getSkillDetailCacheKeys(skill.slug),
     `api:skill-files:${skill.slug}`,
     `skill:${skillId}`,
-    `recommend:${skillId}`,
+    ...getOnlineRecommendCacheKeys(skillId),
     getSkillSourceCacheKey(skill.slug),
     ...getSkillPageCacheInvalidationKeys(skill.slug),
     ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,

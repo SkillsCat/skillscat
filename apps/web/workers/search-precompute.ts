@@ -10,7 +10,10 @@
  */
 
 import type { ExecutionContext, ScheduledController, SearchPrecomputeEnv } from './shared/types';
-import { normalizeRecommendAlgoVersion } from '../src/lib/server/ranking/recommend-precompute';
+import {
+  normalizeRecommendAlgoVersion,
+  RECOMMEND_PRECOMPUTE_COOL_RECENT_ACCESS_WINDOW_MS,
+} from '../src/lib/server/ranking/recommend-precompute';
 import {
   buildSearchTermEntries,
   computeSearchScore,
@@ -20,15 +23,15 @@ import {
   upsertSearchStateSuccess,
 } from '../src/lib/server/ranking/search-precompute';
 
-const DEFAULT_RECOMMEND_PRECOMPUTE_MAX_PER_RUN = 200;
-const DEFAULT_RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = 15_000;
+const DEFAULT_RECOMMEND_PRECOMPUTE_MAX_PER_RUN = 500;
+const DEFAULT_RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = 25_000;
 const DEFAULT_RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS = 2_500;
 const DEFAULT_SEARCH_PRECOMPUTE_MAX_PER_RUN = 500;
 const DEFAULT_SEARCH_PRECOMPUTE_TIME_BUDGET_MS = 10_000;
 const DEFAULT_SITEMAP_REFRESH_TIMEOUT_MS = 20_000;
 const SITEMAP_PREWARM_CONCURRENCY = 4;
 const DEFAULT_MISSING_STATE_SCAN_HOUR_UTC = 3;
-const DEFAULT_MISSING_STATE_SCAN_LIMIT = 200;
+const DEFAULT_MISSING_STATE_SCAN_LIMIT = 500;
 
 interface RecommendPrecomputeCandidate {
   id: string;
@@ -131,6 +134,7 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
   const recommendMissingScanHour = parseMissingStateScanHour(env.RECOMMEND_MISSING_STATE_SCAN_HOUR_UTC);
   const recommendMissingScanLimit = parseMissingStateScanLimit(env.RECOMMEND_MISSING_STATE_SCAN_LIMIT);
   const includeRecommendMissingStateScan = shouldRunMissingStateScan(now, recommendMissingScanHour);
+  const recommendRecentCoolAccessAfter = now - RECOMMEND_PRECOMPUTE_COOL_RECENT_ACCESS_WINDOW_MS;
 
   let candidatesResult;
   try {
@@ -154,7 +158,10 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
           LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
           WHERE rs.skill_id IS NULL
             AND s.visibility = 'public'
-            AND s.tier != 'archived'
+            AND (
+              s.tier IN ('hot', 'warm')
+              OR (s.tier = 'cool' AND s.last_accessed_at IS NOT NULL AND s.last_accessed_at >= ?)
+            )
           ORDER BY s.indexed_at DESC
           LIMIT ?
         ),
@@ -177,7 +184,10 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
         JOIN skills s ON s.id = c.skill_id
         LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
         WHERE s.visibility = 'public'
-          AND s.tier != 'archived'
+          AND (
+            s.tier IN ('hot', 'warm')
+            OR (s.tier = 'cool' AND s.last_accessed_at IS NOT NULL AND s.last_accessed_at >= ?)
+          )
         ORDER BY
           COALESCE(rs.dirty, 1) DESC,
           CASE s.tier
@@ -193,7 +203,7 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
           COALESCE(rs.next_update_at, 0) ASC
         LIMIT ?
       `)
-        .bind(now, recommendMissingScanLimit, limit)
+        .bind(now, recommendRecentCoolAccessAfter, recommendMissingScanLimit, recommendRecentCoolAccessAfter, limit)
         .all<RecommendPrecomputeCandidate>();
     } else {
       candidatesResult = await env.DB.prepare(`
@@ -223,7 +233,10 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
         JOIN skills s ON s.id = c.skill_id
         LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
         WHERE s.visibility = 'public'
-          AND s.tier != 'archived'
+          AND (
+            s.tier IN ('hot', 'warm')
+            OR (s.tier = 'cool' AND s.last_accessed_at IS NOT NULL AND s.last_accessed_at >= ?)
+          )
         ORDER BY
           COALESCE(rs.dirty, 1) DESC,
           CASE s.tier
@@ -239,7 +252,7 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
           COALESCE(rs.next_update_at, 0) ASC
         LIMIT ?
       `)
-        .bind(now, limit)
+        .bind(now, recommendRecentCoolAccessAfter, limit)
         .all<RecommendPrecomputeCandidate>();
     }
   } catch (err) {

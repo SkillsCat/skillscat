@@ -15,6 +15,11 @@ import {
   readRecommendRefreshState,
   shouldRefreshPrecomputedRecommend,
 } from '$lib/server/ranking/recommend-cache';
+import {
+  buildOnlineRecommendCacheKey,
+  getRealtimeRecommendMode,
+  shouldLoadRecommendSignals,
+} from '$lib/server/ranking/recommend-runtime';
 import { buildSkillPathFromOwnerAndName, buildSkillSlug, encodeSkillSlugForPath, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
 import type { SkillCardData, SkillDetail } from '$lib/types';
 import { buildSkillInstallData } from '$lib/skill-install';
@@ -465,18 +470,21 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
             }
           }
 
+          const realtimeRecommendMode = getRealtimeRecommendMode(skill.visibility, skill.tier, false);
+          const shouldUseRecommendSignals = shouldLoadRecommendSignals(realtimeRecommendMode);
           const { data } = await getCached(
-            `recommend:${skill.id}`,
+            buildOnlineRecommendCacheKey(skill.id, realtimeRecommendMode),
             () => getRecommendedSkills(
               env,
               skill.id,
-              skill.categories || [],
+              shouldUseRecommendSignals ? (skill.categories || []) : [],
               skill.repoOwner || '',
               10,
               (name, dur, desc) => {
                 serverTimings.push({ name, dur, desc });
               },
-              false
+              false,
+              shouldUseRecommendSignals ? null : []
             ),
             RECOMMEND_ONLINE_CACHE_TTL_SECONDS
           );

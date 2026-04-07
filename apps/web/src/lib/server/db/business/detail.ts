@@ -25,6 +25,7 @@ interface SkillDetailRow {
   file_structure: string | null;
   visibility: SkillDetail['visibility'] | null;
   source_type: SkillDetail['sourceType'] | null;
+  tier: string | null;
   owner_id: string | null;
   org_id: string | null;
   authorAvatar: string | null;
@@ -220,6 +221,7 @@ export async function getSkillBySlug(
     // 新增字段
     visibility: skillData.visibility || 'public',
     sourceType: skillData.source_type || 'github',
+    tier: skillData.tier,
     ownerId: skillData.owner_id,
     ownerName: skillData.ownerName,
     ownerAvatar: skillData.ownerAvatar,

@@ -14,6 +14,7 @@ import {
   getSkillPageCacheInvalidationKeys,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
+import { getOnlineRecommendCacheKeys } from '$lib/server/ranking/recommend-runtime';
 import { getSkillDetailCacheKeys } from '$lib/server/skill/detail';
 
 export interface OpenClawRouteCachePolicy {
@@ -343,7 +344,7 @@ export async function invalidateOpenClawSkillCaches(skillId: string, nativeSlug:
     ...getSkillDetailCacheKeys(nativeSlug),
     `api:skill-files:${nativeSlug}`,
     `skill:${skillId}`,
-    `recommend:${skillId}`,
+    ...getOnlineRecommendCacheKeys(skillId),
     ...getSkillPageCacheInvalidationKeys(nativeSlug),
     ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
     ...OPENCLAW_BROWSE_INVALIDATION_SORTS.map((sort) =>

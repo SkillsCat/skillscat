@@ -11,6 +11,7 @@
  * Uses GitHub GraphQL API for batch queries (50 repos per request)
  */
 
+import type { D1Database } from '@cloudflare/workers-types';
 import type {
   TrendingEnv,
   StarSnapshot,
@@ -23,6 +24,7 @@ import type {
 import { TIER_CONFIG } from './shared/types';
 import { getSkillRefreshSelectColumns, resolveRefreshRepoMetrics } from './shared/trending/refresh';
 import { buildGithubSkillR2Key } from '../src/lib/skill-path';
+import { syncCategoryPublicStats } from '../src/lib/server/db/business/stats';
 import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
 import { buildRecentActivitySortSql, getNonlinearStarScore, buildTopRatedSortScoreSql } from '../src/lib/server/ranking';
 import { markSearchDirtyBatch } from '../src/lib/server/ranking/search-precompute';
@@ -41,6 +43,7 @@ const AI_CLASSIFICATION_THRESHOLD = 100; // Stars threshold for AI classificatio
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 const SKILL_REFRESH_SELECT_COLUMNS = getSkillRefreshSelectColumns();
 const DAILY_METRICS_RETENTION_DAYS = 95;
+const CATEGORY_STATS_SYNC_SKILL_BATCH_SIZE = 250;
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw || '', 10);
@@ -245,11 +248,13 @@ function getNextUpdateTime(tier: SkillTier): number | null {
 /**
  * Update skills marked for update via KV (user-driven updates)
  */
-async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
+async function updateMarkedSkills(
+  env: TrendingEnv
+): Promise<{ count: number; updatedIds: string[] }> {
   const list = await env.KV.list({ prefix: 'needs_update:', limit: 100 });
 
   if (list.keys.length === 0) {
-    return 0;
+    return { count: 0, updatedIds: [] };
   }
 
   const skillIds = list.keys.map((k) => k.name.replace('needs_update:', ''));
@@ -345,7 +350,59 @@ async function updateMarkedSkills(env: TrendingEnv): Promise<number> {
 
   await Promise.all(list.keys.map((k) => env.KV.delete(k.name)));
 
-  return updates.length;
+  return {
+    count: updates.length,
+    updatedIds: updates.map((update) => update.id),
+  };
+}
+
+interface UpdatedSkillCategoryRow {
+  categorySlug: string;
+}
+
+async function loadUpdatedSkillCategorySlugs(
+  db: D1Database,
+  skillIds: string[]
+): Promise<string[]> {
+  const uniqueSkillIds = Array.from(new Set(skillIds.filter(Boolean)));
+  if (uniqueSkillIds.length === 0) {
+    return [];
+  }
+
+  const categorySlugs = new Set<string>();
+
+  for (let i = 0; i < uniqueSkillIds.length; i += CATEGORY_STATS_SYNC_SKILL_BATCH_SIZE) {
+    const chunk = uniqueSkillIds.slice(i, i + CATEGORY_STATS_SYNC_SKILL_BATCH_SIZE);
+    const placeholders = chunk.map(() => '?').join(',');
+    const result = await db.prepare(`
+      SELECT DISTINCT category_slug as categorySlug
+      FROM skill_categories
+      WHERE skill_id IN (${placeholders})
+    `)
+      .bind(...chunk)
+      .all<UpdatedSkillCategoryRow>();
+
+    for (const row of result.results || []) {
+      if (typeof row.categorySlug === 'string' && row.categorySlug.length > 0) {
+        categorySlugs.add(row.categorySlug);
+      }
+    }
+  }
+
+  return Array.from(categorySlugs);
+}
+
+export async function syncUpdatedSkillCategoryStats(
+  db: D1Database,
+  skillIds: string[]
+): Promise<string[]> {
+  const categorySlugs = await loadUpdatedSkillCategorySlugs(db, skillIds);
+  if (categorySlugs.length === 0) {
+    return [];
+  }
+
+  await syncCategoryPublicStats(db, categorySlugs);
+  return categorySlugs;
 }
 
 /**
@@ -594,20 +651,32 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
     const cleanupBefore = now - DAILY_METRICS_RETENTION_DAYS * 86400000;
     const cleanupBeforeDate = buildSkillMetricDate(cleanupBefore);
     const rateLimitedCleanupBefore = now - 7 * 86400000;
+    const hasFallbackDownloadActions = Boolean(await env.DB.prepare(`
+      SELECT 1 as hasFallbackActions
+      FROM user_actions
+      WHERE action_type IN ('download', 'install')
+        AND skill_id IS NOT NULL
+        AND created_at >= ?
+      LIMIT 1
+    `)
+      .bind(ninetyDaysAgo)
+      .first<{ hasFallbackActions: number }>());
 
     // Keep event table bounded so daily aggregation stays cheap.
     await env.DB.prepare(`
       DELETE FROM user_actions
-      WHERE (
-        action_type IN ('download', 'install')
+      WHERE action_type IN ('download', 'install')
         AND created_at < ?
-      )
-      OR (
-        action_type = 'github_client_rate_limited'
-        AND created_at < ?
-      )
     `)
-      .bind(cleanupBefore, rateLimitedCleanupBefore)
+      .bind(cleanupBefore)
+      .run();
+
+    await env.DB.prepare(`
+      DELETE FROM user_actions
+      WHERE action_type = 'github_client_rate_limited'
+        AND created_at < ?
+    `)
+      .bind(rateLimitedCleanupBefore)
       .run();
 
     await env.DB.prepare(`
@@ -617,21 +686,50 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
       .bind(cleanupBeforeDate)
       .run();
 
-    const aggregated = await env.DB.prepare(`
-      WITH combined AS (
+    const aggregated = hasFallbackDownloadActions
+      ? await env.DB.prepare(`
+        WITH combined AS (
+          SELECT
+            skill_id as skillId,
+            SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as sum7d,
+            SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as sum30d,
+            COUNT(*) as sum90d
+          FROM user_actions
+          WHERE action_type IN ('download', 'install')
+            AND skill_id IS NOT NULL
+            AND created_at >= ?
+          GROUP BY skill_id
+
+          UNION ALL
+
+          SELECT
+            skill_id as skillId,
+            SUM(CASE WHEN metric_date >= ? THEN download_count + install_count ELSE 0 END) as sum7d,
+            SUM(CASE WHEN metric_date >= ? THEN download_count + install_count ELSE 0 END) as sum30d,
+            SUM(download_count + install_count) as sum90d
+          FROM skill_daily_metrics
+          WHERE metric_date >= ?
+            AND (download_count != 0 OR install_count != 0)
+          GROUP BY skill_id
+        )
         SELECT
-          skill_id as skillId,
-          SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as sum7d,
-          SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as sum30d,
-          COUNT(*) as sum90d
-        FROM user_actions
-        WHERE action_type IN ('download', 'install')
-          AND skill_id IS NOT NULL
-          AND created_at >= ?
-        GROUP BY skill_id
-
-        UNION ALL
-
+          skillId,
+          SUM(sum7d) as sum7d,
+          SUM(sum30d) as sum30d,
+          SUM(sum90d) as sum90d
+        FROM combined
+        GROUP BY skillId
+      `)
+        .bind(
+          sevenDaysAgo,
+          thirtyDaysAgo,
+          ninetyDaysAgo,
+          sevenDaysAgoDate,
+          thirtyDaysAgoDate,
+          ninetyDaysAgoDate
+        )
+        .all<{ skillId: string; sum7d: number; sum30d: number; sum90d: number }>()
+      : await env.DB.prepare(`
         SELECT
           skill_id as skillId,
           SUM(CASE WHEN metric_date >= ? THEN download_count + install_count ELSE 0 END) as sum7d,
@@ -641,24 +739,13 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
         WHERE metric_date >= ?
           AND (download_count != 0 OR install_count != 0)
         GROUP BY skill_id
-      )
-      SELECT
-        skillId,
-        SUM(sum7d) as sum7d,
-        SUM(sum30d) as sum30d,
-        SUM(sum90d) as sum90d
-      FROM combined
-      GROUP BY skillId
-    `)
-      .bind(
-        sevenDaysAgo,
-        thirtyDaysAgo,
-        ninetyDaysAgo,
-        sevenDaysAgoDate,
-        thirtyDaysAgoDate,
-        ninetyDaysAgoDate
-      )
-      .all<{ skillId: string; sum7d: number; sum30d: number; sum90d: number }>();
+      `)
+        .bind(
+          sevenDaysAgoDate,
+          thirtyDaysAgoDate,
+          ninetyDaysAgoDate
+        )
+        .all<{ skillId: string; sum7d: number; sum30d: number; sum90d: number }>();
 
     if ((aggregated.results || []).length === 0) {
       await env.DB.prepare(`
@@ -690,28 +777,45 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
     }
 
     // Clear stale counters for skills with no download/install events in 90 days.
-    await env.DB.prepare(`
-      UPDATE skills
-      SET download_count_7d = 0, download_count_30d = 0, download_count_90d = 0
-      WHERE (download_count_7d != 0 OR download_count_30d != 0 OR download_count_90d != 0)
-        AND NOT EXISTS (
-          SELECT 1
-          FROM user_actions ua
-          WHERE ua.skill_id = skills.id
-            AND ua.action_type IN ('download', 'install')
-            AND ua.skill_id IS NOT NULL
-            AND ua.created_at >= ?
-        )
-        AND NOT EXISTS (
-          SELECT 1
-          FROM skill_daily_metrics sdm
-          WHERE sdm.skill_id = skills.id
-            AND sdm.metric_date >= ?
-            AND (sdm.download_count != 0 OR sdm.install_count != 0)
-        )
-    `)
-      .bind(ninetyDaysAgo, ninetyDaysAgoDate)
-      .run();
+    if (hasFallbackDownloadActions) {
+      await env.DB.prepare(`
+        UPDATE skills
+        SET download_count_7d = 0, download_count_30d = 0, download_count_90d = 0
+        WHERE (download_count_7d != 0 OR download_count_30d != 0 OR download_count_90d != 0)
+          AND NOT EXISTS (
+            SELECT 1
+            FROM user_actions ua
+            WHERE ua.skill_id = skills.id
+              AND ua.action_type IN ('download', 'install')
+              AND ua.skill_id IS NOT NULL
+              AND ua.created_at >= ?
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM skill_daily_metrics sdm
+            WHERE sdm.skill_id = skills.id
+              AND sdm.metric_date >= ?
+              AND (sdm.download_count != 0 OR sdm.install_count != 0)
+          )
+      `)
+        .bind(ninetyDaysAgo, ninetyDaysAgoDate)
+        .run();
+    } else {
+      await env.DB.prepare(`
+        UPDATE skills
+        SET download_count_7d = 0, download_count_30d = 0, download_count_90d = 0
+        WHERE (download_count_7d != 0 OR download_count_30d != 0 OR download_count_90d != 0)
+          AND NOT EXISTS (
+            SELECT 1
+            FROM skill_daily_metrics sdm
+            WHERE sdm.skill_id = skills.id
+              AND sdm.metric_date >= ?
+              AND (sdm.download_count != 0 OR sdm.install_count != 0)
+          )
+      `)
+        .bind(ninetyDaysAgoDate)
+        .run();
+    }
 
     await env.KV.put('dl:last_flush_actions', today, { expirationTtl: 86400 });
     return entries.length;
@@ -803,6 +907,20 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   console.log('Cache lists regenerated');
 }
 
+export function shouldRegenerateTrendingListCaches(input: {
+  markedUpdates: number;
+  hotUpdates: number;
+  warmUpdates: number;
+  coolUpdates: number;
+  downloadsFlushed: number;
+}): boolean {
+  return input.markedUpdates > 0
+    || input.hotUpdates > 0
+    || input.warmUpdates > 0
+    || input.coolUpdates > 0
+    || input.downloadsFlushed > 0;
+}
+
 export async function queueTrendingHeadSecurityPremium(env: TrendingEnv): Promise<number> {
   if (!env.SECURITY_ANALYSIS_QUEUE) {
     return 0;
@@ -810,23 +928,45 @@ export async function queueTrendingHeadSecurityPremium(env: TrendingEnv): Promis
 
   const limit = parsePositiveInt(env.SECURITY_PREMIUM_TOP_N, 50);
   const rows = await env.DB.prepare(`
-    SELECT s.id, ss.content_fingerprint AS contentFingerprint
-    FROM skills s
-    LEFT JOIN skill_security_state ss ON ss.skill_id = s.id
-    WHERE s.visibility = 'public'
-      AND ss.content_fingerprint IS NOT NULL
+    WITH trending_head AS (
+      SELECT id, trending_score
+      FROM skills INDEXED BY skills_visibility_trending_desc_idx
+      WHERE visibility = 'public'
+      ORDER BY trending_score DESC
+      LIMIT ?
+    )
+    SELECT
+      th.id,
+      ss.content_fingerprint AS contentFingerprint,
+      ss.premium_requested_fingerprint AS premiumRequestedFingerprint,
+      ss.premium_last_analyzed_fingerprint AS premiumLastAnalyzedFingerprint
+    FROM trending_head th
+    INNER JOIN skill_security_state ss ON ss.skill_id = th.id
+    WHERE ss.content_fingerprint IS NOT NULL
       AND (
         ss.premium_last_analyzed_fingerprint IS NULL
         OR ss.premium_last_analyzed_fingerprint != ss.content_fingerprint
       )
-    ORDER BY s.trending_score DESC
-    LIMIT ?
+    ORDER BY th.trending_score DESC
   `)
     .bind(limit)
-    .all<{ id: string; contentFingerprint: string }>();
+    .all<{
+      id: string;
+      contentFingerprint: string;
+      premiumRequestedFingerprint: string | null;
+      premiumLastAnalyzedFingerprint: string | null;
+    }>();
 
   let queued = 0;
   for (const row of rows.results || []) {
+    const premiumAlreadyRequestedForCurrentFingerprint =
+      row.premiumRequestedFingerprint === row.contentFingerprint
+      && row.premiumLastAnalyzedFingerprint !== row.contentFingerprint;
+
+    if (premiumAlreadyRequestedForCurrentFingerprint) {
+      continue;
+    }
+
     await markSkillSecurityPremiumDue(env.DB, {
       skillId: row.id,
       contentFingerprint: row.contentFingerprint,
@@ -885,8 +1025,9 @@ export default {
     const allUpdatedIds: string[] = [];
 
     // 1. Process user-marked skills first (highest priority)
-    const markedUpdates = await updateMarkedSkills(env);
-    console.log(`Updated ${markedUpdates} marked skills`);
+    const markedResult = await updateMarkedSkills(env);
+    console.log(`Updated ${markedResult.count} marked skills`);
+    allUpdatedIds.push(...markedResult.updatedIds);
 
     // 2. Update hot tier skills (every 6 hours, but check every hour)
     const hotResult = await updateSkillsByTier(env, ['hot'], MAX_SKILLS_PER_RUN);
@@ -903,13 +1044,20 @@ export default {
     console.log(`Updated ${coolResult.count} cool tier skills`);
     allUpdatedIds.push(...coolResult.updatedIds);
 
+    const uniqueUpdatedIds = Array.from(new Set(allUpdatedIds));
+
     // Mark updated skills as dirty for search score recomputation.
-    if (allUpdatedIds.length > 0) {
-      await markSearchDirtyBatch(env.DB, allUpdatedIds);
+    if (uniqueUpdatedIds.length > 0) {
+      await markSearchDirtyBatch(env.DB, uniqueUpdatedIds);
+
+      const syncedCategories = await syncUpdatedSkillCategoryStats(env.DB, uniqueUpdatedIds);
+      if (syncedCategories.length > 0) {
+        console.log(`Refreshed category stats for ${syncedCategories.length} categories`);
+      }
     }
 
     // 5. Detect skills needing AI reclassification (stars crossed threshold)
-    const reclassifications = await detectReclassificationNeeded(env, allUpdatedIds);
+    const reclassifications = await detectReclassificationNeeded(env, uniqueUpdatedIds);
     if (reclassifications > 0) {
       console.log(`Queued ${reclassifications} skills for AI reclassification`);
     }
@@ -921,7 +1069,17 @@ export default {
     }
 
     // 7. Regenerate list caches
-    await regenerateListCaches(env);
+    if (shouldRegenerateTrendingListCaches({
+      markedUpdates: markedResult.count,
+      hotUpdates: hotResult.count,
+      warmUpdates: warmResult.count,
+      coolUpdates: coolResult.count,
+      downloadsFlushed,
+    })) {
+      await regenerateListCaches(env);
+    } else {
+      console.log('Skipped list cache regeneration: no trending or download changes');
+    }
 
     // 7b. Queue premium security reanalysis for trending head skills.
     const premiumSecurityQueued = await queueTrendingHeadSecurityPremium(env);
@@ -930,9 +1088,11 @@ export default {
     }
 
     // 8. Record metrics
-    const totalBatches = Math.ceil((markedUpdates + hotResult.count + warmResult.count + coolResult.count) / BATCH_SIZE);
+    const totalBatches = Math.ceil(
+      (markedResult.count + hotResult.count + warmResult.count + coolResult.count) / BATCH_SIZE
+    );
     await recordMetrics(env, {
-      markedUpdates,
+      markedUpdates: markedResult.count,
       hotUpdates: hotResult.count,
       warmUpdates: warmResult.count,
       coolUpdates: coolResult.count,

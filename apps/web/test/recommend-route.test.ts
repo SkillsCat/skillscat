@@ -9,6 +9,7 @@ const getRecommendedSkills = vi.fn();
 const isOpenClawUserAgent = vi.fn();
 const readCachedRecommendSkills = vi.fn();
 const shouldRefreshPrecomputedRecommend = vi.fn();
+const markRecommendDirty = vi.fn();
 const markRecommendFallbackServed = vi.fn();
 const normalizeRecommendAlgoVersion = vi.fn();
 const upsertRecommendStateFailure = vi.fn();
@@ -45,6 +46,7 @@ vi.mock('$lib/server/ranking/recommend-cache', () => ({
 }));
 
 vi.mock('$lib/server/ranking/recommend-precompute', () => ({
+  markRecommendDirty,
   markRecommendFallbackServed,
   normalizeRecommendAlgoVersion,
   upsertRecommendStateFailure,
@@ -108,6 +110,7 @@ beforeEach(() => {
     algoVersion: 'v1',
   });
   shouldRefreshPrecomputedRecommend.mockReturnValue(false);
+  markRecommendDirty.mockResolvedValue(undefined);
   markRecommendFallbackServed.mockResolvedValue(undefined);
   normalizeRecommendAlgoVersion.mockReturnValue('v1');
   upsertRecommendStateFailure.mockResolvedValue(undefined);
@@ -273,5 +276,161 @@ describe('recommend route crawler fallback policy', () => {
     expect(payload.data.recommendSkills).toHaveLength(1);
     expect(getRecommendedSkills).toHaveBeenCalledTimes(1);
     expect(waitUntil).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses lightweight realtime fallback for cool public skills and only marks background refresh', async () => {
+    const db = createDb([
+      {
+        id: 'skill_1',
+        slug: 'acme/demo-skill',
+        repoOwner: 'acme',
+        visibility: 'public',
+        tier: 'cool',
+        recommendDirty: null,
+        recommendNextUpdateAt: null,
+        recommendPrecomputedAt: null,
+        recommendAlgoVersion: null,
+        recommendLastFallbackAt: null,
+      },
+    ]);
+    getRecommendedSkills.mockResolvedValue([
+      {
+        id: 'rec_1',
+        name: 'Fallback Related',
+        slug: 'acme/fallback-related',
+        description: 'fallback',
+        repoOwner: 'acme',
+        repoName: 'fallback-related',
+        stars: 3,
+        forks: 0,
+        trendingScore: 4,
+        updatedAt: Date.now(),
+        categories: [],
+      },
+    ]);
+    const request = createRequest({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)',
+    });
+
+    const { GET } = await import('../src/routes/api/skills/[owner]/[...name]/recommend/+server');
+    const response = await GET({
+      params: { owner: 'acme', name: 'demo-skill' },
+      platform: { env: { DB: db } },
+      request,
+      locals: {},
+      url: new URL(request.url),
+    } as never);
+
+    const payload = await response.json();
+    expect(payload.data.recommendSkills).toHaveLength(1);
+    expect(getRecommendedSkills).toHaveBeenCalledTimes(1);
+    expect(getRecommendedSkills.mock.calls[0]?.[2]).toEqual([]);
+    expect(getRecommendedSkills.mock.calls[0]?.[7]).toEqual([]);
+    expect(db.prepare).toHaveBeenCalledTimes(1);
+    expect(markRecommendDirty).toHaveBeenCalledWith(db, 'skill_1');
+    expect(markRecommendFallbackServed).toHaveBeenCalledWith(db, 'skill_1');
+    expect(writeRecommendPrecomputedPayload).not.toHaveBeenCalled();
+    expect(upsertRecommendStateSuccess).not.toHaveBeenCalled();
+  });
+
+  it('skips repeated lightweight fallback writes during cooldown windows', async () => {
+    const db = createDb([
+      {
+        id: 'skill_1',
+        slug: 'acme/demo-skill',
+        repoOwner: 'acme',
+        visibility: 'public',
+        tier: 'cold',
+        recommendDirty: null,
+        recommendNextUpdateAt: null,
+        recommendPrecomputedAt: null,
+        recommendAlgoVersion: null,
+        recommendLastFallbackAt: Date.now() - 5 * 60 * 1000,
+      },
+    ]);
+    getRecommendedSkills.mockResolvedValue([
+      {
+        id: 'rec_1',
+        name: 'Fallback Related',
+        slug: 'acme/fallback-related',
+        description: 'fallback',
+        repoOwner: 'acme',
+        repoName: 'fallback-related',
+        stars: 3,
+        forks: 0,
+        trendingScore: 4,
+        updatedAt: Date.now(),
+        categories: [],
+      },
+    ]);
+
+    const request = createRequest({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)',
+    });
+
+    const { GET } = await import('../src/routes/api/skills/[owner]/[...name]/recommend/+server');
+    const response = await GET({
+      params: { owner: 'acme', name: 'demo-skill' },
+      platform: { env: { DB: db } },
+      request,
+      locals: {},
+      url: new URL(request.url),
+    } as never);
+
+    const payload = await response.json();
+    expect(payload.data.recommendSkills).toHaveLength(1);
+    expect(getRecommendedSkills.mock.calls[0]?.[2]).toEqual([]);
+    expect(markRecommendDirty).not.toHaveBeenCalled();
+    expect(markRecommendFallbackServed).not.toHaveBeenCalled();
+  });
+
+  it('does not enqueue cold lightweight fallback skills for cron backfill', async () => {
+    const db = createDb([
+      {
+        id: 'skill_1',
+        slug: 'acme/demo-skill',
+        repoOwner: 'acme',
+        visibility: 'public',
+        tier: 'cold',
+        recommendDirty: null,
+        recommendNextUpdateAt: null,
+        recommendPrecomputedAt: null,
+        recommendAlgoVersion: null,
+        recommendLastFallbackAt: null,
+      },
+    ]);
+    getRecommendedSkills.mockResolvedValue([
+      {
+        id: 'rec_1',
+        name: 'Fallback Related',
+        slug: 'acme/fallback-related',
+        description: 'fallback',
+        repoOwner: 'acme',
+        repoName: 'fallback-related',
+        stars: 3,
+        forks: 0,
+        trendingScore: 4,
+        updatedAt: Date.now(),
+        categories: [],
+      },
+    ]);
+
+    const request = createRequest({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)',
+    });
+
+    const { GET } = await import('../src/routes/api/skills/[owner]/[...name]/recommend/+server');
+    const response = await GET({
+      params: { owner: 'acme', name: 'demo-skill' },
+      platform: { env: { DB: db } },
+      request,
+      locals: {},
+      url: new URL(request.url),
+    } as never);
+
+    const payload = await response.json();
+    expect(payload.data.recommendSkills).toHaveLength(1);
+    expect(markRecommendDirty).not.toHaveBeenCalled();
+    expect(markRecommendFallbackServed).toHaveBeenCalledWith(db, 'skill_1');
   });
 });

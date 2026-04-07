@@ -19,7 +19,8 @@ GITHUB_CLIENT_SECRET=your-github-client-secret
 GITHUB_TOKEN=your-github-token
 
 # ========== IndexNow (可选，用于加速 Bing 等搜索引擎发现) ==========
-# key 可以按官方 FAQ 自行生成。默认会对外提供 https://<host>/<key>.txt
+# pnpm init:project 默认会自动生成 key；如有需要也可以手动覆盖
+# 默认会对外提供 https://<host>/<key>.txt
 # 文档: https://www.indexnow.org/documentation
 INDEXNOW_KEY=
 

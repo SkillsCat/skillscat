@@ -38,6 +38,12 @@ export interface RecommendStateRow {
 
 export const DEFAULT_RECOMMEND_ALGO_VERSION = 'v1';
 const RECOMMEND_PRECOMPUTE_R2_PREFIX = 'cache/recommend';
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const HOT_RECOMMEND_REFRESH_INTERVAL_MS = 12 * HOUR_MS;
+const WARM_RECOMMEND_REFRESH_INTERVAL_MS = 72 * HOUR_MS;
+const COOL_RECOMMEND_REFRESH_INTERVAL_MS = 14 * DAY_MS;
+export const RECOMMEND_PRECOMPUTE_COOL_RECENT_ACCESS_WINDOW_MS = 30 * DAY_MS;
 
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 
@@ -57,16 +63,33 @@ export function getNextRecommendUpdateAt(
 ): number | null {
   switch (tier) {
     case 'hot':
-      return now + 6 * 60 * 60 * 1000;
+      return now + HOT_RECOMMEND_REFRESH_INTERVAL_MS;
     case 'warm':
-      return now + 48 * 60 * 60 * 1000;
+      return now + WARM_RECOMMEND_REFRESH_INTERVAL_MS;
     case 'cool':
-      return now + 14 * 24 * 60 * 60 * 1000;
+      return now + COOL_RECOMMEND_REFRESH_INTERVAL_MS;
     case 'cold':
     case 'archived':
     default:
       return null;
   }
+}
+
+export function shouldIncludeSkillInRecommendPrecompute(
+  tier: string | null | undefined,
+  lastAccessedAt: number | null | undefined,
+  now: number = Date.now(),
+  coolRecentAccessWindowMs: number = RECOMMEND_PRECOMPUTE_COOL_RECENT_ACCESS_WINDOW_MS
+): boolean {
+  if (tier === 'hot' || tier === 'warm') {
+    return true;
+  }
+
+  if (tier !== 'cool') {
+    return false;
+  }
+
+  return lastAccessedAt != null && lastAccessedAt >= now - coolRecentAccessWindowMs;
 }
 
 function isRecommendSkillPayloadItem(value: unknown): value is RecommendSkillPayloadItem {
