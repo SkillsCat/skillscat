@@ -43,6 +43,12 @@ interface RecommendCategorySeedCandidate {
   firstCategoryIndex: number;
 }
 
+interface RecommendCategoryPair {
+  firstCategory: string;
+  secondCategory: string;
+  pairOrder: number;
+}
+
 const EXACT_CATEGORY_OVERLAP_POOL_MAX = 2000;
 const MAX_CATEGORY_SEED_IDS = 192;
 
@@ -105,6 +111,24 @@ export function mergeRecommendCategorySeedSkillIds(
 ): string[] {
   return buildRecommendCategorySeedCandidates(orderedCategories, categorySeedIds, maxIds)
     .map((candidate) => candidate.skillId);
+}
+
+function buildRecommendCategoryPairs(categories: string[]): RecommendCategoryPair[] {
+  const pairs: RecommendCategoryPair[] = [];
+  let pairOrder = 0;
+
+  for (let i = 0; i < categories.length - 1; i++) {
+    for (let j = i + 1; j < categories.length; j++) {
+      pairs.push({
+        firstCategory: categories[i],
+        secondCategory: categories[j],
+        pairOrder,
+      });
+      pairOrder += 1;
+    }
+  }
+
+  return pairs;
 }
 
 export function orderRecommendDiscoveryCategories(
@@ -216,6 +240,70 @@ async function loadRecommendDiscoveryCategories(
   }
 }
 
+async function loadRecommendMultiCategoryCandidates(
+  db: D1Database,
+  orderedCategories: string[],
+  excludeIds: string[],
+  skillColumnsBase: string,
+  limit: number,
+  timingCollector?: TimingCollector
+): Promise<RecommendSkillCandidateRow[]> {
+  if (orderedCategories.length < 2 || limit <= 0) return [];
+
+  const categoryPairs = buildRecommendCategoryPairs(orderedCategories);
+  if (categoryPairs.length === 0) return [];
+
+  const perPairLimit = Math.max(4, Math.min(12, limit * 2));
+  const merged = new Map<string, { row: RecommendSkillCandidateRow; pairOrder: number }>();
+
+  for (const pair of categoryPairs) {
+    const exPh = excludeIds.map(() => '?').join(',');
+    const result = await timedTask(
+      timingCollector,
+      'rel_t1_pairs',
+      () => db.prepare(`
+        SELECT
+          ${skillColumnsBase}
+        FROM skill_categories sc1 INDEXED BY skill_categories_category_skill_idx
+        JOIN skill_categories sc2 INDEXED BY skill_categories_category_skill_idx
+          ON sc2.skill_id = sc1.skill_id
+         AND sc2.category_slug = ?
+        CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
+        WHERE sc1.category_slug = ?
+          AND s.id = sc1.skill_id
+          AND s.id NOT IN (${exPh})
+          AND s.visibility = 'public'
+        ORDER BY s.trending_score DESC
+        LIMIT ?
+      `).bind(pair.secondCategory, pair.firstCategory, ...excludeIds, perPairLimit).all<RecommendSkillCandidateRow>(),
+      `tier1 multi-category supplement (${pair.firstCategory}+${pair.secondCategory})`
+    );
+
+    for (const row of result.results) {
+      const existing = merged.get(row.id);
+      if (existing) continue;
+
+      merged.set(row.id, {
+        row: {
+          ...row,
+          sharedCategoryCount: 2,
+        },
+        pairOrder: pair.pairOrder,
+      });
+    }
+  }
+
+  return Array.from(merged.values())
+    .sort((a, b) =>
+      a.pairOrder - b.pairOrder
+      || (b.row.trendingScore || 0) - (a.row.trendingScore || 0)
+      || (b.row.stars || 0) - (a.row.stars || 0)
+      || a.row.id.localeCompare(b.row.id)
+    )
+    .slice(0, limit)
+    .map(({ row }) => row);
+}
+
 /**
  * 获取相关 skills (tiered candidate discovery + adaptive scoring)
  *
@@ -273,10 +361,20 @@ export async function getRecommendedSkills(
 
   const addCandidates = (rows: RecommendSkillCandidateRow[], tier: number) => {
     for (const row of rows) {
-      if (!candidateMap.has(row.id)) {
-        candidateMap.set(row.id, { data: row, tier });
-        excludeIds.push(row.id);
+      const existing = candidateMap.get(row.id);
+      if (existing) {
+        existing.tier = Math.min(existing.tier, tier);
+        if ((row.sharedCategoryCount || 0) > (existing.data.sharedCategoryCount || 0)) {
+          existing.data.sharedCategoryCount = row.sharedCategoryCount;
+        }
+        if ((row.sharedTagCount || 0) > (existing.data.sharedTagCount || 0)) {
+          existing.data.sharedTagCount = row.sharedTagCount;
+        }
+        continue;
       }
+
+      candidateMap.set(row.id, { data: row, tier });
+      excludeIds.push(row.id);
     }
   };
 
@@ -348,6 +446,19 @@ export async function getRecommendedSkills(
           1
         );
         seededTier1Candidates = true;
+      }
+
+      if (discovery.orderedCategories.length > 1) {
+        const multiCategoryLimit = Math.max(6, Math.min(MAX_SCORING_CANDIDATES, limit * 2));
+        const multiCategoryRows = await loadRecommendMultiCategoryCandidates(
+          db,
+          discovery.orderedCategories,
+          [skillId],
+          SKILL_COLUMNS_BASE,
+          multiCategoryLimit,
+          timingCollector
+        );
+        addCandidates(multiCategoryRows, 1);
       }
 
       if (discovery.fallbackCategories.length > 0) {
@@ -458,7 +569,7 @@ export async function getRecommendedSkills(
       'rel_t3',
       () => db.prepare(`
       SELECT ${SKILL_COLUMNS_BASE}
-      FROM skills s
+      FROM skills s INDEXED BY skills_repo_visibility_trending_idx
       WHERE s.repo_owner = ?
         AND s.id NOT IN (${exPh})
         AND s.visibility = 'public'
@@ -479,7 +590,7 @@ export async function getRecommendedSkills(
       'rel_t4',
       () => db.prepare(`
       SELECT ${SKILL_COLUMNS_BASE}
-      FROM skills s
+      FROM skills s INDEXED BY skills_visibility_trending_desc_idx
       WHERE s.id NOT IN (${exPh})
         AND s.visibility = 'public'
       ORDER BY s.trending_score DESC

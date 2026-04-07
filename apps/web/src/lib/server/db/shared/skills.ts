@@ -106,7 +106,7 @@ export async function addAuthorAvatarsToSkills(
   const placeholders = repoOwners.map(() => '?').join(',');
   const authors = await db.prepare(`
     SELECT username, avatar_url as authorAvatar
-    FROM authors
+    FROM authors INDEXED BY authors_username_idx
     WHERE username IN (${placeholders})
   `)
     .bind(...repoOwners)

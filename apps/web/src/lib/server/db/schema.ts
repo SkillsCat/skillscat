@@ -562,6 +562,7 @@ export const categoryPublicStats = sqliteTable('category_public_stats', {
   categorySlug: text('category_slug').primaryKey(),
   publicSkillCount: integer('public_skill_count').notNull().default(0),
   topSkillIdsJson: text('top_skill_ids_json'),
+  topRankedSkillIdsJson: text('top_ranked_skill_ids_json'),
   maxFreshnessTs: integer('max_freshness_ts', { mode: 'timestamp_ms' }),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 });

@@ -21,6 +21,11 @@ interface TableInfoRow {
   name: string;
 }
 
+interface CategoryPublicStatsColumnSupport {
+  topSkillIdsJson: boolean;
+  topRankedSkillIdsJson: boolean;
+}
+
 interface CategoryStatsCompletenessRow {
   count: number;
 }
@@ -35,7 +40,7 @@ export interface DynamicCategoryStat {
 
 let pendingPredefinedCategoryStatsSync: Promise<void> | null = null;
 const CATEGORY_PUBLIC_TOP_SKILL_IDS_LIMIT = 96;
-let supportsCategoryTopSkillIdsColumn: boolean | null = null;
+const categoryPublicStatsColumnSupportCache = new WeakMap<object, CategoryPublicStatsColumnSupport>();
 
 function normalizeCategorySlugs(categorySlugs: Iterable<string>): string[] {
   return Array.from(
@@ -108,10 +113,10 @@ async function loadTopSkillIdsForCategory(
   const result = await db.prepare(`
     SELECT sc.skill_id as skillId
     FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
-    JOIN skills s
-      ON s.id = sc.skill_id
-     AND s.visibility = 'public'
+    CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
     WHERE sc.category_slug = ?
+      AND s.id = sc.skill_id
+      AND s.visibility = 'public'
     ORDER BY s.trending_score DESC
     LIMIT ?
   `)
@@ -123,19 +128,62 @@ async function loadTopSkillIdsForCategory(
     .filter((skillId): skillId is string => typeof skillId === 'string' && skillId.length > 0);
 }
 
-async function hasCategoryTopSkillIdsColumn(db: D1Database): Promise<boolean> {
-  if (supportsCategoryTopSkillIdsColumn !== null) {
-    return supportsCategoryTopSkillIdsColumn;
+async function loadTopRankedSkillIdsForCategory(
+  db: D1Database,
+  categorySlug: string,
+  limit: number = CATEGORY_PUBLIC_TOP_SKILL_IDS_LIMIT
+): Promise<string[]> {
+  if (!categorySlug || limit <= 0) return [];
+
+  const result = await db.prepare(`
+    SELECT sc.skill_id as skillId
+    FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+    CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
+    WHERE sc.category_slug = ?
+      AND s.id = sc.skill_id
+      AND s.visibility = 'public'
+    ORDER BY CASE
+      WHEN s.classification_method = 'direct' THEN 0
+      WHEN s.classification_method = 'ai' THEN 1
+      WHEN s.classification_method = 'keyword' THEN 2
+      ELSE 3
+    END ASC,
+    s.trending_score DESC
+    LIMIT ?
+  `)
+    .bind(categorySlug, limit)
+    .all<CategoryTopSkillRow>();
+
+  return (result.results || [])
+    .map((row) => row.skillId)
+    .filter((skillId): skillId is string => typeof skillId === 'string' && skillId.length > 0);
+}
+
+async function getCategoryPublicStatsColumnSupport(
+  db: D1Database
+): Promise<CategoryPublicStatsColumnSupport> {
+  const cached = categoryPublicStatsColumnSupportCache.get(db as object);
+  if (cached) {
+    return cached;
   }
 
   try {
     const result = await db.prepare(`PRAGMA table_info(category_public_stats)`).all<TableInfoRow>();
-    supportsCategoryTopSkillIdsColumn = (result.results || []).some((row) => row.name === 'top_skill_ids_json');
+    const columns = new Set((result.results || []).map((row) => row.name));
+    const support = {
+      topSkillIdsJson: columns.has('top_skill_ids_json'),
+      topRankedSkillIdsJson: columns.has('top_ranked_skill_ids_json'),
+    };
+    categoryPublicStatsColumnSupportCache.set(db as object, support);
+    return support;
   } catch {
-    supportsCategoryTopSkillIdsColumn = false;
+    const support = {
+      topSkillIdsJson: false,
+      topRankedSkillIdsJson: false,
+    };
+    categoryPublicStatsColumnSupportCache.set(db as object, support);
+    return support;
   }
-
-  return supportsCategoryTopSkillIdsColumn;
 }
 
 function buildCategoryStatsRecord(rows: Iterable<CategoryCountRow>): Record<string, number> {
@@ -258,7 +306,9 @@ export async function syncCategoryPublicStats(
   if (normalizedSlugs.length === 0) return;
 
   const aggregateMap = await loadCategoryAggregates(db, normalizedSlugs);
-  const includeTopSkillIds = await hasCategoryTopSkillIdsColumn(db);
+  const columnSupport = await getCategoryPublicStatsColumnSupport(db);
+  const includeTopSkillIds = columnSupport.topSkillIdsJson;
+  const includeTopRankedSkillIds = columnSupport.topRankedSkillIdsJson;
 
   for (const slug of normalizedSlugs) {
     const aggregate = aggregateMap.get(slug);
@@ -267,8 +317,31 @@ export async function syncCategoryPublicStats(
     const topSkillIdsJson = includeTopSkillIds && count > 0
       ? JSON.stringify(await loadTopSkillIdsForCategory(db, slug))
       : JSON.stringify([]);
+    const topRankedSkillIdsJson = includeTopRankedSkillIds && count > 0
+      ? JSON.stringify(await loadTopRankedSkillIdsForCategory(db, slug))
+      : JSON.stringify([]);
 
-    if (includeTopSkillIds) {
+    if (includeTopSkillIds && includeTopRankedSkillIds) {
+      await db.prepare(`
+        INSERT INTO category_public_stats (
+          category_slug,
+          public_skill_count,
+          top_skill_ids_json,
+          top_ranked_skill_ids_json,
+          max_freshness_ts,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(category_slug) DO UPDATE SET
+          public_skill_count = excluded.public_skill_count,
+          top_skill_ids_json = excluded.top_skill_ids_json,
+          top_ranked_skill_ids_json = excluded.top_ranked_skill_ids_json,
+          max_freshness_ts = excluded.max_freshness_ts,
+          updated_at = excluded.updated_at
+      `)
+        .bind(slug, count, topSkillIdsJson, topRankedSkillIdsJson, maxTs, now)
+        .run();
+    } else if (includeTopSkillIds) {
       await db.prepare(`
         INSERT INTO category_public_stats (category_slug, public_skill_count, top_skill_ids_json, max_freshness_ts, updated_at)
         VALUES (?, ?, ?, ?, ?)
@@ -279,6 +352,18 @@ export async function syncCategoryPublicStats(
           updated_at = excluded.updated_at
       `)
         .bind(slug, count, topSkillIdsJson, maxTs, now)
+        .run();
+    } else if (includeTopRankedSkillIds) {
+      await db.prepare(`
+        INSERT INTO category_public_stats (category_slug, public_skill_count, top_ranked_skill_ids_json, max_freshness_ts, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(category_slug) DO UPDATE SET
+          public_skill_count = excluded.public_skill_count,
+          top_ranked_skill_ids_json = excluded.top_ranked_skill_ids_json,
+          max_freshness_ts = excluded.max_freshness_ts,
+          updated_at = excluded.updated_at
+      `)
+        .bind(slug, count, topRankedSkillIdsJson, maxTs, now)
         .run();
     } else {
       await db.prepare(`

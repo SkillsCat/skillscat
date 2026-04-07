@@ -93,6 +93,10 @@ function createRecommendDb(): DatabaseSync {
       ON skills (visibility, id);
     CREATE INDEX skills_visibility_trending_desc_idx
       ON skills (visibility, trending_score DESC);
+    CREATE INDEX skills_repo_visibility_trending_idx
+      ON skills (repo_owner, visibility, trending_score DESC);
+    CREATE INDEX authors_username_idx
+      ON authors (username);
     CREATE INDEX skill_categories_category_skill_idx
       ON skill_categories (category_slug, skill_id);
     CREATE INDEX skill_tags_tag_skill_idx
@@ -210,5 +214,54 @@ describe('orderRecommendDiscoveryCategories', () => {
 
     expect(results).toHaveLength(2);
     expect(results.map((skill) => skill.id).sort()).toEqual(['skill-fallback', 'skill-seeded']);
+  });
+
+  it('supplements large-pool seeds with unseen multi-category matches', async () => {
+    const sqlite = createRecommendDb();
+
+    sqlite.exec(`
+      INSERT INTO skills (
+        id, name, slug, description, repo_owner, repo_name, visibility,
+        stars, forks, trending_score, last_commit_at, updated_at, indexed_at
+      )
+      VALUES
+        ('skill-current', 'Current', 'current', NULL, 'owner-current', 'repo-current', 'public', 10, 1, 5, 1000, 1000, 1000),
+        ('skill-alpha-hot', 'Alpha Hot', 'alpha-hot', NULL, 'owner-alpha', 'repo-alpha', 'public', 300, 10, 100, 1000, 1000, 1000),
+        ('skill-beta-hot', 'Beta Hot', 'beta-hot', NULL, 'owner-beta', 'repo-beta', 'public', 250, 9, 90, 1000, 1000, 1000),
+        ('skill-multi', 'Multi Match', 'multi-match', NULL, 'owner-multi', 'repo-multi', 'public', 5, 1, 5, 1000, 1000, 1000);
+
+      INSERT INTO skill_categories (skill_id, category_slug)
+      VALUES
+        ('skill-current', 'alpha'),
+        ('skill-current', 'beta'),
+        ('skill-alpha-hot', 'alpha'),
+        ('skill-beta-hot', 'beta'),
+        ('skill-multi', 'alpha'),
+        ('skill-multi', 'beta');
+
+      INSERT INTO category_public_stats (
+        category_slug, public_skill_count, top_skill_ids_json, max_freshness_ts, updated_at
+      )
+      VALUES
+        ('alpha', 3000, '["skill-alpha-hot"]', 1000, 1000),
+        ('beta', 3000, '["skill-beta-hot"]', 1000, 1000);
+    `);
+
+    const results = await getRecommendedSkills(
+      {
+        DB: new SqliteD1Database(sqlite) as never,
+        R2: undefined,
+      },
+      'skill-current',
+      ['alpha', 'beta'],
+      '',
+      2,
+      undefined,
+      false,
+      []
+    );
+
+    expect(results).toHaveLength(2);
+    expect(results.map((skill) => skill.id)).toContain('skill-multi');
   });
 });

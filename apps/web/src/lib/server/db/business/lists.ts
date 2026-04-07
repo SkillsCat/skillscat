@@ -5,6 +5,171 @@ import { buildListCacheKeys } from '$lib/server/db/shared/cache';
 import { addCategoriesToSkills, hydrateCachedSkills, normalizeCachedSkill } from '$lib/server/db/shared/skills';
 import type { CachedSkillCardRaw, DbEnv, SkillListRow } from '$lib/server/db/shared/types';
 
+interface CategoryListSnapshotRow {
+  publicSkillCount: number;
+  topRankedSkillIdsJson?: string | null;
+}
+
+const categoryTopRankedSkillIdsColumnSupportCache = new WeakMap<object, boolean>();
+
+function parseSkillIdsJson(value: string | null | undefined): string[] {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+async function readCategoryListSnapshot(
+  db: D1Database,
+  categorySlug: string
+): Promise<{ total: number | null; topRankedSkillIds: string[] }> {
+  const supportsTopRankedSkillIdsColumn = categoryTopRankedSkillIdsColumnSupportCache.get(db as object);
+
+  if (supportsTopRankedSkillIdsColumn !== false) {
+    try {
+      const row = await db.prepare(`
+        SELECT
+          public_skill_count as publicSkillCount,
+          top_ranked_skill_ids_json as topRankedSkillIdsJson
+        FROM category_public_stats
+        WHERE category_slug = ?
+        LIMIT 1
+      `)
+        .bind(categorySlug)
+        .first<CategoryListSnapshotRow>();
+
+      categoryTopRankedSkillIdsColumnSupportCache.set(db as object, true);
+      return {
+        total: row ? Number(row.publicSkillCount) || 0 : null,
+        topRankedSkillIds: parseSkillIdsJson(row?.topRankedSkillIdsJson),
+      };
+    } catch {
+      categoryTopRankedSkillIdsColumnSupportCache.set(db as object, false);
+    }
+  }
+
+  const row = await db.prepare(`
+    SELECT public_skill_count as publicSkillCount
+    FROM category_public_stats
+    WHERE category_slug = ?
+    LIMIT 1
+  `)
+    .bind(categorySlug)
+    .first<Pick<CategoryListSnapshotRow, 'publicSkillCount'>>();
+
+  return {
+    total: row ? Number(row.publicSkillCount) || 0 : null,
+    topRankedSkillIds: [],
+  };
+}
+
+async function loadCategorySkillsByIds(
+  db: D1Database,
+  categorySlug: string,
+  skillIds: string[]
+): Promise<SkillListRow[]> {
+  if (skillIds.length === 0) return [];
+
+  const placeholders = skillIds.map(() => '?').join(',');
+  const result = await db.prepare(`
+    SELECT
+      s.id,
+      s.name,
+      s.slug,
+      s.description,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.stars,
+      s.forks,
+      s.trending_score as trendingScore,
+      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
+      a.avatar_url as authorAvatar
+    FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+    CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
+    LEFT JOIN authors a INDEXED BY authors_username_idx
+      ON s.repo_owner = a.username
+    WHERE sc.category_slug = ?
+      AND sc.skill_id IN (${placeholders})
+      AND s.id = sc.skill_id
+      AND s.visibility = 'public'
+  `)
+    .bind(categorySlug, ...skillIds)
+    .all<SkillListRow>();
+
+  const rowMap = new Map((result.results || []).map((row) => [row.id, row] as const));
+  return skillIds
+    .map((skillId) => rowMap.get(skillId))
+    .filter((row): row is SkillListRow => Boolean(row));
+}
+
+async function countSkillsByCategory(
+  db: D1Database,
+  categorySlug: string
+): Promise<number> {
+  const countResult = await db.prepare(`
+    SELECT COUNT(*) as total
+    FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+    CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
+    WHERE sc.category_slug = ?
+      AND s.id = sc.skill_id
+      AND s.visibility = 'public'
+  `)
+    .bind(categorySlug)
+    .first<{ total: number }>();
+
+  return countResult?.total || 0;
+}
+
+async function loadCategorySkillsLive(
+  db: D1Database,
+  categorySlug: string,
+  queryLimit: number,
+  offset: number
+): Promise<SkillListRow[]> {
+  const result = await db.prepare(`
+    WITH matched AS (
+      SELECT
+        s.id,
+        s.name,
+        s.slug,
+        s.description,
+        s.repo_owner as repoOwner,
+        s.repo_name as repoName,
+        s.stars,
+        s.forks,
+        s.trending_score as trendingScore,
+        COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
+        CASE
+          WHEN s.classification_method = 'direct' THEN 0
+          WHEN s.classification_method = 'ai' THEN 1
+          WHEN s.classification_method = 'keyword' THEN 2
+          ELSE 3
+        END as classificationRank
+      FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+      CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
+      WHERE sc.category_slug = ?
+        AND s.id = sc.skill_id
+        AND s.visibility = 'public'
+      ORDER BY classificationRank ASC, s.trending_score DESC
+      LIMIT ? OFFSET ?
+    )
+    SELECT matched.*, a.avatar_url as authorAvatar
+    FROM matched
+    LEFT JOIN authors a INDEXED BY authors_username_idx
+      ON matched.repoOwner = a.username
+    ORDER BY matched.classificationRank ASC, matched.trendingScore DESC
+  `)
+    .bind(categorySlug, queryLimit, offset)
+    .all<SkillListRow>();
+
+  return result.results || [];
+}
+
 /**
  * 从 R2 缓存读取列表数据
  */
@@ -405,58 +570,38 @@ export async function getSkillsByCategory(
 ): Promise<{ skills: SkillCardData[]; total: number }> {
   if (!env.DB) return { skills: [], total: 0 };
   const queryLimit = offset === 0 ? limit + 1 : limit;
+  const snapshot = await readCategoryListSnapshot(env.DB, categorySlug);
+  const totalFromStats = snapshot.total;
+  const requestedIds = snapshot.topRankedSkillIds.slice(offset, offset + queryLimit);
+  const canUsePrecomputedPage = typeof totalFromStats === 'number'
+    && requestedIds.length === queryLimit
+    && totalFromStats >= offset + requestedIds.length;
 
-  const result = await env.DB.prepare(`
-    WITH matched AS (
-      SELECT
-        s.id,
-        s.name,
-        s.slug,
-        s.description,
-        s.repo_owner as repoOwner,
-        s.repo_name as repoName,
-        s.stars,
-        s.forks,
-        s.trending_score as trendingScore,
-        COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-        CASE
-          WHEN s.classification_method = 'direct' THEN 0
-          WHEN s.classification_method = 'ai' THEN 1
-          WHEN s.classification_method = 'keyword' THEN 2
-          ELSE 3
-        END as classificationRank
-      FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
-      JOIN skills s ON s.id = sc.skill_id
-      WHERE sc.category_slug = ?
-        AND s.visibility = 'public'
-      ORDER BY classificationRank ASC, s.trending_score DESC
-      LIMIT ? OFFSET ?
-    )
-    SELECT matched.*, a.avatar_url as authorAvatar
-    FROM matched
-    LEFT JOIN authors a ON matched.repoOwner = a.username
-    ORDER BY matched.classificationRank ASC, matched.trendingScore DESC
-  `)
-    .bind(categorySlug, queryLimit, offset)
-    .all<SkillListRow>();
+  let pageRows: SkillListRow[];
+  if (canUsePrecomputedPage) {
+    const precomputedRows = await loadCategorySkillsByIds(env.DB, categorySlug, requestedIds);
+    if (precomputedRows.length === requestedIds.length) {
+      pageRows = offset === 0 && typeof totalFromStats === 'number' && totalFromStats > limit
+        ? precomputedRows.slice(0, limit)
+        : precomputedRows;
 
-  const hasMoreOnFirstPage = offset === 0 && result.results.length > limit;
-  const pageRows = hasMoreOnFirstPage ? result.results.slice(0, limit) : result.results;
+      const skills = await addCategoriesToSkills(env.DB, pageRows);
+      return {
+        skills,
+        total: totalFromStats ?? pageRows.length,
+      };
+    }
+  }
+
+  const liveRows = await loadCategorySkillsLive(env.DB, categorySlug, queryLimit, offset);
+  const hasMoreOnFirstPage = offset === 0 && liveRows.length > limit;
+  pageRows = hasMoreOnFirstPage ? liveRows.slice(0, limit) : liveRows;
 
   let total: number;
   if (offset === 0 && !hasMoreOnFirstPage) {
     total = pageRows.length;
   } else {
-    const countResult = await env.DB.prepare(`
-      SELECT COUNT(*) as total
-      FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
-      JOIN skills s ON s.id = sc.skill_id
-      WHERE sc.category_slug = ?
-        AND s.visibility = 'public'
-    `)
-      .bind(categorySlug)
-      .first<{ total: number }>();
-    total = countResult?.total || 0;
+    total = await countSkillsByCategory(env.DB, categorySlug);
   }
 
   const skills = await addCategoriesToSkills(env.DB, pageRows);

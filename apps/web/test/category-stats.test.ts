@@ -51,6 +51,8 @@ function createCategoryStatsDb(): DatabaseSync {
     CREATE TABLE skills (
       id TEXT PRIMARY KEY NOT NULL,
       visibility TEXT NOT NULL,
+      classification_method TEXT,
+      trending_score REAL NOT NULL DEFAULT 0,
       last_commit_at INTEGER,
       updated_at INTEGER,
       indexed_at INTEGER
@@ -77,12 +79,16 @@ function createCategoryStatsDb(): DatabaseSync {
     CREATE TABLE category_public_stats (
       category_slug TEXT PRIMARY KEY NOT NULL,
       public_skill_count INTEGER NOT NULL DEFAULT 0,
+      top_skill_ids_json TEXT,
+      top_ranked_skill_ids_json TEXT,
       max_freshness_ts INTEGER,
       updated_at INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE INDEX skill_categories_category_skill_idx
       ON skill_categories (category_slug, skill_id);
+    CREATE INDEX skills_visibility_id_idx
+      ON skills (visibility, id);
   `);
 
   return sqlite;
@@ -97,11 +103,13 @@ describe('category public stats', () => {
         ('cat-custom-a', 'custom-a', 'Custom A', NULL, 'ai-suggested'),
         ('cat-custom-b', 'custom-b', 'Custom B', NULL, 'ai-suggested');
 
-      INSERT INTO skills (id, visibility, last_commit_at, updated_at, indexed_at)
+      INSERT INTO skills (
+        id, visibility, classification_method, trending_score, last_commit_at, updated_at, indexed_at
+      )
       VALUES
-        ('skill-1', 'public', 2000, 1500, 1400),
-        ('skill-2', 'private', 9000, 9000, 9000),
-        ('skill-3', 'public', NULL, 4000, 3500);
+        ('skill-1', 'public', 'direct', 10, 2000, 1500, 1400),
+        ('skill-2', 'private', 'direct', 999, 9000, 9000, 9000),
+        ('skill-3', 'public', 'ai', 100, NULL, 4000, 3500);
 
       INSERT INTO skill_categories (skill_id, category_slug)
       VALUES
@@ -115,19 +123,29 @@ describe('category public stats', () => {
     await syncCategoryPublicStats(db as never, ['custom-a', 'custom-b'], 5000);
 
     expect(sqlite.prepare(`
-      SELECT category_slug, public_skill_count, max_freshness_ts, updated_at
+      SELECT
+        category_slug,
+        public_skill_count,
+        top_skill_ids_json,
+        top_ranked_skill_ids_json,
+        max_freshness_ts,
+        updated_at
       FROM category_public_stats
       ORDER BY category_slug ASC
     `).all()).toEqual([
       {
         category_slug: 'custom-a',
         public_skill_count: 2,
+        top_skill_ids_json: '["skill-3","skill-1"]',
+        top_ranked_skill_ids_json: '["skill-1","skill-3"]',
         max_freshness_ts: 4000,
         updated_at: 5000,
       },
       {
         category_slug: 'custom-b',
         public_skill_count: 1,
+        top_skill_ids_json: '["skill-1"]',
+        top_ranked_skill_ids_json: '["skill-1"]',
         max_freshness_ts: 2000,
         updated_at: 5000,
       },
@@ -154,12 +172,14 @@ describe('category public stats', () => {
   it('backfills predefined category snapshot rows on first read', async () => {
     const sqlite = createCategoryStatsDb();
     sqlite.exec(`
-      INSERT INTO skills (id, visibility, last_commit_at, updated_at, indexed_at)
+      INSERT INTO skills (
+        id, visibility, classification_method, trending_score, last_commit_at, updated_at, indexed_at
+      )
       VALUES
-        ('skill-1', 'public', 2200, 2100, 2000),
-        ('skill-2', 'public', NULL, 3200, 3000),
-        ('skill-3', 'private', 9999, 9999, 9999),
-        ('skill-4', 'public', 2600, 2500, 2400);
+        ('skill-1', 'public', 'direct', 50, 2200, 2100, 2000),
+        ('skill-2', 'public', 'ai', 80, NULL, 3200, 3000),
+        ('skill-3', 'private', 'direct', 999, 9999, 9999, 9999),
+        ('skill-4', 'public', 'keyword', 30, 2600, 2500, 2400);
 
       INSERT INTO skill_categories (skill_id, category_slug)
       VALUES
