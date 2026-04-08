@@ -27,6 +27,7 @@ import {
   classifySecurityFileKind,
   computeSecurityTotalScore,
   getSecurityRiskLevel,
+  normalizeSecurityFileScores,
   runSecurityHeuristics,
   sortDimensionsBySeverity,
   type SecurityDimension,
@@ -170,6 +171,14 @@ function roundUsd(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
+function buildFileInventoryContext(files: SecurityFileInput[]): string {
+  return files.map((file) => {
+    const kind = classifySecurityFileKind(file.path, file.type);
+    const hasContent = file.type === 'text' && typeof file.content === 'string' && file.content.length > 0;
+    return `- ${file.path} (${kind}, ${file.type}, ${file.size} bytes${hasContent ? ', readable content included' : ', metadata only'})`;
+  }).join('\n');
+}
+
 function buildFilesContext(files: SecurityFileInput[]): string {
   return files.map((file) => {
     const header = `### ${file.path} (${classifySecurityFileKind(file.path, file.type)}, ${file.size} bytes)`;
@@ -178,11 +187,12 @@ function buildFilesContext(files: SecurityFileInput[]): string {
   }).join('\n\n');
 }
 
-function buildAssessmentPrompt(
+export function buildAssessmentPrompt(
   stage: 'initial' | 'review' | 'confirm' | 'final',
   files: SecurityFileInput[],
   heuristic: ReturnType<typeof runSecurityHeuristics>,
-  priorJson?: string
+  priorJson?: string,
+  inventoryFiles: SecurityFileInput[] = files,
 ): string {
   const heuristicSummary = sortDimensionsBySeverity(heuristic.dimensions)
     .map((dimension) => `${dimension.dimension}: ${dimension.score}/10 (${dimension.reason})`)
@@ -213,15 +223,27 @@ Risk dimensions:
 
 Rules:
 1. Score each dimension from 0.0 to 10.0.
-2. Only claim a risk when the provided files contain concrete evidence.
-3. Keep reasons short and evidence-based.
-4. findings must reference real file paths from the provided list.
-5. Return strict JSON only.
+2. Use only the supplied file inventory and readable file contents. Do not infer behavior from missing files, unseen bytes, reputation guesses, or generic assumptions.
+3. Only files shown in the readable content section have inspectable contents. Inventory-only files, especially binaries, are unknown and must not be treated as malware or harmful behavior by themselves.
+4. Heuristic baseline is only a hint and may be wrong. Override it whenever the provided evidence does not support the heuristic.
+5. If evidence is incomplete or ambiguous, score lower and say the evidence is insufficient instead of speculating.
+6. Quoted examples, documentation, defensive guidance, or benign references should score low unless the skill is actually instructing the user or agent to do the risky thing.
+7. Scores 9.0-10.0 are reserved for explicit, concrete, severe harm that could realistically hurt users: credential theft or exfiltration, destructive system/database actions, malware-like payload delivery or persistence, or other seriously invasive abuse.
+8. Scores 7.0-8.9 require strong direct evidence of likely real harm in the provided context. Mere suspicious wording, opaque binaries, or missing context are not enough.
+9. Scores 4.0-6.9 are for moderate but still evidence-backed concerns. If you are not confident from the supplied context, stay in this range or lower.
+10. Prompt-injection language alone is not high or critical unless it is clearly tied to severe abuse such as secret theft, destructive actions, or serious safety bypass with real-world impact.
+11. Never claim hidden capabilities, malware behavior, exfiltration, persistence, or destructive actions unless those behaviors are directly evidenced in the supplied context.
+12. Keep reasons short and evidence-based.
+13. findings must reference real file paths from the provided list.
+14. Return strict JSON only.
 
 Heuristic baseline:
 ${heuristicSummary}
 ${previousSection}
-Files:
+File inventory:
+${buildFileInventoryContext(inventoryFiles)}
+
+Readable file contents:
 ${buildFilesContext(files)}
 
 Respond with:
@@ -236,11 +258,67 @@ Respond with:
 }`;
 }
 
-function parseAiAssessment(content: string): AiAssessmentResult | null {
-  const match = content.match(/\{[\s\S]*\}/);
-  if (!match) return null;
+function extractJsonObjectCandidate(content: string): string | null {
+  const start = content.indexOf('{');
+  if (start === -1) {
+    return null;
+  }
 
-  const parsed = JSON.parse(match[0]) as {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < content.length; index += 1) {
+    const char = content[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) {
+      continue;
+    }
+
+    if (char === '{') {
+      depth += 1;
+      continue;
+    }
+
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return content.slice(start, index + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function sanitizeJsonCandidate(candidate: string): string {
+  return candidate
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .replace(/,\s*([}\]])/g, '$1')
+    .trim();
+}
+
+export function parseAiAssessment(content: string): AiAssessmentResult | null {
+  const candidate = extractJsonObjectCandidate(content);
+  if (!candidate) return null;
+
+  const parsed = JSON.parse(sanitizeJsonCandidate(candidate)) as {
     summary?: unknown;
     dimensions?: Array<{
       dimension?: unknown;
@@ -333,7 +411,7 @@ async function callOpenRouter(
   }
 
   const payload = await response.json() as OpenRouterResponse;
-  const content = payload.choices?.[0]?.message?.content;
+  const content = extractOpenRouterTextContent(payload);
   if (!content) {
     throw new Error('OpenRouter returned no content');
   }
@@ -345,6 +423,43 @@ async function callOpenRouter(
     totalTokens: payload.usage?.total_tokens || 0,
     costUsd: typeof payload.usage?.cost === 'number' ? roundUsd(payload.usage.cost) : null,
   };
+}
+
+function extractOpenRouterTextContent(payload: OpenRouterResponse): string | null {
+  const rawContent = (payload as unknown as {
+    choices?: Array<{
+      message?: {
+        content?: unknown;
+      };
+    }>;
+  }).choices?.[0]?.message?.content;
+
+  if (typeof rawContent === 'string') {
+    const trimmed = rawContent.trim();
+    return trimmed || null;
+  }
+
+  if (!Array.isArray(rawContent)) {
+    return null;
+  }
+
+  const text = rawContent
+    .map((part) => {
+      if (typeof part === 'string') {
+        return part;
+      }
+
+      if (!part || typeof part !== 'object') {
+        return '';
+      }
+
+      const textPart = (part as { text?: unknown }).text;
+      return typeof textPart === 'string' ? textPart : '';
+    })
+    .join('')
+    .trim();
+
+  return text || null;
 }
 
 function scoreFileImportance(
@@ -403,6 +518,7 @@ function isStableAssessment(previous: SecurityDimensionScore[], next: SecurityDi
 }
 
 async function runAiPipeline(
+  allFiles: SecurityFileInput[],
   files: SecurityFileInput[],
   heuristic: ReturnType<typeof runSecurityHeuristics>,
   tier: SecurityAnalysisTier,
@@ -427,10 +543,10 @@ async function runAiPipeline(
       let hasCostData = false;
 
       for (let round = 1; round <= stabilityRounds; round += 1) {
-        const initial = await callOpenRouter(model, buildAssessmentPrompt('initial', files, heuristic, previousJson), env.OPENROUTER_API_KEY);
-        const reviewed = await callOpenRouter(model, buildAssessmentPrompt('review', files, heuristic, initial.content), env.OPENROUTER_API_KEY);
-        const confirmed = await callOpenRouter(model, buildAssessmentPrompt('confirm', files, heuristic, reviewed.content), env.OPENROUTER_API_KEY);
-        const finalized = await callOpenRouter(model, buildAssessmentPrompt('final', files, heuristic, confirmed.content), env.OPENROUTER_API_KEY);
+        const initial = await callOpenRouter(model, buildAssessmentPrompt('initial', files, heuristic, previousJson, allFiles), env.OPENROUTER_API_KEY);
+        const reviewed = await callOpenRouter(model, buildAssessmentPrompt('review', files, heuristic, initial.content, allFiles), env.OPENROUTER_API_KEY);
+        const confirmed = await callOpenRouter(model, buildAssessmentPrompt('confirm', files, heuristic, reviewed.content, allFiles), env.OPENROUTER_API_KEY);
+        const finalized = await callOpenRouter(model, buildAssessmentPrompt('final', files, heuristic, confirmed.content, allFiles), env.OPENROUTER_API_KEY);
 
         totalPromptTokens += initial.promptTokens + reviewed.promptTokens + confirmed.promptTokens + finalized.promptTokens;
         totalCompletionTokens += initial.completionTokens + reviewed.completionTokens + confirmed.completionTokens + finalized.completionTokens;
@@ -505,7 +621,12 @@ function mergeDimensions(
 
     return {
       dimension: dimension.dimension,
-      score: clampScore(Math.max(aiDimension.score, Math.max(0, dimension.score - 1))),
+      // Let AI materially pull down over-eager heuristics while still keeping a modest
+      // heuristic floor when the file contents support concern.
+      score: clampScore(Math.max(
+        aiDimension.score,
+        Math.min(dimension.score, aiDimension.score + 1.5)
+      )),
       reason: aiDimension.reason || dimension.reason,
       findingCount: Math.max(dimension.findingCount, aiDimension.findingCount),
     } satisfies SecurityDimensionScore;
@@ -532,12 +653,19 @@ function mergeFileScores(
     });
   }
 
-  return merged;
+  return normalizeSecurityFileScores(merged);
 }
 
-function buildFindingsPayload(fileScores: SecurityFileScore[]): string {
+export function buildFindingsPayload(
+  fileScores: SecurityFileScore[],
+  aiResult: AiAssessmentResult | null = null
+): string {
+  const displayScores = aiResult
+    ? fileScores.filter((entry) => entry.source === 'ai')
+    : fileScores;
+
   return JSON.stringify(
-    fileScores
+    displayScores
       .filter((entry) => entry.score >= 5)
       .sort((left, right) => right.score - left.score || left.filePath.localeCompare(right.filePath))
       .slice(0, 20)
@@ -1324,7 +1452,7 @@ async function processSecurityMessage(
 
   if (requestedTier === 'premium' && canRunPremiumAnalysis(env) && aiEligible && aiFiles.length > 0) {
     try {
-      aiResult = await runAiPipeline(aiFiles, heuristic, 'premium', env);
+      aiResult = await runAiPipeline(securityFiles, aiFiles, heuristic, 'premium', env);
       if (aiResult) {
         executedTier = 'premium';
       }
@@ -1371,7 +1499,7 @@ async function processSecurityMessage(
     }
 
     try {
-      aiResult = await runAiPipeline(aiFiles, heuristic, 'free', env);
+      aiResult = await runAiPipeline(securityFiles, aiFiles, heuristic, 'free', env);
     } catch (aiError) {
       if (isOpenRouterFreePauseError(aiError)) {
         freePauseUntil = await pauseOpenRouterFreeModels(env.KV, {
@@ -1428,7 +1556,7 @@ async function processSecurityMessage(
     totalScore,
     riskLevel,
     summary,
-    findingsJson: buildFindingsPayload(fileScores),
+    findingsJson: buildFindingsPayload(fileScores, aiResult),
     dimensions,
     fileScores,
     rounds: aiResult?.rounds || 0,

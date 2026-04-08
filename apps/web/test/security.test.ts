@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSecurityContentFingerprint,
   computeSecurityTotalScore,
+  getSecurityRiskLevel,
   getSecurityReportRiskLevel,
+  normalizeSecurityFileScores,
   runSecurityHeuristics,
   shouldRequestPremiumByReports,
 } from '../src/lib/server/security';
@@ -69,5 +71,86 @@ describe('security helpers', () => {
     expect(shouldRequestPremiumByReports(101, 10)).toBe(true);
     expect(shouldRequestPremiumByReports(100, 10)).toBe(false);
     expect(shouldRequestPremiumByReports(101, 9)).toBe(false);
+  });
+
+  it('keeps critical reserved for only the most severe scores', () => {
+    expect(getSecurityRiskLevel(6.9)).toBe('mid');
+    expect(getSecurityRiskLevel(7)).toBe('high');
+    expect(getSecurityRiskLevel(8.9)).toBe('high');
+    expect(getSecurityRiskLevel(9)).toBe('fatal');
+  });
+
+  it('treats standalone binaries as low-confidence review signals rather than malware evidence', () => {
+    const heuristic = runSecurityHeuristics([
+      {
+        path: 'bin/tool',
+        size: 4096,
+        type: 'binary',
+      },
+    ]);
+
+    expect(heuristic.hasBinary).toBe(true);
+    expect(
+      heuristic.dimensions.find((dimension) => dimension.dimension === 'supply_chain_malware')?.score
+    ).toBeLessThan(3);
+    expect(
+      heuristic.dimensions.find((dimension) => dimension.dimension === 'supply_chain_malware')?.reason
+    ).toContain('not malware evidence by itself');
+  });
+
+  it('deduplicates repeated file findings for the same file, source, and dimension', () => {
+    const normalized = normalizeSecurityFileScores([
+      {
+        filePath: 'scripts/install.sh',
+        fileKind: 'script',
+        source: 'heuristic',
+        dimension: 'supply_chain_malware',
+        score: 8.5,
+        reason: 'downloads and executes remote payloads',
+      },
+      {
+        filePath: 'scripts/install.sh',
+        fileKind: 'script',
+        source: 'heuristic',
+        dimension: 'supply_chain_malware',
+        score: 6.5,
+        reason: 'uses install hooks that can execute code',
+      },
+      {
+        filePath: 'scripts/install.sh',
+        fileKind: 'script',
+        source: 'ai',
+        dimension: 'supply_chain_malware',
+        score: 7.2,
+        reason: 'downloads a remote script before execution',
+      },
+      {
+        filePath: 'scripts/install.sh',
+        fileKind: 'script',
+        source: 'ai',
+        dimension: 'supply_chain_malware',
+        score: 7.9,
+        reason: 'downloads a remote script before execution',
+      },
+    ]);
+
+    expect(normalized).toEqual([
+      {
+        filePath: 'scripts/install.sh',
+        fileKind: 'script',
+        source: 'heuristic',
+        dimension: 'supply_chain_malware',
+        score: 8.5,
+        reason: 'downloads and executes remote payloads; uses install hooks that can execute code',
+      },
+      {
+        filePath: 'scripts/install.sh',
+        fileKind: 'script',
+        source: 'ai',
+        dimension: 'supply_chain_malware',
+        score: 7.9,
+        reason: 'downloads a remote script before execution',
+      },
+    ]);
   });
 });

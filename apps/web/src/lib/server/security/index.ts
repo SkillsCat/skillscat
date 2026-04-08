@@ -181,8 +181,8 @@ export async function buildSecurityContentFingerprint(files: Array<Pick<Director
 }
 
 export function getSecurityRiskLevel(score: number): SecurityRiskLevel {
-  if (score >= 8) return 'fatal';
-  if (score >= 6) return 'high';
+  if (score >= 9) return 'fatal';
+  if (score >= 7) return 'high';
   if (score >= 3) return 'mid';
   return 'low';
 }
@@ -266,6 +266,41 @@ function addFinding(
   }
 }
 
+export function normalizeSecurityFileScores(fileScores: SecurityFileScore[]): SecurityFileScore[] {
+  const merged = new Map<string, SecurityFileScore & { reasonList: string[] }>();
+
+  for (const entry of fileScores) {
+    const score = clampScore(entry.score);
+    const reason = entry.reason.trim();
+    const key = `${entry.source}\u0000${entry.dimension}\u0000${entry.filePath}`;
+    const existing = merged.get(key);
+
+    if (!existing) {
+      merged.set(key, {
+        ...entry,
+        score,
+        reason,
+        reasonList: reason ? [reason] : [],
+      });
+      continue;
+    }
+
+    if (score > existing.score) {
+      existing.score = score;
+      existing.fileKind = entry.fileKind;
+    }
+
+    if (reason && !existing.reasonList.includes(reason)) {
+      existing.reasonList.push(reason);
+    }
+  }
+
+  return Array.from(merged.values()).map(({ reasonList, ...entry }) => ({
+    ...entry,
+    reason: reasonList.slice(0, 3).join('; '),
+  }));
+}
+
 export function runSecurityHeuristics(files: SecurityFileInput[]): SecurityHeuristicResult {
   const counts = new Map<SecurityDimension, number>();
   const reasons = new Map<SecurityDimension, string[]>();
@@ -294,10 +329,10 @@ export function runSecurityHeuristics(files: SecurityFileInput[]): SecurityHeuri
         filePath: file.path,
         fileKind,
         dimension: 'supply_chain_malware',
-        score: 4.5,
-        reason: 'contains binary artifact that warrants malware screening',
+        score: 2.4,
+        reason: 'contains an opaque binary artifact; this merits verification but is not malware evidence by itself',
       });
-      maxScores.set('supply_chain_malware', Math.max(maxScores.get('supply_chain_malware') || 0, 4.5));
+      maxScores.set('supply_chain_malware', Math.max(maxScores.get('supply_chain_malware') || 0, 2.4));
       continue;
     }
 
@@ -344,7 +379,7 @@ export function runSecurityHeuristics(files: SecurityFileInput[]): SecurityHeuri
 
   return {
     dimensions,
-    fileScores,
+    fileScores: normalizeSecurityFileScores(fileScores),
     summary,
     maxScore: Math.max(...dimensions.map((dimension) => dimension.score), 0),
     hasExecutableSurface,

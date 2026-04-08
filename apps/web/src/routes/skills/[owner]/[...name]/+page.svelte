@@ -1,10 +1,10 @@
 <script lang="ts">
+  import { tick, untrack } from 'svelte';
   import SEO from '$lib/components/common/SEO.svelte';
   import CopyButton from '$lib/components/ui/CopyButton.svelte';
-  import { DropdownMenu } from 'bits-ui';
-  import SkillCardCompact from '$lib/components/skill/SkillCardCompact.svelte';
+  import DeferredSkillResourcesPanel from '$lib/components/skill/DeferredSkillResourcesPanel.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
-  import { toast } from '$lib/components/ui/Toast.svelte';
+  import { toast } from '$lib/components/ui/toast-store';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import VisibilityBadge from '$lib/components/ui/VisibilityBadge.svelte';
   import { useI18n } from '$lib/i18n/runtime';
@@ -13,9 +13,16 @@
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
   import { splitShellCommand } from '$lib/skill-install';
   import { encodeSkillSlugForPath } from '$lib/skill-path';
+  import { ensureClientShikiLanguage, getClientShikiHighlighter } from '$lib/shiki-client';
   import { useSession } from '$lib/auth-client';
-  import type { SkillDetail, SkillCardData, FileNode, SkillInstallData, SecurityRiskLevel } from '$lib/types';
-  import type { Highlighter } from 'shiki';
+  import type {
+    SkillDetail,
+    SkillCardData,
+    FileNode,
+    SkillInstallData,
+    SecurityDimension,
+    SecurityRiskLevel,
+  } from '$lib/types';
   import { buildOgImageUrl } from '$lib/seo/og';
   import { SITE_URL } from '$lib/seo/constants';
 
@@ -80,12 +87,49 @@
     return copy.securityRiskFatal;
   }
 
+  function formatSecurityDimensionLabel(dimension: SecurityDimension): string {
+    if (dimension === 'prompt_injection') return copy.securityDimensionPromptInjection;
+    if (dimension === 'privacy_exfiltration') return copy.securityDimensionPrivacyExfiltration;
+    if (dimension === 'dangerous_operations') return copy.securityDimensionDangerousOperations;
+    if (dimension === 'supply_chain_malware') return copy.securityDimensionSupplyChainMalware;
+    return copy.securityDimensionObfuscationEvasion;
+  }
+
+  function getRiskLevelFromScore(score: number): SecurityRiskLevel {
+    if (score >= 9) return 'fatal';
+    if (score >= 7) return 'high';
+    if (score >= 3) return 'mid';
+    return 'low';
+  }
+
   const securityVisualRisk = $derived.by(() => pickHighestRisk(
     securitySummary?.aiRiskLevel,
     securitySummary?.vtRiskLevel
   ));
   const securityAiLabel = $derived.by(() => formatRiskLabel(securitySummary?.aiRiskLevel));
   const securityVtLabel = $derived.by(() => formatRiskLabel(securitySummary?.vtRiskLevel));
+  const shouldShowSecurityReasons = $derived.by(() => {
+    const aiRiskLevel = securitySummary?.aiRiskLevel;
+    return aiRiskLevel === 'mid' || aiRiskLevel === 'high' || aiRiskLevel === 'fatal';
+  });
+  const securityNarrative = $derived.by(() => {
+    const summary = securitySummary?.aiSummary?.trim();
+    if (!summary) return '';
+    if (/^heuristic indicators ->/i.test(summary)) return '';
+    if (/^heuristics found no strong indicators/i.test(summary)) return '';
+    return summary;
+  });
+  const securityFindings = $derived.by(() => (
+    [...(securitySummary?.aiFindings ?? [])]
+      .sort((left, right) => right.score - left.score || left.filePath.localeCompare(right.filePath))
+      .slice(0, 3)
+  ));
+  const securityDimensions = $derived.by(() => (
+    [...(securitySummary?.aiDimensions ?? [])]
+      .filter((entry) => entry.score >= 3)
+      .sort((left, right) => right.score - left.score || left.dimension.localeCompare(right.dimension))
+      .slice(0, 3)
+  ));
 
   // Bookmark state - use local state that syncs with server data
   let bookmarkOverride = $state<boolean | null>(null);
@@ -123,12 +167,19 @@
   const canUseNativeShare = $derived(
     typeof navigator !== 'undefined' && typeof navigator.share === 'function'
   );
+  let shareMenuOpen = $state(false);
+  let shareMenuRoot = $state<HTMLDivElement | null>(null);
+  let shareMenuTrigger = $state<HTMLButtonElement | null>(null);
+  let shareMenuCloseTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
 
   $effect(() => {
     data.skill?.id;
     bookmarkOverride = null;
     bookmarkState = null;
     isLoadingBookmarkState = false;
+    requestedResourceFilePath = '';
+    cancelShareMenuClose();
+    shareMenuOpen = false;
   });
 
   $effect(() => {
@@ -297,6 +348,155 @@
     }
   }
 
+  function getShareMenuItems(): HTMLButtonElement[] {
+    if (!shareMenuRoot) return [];
+    return Array.from(shareMenuRoot.querySelectorAll<HTMLButtonElement>('.share-dropdown-item'));
+  }
+
+  function cancelShareMenuClose() {
+    if (!shareMenuCloseTimeout) return;
+    clearTimeout(shareMenuCloseTimeout);
+    shareMenuCloseTimeout = null;
+  }
+
+  function scheduleShareMenuClose(options?: { restoreFocus?: boolean }) {
+    cancelShareMenuClose();
+    shareMenuCloseTimeout = setTimeout(() => {
+      shareMenuCloseTimeout = null;
+      closeShareMenu(options);
+    }, 120);
+  }
+
+  async function openShareMenu(options?: { focus?: 'first' | 'last' }) {
+    cancelShareMenuClose();
+    shareMenuOpen = true;
+    if (!options?.focus) return;
+
+    await tick();
+    const items = getShareMenuItems();
+    const nextItem = options.focus === 'last' ? items[items.length - 1] : items[0];
+    nextItem?.focus();
+  }
+
+  function closeShareMenu(options?: { restoreFocus?: boolean }) {
+    cancelShareMenuClose();
+    shareMenuOpen = false;
+    if (options?.restoreFocus) {
+      shareMenuTrigger?.focus();
+    }
+  }
+
+  async function runShareAction(action: () => void | Promise<void>) {
+    closeShareMenu();
+    await action();
+  }
+
+  function handleShareTriggerKeydown(event: KeyboardEvent) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      void openShareMenu({ focus: 'first' });
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      void openShareMenu({ focus: 'last' });
+      return;
+    }
+
+    if (event.key === 'Escape' && shareMenuOpen) {
+      event.preventDefault();
+      closeShareMenu();
+    }
+  }
+
+  function handleShareMenuKeydown(event: KeyboardEvent) {
+    const items = getShareMenuItems();
+    if (items.length === 0) return;
+
+    const currentIndex = items.findIndex((item) => item === document.activeElement);
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      items[(currentIndex + 1 + items.length) % items.length]?.focus();
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      items[(currentIndex - 1 + items.length) % items.length]?.focus();
+      return;
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault();
+      items[0]?.focus();
+      return;
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault();
+      items[items.length - 1]?.focus();
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeShareMenu({ restoreFocus: true });
+    }
+  }
+
+  function handleShareRootMouseEnter() {
+    void openShareMenu();
+  }
+
+  function handleShareRootMouseLeave() {
+    scheduleShareMenuClose();
+  }
+
+  function handleShareRootFocusIn() {
+    void openShareMenu();
+  }
+
+  function handleShareRootFocusOut(event: FocusEvent) {
+    const nextTarget = event.relatedTarget;
+    if (shareMenuRoot && nextTarget instanceof Node && shareMenuRoot.contains(nextTarget)) {
+      cancelShareMenuClose();
+      return;
+    }
+    scheduleShareMenuClose();
+  }
+
+  $effect(() => () => {
+    cancelShareMenuClose();
+  });
+
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!shareMenuRoot || !(target instanceof Node)) return;
+      if (!shareMenuRoot.contains(target)) {
+        closeShareMenu();
+      }
+    };
+
+    const handleDocumentKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeShareMenu();
+      }
+    };
+
+    document.addEventListener('click', handleDocumentClick);
+    document.addEventListener('keydown', handleDocumentKeydown);
+
+    return () => {
+      document.removeEventListener('click', handleDocumentClick);
+      document.removeEventListener('keydown', handleDocumentKeydown);
+    };
+  });
+
   function retryCurrentPage() {
     if (typeof window !== 'undefined') {
       window.location.reload();
@@ -304,15 +504,24 @@
   }
 
   // Shiki highlighter (lazy loaded)
-  let highlighter = $state<Highlighter | null>(null);
+  let highlighter = $state<Awaited<ReturnType<typeof getClientShikiHighlighter>> | null>(null);
   let highlightedReadme = $state('');
   let isLoadingShiki = $state(false);
+  let activeReadmeHighlightId = 0;
+  let lastReadmeHighlightSkillId: string | null = null;
+  let lastReadmeHighlightHtml = '';
   let deferredRecommendSkills = $state<SkillCardData[] | null>(null);
   let deferredRecommendSkillsError = $state<string | null>(null);
 
   // Reset highlighted HTML whenever server-rendered markdown changes.
   $effect(() => {
-    data.renderedReadme;
+    const currentSkillId = data.skill?.id ?? null;
+    const renderedReadme = data.renderedReadme ?? '';
+    if (currentSkillId === lastReadmeHighlightSkillId && renderedReadme === lastReadmeHighlightHtml) return;
+
+    lastReadmeHighlightSkillId = currentSkillId;
+    lastReadmeHighlightHtml = renderedReadme;
+    activeReadmeHighlightId += 1;
     highlightedReadme = '';
   });
 
@@ -330,7 +539,13 @@
 
     void (async () => {
       try {
-        const response = await fetch(`/api/skills/${encodeSkillSlugForPath(skill.slug)}/recommend`, {
+        const query = new URLSearchParams();
+        for (const category of skill.categories.slice(0, 3)) {
+          query.append('category', category);
+        }
+
+        const recommendEndpoint = `/api/skills/${encodeSkillSlugForPath(skill.slug)}/recommend${query.size > 0 ? `?${query.toString()}` : ''}`;
+        const response = await fetch(recommendEndpoint, {
           signal: controller.signal,
           headers: { accept: 'application/json' }
         });
@@ -383,11 +598,18 @@
 
   // If shiki is already available (client-side navigation), highlight immediately.
   $effect(() => {
-    if (!highlighter || !data.renderedReadme || highlightedReadme) return;
-    void highlightReadmeHtml();
+    const renderedReadme = data.renderedReadme;
+    if (!highlighter || !renderedReadme || highlightedReadme) return;
+
+    untrack(() => {
+      void highlightReadmeHtml(renderedReadme, activeReadmeHighlightId);
+    });
   });
 
   // Handle clicks on relative file links in markdown content
+  let requestedResourceFilePath = $state('');
+  let requestedResourceFilePathVersion = $state(0);
+
   $effect(() => {
     function handleFileLinkClick(e: MouseEvent) {
       const target = e.target as HTMLElement;
@@ -396,7 +618,8 @@
         e.preventDefault();
         const filePath = fileLink.dataset.filePath;
         if (filePath) {
-          navigateToFile(filePath);
+          requestedResourceFilePath = filePath;
+          requestedResourceFilePathVersion += 1;
         }
       }
     }
@@ -412,16 +635,11 @@
     isLoadingShiki = true;
 
     try {
-      const { createHighlighter } = await import('shiki');
-      highlighter = await createHighlighter({
-        themes: ['github-dark', 'github-light'],
-        langs: [
-          'javascript', 'typescript', 'python', 'bash', 'json', 'markdown', 'yaml', 'html', 'css',
-          'shell', 'plaintext', 'go', 'rust', 'powershell', 'bat', 'sql', 'toml', 'xml', 'jsx', 'tsx',
-          'svelte', 'vue', 'c', 'cpp', 'java', 'kotlin', 'swift', 'ruby', 'php', 'dockerfile'
-        ]
-      });
-      await highlightReadmeHtml();
+      highlighter = await getClientShikiHighlighter();
+      const renderedReadme = data.renderedReadme;
+      if (renderedReadme) {
+        await highlightReadmeHtml(renderedReadme, activeReadmeHighlightId);
+      }
     } catch (e) {
       console.error('Failed to load shiki:', e);
     } finally {
@@ -459,19 +677,20 @@
     return 'plaintext';
   }
 
-  async function highlightReadmeHtml() {
-    if (!highlighter || !data.renderedReadme) return;
+  async function highlightReadmeHtml(renderedReadme: string, highlightId: number) {
+    if (!highlighter || !renderedReadme) return;
 
     const container = document.createElement('div');
-    container.innerHTML = data.renderedReadme;
+    container.innerHTML = renderedReadme;
 
     const codeBlocks = Array.from(container.querySelectorAll('pre > code')) as HTMLElement[];
     if (codeBlocks.length === 0) {
-      highlightedReadme = data.renderedReadme;
+      if (highlightId === activeReadmeHighlightId) {
+        highlightedReadme = renderedReadme;
+      }
       return;
     }
 
-    const supportedLanguages = new Set(highlighter.getLoadedLanguages().map((lang) => String(lang)));
     const BATCH_SIZE = 6;
 
     for (let i = 0; i < codeBlocks.length; i++) {
@@ -479,8 +698,10 @@
       const pre = codeBlock.closest('pre');
       if (!pre || !pre.parentNode) continue;
 
-      const requestedLanguage = getCodeLanguage(codeBlock);
-      const language = supportedLanguages.has(requestedLanguage) ? requestedLanguage : 'plaintext';
+      const language = await ensureClientShikiLanguage(highlighter, getCodeLanguage(codeBlock));
+      if (highlightId !== activeReadmeHighlightId) {
+        return;
+      }
 
       try {
         const codeHtml = highlighter.codeToHtml(codeBlock.textContent || '', {
@@ -499,258 +720,18 @@
 
       if ((i + 1) % BATCH_SIZE === 0) {
         await new Promise((resolve) => setTimeout(resolve, 0));
+        if (highlightId !== activeReadmeHighlightId) {
+          return;
+        }
       }
     }
 
-    highlightedReadme = container.innerHTML;
+    if (highlightId === activeReadmeHighlightId) {
+      highlightedReadme = container.innerHTML;
+    }
   }
 
   const encodedApiSkillSlug = $derived(data.skill ? encodeURIComponent(data.skill.slug) : '');
-  const canUseDirectGitHubRead = $derived(Boolean(
-    data.skill &&
-    data.skill.visibility === 'public' &&
-    data.skill.sourceType === 'github' &&
-    data.skill.repoOwner &&
-    data.skill.repoName
-  ));
-
-  const MAX_DIRECT_DOWNLOAD_FILES = 12;
-  const MAX_DIRECT_FILE_SIZE = 512 * 1024;
-  const MIN_DIRECT_RATE_LIMIT_REMAINING = 15;
-  const CLIENT_GITHUB_RATE_LIMIT_UNTIL_KEY = 'skillscat:github-client-rate-limit-until';
-  const CLIENT_GITHUB_RATE_LIMIT_FALLBACK_HEADER = 'x-skillscat-client-github-rate-limited';
-  const DEFAULT_CLIENT_GITHUB_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-  let allowDirectGitHubRead = $state(true);
-  let pendingClientRateLimitSignal = $state(false);
-
-  interface GitHubContentResponse {
-    content?: string;
-    encoding?: string;
-    size?: number;
-    type?: string;
-  }
-
-  interface DirectSkillFilesPayload {
-    folderName: string;
-    files: Array<{ path: string; content: string }>;
-  }
-
-  interface DirectGitHubFileResult {
-    content: string | null;
-    remaining: number | null;
-  }
-
-  function decodeGitHubBase64ToUtf8(base64: string): string {
-    const cleanBase64 = base64.replace(/\n/g, '');
-    const binaryString = atob(cleanBase64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    return new TextDecoder('utf-8').decode(bytes);
-  }
-
-  function buildGitHubContentApiUrl(relativePath: string): string | null {
-    if (!data.skill || !canUseDirectGitHubRead || !allowDirectGitHubRead) return null;
-
-    const normalizedRelativePath = relativePath.replace(/^\/+/, '').replace(/^\.\//, '');
-    if (!normalizedRelativePath || normalizedRelativePath.includes('..')) return null;
-
-    const fullPath = data.skill.skillPath
-      ? `${data.skill.skillPath}/${normalizedRelativePath}`.replace(/^\/+/, '')
-      : normalizedRelativePath;
-
-    const encodedPath = fullPath
-      .split('/')
-      .filter(Boolean)
-      .map((segment) => encodeURIComponent(segment))
-      .join('/');
-
-    if (!encodedPath) return null;
-
-    return `https://api.github.com/repos/${encodeURIComponent(data.skill.repoOwner)}/${encodeURIComponent(data.skill.repoName)}/contents/${encodedPath}`;
-  }
-
-  function parseRateLimitRemaining(headers: Headers): number | null {
-    const value = headers.get('x-ratelimit-remaining');
-    if (!value) return null;
-
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  function parseRateLimitResetMs(headers: Headers): number | null {
-    const retryAfter = headers.get('retry-after');
-    if (retryAfter) {
-      const seconds = Number.parseInt(retryAfter, 10);
-      if (Number.isFinite(seconds) && seconds >= 0) {
-        return Date.now() + (seconds * 1000);
-      }
-
-      const asDate = Date.parse(retryAfter);
-      if (Number.isFinite(asDate)) {
-        return asDate;
-      }
-    }
-
-    const resetEpoch = headers.get('x-ratelimit-reset');
-    if (!resetEpoch) return null;
-    const parsed = Number.parseInt(resetEpoch, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) return null;
-    return parsed * 1000;
-  }
-
-  function getStoredClientRateLimitUntil(): number | null {
-    if (typeof window === 'undefined') return null;
-    const raw = window.sessionStorage.getItem(CLIENT_GITHUB_RATE_LIMIT_UNTIL_KEY);
-    if (!raw) return null;
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  function setStoredClientRateLimitUntil(untilMs: number): void {
-    if (typeof window === 'undefined') return;
-    window.sessionStorage.setItem(CLIENT_GITHUB_RATE_LIMIT_UNTIL_KEY, String(untilMs));
-  }
-
-  function markClientGithubRateLimited(headers: Headers): void {
-    allowDirectGitHubRead = false;
-    pendingClientRateLimitSignal = true;
-
-    const resetAt = parseRateLimitResetMs(headers) ?? (Date.now() + DEFAULT_CLIENT_GITHUB_RATE_LIMIT_WINDOW_MS);
-    setStoredClientRateLimitUntil(resetAt);
-  }
-
-  function consumeClientRateLimitSignalHeaders(): HeadersInit | undefined {
-    if (!pendingClientRateLimitSignal) return undefined;
-    pendingClientRateLimitSignal = false;
-    return { [CLIENT_GITHUB_RATE_LIMIT_FALLBACK_HEADER]: '1' };
-  }
-
-  $effect(() => {
-    if (typeof window === 'undefined') return;
-    const storedUntil = getStoredClientRateLimitUntil();
-    if (!storedUntil) return;
-
-    if (storedUntil > Date.now()) {
-      allowDirectGitHubRead = false;
-      return;
-    }
-
-    window.sessionStorage.removeItem(CLIENT_GITHUB_RATE_LIMIT_UNTIL_KEY);
-  });
-
-  async function fetchGitHubFileDirect(relativePath: string): Promise<DirectGitHubFileResult> {
-    const contentUrl = buildGitHubContentApiUrl(relativePath);
-    if (!contentUrl) return { content: null, remaining: null };
-
-    const response = await fetch(contentUrl, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-      },
-    });
-
-    const remaining = parseRateLimitRemaining(response.headers);
-    if (remaining !== null && remaining <= MIN_DIRECT_RATE_LIMIT_REMAINING) {
-      allowDirectGitHubRead = false;
-    }
-
-    if (response.status === 404) {
-      // Selected path should exist from file tree. 404 usually means repo/path is not
-      // directly accessible (e.g. private repo), so disable direct mode and fallback.
-      allowDirectGitHubRead = false;
-      return { content: null, remaining };
-    }
-    if (
-      response.status === 429 ||
-      (response.status === 403 && remaining === 0)
-    ) {
-      markClientGithubRateLimited(response.headers);
-      return { content: null, remaining };
-    }
-    if (!response.ok) throw new Error(`GitHub fetch failed (${response.status})`);
-
-    const payload = await response.json() as GitHubContentResponse;
-    if (payload.type !== 'file' || payload.encoding !== 'base64' || !payload.content) {
-      throw new Error('Unexpected GitHub content response');
-    }
-
-    if (payload.size && payload.size > MAX_DIRECT_FILE_SIZE) {
-      throw new Error('File too large');
-    }
-
-    return {
-      content: decodeGitHubBase64ToUtf8(payload.content),
-      remaining,
-    };
-  }
-
-  function collectDownloadableFilePaths(nodes: FileNode[], paths: string[]): boolean {
-    for (const node of nodes) {
-      if (paths.length >= MAX_DIRECT_DOWNLOAD_FILES) return true;
-
-      if (node.type === 'directory') {
-        if (node.children && node.children.length > 0) {
-          const exceeded = collectDownloadableFilePaths(node.children, paths);
-          if (exceeded) return true;
-        }
-        continue;
-      }
-
-      if (isBinaryFile(node.path)) continue;
-      if (node.size && node.size > MAX_DIRECT_FILE_SIZE) continue;
-      paths.push(node.path);
-    }
-
-    return false;
-  }
-
-  async function fetchSkillFilesDirectFromGitHub(): Promise<DirectSkillFilesPayload | null> {
-    if (!data.skill || !canUseDirectGitHubRead) return null;
-
-    try {
-      const folderName = data.skill.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
-      const filePaths: string[] = [];
-      let exceededDirectLimit = false;
-
-      if (data.skill.fileStructure && data.skill.fileStructure.length > 0) {
-        exceededDirectLimit = collectDownloadableFilePaths(data.skill.fileStructure, filePaths);
-      }
-
-      if (filePaths.length === 0) {
-        filePaths.push('SKILL.md');
-      }
-
-      if (exceededDirectLimit) {
-        return null;
-      }
-
-      const files: Array<{ path: string; content: string }> = [];
-      const uniqueFilePaths = [...new Set(filePaths)];
-      let remainingBudget: number | null = null;
-
-      for (const filePath of uniqueFilePaths) {
-        if (remainingBudget !== null && remainingBudget <= MIN_DIRECT_RATE_LIMIT_REMAINING) {
-          return null;
-        }
-
-        const result = await fetchGitHubFileDirect(filePath);
-        remainingBudget = result.remaining;
-
-        if (result.content === null) {
-          return null;
-        }
-        files.push({ path: filePath, content: result.content });
-      }
-
-      if (files.length === 0) return null;
-
-      return { folderName, files };
-    } catch (error) {
-      console.warn('Direct GitHub fetch failed, fallback to SkillsCat API:', error);
-      return null;
-    }
-  }
 
   type InstallOption =
     | {
@@ -831,74 +812,28 @@
     isDownloading = true;
 
     try {
-      // Check if File System Access API is supported
-      if ('showDirectoryPicker' in window) {
-        try {
-          const dirHandle = await (window as unknown as { showDirectoryPicker: (options: { mode: string; startIn: string }) => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker({
-            mode: 'readwrite',
-            startIn: 'documents'
-          });
+      const { downloadSkill } = await import('$lib/skill-download-client');
+      const outcome = await downloadSkill({
+        skill: data.skill,
+        encodedApiSkillSlug,
+        tooManyRequestsMessage: copy.tooManyRequests,
+        downloadFailedMessage: copy.downloadFailed,
+      });
 
-          // Public GitHub skills: optimistic direct fetch (unauthorized), fallback to platform API.
-          let payload = await fetchSkillFilesDirectFromGitHub();
-          if (!payload) {
-            const fallbackHeaders = consumeClientRateLimitSignalHeaders();
-            const response = await fetch(
-              `/api/skills/${encodedApiSkillSlug}/files`,
-              fallbackHeaders ? { headers: fallbackHeaders } : undefined
-            );
-            if (!response.ok) {
-              if (response.status === 429) {
-                toast(copy.tooManyRequests, 'warning');
-                return;
-              }
-              throw new Error(copy.downloadFailed);
-            }
-            payload = await response.json() as { folderName: string; files: Array<{ path: string; content: string }> };
-          }
-          const { folderName, files } = payload;
-
-          // Create skill folder
-          const skillDir = await dirHandle.getDirectoryHandle(folderName, { create: true });
-
-          // Write all files
-          for (const file of files) {
-            // Handle subdirectories
-            let targetDir: FileSystemDirectoryHandle = skillDir;
-            const pathParts = file.path.split('/');
-            const fileName = pathParts.pop();
-
-            // Skip if no filename
-            if (!fileName) continue;
-
-            for (const part of pathParts) {
-              if (part) {
-                targetDir = await targetDir.getDirectoryHandle(part, { create: true });
-              }
-            }
-
-            const fileHandle = await targetDir.getFileHandle(fileName, { create: true });
-            const writable = await fileHandle.createWritable();
-            await writable.write(file.content);
-            await writable.close();
-          }
-
-          // Show success - both button state and toast
-          trackSuccessfulInstall();
-          downloadSuccess = true;
-          toast(i18n.t(copy.installedSuccess, { name: data.skill.name }), 'success', { celebrate: true });
-          setTimeout(() => downloadSuccess = false, 3000);
-        } catch (err: unknown) {
-          // User cancelled the directory picker - not an error
-          if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
-            return;
-          }
-          console.error('Download failed:', err);
-          fallbackDownload();
-        }
-      } else {
-        fallbackDownload();
+      if (outcome === 'installed') {
+        trackSuccessfulInstall();
+        downloadSuccess = true;
+        toast(i18n.t(copy.installedSuccess, { name: data.skill.name }), 'success', { celebrate: true });
+        setTimeout(() => downloadSuccess = false, 3000);
+        return;
       }
+
+      if (outcome === 'rate_limited') {
+        toast(copy.tooManyRequests, 'warning');
+      }
+    } catch (err) {
+      console.error('Failed to load download client:', err);
+      fallbackDownload();
     } finally {
       isDownloading = false;
     }
@@ -912,151 +847,6 @@
 
   // Use delayed-highlighted version if available, otherwise server-rendered HTML.
   const renderedReadme = $derived(highlightedReadme || data.renderedReadme || '');
-
-  // File browser state
-  let expandedFolders = $state<Set<string>>(new Set());
-  let selectedFile = $state<string | null>(null);
-  let fileContent = $state<string | null>(null);
-  let fileLoading = $state(false);
-  let fileError = $state<string | null>(null);
-  let highlightedFileContent = $state<string>('');
-
-  function toggleFolder(path: string) {
-    const newSet = new Set(expandedFolders);
-    if (newSet.has(path)) {
-      newSet.delete(path);
-    } else {
-      newSet.add(path);
-    }
-    expandedFolders = newSet;
-  }
-
-  async function selectFile(path: string) {
-    if (selectedFile === path) return;
-    selectedFile = path;
-    fileContent = null;
-    fileError = null;
-    highlightedFileContent = '';
-
-    // SKILL.md is already rendered below in the dedicated readme panel.
-    if (isSkillReadmeFile(path)) {
-      fileLoading = false;
-      return;
-    }
-
-    // Check if it's a binary file
-    if (isBinaryFile(path)) {
-      fileLoading = false;
-      fileError = 'binary';
-      return;
-    }
-
-    if (!encodedApiSkillSlug) {
-      fileLoading = false;
-      fileError = 'Failed to load file';
-      return;
-    }
-
-    fileLoading = true;
-
-    try {
-      // Public GitHub skills: optimistic direct fetch (unauthorized), fallback to platform API.
-      let directContent: string | null = null;
-      try {
-        const directResult = await fetchGitHubFileDirect(path);
-        directContent = directResult.content;
-      } catch (directError) {
-        console.warn('Direct GitHub file fetch failed, fallback to SkillsCat API:', directError);
-      }
-      if (directContent !== null) {
-        fileContent = directContent;
-      } else {
-        const fallbackHeaders = consumeClientRateLimitSignalHeaders();
-        const res = await fetch(
-          `/api/skills/${encodedApiSkillSlug}/file?path=${encodeURIComponent(path)}`,
-          fallbackHeaders ? { headers: fallbackHeaders } : undefined
-        );
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ message: 'Failed to load file' })) as { message?: string };
-          throw new Error(err.message || 'Failed to load file');
-        }
-        const result = await res.json() as { path: string; content: string };
-        fileContent = result.content;
-      }
-
-      // Highlight the content if shiki is loaded
-      if (highlighter && fileContent) {
-        const ext = path.split('.').pop()?.toLowerCase() || 'plaintext';
-        const langMap: Record<string, string> = {
-          'js': 'javascript', 'ts': 'typescript', 'py': 'python',
-          'sh': 'bash', 'yml': 'yaml', 'md': 'markdown'
-        };
-        const lang = langMap[ext] || ext;
-        try {
-          highlightedFileContent = highlighter.codeToHtml(fileContent, {
-            lang,
-            themes: { light: 'github-light', dark: 'github-dark' }
-          });
-        } catch {
-          // Language not supported, show plain text
-          highlightedFileContent = '';
-        }
-      }
-    } catch (err) {
-      fileError = err instanceof Error ? err.message : 'Failed to load file';
-    } finally {
-      fileLoading = false;
-    }
-  }
-
-  // Expand parent folders for a given file path
-  function expandParentFolders(filePath: string) {
-    const parts = filePath.split('/');
-    const newSet = new Set(expandedFolders);
-    let currentPath = '';
-    for (let i = 0; i < parts.length - 1; i++) {
-      currentPath = currentPath ? `${currentPath}/${parts[i]}` : parts[i];
-      newSet.add(currentPath);
-    }
-    expandedFolders = newSet;
-  }
-
-  // Navigate to a file from a relative link
-  function navigateToFile(relativePath: string) {
-    if (resourceFileStructure.length === 0) return;
-
-    // Normalize the path (remove leading ./)
-    let normalizedPath = relativePath.replace(/^\.\//, '');
-
-    // Find the file in the file structure
-    function findFile(nodes: FileNode[], targetPath: string): FileNode | null {
-      for (const node of nodes) {
-        if (node.path === targetPath || node.path.endsWith('/' + targetPath) || node.path === targetPath.replace(/^\//, '')) {
-          return node;
-        }
-        if (node.children) {
-          const found = findFile(node.children, targetPath);
-          if (found) return found;
-        }
-      }
-      return null;
-    }
-
-    const file = findFile(resourceFileStructure, normalizedPath);
-    if (file) {
-      expandParentFolders(file.path);
-      selectFile(file.path);
-
-      // Scroll to the file in the file browser after DOM updates
-      requestAnimationFrame(() => {
-        const safeSelector = escapeCssSelectorValue(file.path);
-        const fileElement = document.querySelector(`[data-file-path="${safeSelector}"]`);
-        if (fileElement) {
-          fileElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      });
-    }
-  }
 
   // Binary file extensions that cannot be previewed
   const BINARY_EXTENSIONS = new Set([
@@ -1103,122 +893,22 @@
     data.skill?.fileStructure ? filterResourceNodes(data.skill.fileStructure) : []
   );
 
-  function resourceTreeHasPath(nodes: FileNode[], targetPath: string): boolean {
-    for (const node of nodes) {
-      if (node.path === targetPath) return true;
-      if (node.children && resourceTreeHasPath(node.children, targetPath)) return true;
-    }
-    return false;
-  }
-
-  $effect(() => {
-    if (!selectedFile) return;
-    if (isSkillReadmeFile(selectedFile) || !resourceTreeHasPath(resourceFileStructure, selectedFile)) {
-      selectedFile = null;
-      fileContent = null;
-      highlightedFileContent = '';
-      fileError = null;
-    }
-  });
-
-  // SVG icons for different file types (VS Code style)
-  function getFileIconSvg(node: FileNode): string {
-    if (node.type === 'directory') {
-      const isExpanded = expandedFolders.has(node.path);
-      return isExpanded
-        ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M2 10h20"/></svg>`
-        : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
-    }
-
-    const ext = node.name.split('.').pop()?.toLowerCase() || '';
-    const name = node.name.toLowerCase();
-
-    // Special files
-    if (name === 'skill.md' || name === 'readme.md') {
-      return `<svg viewBox="0 0 24 24" fill="none" stroke="#519aba" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>`;
-    }
-
-    // By extension
-    switch (ext) {
-      case 'md':
-      case 'mdx':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#519aba" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>`;
-      case 'js':
-      case 'mjs':
-      case 'cjs':
-        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#f7df1e"/><text x="12" y="17" font-size="10" font-weight="bold" fill="#000" text-anchor="middle">JS</text></svg>`;
-      case 'ts':
-      case 'mts':
-      case 'cts':
-        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#3178c6"/><text x="12" y="17" font-size="10" font-weight="bold" fill="#fff" text-anchor="middle">TS</text></svg>`;
-      case 'jsx':
-        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#61dafb"/><text x="12" y="17" font-size="9" font-weight="bold" fill="#000" text-anchor="middle">JSX</text></svg>`;
-      case 'tsx':
-        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#3178c6"/><text x="12" y="17" font-size="9" font-weight="bold" fill="#fff" text-anchor="middle">TSX</text></svg>`;
-      case 'json':
-      case 'jsonc':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#cbcb41" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h2"/><path d="M8 17h2"/><path d="M14 13h2"/><path d="M14 17h2"/></svg>`;
-      case 'css':
-        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#264de4"/><text x="12" y="17" font-size="9" font-weight="bold" fill="#fff" text-anchor="middle">CSS</text></svg>`;
-      case 'scss':
-      case 'sass':
-        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#cc6699"/><text x="12" y="17" font-size="8" font-weight="bold" fill="#fff" text-anchor="middle">SCSS</text></svg>`;
-      case 'html':
-      case 'htm':
-        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#e34c26"/><text x="12" y="17" font-size="8" font-weight="bold" fill="#fff" text-anchor="middle">HTML</text></svg>`;
-      case 'py':
-      case 'pyw':
-      case 'pyi':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#3572a5" stroke-width="2"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>`;
-      case 'sh':
-      case 'bash':
-      case 'zsh':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#4eaa25" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 15l3-3-3-3"/><path d="M13 15h4"/></svg>`;
-      case 'yaml':
-      case 'yml':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#cb171e" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13l2 2 2-2"/><path d="M12 15v3"/></svg>`;
-      case 'toml':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#9c4121" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>`;
-      case 'env':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#ecd53f" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><circle cx="12" cy="14" r="3"/></svg>`;
-      case 'svg':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#ffb13b" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg>`;
-      case 'png':
-      case 'jpg':
-      case 'jpeg':
-      case 'gif':
-      case 'webp':
-      case 'ico':
-      case 'bmp':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#a074c4" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`;
-      case 'go':
-        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#00add8"/><text x="12" y="17" font-size="10" font-weight="bold" fill="#fff" text-anchor="middle">GO</text></svg>`;
-      case 'rs':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#dea584" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><circle cx="12" cy="14" r="3"/></svg>`;
-      case 'svelte':
-        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#ff3e00"/><text x="12" y="17" font-size="8" font-weight="bold" fill="#fff" text-anchor="middle">SVE</text></svg>`;
-      case 'vue':
-        return `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" fill="#42b883"/><text x="12" y="17" font-size="8" font-weight="bold" fill="#fff" text-anchor="middle">VUE</text></svg>`;
-      case 'dockerfile':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#2496ed" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 13h2v2H7z"/><path d="M11 13h2v2h-2z"/><path d="M15 13h2v2h-2z"/><path d="M11 9h2v2h-2z"/></svg>`;
-      case 'gitignore':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#f05032" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6"/><path d="M15 9l-6 6"/></svg>`;
-      case 'lock':
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
-      default:
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
-    }
-  }
-
-  function formatFileSize(bytes?: number): string {
-    if (!bytes) return '';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
   function formatRelativeTime(timestamp: number): string {
     return formatRelativeTimestamp(i18n, messages, timestamp);
+  }
+
+  function formatRecommendAuthor(owner: string): string {
+    return i18n.locale() === 'en'
+      ? i18n.t(messages.common.byAuthor, { author: owner })
+      : owner;
+  }
+
+  function formatRecommendStars(stars: number): string {
+    return i18n.formatCompactNumber(stars);
+  }
+
+  function getRecommendSkillHref(slug: string): string {
+    return `/skills/${encodeSkillSlugForPath(slug)}`;
   }
 
   // Get author profile URL
@@ -1608,54 +1298,6 @@
             <div class="flex-1 min-w-0 flex items-center gap-3">
               <h1 class="skill-title-inline flex-1">{data.skill.name}</h1>
               <div class="skill-header-actions">
-                <DropdownMenu.Root>
-                  <DropdownMenu.Trigger class="skill-action-btn share-btn" aria-label={copy.shareSkill}>
-                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                    </svg>
-                  </DropdownMenu.Trigger>
-
-                  <DropdownMenu.Portal>
-                    <DropdownMenu.Content
-                      forceMount
-                      side="bottom"
-                      align="end"
-                      sideOffset={8}
-                    >
-                      {#snippet child({ wrapperProps, props, open })}
-                        {#if open}
-                          <div {...wrapperProps}>
-                            <div {...props} class="share-dropdown-content">
-                              {#if canUseNativeShare}
-                                <DropdownMenu.Item class="share-dropdown-item" onSelect={handleNativeShare}>
-                                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                                  </svg>
-                                  {copy.shareNative}
-                                </DropdownMenu.Item>
-                              {/if}
-
-                              <DropdownMenu.Item class="share-dropdown-item" onSelect={handleShareToX}>
-                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                                  <path d="M18.901 1.154h3.681l-8.04 9.19 9.459 12.502h-7.406l-5.8-7.584-6.633 7.584H.48l8.6-9.826L0 1.154h7.594l5.243 6.932 6.064-6.932zm-1.291 19.49h2.04L6.486 3.24H4.297z" />
-                                </svg>
-                                {copy.shareToX}
-                              </DropdownMenu.Item>
-
-                              <DropdownMenu.Item class="share-dropdown-item" onSelect={handleCopyUrl}>
-                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-4 12h6a2 2 0 002-2v-8a2 2 0 00-2-2h-6a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                </svg>
-                                {copy.copyUrl}
-                              </DropdownMenu.Item>
-                            </div>
-                          </div>
-                        {/if}
-                      {/snippet}
-                    </DropdownMenu.Content>
-                  </DropdownMenu.Portal>
-                </DropdownMenu.Root>
-
                 {#if securitySummary}
                   <button
                     class="skill-action-btn security-btn"
@@ -1680,9 +1322,139 @@
                           {securityVtLabel}
                         </span>
                       </div>
+
+                      {#if shouldShowSecurityReasons}
+                        {#if securityNarrative}
+                          <div class="security-tooltip-section">
+                            <div class="security-tooltip-section-label">{copy.securitySummaryLabel}</div>
+                            <p class="security-tooltip-summary">{securityNarrative}</p>
+                          </div>
+                        {/if}
+
+                        <div class="security-tooltip-section">
+                          <div class="security-tooltip-section-label">{copy.securityFindingsLabel}</div>
+
+                          {#if securityFindings.length > 0}
+                            <div class="security-finding-list">
+                              {#each securityFindings as finding}
+                                <div class="security-finding-item">
+                                  <div class="security-finding-head">
+                                    <span class="security-finding-dimension">{formatSecurityDimensionLabel(finding.dimension)}</span>
+                                    <span class="security-risk-pill security-score-pill" data-risk={getRiskLevelFromScore(finding.score)}>
+                                      {finding.score.toFixed(1)}
+                                    </span>
+                                  </div>
+                                  <div class="security-finding-path">{finding.filePath}</div>
+                                  <p class="security-finding-reason">{finding.reason}</p>
+                                </div>
+                              {/each}
+                            </div>
+                          {:else if securityDimensions.length > 0}
+                            <div class="security-dimension-list">
+                              {#each securityDimensions as dimension}
+                                <div class="security-dimension-item">
+                                  <div class="security-finding-head">
+                                    <span class="security-finding-dimension">{formatSecurityDimensionLabel(dimension.dimension)}</span>
+                                    <span class="security-risk-pill security-score-pill" data-risk={getRiskLevelFromScore(dimension.score)}>
+                                      {dimension.score.toFixed(1)}
+                                    </span>
+                                  </div>
+                                  <p class="security-finding-reason">{dimension.reason}</p>
+                                </div>
+                              {/each}
+                            </div>
+                          {:else}
+                            <p class="security-tooltip-empty">{copy.securityNoFindings}</p>
+                          {/if}
+                        </div>
+                      {/if}
                     </div>
                   </button>
                 {/if}
+
+                <div
+                  class="share-menu"
+                  bind:this={shareMenuRoot}
+                  role="group"
+                  aria-label={copy.shareSkill}
+                  onmouseenter={handleShareRootMouseEnter}
+                  onmouseleave={handleShareRootMouseLeave}
+                  onfocusin={handleShareRootFocusIn}
+                  onfocusout={handleShareRootFocusOut}
+                >
+                  <button
+                    bind:this={shareMenuTrigger}
+                    type="button"
+                    class="skill-action-btn share-btn"
+                    aria-label={copy.shareSkill}
+                    aria-haspopup="menu"
+                    aria-expanded={shareMenuOpen}
+                    aria-controls={shareMenuOpen ? 'skill-share-menu' : undefined}
+                    data-state={shareMenuOpen ? 'open' : 'closed'}
+                    onclick={() => {
+                      if (shareMenuOpen) {
+                        closeShareMenu();
+                      } else {
+                        void openShareMenu();
+                      }
+                    }}
+                    onkeydown={handleShareTriggerKeydown}
+                  >
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                    </svg>
+                  </button>
+
+                  {#if shareMenuOpen}
+                    <div class="share-menu-panel">
+                      <div
+                        id="skill-share-menu"
+                        class="share-dropdown-content"
+                        role="menu"
+                        tabindex="-1"
+                        onkeydown={handleShareMenuKeydown}
+                      >
+                        {#if canUseNativeShare}
+                          <button
+                            type="button"
+                            class="share-dropdown-item"
+                            role="menuitem"
+                            onclick={() => void runShareAction(handleNativeShare)}
+                          >
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                            </svg>
+                            {copy.shareNative}
+                          </button>
+                        {/if}
+
+                        <button
+                          type="button"
+                          class="share-dropdown-item"
+                          role="menuitem"
+                          onclick={() => void runShareAction(handleShareToX)}
+                        >
+                          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M18.901 1.154h3.681l-8.04 9.19 9.459 12.502h-7.406l-5.8-7.584-6.633 7.584H.48l8.6-9.826L0 1.154h7.594l5.243 6.932 6.064-6.932zm-1.291 19.49h2.04L6.486 3.24H4.297z" />
+                          </svg>
+                          {copy.shareToX}
+                        </button>
+
+                        <button
+                          type="button"
+                          class="share-dropdown-item"
+                          role="menuitem"
+                          onclick={() => void runShareAction(handleCopyUrl)}
+                        >
+                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-4 12h6a2 2 0 002-2v-8a2 2 0 00-2-2h-6a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          {copy.copyUrl}
+                        </button>
+                      </div>
+                    </div>
+                  {/if}
+                </div>
 
                 {#if bookmarkUiPending}
                   <div class="skill-action-btn bookmark-btn bookmark-btn-placeholder" aria-hidden="true">
@@ -1806,100 +1578,13 @@
 
         <!-- Resources (show above SKILL.md when non-readme files exist) -->
         {#if resourceFileStructure.length > 0}
-          <div class="card">
-            <h2 class="text-lg font-semibold text-fg mb-4">{copy.resources}</h2>
-            <div class="file-browser">
-              {#snippet renderFileTree(nodes: FileNode[], depth: number = 0)}
-                {#each nodes as node (node.path)}
-                  <div class="file-item" style="padding-left: {Math.min(depth, 8) * 0.75}rem">
-                    {#if node.type === 'directory'}
-                      <button
-                        class="file-row"
-                        onclick={() => toggleFolder(node.path)}
-                        title={node.path}
-                        data-file-path={node.path}
-                      >
-                        <span class="file-icon">{@html getFileIconSvg(node)}</span>
-                        <span class="file-name">{node.name}</span>
-                        <svg
-                          class="w-4 h-4 text-fg-muted transition-transform flex-shrink-0 {expandedFolders.has(node.path) ? 'rotate-90' : ''}"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                        </svg>
-                      </button>
-                      {#if expandedFolders.has(node.path) && node.children}
-                        {@render renderFileTree(node.children, depth + 1)}
-                      {/if}
-                    {:else}
-                      <button
-                        class="file-row"
-                        class:file-row-selected={selectedFile === node.path}
-                        onclick={() => selectFile(node.path)}
-                        title={node.path}
-                        data-file-path={node.path}
-                      >
-                        <span class="file-icon">{@html getFileIconSvg(node)}</span>
-                        <span class="file-name">{node.name}</span>
-                        {#if node.size}
-                          <span class="file-size">{formatFileSize(node.size)}</span>
-                        {/if}
-                      </button>
-                    {/if}
-                  </div>
-                {/each}
-              {/snippet}
-              {@render renderFileTree(resourceFileStructure)}
-            </div>
-
-            <!-- File Content Viewer -->
-            {#if selectedFile}
-              <div class="file-content-viewer">
-                <div class="file-content-header">
-                  <span class="file-content-path">{selectedFile}</span>
-                  {#if fileContent}
-                    <CopyButton text={fileContent} size="sm" />
-                  {/if}
-                </div>
-                <div class="file-content-body">
-                  {#if fileLoading}
-                    <div class="file-loading">
-                      <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      <span>{copy.loadingFile}</span>
-                    </div>
-                  {:else if fileError === 'binary'}
-                    <div class="file-unsupported">
-                      <svg class="file-unsupported-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      <span class="file-unsupported-text">{copy.binaryFile}</span>
-                      <span class="file-unsupported-hint">{copy.binaryFileHint}</span>
-                    </div>
-                  {:else if fileError}
-                    <div class="file-error">
-                      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                      </svg>
-                      <span>{fileError}</span>
-                    </div>
-                  {:else if fileContent}
-                    {#if highlightedFileContent}
-                      <div class="file-code-highlighted">
-                        {@html highlightedFileContent}
-                      </div>
-                    {:else}
-                      <pre class="file-code-plain"><code>{fileContent}</code></pre>
-                    {/if}
-                  {/if}
-                </div>
-              </div>
-            {/if}
-          </div>
+          <DeferredSkillResourcesPanel
+            skill={data.skill}
+            files={resourceFileStructure}
+            {copy}
+            requestedFilePath={requestedResourceFilePath}
+            requestedFilePathVersion={requestedResourceFilePathVersion}
+          />
         {/if}
 
         <!-- Mobile: primary actions above SKILL.md -->
@@ -2014,7 +1699,37 @@
             {#if displayRecommendSkills.length > 0}
               <div class="space-y-3">
                 {#each displayRecommendSkills as recommendSkill (recommendSkill.id)}
-                  <SkillCardCompact skill={recommendSkill} />
+                  {@const recommendAuthor = formatRecommendAuthor(recommendSkill.repoOwner)}
+                  <a
+                    href={getRecommendSkillHref(recommendSkill.slug)}
+                    class="recommend-skill-item"
+                    title={`${recommendSkill.name}\n${recommendAuthor}`}
+                  >
+                    <div class="recommend-skill-avatar">
+                      <Avatar
+                        src={recommendSkill.authorAvatar}
+                        fallback={recommendSkill.repoOwner}
+                        alt={recommendSkill.repoOwner}
+                        size="sm"
+                        useGithubFallback
+                      />
+                    </div>
+
+                    <div class="recommend-skill-copy">
+                      <span class="recommend-skill-name">{recommendSkill.name}</span>
+                      <span class="recommend-skill-author">{recommendAuthor}</span>
+                    </div>
+
+                    <div class="recommend-skill-meta">
+                      <span class="recommend-skill-stars">
+                        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M12 .587l3.668 7.568 8.332 1.151-6.064 5.828 1.48 8.279-7.416-3.967-7.417 3.967 1.481-8.279-6.064-5.828 8.332-1.151z"/>
+                        </svg>
+                        {formatRecommendStars(recommendSkill.stars)}
+                      </span>
+                      <span class="recommend-skill-updated">{formatRelativeTime(recommendSkill.updatedAt)}</span>
+                    </div>
+                  </a>
                 {/each}
               </div>
             {:else if showRecommendSkillsLoading}
@@ -2140,6 +1855,17 @@
     flex-shrink: 0;
   }
 
+  .share-menu {
+    position: relative;
+  }
+
+  .share-menu-panel {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    z-index: 60;
+  }
+
   /* Header Action Buttons */
   :global(.skill-action-btn) {
     display: flex;
@@ -2203,9 +1929,10 @@
   .security-tooltip {
     position: absolute;
     right: 0;
-    bottom: calc(100% + 0.5rem);
-    min-width: 13rem;
-    padding: 0.625rem 0.75rem;
+    top: calc(100% + 0.65rem);
+    width: min(22rem, calc(100vw - 1.5rem));
+    min-width: min(19rem, calc(100vw - 1.5rem));
+    padding: 0.75rem 0.875rem;
     background: var(--background);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -2213,7 +1940,7 @@
     color: var(--fg);
     opacity: 0;
     pointer-events: none;
-    transform: translateY(6px);
+    transform: translateY(-6px);
     transition: opacity 0.18s ease, transform 0.18s ease;
     z-index: 70;
   }
@@ -2230,6 +1957,7 @@
     font-weight: 700;
     margin-bottom: 0.375rem;
     color: var(--fg);
+    text-align: left;
   }
 
   .security-tooltip-row {
@@ -2247,6 +1975,31 @@
 
   .security-tooltip-label {
     font-weight: 600;
+    color: var(--fg-muted);
+  }
+
+  .security-tooltip-section {
+    display: grid;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    text-align: left;
+  }
+
+  .security-tooltip-section-label {
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-subtle);
+  }
+
+  .security-tooltip-summary,
+  .security-tooltip-empty {
+    margin: 0;
+    font-size: 0.76rem;
+    line-height: 1.55;
     color: var(--fg-muted);
   }
 
@@ -2275,6 +2028,60 @@
 
   .security-risk-pill[data-risk='unknown'] {
     color: var(--fg-subtle);
+  }
+
+  .security-finding-list,
+  .security-dimension-list {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .security-finding-item,
+  .security-dimension-item {
+    padding: 0.55rem 0.625rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+
+  .security-finding-head {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+    text-align: left;
+  }
+
+  .security-finding-dimension {
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: var(--fg);
+    line-height: 1.35;
+  }
+
+  .security-score-pill {
+    display: inline-flex;
+    align-items: center;
+    min-width: 2.7rem;
+    justify-content: center;
+    margin-left: auto;
+  }
+
+  .security-finding-path {
+    margin-bottom: 0.3rem;
+    font-size: 0.67rem;
+    line-height: 1.4;
+    color: var(--fg-subtle);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    word-break: break-all;
+  }
+
+  .security-finding-reason {
+    margin: 0;
+    font-size: 0.74rem;
+    line-height: 1.5;
+    color: var(--fg-muted);
   }
 
   .bookmark-btn-placeholder {
@@ -2316,25 +2123,32 @@
     z-index: 60;
   }
 
-  :global(.share-dropdown-item) {
+  .share-dropdown-item {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     width: 100%;
     padding: 0.5rem 0.625rem;
+    background: transparent;
+    border: none;
     border-radius: var(--radius-md);
     color: var(--fg);
     font-size: 0.875rem;
     line-height: 1.35;
+    text-align: left;
     cursor: pointer;
     user-select: none;
     transition: background-color 0.15s ease, color 0.15s ease;
   }
 
-  :global(.share-dropdown-item:hover),
-  :global(.share-dropdown-item[data-highlighted]) {
+  .share-dropdown-item:hover,
+  .share-dropdown-item:focus-visible {
     background: var(--bg-muted);
     color: var(--primary);
+  }
+
+  .share-dropdown-item:focus-visible {
+    outline: none;
   }
 
   .skill-description-full {
@@ -2353,6 +2167,90 @@
     border-top: 1px solid var(--border);
   }
 
+  .recommend-skill-item {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    padding: 0.875rem 1rem;
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: 0.875rem;
+    text-decoration: none;
+    transition:
+      border-color 0.2s ease,
+      transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+      box-shadow 0.2s ease;
+  }
+
+  .recommend-skill-item:hover {
+    border-color: var(--border-sketch);
+    transform: translateY(-2px) translateX(-2px);
+    box-shadow: 4px 4px 0 0 var(--border-sketch);
+  }
+
+  .recommend-skill-avatar {
+    flex-shrink: 0;
+  }
+
+  .recommend-skill-copy {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+  }
+
+  .recommend-skill-name {
+    overflow: hidden;
+    color: var(--fg);
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.15s ease;
+  }
+
+  .recommend-skill-item:hover .recommend-skill-name {
+    color: var(--primary);
+  }
+
+  .recommend-skill-author {
+    overflow: hidden;
+    color: var(--fg-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .recommend-skill-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
+    color: var(--fg-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
+
+  .recommend-skill-stars {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 9999px;
+    background: var(--bg-muted);
+    font-size: 0.6875rem;
+    font-weight: 600;
+  }
+
+  .recommend-skill-item:hover .recommend-skill-stars {
+    background: var(--primary-subtle);
+    color: var(--primary);
+  }
+
+  .recommend-skill-updated {
+    color: var(--fg-subtle);
+  }
+
   .skill-meta-item {
     display: flex;
     align-items: center;
@@ -2365,208 +2263,6 @@
 
   a.skill-meta-item:hover {
     color: var(--primary);
-  }
-
-  /* File Browser Styles */
-  .file-browser {
-    max-height: 400px;
-    overflow: auto;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--bg-subtle);
-  }
-
-  .file-item {
-    border-bottom: 1px solid var(--border);
-    max-width: 100%;
-    overflow: hidden;
-  }
-
-  .file-item:last-child {
-    border-bottom: none;
-  }
-
-  .file-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    width: 100%;
-    max-width: 100%;
-    padding: 0.625rem 0.75rem;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    text-align: left;
-    font-size: 0.875rem;
-    color: var(--fg);
-    transition: background-color 0.15s ease;
-    overflow: hidden;
-  }
-
-  .file-row:hover {
-    background: var(--bg-muted);
-  }
-
-  .file-row-selected {
-    background: var(--primary-subtle);
-    color: var(--primary);
-  }
-
-  .file-icon {
-    width: 1rem;
-    height: 1rem;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--fg-muted);
-  }
-
-  .file-icon :global(svg) {
-    width: 100%;
-    height: 100%;
-  }
-
-  .file-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .file-size {
-    font-size: 0.75rem;
-    color: var(--fg-muted);
-    flex-shrink: 0;
-  }
-
-  /* File Content Viewer */
-  .file-content-viewer {
-    margin-top: 1rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-  }
-
-  .file-content-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.5rem 0.75rem;
-    background: var(--bg-muted);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .file-content-path {
-    font-size: 0.8125rem;
-    font-family: var(--font-mono);
-    color: var(--fg-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .file-content-body {
-    min-height: 120px;
-    max-height: 500px;
-    overflow: auto;
-    background: var(--bg-subtle);
-  }
-
-  :root.dark .file-content-body {
-    background: #0d1117;
-  }
-
-  .file-loading,
-  .file-error {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    min-height: 120px;
-    padding: 2rem;
-    color: var(--fg-muted);
-    font-size: 0.875rem;
-  }
-
-  .file-error {
-    color: var(--error);
-  }
-
-  /* Binary file unsupported preview */
-  .file-unsupported {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    min-height: 120px;
-    padding: 2.5rem 1.5rem;
-    text-align: center;
-  }
-
-  .file-unsupported-icon {
-    width: 3rem;
-    height: 3rem;
-    color: var(--fg-muted);
-    opacity: 0.6;
-  }
-
-  .file-unsupported-text {
-    font-size: 0.9375rem;
-    font-weight: 500;
-    color: var(--fg-muted);
-  }
-
-  .file-unsupported-hint {
-    font-size: 0.8125rem;
-    color: var(--fg-muted);
-    opacity: 0.7;
-  }
-
-  .file-code-highlighted {
-    font-size: 0.8125rem;
-    line-height: 1.6;
-    tab-size: 2;
-    -moz-tab-size: 2;
-  }
-
-  .file-code-highlighted :global(pre) {
-    margin: 0;
-    padding: 1rem;
-    background: transparent !important;
-    overflow-x: auto;
-  }
-
-  .file-code-highlighted :global(code) {
-    font-family: var(--font-mono);
-  }
-
-  /* Dark mode: use GitHub dark theme background */
-  :root.dark .file-code-highlighted :global(.shiki),
-  :root.dark .file-code-highlighted :global(pre) {
-    background: #0d1117 !important;
-  }
-
-  :root.dark .file-code-highlighted :global(.shiki span) {
-    color: var(--shiki-dark) !important;
-  }
-
-  .file-code-plain {
-    margin: 0;
-    padding: 1rem;
-    font-size: 0.8125rem;
-    line-height: 1.6;
-    overflow-x: auto;
-    white-space: pre;
-    tab-size: 2;
-    -moz-tab-size: 2;
-  }
-
-  .file-code-plain code {
-    font-family: var(--font-mono);
-    color: var(--fg);
   }
 
   /* Download Button */
@@ -2893,7 +2589,7 @@
     flex-shrink: 0;
   }
 
-  .agent-intro-line {
+  .prompt-rich :global(.agent-intro-line) {
     font-family: var(--font-sans);
     font-size: 0.88rem;
     font-weight: 700;
@@ -2901,11 +2597,11 @@
     color: var(--fg);
   }
 
-  .agent-body-line {
+  .prompt-rich :global(.agent-body-line) {
     color: var(--fg-muted);
   }
 
-  .agent-section-label {
+  .prompt-rich :global(.agent-section-label) {
     margin-top: 0.15rem;
     font-family: var(--font-sans);
     font-size: 0.68rem;
@@ -2915,14 +2611,14 @@
     color: var(--primary);
   }
 
-  .agent-meta-line {
+  .prompt-rich :global(.agent-meta-line) {
     display: flex;
     flex-wrap: wrap;
     gap: 0.35rem;
     align-items: baseline;
   }
 
-  .agent-meta-label {
+  .prompt-rich :global(.agent-meta-label) {
     font-family: var(--font-sans);
     font-size: 0.68rem;
     font-weight: 800;
@@ -2931,16 +2627,16 @@
     color: var(--fg-muted);
   }
 
-  .agent-meta-sep {
+  .prompt-rich :global(.agent-meta-sep) {
     color: var(--fg-subtle);
   }
 
-  .agent-meta-value {
+  .prompt-rich :global(.agent-meta-value) {
     color: var(--fg);
     font-weight: 600;
   }
 
-  .agent-link {
+  .prompt-rich :global(.agent-link) {
     display: inline-flex;
     align-items: center;
     max-width: 100%;
@@ -2952,7 +2648,7 @@
     word-break: break-all;
   }
 
-  .agent-command-line {
+  .prompt-rich :global(.agent-command-line) {
     padding: 0.7rem 0.85rem;
     background: color-mix(in oklch, var(--bg) 72%, var(--primary) 10%);
     border: 1px solid color-mix(in oklch, var(--border) 70%, var(--primary) 18%);
@@ -2963,40 +2659,40 @@
     -ms-overflow-style: none;
   }
 
-  .agent-command-line::-webkit-scrollbar {
+  .prompt-rich :global(.agent-command-line::-webkit-scrollbar) {
     display: none;
   }
 
-  .agent-command {
+  .prompt-rich :global(.agent-command) {
     display: block;
     white-space: nowrap;
     color: var(--fg);
   }
 
-  .agent-command :global(.cmd-npx) {
+  .prompt-rich :global(.agent-command .cmd-npx) {
     color: var(--accent);
     font-weight: 600;
   }
 
-  .agent-command :global(.cmd-tool) {
+  .prompt-rich :global(.agent-command .cmd-tool) {
     color: var(--fg);
     font-weight: 600;
   }
 
-  .agent-command :global(.cmd-action) {
+  .prompt-rich :global(.agent-command .cmd-action) {
     color: var(--primary);
     font-weight: 700;
   }
 
-  .agent-command :global(.cmd-repo) {
+  .prompt-rich :global(.agent-command .cmd-repo) {
     color: var(--fg-muted);
   }
 
-  .agent-command :global(.cmd-default) {
+  .prompt-rich :global(.agent-command .cmd-default) {
     color: var(--fg);
   }
 
-  .agent-note-line {
+  .prompt-rich :global(.agent-note-line) {
     padding: 0.65rem 0.75rem;
     color: var(--fg);
     background: color-mix(in oklch, var(--accent) 11%, transparent);
@@ -3004,7 +2700,7 @@
     border-radius: calc(var(--radius-lg) - 4px);
   }
 
-  .agent-inline-code {
+  .prompt-rich :global(.agent-inline-code) {
     display: inline-flex;
     align-items: center;
     padding: 0.05rem 0.35rem;
@@ -3016,11 +2712,11 @@
     border-radius: 0.4rem;
   }
 
-  .agent-endpoint-line {
+  .prompt-rich :global(.agent-endpoint-line) {
     display: flex;
   }
 
-  .agent-endpoint-pill {
+  .prompt-rich :global(.agent-endpoint-pill) {
     display: inline-flex;
     max-width: 100%;
     padding: 0.45rem 0.65rem;
@@ -3031,7 +2727,7 @@
     word-break: break-all;
   }
 
-  .agent-spacer {
+  .prompt-rich :global(.agent-spacer) {
     height: 0.2rem;
   }
 

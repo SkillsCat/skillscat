@@ -43,6 +43,9 @@ interface SkillDetailRow {
   classification_method: SkillDetail['classificationMethod'];
   currentRiskLevel: string | null;
   vtLastStats: string | null;
+  aiSummary: string | null;
+  aiFindingsJson: string | null;
+  aiDimensionsJson: string | null;
 }
 
 /**
@@ -80,12 +83,26 @@ export async function getSkillBySlug(
         o.slug as orgSlug,
         o.avatar_url as orgAvatar,
         ss.current_risk_level as currentRiskLevel,
-        ss.vt_last_stats as vtLastStats
+        ss.vt_last_stats as vtLastStats,
+        scan.summary as aiSummary,
+        scan.findings as aiFindingsJson,
+        (
+          SELECT json_group_array(json_object(
+            'dimension', dim.dimension,
+            'score', dim.score,
+            'reason', dim.reason,
+            'findingCount', dim.finding_count
+          ))
+          FROM skill_security_scan_dimensions dim
+          WHERE dim.scan_id = scan.id
+        ) as aiDimensionsJson
       FROM skills s
       LEFT JOIN authors a ON s.repo_owner = a.username
       LEFT JOIN user u ON s.owner_id = u.id
       LEFT JOIN organizations o ON s.org_id = o.id
       LEFT JOIN skill_security_state ss ON ss.skill_id = s.id
+      LEFT JOIN skill_security_scans scan
+        ON scan.id = COALESCE(ss.current_premium_scan_id, ss.current_free_scan_id)
       WHERE s.slug = ?
     `)
       .bind(slug)
@@ -189,6 +206,9 @@ export async function getSkillBySlug(
   const security = buildSkillSecuritySummary({
     aiRiskLevel: skillData.currentRiskLevel,
     vtLastStats: skillData.vtLastStats,
+    aiSummary: skillData.aiSummary,
+    aiDimensionsJson: skillData.aiDimensionsJson,
+    aiFindingsJson: skillData.aiFindingsJson,
   });
 
   return {

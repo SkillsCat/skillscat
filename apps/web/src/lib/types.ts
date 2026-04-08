@@ -71,10 +71,33 @@ export interface SkillInstallCliMethod {
 }
 
 export type SecurityRiskLevel = 'low' | 'mid' | 'high' | 'fatal';
+export type SecurityDimension =
+  | 'prompt_injection'
+  | 'privacy_exfiltration'
+  | 'dangerous_operations'
+  | 'supply_chain_malware'
+  | 'obfuscation_evasion';
+
+export interface SkillSecurityDimension {
+  dimension: SecurityDimension;
+  score: number;
+  reason: string;
+  findingCount: number;
+}
+
+export interface SkillSecurityFinding {
+  filePath: string;
+  dimension: SecurityDimension;
+  score: number;
+  reason: string;
+}
 
 export interface SkillSecuritySummary {
   aiRiskLevel?: SecurityRiskLevel | null;
   vtRiskLevel?: SecurityRiskLevel | null;
+  aiSummary?: string | null;
+  aiDimensions?: SkillSecurityDimension[];
+  aiFindings?: SkillSecurityFinding[];
 }
 
 export interface SkillInstallData {
