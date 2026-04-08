@@ -12,6 +12,11 @@
   import type { SkillCardData } from '$lib/types';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { buildOgImageUrl } from '$lib/seo/og';
+  import {
+    buildBreadcrumbListStructuredData,
+    buildCollectionPageStructuredData,
+    buildSkillListItemElements
+  } from '$lib/seo/schema';
   import { SITE_URL } from '$lib/seo/constants';
   import {
     GitBranchIcon,
@@ -196,19 +201,28 @@
       ? `${displayCategory.name}${data.pagination && data.pagination.currentPage > 1 ? i18n.t(messages.common.pageSuffix, { page: data.pagination.currentPage }) : ''} - SkillsCat`
       : messages.categories.notFoundTitle
   );
+  const skillListStartPosition = $derived(
+    data.pagination ? (data.pagination.currentPage - 1) * data.pagination.itemsPerPage + 1 : 1
+  );
+  const categorySkillItemList = $derived(
+    buildSkillListItemElements(data.skills, { startPosition: skillListStartPosition })
+  );
   const categoryStructuredData = $derived(
     displayCategory && data.shouldIndex !== false
-      ? {
-          '@context': 'https://schema.org',
-          '@type': 'CollectionPage',
-          name: pageTitle,
-          description: categoryDescription,
-          url: canonicalUrl,
-          mainEntity: {
-            '@type': 'ItemList',
+      ? [
+          buildCollectionPageStructuredData({
+            name: pageTitle,
+            description: categoryDescription,
+            url: canonicalUrl,
             numberOfItems: data.pagination?.totalItems ?? data.skills.length,
-          },
-        }
+            itemListElement: categorySkillItemList,
+          }),
+          buildBreadcrumbListStructuredData([
+            { name: messages.categories.breadcrumbHome, item: '/' },
+            { name: messages.categories.breadcrumbCategories, item: '/categories' },
+            { name: displayCategory.name, item: canonicalUrl },
+          ]),
+        ]
       : null
   );
 </script>

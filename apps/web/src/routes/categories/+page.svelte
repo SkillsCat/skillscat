@@ -54,7 +54,11 @@
     Tag01Icon
   } from '@hugeicons/core-free-icons';
   import { buildOgImageUrl } from '$lib/seo/og';
-  import { SITE_URL } from '$lib/seo/constants';
+  import {
+    buildBreadcrumbListStructuredData,
+    buildCollectionPageStructuredData,
+    buildPathListItemElements
+  } from '$lib/seo/schema';
 
   interface DynamicCategory {
     slug: string;
@@ -70,6 +74,8 @@
       dynamicCategories: DynamicCategory[];
     };
   }
+
+  const CATEGORY_ITEMLIST_LIMIT = 48;
 
   let { data }: Props = $props();
   const i18n = useI18n();
@@ -178,22 +184,38 @@
 
   const totalCount = $derived(filteredCategories.length + filteredDynamicCategories.length);
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'categories' });
+  const pageTitle = $derived(`${messages.categories.title} - SkillsCat`);
   const pageDescription = $derived(messages.categories.description);
-  const structuredData = $derived({
-    '@context': 'https://schema.org',
-    '@type': 'CollectionPage',
-    name: `${messages.categories.title} - SkillsCat`,
-    description: pageDescription,
-    url: `${SITE_URL}/categories`,
-    mainEntity: {
-      '@type': 'ItemList',
+  const categorySeoLinks = $derived([
+    ...localizedCategories.map((category) => ({
+      name: category.name,
+      path: `/category/${encodeURIComponent(category.slug)}`,
+    })),
+    ...data.dynamicCategories.map((category) => ({
+      name: category.name,
+      path: `/category/${encodeURIComponent(category.slug)}`,
+    })),
+  ]);
+  const categoryItemList = $derived(
+    buildPathListItemElements(categorySeoLinks, { limit: CATEGORY_ITEMLIST_LIMIT })
+  );
+  const structuredData = $derived([
+    buildCollectionPageStructuredData({
+      name: pageTitle,
+      description: pageDescription,
+      url: '/categories',
       numberOfItems: data.categories.length + data.dynamicCategories.length,
-    },
-  });
+      itemListElement: categoryItemList,
+    }),
+    buildBreadcrumbListStructuredData([
+      { name: messages.categories.breadcrumbHome, item: '/' },
+      { name: messages.categories.breadcrumbCategories, item: '/categories' },
+    ]),
+  ]);
 </script>
 
 <SEO
-  title={`${messages.categories.title} - SkillsCat`}
+  title={pageTitle}
   description={pageDescription}
   url="/categories"
   image={ogImageUrl}

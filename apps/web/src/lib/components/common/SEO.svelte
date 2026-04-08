@@ -24,6 +24,7 @@
     tags?: string[];
     section?: string;
     noindex?: boolean;
+    robots?: string;
     structuredData?: Record<string, unknown> | Array<Record<string, unknown>> | null;
   }
 
@@ -43,6 +44,7 @@
     tags = [],
     section,
     noindex = false,
+    robots = '',
     structuredData,
   }: Props = $props();
 
@@ -75,8 +77,10 @@
   );
   const hasCanonical = $derived(Boolean(url) || !noindex);
   const robotsContent = $derived(
-    noindex
-      ? 'noindex, nofollow, noarchive'
+    robots.trim()
+      ? robots.trim()
+      : noindex
+        ? 'noindex, nofollow, noarchive'
       : 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'
   );
 

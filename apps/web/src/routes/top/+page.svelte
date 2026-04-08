@@ -6,6 +6,7 @@
   import { StarIcon } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
   import { buildOgImageUrl } from '$lib/seo/og';
+  import { buildCollectionPageStructuredData, buildSkillListItemElements } from '$lib/seo/schema';
   import { SITE_URL } from '$lib/seo/constants';
 
   interface PaginationData {
@@ -44,18 +45,22 @@
     `${messages.lists.topTitle}${data.pagination.currentPage > 1 ? i18n.t(messages.common.pageSuffix, { page: data.pagination.currentPage }) : ''} - SkillsCat`
   );
   const pageDescription = $derived(messages.lists.topDescription);
-  const structuredData = $derived({
-    '@context': 'https://schema.org',
-    '@type': 'CollectionPage',
-    name: pageTitle,
-    description: pageDescription,
-    url: canonicalUrl,
-    mainEntity: {
-      '@type': 'ItemList',
-      itemListOrder: 'https://schema.org/ItemListOrderDescending',
+  const skillListStartPosition = $derived(
+    (data.pagination.currentPage - 1) * data.pagination.itemsPerPage + 1
+  );
+  const skillItemList = $derived(
+    buildSkillListItemElements(data.skills, { startPosition: skillListStartPosition })
+  );
+  const structuredData = $derived(
+    buildCollectionPageStructuredData({
+      name: pageTitle,
+      description: pageDescription,
+      url: canonicalUrl,
       numberOfItems: data.pagination.totalItems,
-    },
-  });
+      itemListOrder: 'https://schema.org/ItemListOrderDescending',
+      itemListElement: skillItemList,
+    })
+  );
 </script>
 
 <SEO

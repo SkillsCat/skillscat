@@ -1,5 +1,6 @@
 <script lang="ts">
   import SearchBox from '$lib/components/common/SearchBox.svelte';
+  import SEO from '$lib/components/common/SEO.svelte';
   import Grid from '$lib/components/layout/Grid.svelte';
   import SkillCard from '$lib/components/skill/SkillCard.svelte';
   import Section from '$lib/components/layout/Section.svelte';
@@ -127,6 +128,13 @@
     searchValue = data.query;
   });
 
+  const pageTitle = $derived(
+    data.query
+      ? `${i18n.t(messages.searchPage.titleWithQuery, { query: data.query })} - SkillsCat`
+      : `${messages.searchPage.title} - SkillsCat`
+  );
+  const pageDescription = $derived(messages.searchPage.startDescription);
+
   function handleSearch(newQuery: string) {
     if (newQuery.trim()) {
       window.location.href = `/search?q=${encodeURIComponent(newQuery.trim())}`;
@@ -138,12 +146,14 @@
   }
 </script>
 
-<svelte:head>
-  <title>{data.query ? `${i18n.t(messages.searchPage.titleWithQuery, { query: data.query })} - SkillsCat` : `${messages.searchPage.title} - SkillsCat`}</title>
-  <meta name="description" content={messages.searchPage.startDescription} />
-  <link rel="canonical" href="https://skills.cat/search" />
-  <meta name="robots" content="noindex, follow" />
-</svelte:head>
+<SEO
+  title={pageTitle}
+  description={pageDescription}
+  url="/search"
+  noindex
+  robots="noindex, follow, noarchive"
+  structuredData={null}
+/>
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
   <!-- Header -->
