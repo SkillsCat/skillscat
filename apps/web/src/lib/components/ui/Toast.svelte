@@ -1,53 +1,20 @@
 <script lang="ts" module>
-  import { writable } from 'svelte/store';
-
-  export interface ToastData {
-    id: string;
-    type: 'success' | 'error' | 'info' | 'warning';
-    message: string;
-    duration?: number;
-    celebrate?: boolean;
-  }
-
-  export interface ToastOptions {
-    duration?: number;
-    celebrate?: boolean;
-  }
-
-  const toasts = writable<ToastData[]>([]);
-
-  let toastId = 0;
-
-  export function toast(
-    message: string,
-    type: ToastData['type'] = 'success',
-    config: number | ToastOptions = 3000
-  ) {
-    const duration = typeof config === 'number' ? config : (config.duration ?? 3000);
-    const celebrate = typeof config === 'number' ? false : Boolean(config.celebrate);
-    const id = `toast-${++toastId}`;
-    toasts.update(t => [...t, { id, type, message, duration, celebrate }]);
-
-    if (duration > 0) {
-      setTimeout(() => {
-        dismissToast(id);
-      }, duration);
-    }
-
-    return id;
-  }
-
-  export function dismissToast(id: string) {
-    toasts.update(t => t.filter(toast => toast.id !== id));
-  }
-
-  export { toasts };
+  export {
+    dismissToast,
+    registerToastHost,
+    toast,
+    toasts,
+    type ToastData,
+    type ToastOptions,
+  } from './toast-store';
 </script>
 
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Alert02Icon, Cancel01Icon, InformationCircleIcon, Tick02Icon } from '@hugeicons/core-free-icons';
+  import { dismissToast, registerToastHost, toasts } from './toast-store';
 
   const MAX_STACK_DEPTH = 4;
   const STACK_Z_STEP = 120;
@@ -100,6 +67,8 @@
       bgClass: 'toast-warning'
     }
   };
+
+  onMount(() => registerToastHost());
 </script>
 
 <div class="toast-container" aria-live="polite">

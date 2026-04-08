@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Checkbox, Select } from 'bits-ui';
   import Button from '$lib/components/ui/Button.svelte';
-  import { toast } from '$lib/components/ui/Toast.svelte';
+  import { toast } from '$lib/components/ui/toast-store';
   import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { useI18n } from '$lib/i18n/runtime';

@@ -5,7 +5,7 @@
   import { useSession } from '$lib/auth-client';
   import Navbar from '$lib/components/layout/Navbar.svelte';
   import Footer from '$lib/components/layout/Footer.svelte';
-  import Toast from '$lib/components/ui/Toast.svelte';
+  import { toasts } from '$lib/components/ui/toast-store';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { createI18nRuntime, setI18nContext } from '$lib/i18n/runtime';
@@ -56,6 +56,8 @@
 
   let scrollY = $state(0);
   let isScrolled = $derived(scrollY > 20);
+  let showLavaBackground = $state(false);
+  let ToastComponent = $state<typeof import('$lib/components/ui/Toast.svelte').default | null>(null);
   let unreadCount = $state(0);
   let unreadCountLastFetchedAt = $state(0);
   let unreadCountFetchUserId = $state<string | null>(null);
@@ -66,6 +68,27 @@
     if (browser) {
       document.documentElement.lang = i18n.htmlLang();
     }
+  });
+
+  async function loadToastUi(): Promise<void> {
+    if (ToastComponent) {
+      return;
+    }
+
+    try {
+      const module = await import('$lib/components/ui/Toast.svelte');
+      ToastComponent = module.default;
+    } catch (error) {
+      console.error('Failed to load toast UI:', error);
+    }
+  }
+
+  $effect(() => {
+    if (!browser || ToastComponent || $toasts.length === 0) {
+      return;
+    }
+
+    void loadToastUi();
   });
 
   async function loadUnreadCount(options?: { force?: boolean; signal?: AbortSignal }): Promise<void> {
@@ -138,7 +161,15 @@
   });
 
   onMount(() => {
+    const enableLavaBackground = () => {
+      showLavaBackground = true;
+    };
+
     let rafId = 0;
+    let lavaBackgroundTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let lavaBackgroundIdleId = 0;
+    let toastTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let toastIdleId = 0;
     const handleScroll = () => {
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
@@ -149,6 +180,32 @@
 
     window.addEventListener('scroll', handleScroll, { passive: true });
     handleScroll();
+
+    if ('requestIdleCallback' in window) {
+      lavaBackgroundIdleId = (
+        window as Window & {
+          requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
+          cancelIdleCallback?: (id: number) => void;
+        }
+      ).requestIdleCallback(enableLavaBackground, { timeout: 1500 });
+    } else {
+      lavaBackgroundTimeoutId = setTimeout(enableLavaBackground, 750);
+    }
+
+    if ('requestIdleCallback' in window) {
+      toastIdleId = (
+        window as Window & {
+          requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
+          cancelIdleCallback?: (id: number) => void;
+        }
+      ).requestIdleCallback(() => {
+        void loadToastUi();
+      }, { timeout: 2500 });
+    } else {
+      toastTimeoutId = setTimeout(() => {
+        void loadToastUi();
+      }, 1800);
+    }
 
     // 注册 Service Worker (仅生产环境)
     const isDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
@@ -187,6 +244,26 @@
       if (rafId) {
         cancelAnimationFrame(rafId);
       }
+      if (lavaBackgroundTimeoutId !== null) {
+        clearTimeout(lavaBackgroundTimeoutId);
+      }
+      if (lavaBackgroundIdleId && 'cancelIdleCallback' in window) {
+        (
+          window as Window & {
+            cancelIdleCallback?: (id: number) => void;
+          }
+        ).cancelIdleCallback?.(lavaBackgroundIdleId);
+      }
+      if (toastTimeoutId !== null) {
+        clearTimeout(toastTimeoutId);
+      }
+      if (toastIdleId && 'cancelIdleCallback' in window) {
+        (
+          window as Window & {
+            cancelIdleCallback?: (id: number) => void;
+          }
+        ).cancelIdleCallback?.(toastIdleId);
+      }
     };
   });
 </script>
@@ -198,13 +275,15 @@
   <div class="app-content">
     <div class="main-container">
       <!-- Lava Lamp Background Effect -->
-      <div class="lava-bg">
-        <div class="lava-blob lava-blob-1"></div>
-        <div class="lava-blob lava-blob-2"></div>
-        <div class="lava-blob lava-blob-3"></div>
-        <div class="lava-blob lava-blob-4"></div>
-        <div class="lava-blob lava-blob-5"></div>
-      </div>
+      {#if showLavaBackground}
+        <div class="lava-bg">
+          <div class="lava-blob lava-blob-1"></div>
+          <div class="lava-blob lava-blob-2"></div>
+          <div class="lava-blob lava-blob-3"></div>
+          <div class="lava-blob lava-blob-4"></div>
+          <div class="lava-blob lava-blob-5"></div>
+        </div>
+      {/if}
 
       <div class="main-content">
         <Navbar {unreadCount} {currentUser} authPending={deferAuthUi} />
@@ -219,7 +298,9 @@
   </div>
 
   <!-- Global Toast Container -->
-  <Toast />
+  {#if ToastComponent}
+    <ToastComponent />
+  {/if}
 </div>
 
 <style>

@@ -1,6 +1,5 @@
 <script lang="ts">
   import UserMenuAuthenticated from '$lib/components/common/UserMenuAuthenticated.svelte';
-  import LoginDialog from '$lib/components/dialog/LoginDialog.svelte';
   import { useI18n } from '$lib/i18n/runtime';
   import type { CurrentUser } from '$lib/types';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
@@ -17,7 +16,19 @@
   const messages = $derived(i18n.messages());
 
   let showLoginDialog = $state(false);
-  function openLoginDialog() {
+  let LoginDialogComponent = $state<typeof import('$lib/components/dialog/LoginDialog.svelte').default | null>(null);
+
+  async function openLoginDialog() {
+    if (!LoginDialogComponent) {
+      try {
+        const module = await import('$lib/components/dialog/LoginDialog.svelte');
+        LoginDialogComponent = module.default;
+      } catch (error) {
+        console.error('Failed to load login dialog:', error);
+        return;
+      }
+    }
+
     showLoginDialog = true;
   }
 </script>
@@ -29,14 +40,19 @@
 {:else}
   <button
     type="button"
-    onclick={openLoginDialog}
+    onclick={() => void openLoginDialog()}
     class="sign-in-btn"
   >
     <HugeiconsIcon icon={Login03Icon} size={16} />
     <span class="hidden sm:inline">{messages.userMenu.signIn}</span>
   </button>
 
-  <LoginDialog isOpen={showLoginDialog} onClose={() => (showLoginDialog = false)} />
+  {#if LoginDialogComponent}
+    <LoginDialogComponent
+      isOpen={showLoginDialog}
+      onClose={() => (showLoginDialog = false)}
+    />
+  {/if}
 {/if}
 
 <style>

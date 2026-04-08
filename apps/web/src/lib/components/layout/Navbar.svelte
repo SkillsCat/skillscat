@@ -1,11 +1,9 @@
 <script lang="ts">
   import { signOut } from '$lib/auth-client';
-  import SearchBox from '$lib/components/common/SearchBox.svelte';
   import Logo from '$lib/components/common/Logo.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
-  import LoginDialog from '$lib/components/dialog/LoginDialog.svelte';
-  import SubmitDialog from '$lib/components/dialog/SubmitDialog.svelte';
-  import NavbarCategoriesMenu from '$lib/components/layout/NavbarCategoriesMenu.svelte';
+  import DeferredNavbarCategoriesMenu from '$lib/components/layout/DeferredNavbarCategoriesMenu.svelte';
+  import DeferredSearchBox from '$lib/components/layout/DeferredSearchBox.svelte';
   import ThemeToggle from '$lib/components/ui/ThemeToggle.svelte';
   import UserMenu from '$lib/components/common/UserMenu.svelte';
   import { buildSkillPath } from '$lib/skill-path';
@@ -43,6 +41,8 @@
   let categoriesMenuValue = $state('');
   let showSubmitDialog = $state(false);
   let showLoginDialog = $state(false);
+  let SubmitDialogComponent = $state<typeof import('$lib/components/dialog/SubmitDialog.svelte').default | null>(null);
+  let LoginDialogComponent = $state<typeof import('$lib/components/dialog/LoginDialog.svelte').default | null>(null);
 
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
@@ -70,11 +70,31 @@
     goto(buildSkillPath(skill.slug));
   }
 
-  function openSubmitDialog() {
+  async function openSubmitDialog() {
+    if (!SubmitDialogComponent) {
+      try {
+        const module = await import('$lib/components/dialog/SubmitDialog.svelte');
+        SubmitDialogComponent = module.default;
+      } catch (error) {
+        console.error('Failed to load submit dialog:', error);
+        return;
+      }
+    }
+
     showSubmitDialog = true;
   }
 
-  function openLoginDialog() {
+  async function openLoginDialog() {
+    if (!LoginDialogComponent) {
+      try {
+        const module = await import('$lib/components/dialog/LoginDialog.svelte');
+        LoginDialogComponent = module.default;
+      } catch (error) {
+        console.error('Failed to load login dialog:', error);
+        return;
+      }
+    }
+
     showLoginDialog = true;
   }
 
@@ -99,12 +119,11 @@
 
       <!-- Search (Desktop) -->
       <div class="search-desktop">
-        <SearchBox
+        <DeferredSearchBox
           class="navbar-wide-sug"
           bind:value={searchQuery}
           onSearch={handleSearch}
           onSelectSkill={handleSkillSuggestionSelect}
-          suggestionMode="skills"
           placeholder={messages.nav.searchSkills}
         />
       </div>
@@ -119,7 +138,7 @@
           {messages.nav.trending}
         </a>
 
-        <NavbarCategoriesMenu
+        <DeferredNavbarCategoriesMenu
           label={messages.nav.categories}
           bind:value={categoriesMenuValue}
           active={matchesCategoryPath()}
@@ -141,7 +160,7 @@
             <button
               type="button"
               class="nav-submit-btn"
-              onclick={openSubmitDialog}
+              onclick={() => void openSubmitDialog()}
             >
               <HugeiconsIcon icon={Add01Icon} size={16} strokeWidth={2} />
               <span class="submit-btn-text">{messages.nav.submit}</span>
@@ -171,12 +190,11 @@
       <div class="mobile-menu" transition:slide={{ duration: 200 }}>
         <!-- Search -->
         <div class="mobile-search">
-          <SearchBox
+          <DeferredSearchBox
             class="navbar-wide-sug"
             bind:value={searchQuery}
             onSearch={handleSearch}
             onSelectSkill={handleSkillSuggestionSelect}
-            suggestionMode="skills"
             placeholder={messages.nav.searchSkills}
           />
         </div>
@@ -285,7 +303,7 @@
               class="mobile-sign-in-btn"
               onclick={() => {
                 mobileMenuOpen = false;
-                openLoginDialog();
+                void openLoginDialog();
               }}
             >
               <HugeiconsIcon icon={Login03Icon} size={16} strokeWidth={2} />
@@ -298,15 +316,19 @@
   </div>
 </nav>
 
-<SubmitDialog
-  isOpen={showSubmitDialog}
-  onClose={() => showSubmitDialog = false}
-/>
+{#if SubmitDialogComponent}
+  <SubmitDialogComponent
+    isOpen={showSubmitDialog}
+    onClose={() => showSubmitDialog = false}
+  />
+{/if}
 
-<LoginDialog
-  isOpen={showLoginDialog}
-  onClose={() => showLoginDialog = false}
-/>
+{#if LoginDialogComponent}
+  <LoginDialogComponent
+    isOpen={showLoginDialog}
+    onClose={() => showLoginDialog = false}
+  />
+{/if}
 
 <style>
   .navbar {

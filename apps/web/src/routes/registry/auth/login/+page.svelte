@@ -2,7 +2,7 @@
   import { signIn } from '$lib/auth-client';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import Button from '$lib/components/ui/Button.svelte';
-  import { toast } from '$lib/components/ui/Toast.svelte';
+  import { toast } from '$lib/components/ui/toast-store';
   import { useI18n } from '$lib/i18n/runtime';
   import { getSettingsCopy } from '$lib/i18n/settings';
 

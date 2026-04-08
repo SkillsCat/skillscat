@@ -2,7 +2,7 @@
   import { page } from '$app/stores';
   import { Checkbox, Select } from 'bits-ui';
   import Button from '$lib/components/ui/Button.svelte';
-  import { toast } from '$lib/components/ui/Toast.svelte';
+  import { toast } from '$lib/components/ui/toast-store';
   import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
   import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
