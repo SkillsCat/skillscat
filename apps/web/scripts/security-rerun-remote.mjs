@@ -9,13 +9,15 @@ import { getPlatformProxy } from 'wrangler';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP_DIR = resolve(__dirname, '..');
+const DEFAULT_BACKFILL_FREE_MODEL = 'google/gemma-4-31b-it:free';
 
 const DEFAULTS = {
   envName: 'production',
   risks: ['high', 'fatal'],
   limit: 0,
   workerBatchSize: 10,
-  requestedTier: 'premium',
+  requestedTier: 'free',
+  freeModel: DEFAULT_BACKFILL_FREE_MODEL,
   dryRun: false,
   outputPath: '',
   inputPath: '',
@@ -33,7 +35,8 @@ Options:
   --risk <csv>              Risk levels to target (default: high,fatal)
   --limit <n>               Only process the first n matching skills
   --worker-batch <n>        Skills to re-run per scheduled trigger (max recommended: 10)
-  --requested-tier <tier>   Requested tier for replayed jobs: auto|free|premium (default: premium)
+  --requested-tier <tier>   Requested tier for replayed jobs: auto|free|premium (default: free)
+  --free-model <id>         Free model override for reruns (default: google/gemma-4-31b-it:free)
   --output <path>           Write a JSON snapshot of the selected skills
   --input <path>            Re-use a previously written snapshot instead of querying production
   --dry-run                 Print the selected skills but do not mutate production
@@ -113,6 +116,10 @@ function parseArgs(argv) {
         options.requestedTier = parseRequestedTier(takeArgValue(argv, index, arg));
         index += 1;
         break;
+      case '--free-model':
+        options.freeModel = takeArgValue(argv, index, arg).trim();
+        index += 1;
+        break;
       case '--output':
         options.outputPath = resolve(process.cwd(), takeArgValue(argv, index, arg));
         index += 1;
@@ -134,6 +141,19 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+function applyRerunModelOverrides(env, options) {
+  if (options.requestedTier !== 'free' && options.requestedTier !== 'auto') {
+    return;
+  }
+
+  if (!options.freeModel) {
+    return;
+  }
+
+  env.SECURITY_FREE_MODEL = options.freeModel;
+  env.SECURITY_FREE_MODELS = options.freeModel;
 }
 
 function buildInClause(length) {
@@ -324,7 +344,7 @@ async function main() {
   }
 
   console.log(
-    `[security-rerun-remote] env=${options.envName} risks=${options.risks.join(',')} requestedTier=${options.requestedTier} dryRun=${options.dryRun}`
+    `[security-rerun-remote] env=${options.envName} risks=${options.risks.join(',')} requestedTier=${options.requestedTier} freeModel=${options.freeModel} dryRun=${options.dryRun}`
   );
 
   const proxy = await getPlatformProxy({
@@ -334,6 +354,8 @@ async function main() {
 
   let workerModule;
   try {
+    applyRerunModelOverrides(proxy.env, options);
+
     const targets = await loadTargets(options, proxy.env.DB);
     console.log(`[security-rerun-remote] selected=${targets.length}`);
     for (const [risk, count] of summarizeByRisk(targets)) {
