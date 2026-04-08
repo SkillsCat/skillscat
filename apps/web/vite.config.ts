@@ -5,6 +5,11 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   build: {
     chunkSizeWarningLimit: 900,
+    rolldownOptions: {
+      checks: {
+        pluginTimings: false,
+      },
+    },
     rollupOptions: {
       onwarn(warning, defaultHandler) {
         const isHugeiconsAnnotationNoise = typeof warning.message === 'string'
