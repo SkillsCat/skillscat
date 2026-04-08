@@ -6,6 +6,7 @@ const getAuthContext = vi.fn();
 const requireScope = vi.fn();
 const checkSkillAccess = vi.fn();
 const getRecommendedSkills = vi.fn();
+const getLightweightRecommendedSkills = vi.fn();
 const isOpenClawUserAgent = vi.fn();
 const readCachedRecommendSkills = vi.fn();
 const shouldRefreshPrecomputedRecommend = vi.fn();
@@ -32,6 +33,7 @@ vi.mock('$lib/server/auth/permissions', () => ({
 
 vi.mock('$lib/server/db/business/recommend', () => ({
   getRecommendedSkills,
+  getLightweightRecommendedSkills,
 }));
 
 vi.mock('$lib/server/openclaw/agent-markdown', () => ({
@@ -103,6 +105,7 @@ beforeEach(() => {
   getAuthContext.mockResolvedValue({ userId: null, scopes: [] });
   checkSkillAccess.mockResolvedValue(false);
   getRecommendedSkills.mockResolvedValue([]);
+  getLightweightRecommendedSkills.mockResolvedValue([]);
   isOpenClawUserAgent.mockReturnValue(false);
   readCachedRecommendSkills.mockResolvedValue({
     recommendSkills: null,
@@ -220,6 +223,61 @@ describe('recommend route crawler fallback policy', () => {
     expect(waitUntil).not.toHaveBeenCalled();
   });
 
+  it('bypasses empty precomputed payloads for human traffic and falls back online', async () => {
+    const db = createDb([
+      {
+        id: 'skill_1',
+        slug: 'acme/demo-skill',
+        repoOwner: 'acme',
+        visibility: 'public',
+        tier: 'cool',
+        recommendDirty: 0,
+        recommendNextUpdateAt: null,
+        recommendPrecomputedAt: Date.now(),
+        recommendAlgoVersion: 'v1',
+        recommendLastFallbackAt: null,
+      },
+    ]);
+    readCachedRecommendSkills.mockResolvedValue({
+      recommendSkills: [],
+      hit: true,
+      algoVersion: 'v1',
+    });
+    getLightweightRecommendedSkills.mockResolvedValue([
+      {
+        id: 'rec_1',
+        name: 'Fallback Related',
+        slug: 'acme/fallback-related',
+        description: 'fallback',
+        repoOwner: 'acme',
+        repoName: 'fallback-related',
+        stars: 3,
+        forks: 0,
+        trendingScore: 4,
+        updatedAt: Date.now(),
+        categories: [],
+      },
+    ]);
+
+    const request = createRequest({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)',
+    });
+
+    const { GET } = await import('../src/routes/api/skills/[owner]/[...name]/recommend/+server');
+    const response = await GET({
+      params: { owner: 'acme', name: 'demo-skill' },
+      platform: { env: { DB: db } },
+      request,
+      locals: {},
+      url: new URL(request.url),
+    } as never);
+
+    const payload = await response.json();
+    expect(payload.data.recommendSkills).toHaveLength(1);
+    expect(getLightweightRecommendedSkills).toHaveBeenCalledTimes(1);
+    expect(getRecommendedSkills).not.toHaveBeenCalled();
+  });
+
   it('keeps hot skills eligible for online fallback even for verified bots', async () => {
     const db = createDb([
       {
@@ -293,7 +351,7 @@ describe('recommend route crawler fallback policy', () => {
         recommendLastFallbackAt: null,
       },
     ]);
-    getRecommendedSkills.mockResolvedValue([
+    getLightweightRecommendedSkills.mockResolvedValue([
       {
         id: 'rec_1',
         name: 'Fallback Related',
@@ -323,9 +381,8 @@ describe('recommend route crawler fallback policy', () => {
 
     const payload = await response.json();
     expect(payload.data.recommendSkills).toHaveLength(1);
-    expect(getRecommendedSkills).toHaveBeenCalledTimes(1);
-    expect(getRecommendedSkills.mock.calls[0]?.[2]).toEqual([]);
-    expect(getRecommendedSkills.mock.calls[0]?.[7]).toEqual([]);
+    expect(getLightweightRecommendedSkills).toHaveBeenCalledTimes(1);
+    expect(getLightweightRecommendedSkills.mock.calls[0]?.[2]).toEqual([]);
     expect(db.prepare).toHaveBeenCalledTimes(1);
     expect(markRecommendDirty).toHaveBeenCalledWith(db, 'skill_1');
     expect(markRecommendFallbackServed).toHaveBeenCalledWith(db, 'skill_1');
@@ -348,7 +405,7 @@ describe('recommend route crawler fallback policy', () => {
         recommendLastFallbackAt: Date.now() - 5 * 60 * 1000,
       },
     ]);
-    getRecommendedSkills.mockResolvedValue([
+    getLightweightRecommendedSkills.mockResolvedValue([
       {
         id: 'rec_1',
         name: 'Fallback Related',
@@ -379,7 +436,8 @@ describe('recommend route crawler fallback policy', () => {
 
     const payload = await response.json();
     expect(payload.data.recommendSkills).toHaveLength(1);
-    expect(getRecommendedSkills.mock.calls[0]?.[2]).toEqual([]);
+    expect(getRecommendedSkills).not.toHaveBeenCalled();
+    expect(getLightweightRecommendedSkills.mock.calls[0]?.[2]).toEqual([]);
     expect(markRecommendDirty).not.toHaveBeenCalled();
     expect(markRecommendFallbackServed).not.toHaveBeenCalled();
   });
@@ -399,7 +457,7 @@ describe('recommend route crawler fallback policy', () => {
         recommendLastFallbackAt: null,
       },
     ]);
-    getRecommendedSkills.mockResolvedValue([
+    getLightweightRecommendedSkills.mockResolvedValue([
       {
         id: 'rec_1',
         name: 'Fallback Related',
@@ -430,7 +488,59 @@ describe('recommend route crawler fallback policy', () => {
 
     const payload = await response.json();
     expect(payload.data.recommendSkills).toHaveLength(1);
+    expect(getRecommendedSkills).not.toHaveBeenCalled();
     expect(markRecommendDirty).not.toHaveBeenCalled();
     expect(markRecommendFallbackServed).toHaveBeenCalledWith(db, 'skill_1');
+  });
+
+  it('passes client-provided category hints into lightweight fallback', async () => {
+    const db = createDb([
+      {
+        id: 'skill_1',
+        slug: 'acme/demo-skill',
+        repoOwner: 'acme',
+        visibility: 'public',
+        tier: 'cool',
+        recommendDirty: null,
+        recommendNextUpdateAt: null,
+        recommendPrecomputedAt: null,
+        recommendAlgoVersion: null,
+        recommendLastFallbackAt: null,
+      },
+    ]);
+    getLightweightRecommendedSkills.mockResolvedValue([
+      {
+        id: 'rec_1',
+        name: 'Hinted Related',
+        slug: 'acme/hinted-related',
+        description: 'hinted',
+        repoOwner: 'acme',
+        repoName: 'hinted-related',
+        stars: 5,
+        forks: 0,
+        trendingScore: 6,
+        updatedAt: Date.now(),
+        categories: [],
+      },
+    ]);
+    const request = createRequest({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)',
+    });
+    const url = new URL(request.url);
+    url.searchParams.append('category', 'automation');
+    url.searchParams.append('category', 'coding');
+
+    const { GET } = await import('../src/routes/api/skills/[owner]/[...name]/recommend/+server');
+    const response = await GET({
+      params: { owner: 'acme', name: 'demo-skill' },
+      platform: { env: { DB: db } },
+      request,
+      locals: {},
+      url,
+    } as never);
+
+    const payload = await response.json();
+    expect(payload.data.recommendSkills).toHaveLength(1);
+    expect(getLightweightRecommendedSkills.mock.calls[0]?.[2]).toEqual(['automation', 'coding']);
   });
 });

@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 const setPublicPageCache = vi.fn();
 const getSkillBySlug = vi.fn();
 const getRecommendedSkills = vi.fn();
+const getLightweightRecommendedSkills = vi.fn();
 const loadSkillReadmeFromR2 = vi.fn();
 const getCached = vi.fn();
 const renderReadmeMarkdown = vi.fn((value: string) => value);
@@ -20,6 +21,7 @@ vi.mock('$lib/server/db/business/detail', () => ({
 
 vi.mock('$lib/server/db/business/recommend', () => ({
   getRecommendedSkills,
+  getLightweightRecommendedSkills,
 }));
 
 vi.mock('$lib/server/db/business/readme', () => ({
@@ -79,6 +81,8 @@ beforeEach(() => {
     hit: false,
     algoVersion: 'v1',
   });
+  getRecommendedSkills.mockResolvedValue([]);
+  getLightweightRecommendedSkills.mockResolvedValue([]);
   readRecommendRefreshState.mockResolvedValue(null);
   shouldRefreshPrecomputedRecommend.mockReturnValue(false);
   renderReadmeMarkdown.mockImplementation((value: string) => value);
@@ -414,5 +418,77 @@ describe('public detail status overrides', () => {
     expect(result.recommendSkills).toEqual([]);
     expect(fetch).not.toHaveBeenCalled();
     expect(getRecommendedSkills).not.toHaveBeenCalled();
+  });
+
+  it('treats empty cached related skills as a miss and re-triggers client loading', async () => {
+    getSkillBySlug.mockResolvedValue({
+      id: 'skill_1',
+      name: 'Demo Skill',
+      slug: 'acme/demo-skill',
+      description: 'Demo',
+      repoOwner: 'acme',
+      repoName: 'demo-skill',
+      githubUrl: 'https://github.com/acme/demo-skill',
+      skillPath: 'SKILL.md',
+      stars: 10,
+      forks: 1,
+      trendingScore: 5,
+      updatedAt: Date.now(),
+      lastCommitAt: null,
+      createdAt: Date.now(),
+      indexedAt: Date.now(),
+      readme: '# Demo',
+      fileStructure: null,
+      categories: ['automation'],
+      classificationMethod: null,
+      authorAvatar: null,
+      authorUsername: 'acme',
+      authorDisplayName: 'Acme',
+      authorBio: null,
+      authorSkillsCount: 1,
+      authorTotalStars: 10,
+      visibility: 'public',
+      sourceType: 'github',
+      ownerId: null,
+      ownerName: null,
+      ownerAvatar: null,
+      orgId: null,
+      orgName: null,
+      orgSlug: null,
+      orgAvatar: null,
+    });
+    readCachedRecommendSkills.mockResolvedValue({
+      recommendSkills: [],
+      hit: true,
+      algoVersion: 'v1',
+    });
+
+    const { setHeaders } = createHeadersRecorder();
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      data: { recommendSkills: [] },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    const platform = createPlatform();
+    const { load } = await import('../src/routes/skills/[owner]/[...name]/+page.server');
+
+    const result = await load({
+      params: { owner: 'acme', name: 'demo-skill' },
+      platform,
+      locals: { user: null },
+      request: new Request('https://skills.cat/skills/acme/demo-skill'),
+      fetch,
+      setHeaders,
+      isDataRequest: false,
+    } as never);
+
+    expect(result.deferRecommendSkills).toBe(true);
+    expect(result.recommendSkills).toEqual([]);
+    expect(platform.context.waitUntil).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith('/api/skills/acme/demo-skill/recommend', {
+      headers: { accept: 'application/json' },
+    });
   });
 });

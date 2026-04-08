@@ -4,7 +4,7 @@ import type { ApiResponse, SkillCardData } from '$lib/types';
 import { getCached, invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
-import { getRecommendedSkills } from '$lib/server/db/business/recommend';
+import { getLightweightRecommendedSkills, getRecommendedSkills } from '$lib/server/db/business/recommend';
 import { isOpenClawUserAgent } from '$lib/server/openclaw/agent-markdown';
 import { isCrawlerLikeRequest } from '$lib/server/request-client';
 import { buildSkillSlug, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
@@ -83,6 +83,25 @@ function parseJsonStringArray(value: string | null): string[] {
   }
 }
 
+function parseLightweightCategoryHints(url: URL): string[] {
+  const seen = new Set<string>();
+
+  return url.searchParams
+    .getAll('category')
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => /^[a-z0-9-]{1,64}$/.test(value))
+    .filter((value) => {
+      if (seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    })
+    .slice(0, 3);
+}
+
+function hasNonEmptyRecommendSkills(recommendSkills: SkillCardData[] | null | undefined): recommendSkills is SkillCardData[] {
+  return Array.isArray(recommendSkills) && recommendSkills.length > 0;
+}
+
 function isAuthorizedWorkerRefresh(request: Request, env: RuntimeEnv | undefined): boolean {
   const secret = env?.WORKER_SECRET;
   if (!secret) return false;
@@ -138,6 +157,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
   const now = Date.now();
   const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
   const isOpenClawRequest = isOpenClawUserAgent(request.headers.get('user-agent'));
+  const lightweightCategoryHints = parseLightweightCategoryHints(url);
 
   if (forceRefresh && !isAuthorizedWorkerRefresh(request, env)) {
     return json({
@@ -238,6 +258,20 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       mode: RealtimeRecommendMode
     ): Promise<SkillCardData[]> => {
       const runCompute = async () => {
+        if (mode === 'lightweight') {
+          return getLightweightRecommendedSkills(
+            { DB: db },
+            skill.id,
+            lightweightCategoryHints,
+            skill.repoOwner || '',
+            RECOMMEND_CACHE_LIMIT,
+            (name, dur, desc) => {
+              serverTimings.push({ name, dur, desc });
+            },
+            false
+          );
+        }
+
         const signals = shouldLoadRecommendSignals(mode)
           ? await loadSkillSignals()
           : { categories: [], tags: [] };
@@ -359,7 +393,16 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
         'cache+r2'
       );
 
-      if (precomputedRecommendSkills !== null) {
+      const hasEmptyPrecomputedRecommend = Array.isArray(precomputedRecommendSkills)
+        && precomputedRecommendSkills.length === 0;
+      const shouldServePrecomputedRecommend = precomputedRecommendSkills !== null
+        && (
+          hasNonEmptyRecommendSkills(precomputedRecommendSkills)
+          || isOpenClawRequest
+          || suppressRealtimeFallback
+        );
+
+      if (shouldServePrecomputedRecommend) {
         if (
           shouldRefreshPrecomputedRecommend(skill, algoVersion, now)
           && !suppressRealtimeFallback
@@ -381,6 +424,10 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
             'Server-Timing': buildServerTimingHeader(),
           },
         });
+      }
+
+      if (hasEmptyPrecomputedRecommend) {
+        serverTimings.push({ name: 'precomputed_empty_bypass', dur: 0, desc: 'online-fallback' });
       }
 
       if (isOpenClawRequest || suppressRealtimeFallback) {

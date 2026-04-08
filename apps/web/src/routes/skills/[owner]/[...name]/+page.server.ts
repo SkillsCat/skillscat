@@ -1,7 +1,7 @@
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
 import { getSkillBySlug } from '$lib/server/db/business/detail';
-import { getRecommendedSkills } from '$lib/server/db/business/recommend';
+import { getLightweightRecommendedSkills, getRecommendedSkills } from '$lib/server/db/business/recommend';
 import { loadSkillReadmeFromR2 } from '$lib/server/db/business/readme';
 import { getCached } from '$lib/server/cache';
 import { renderReadmeMarkdown } from '$lib/server/text/markdown';
@@ -46,6 +46,10 @@ interface SkillSeoPayload {
 }
 
 type SkillPageErrorKind = 'not_found' | 'temporary_failure';
+
+function hasNonEmptyRecommendSkills(recommendSkills: SkillCardData[] | null | undefined): recommendSkills is SkillCardData[] {
+  return Array.isArray(recommendSkills) && recommendSkills.length > 0;
+}
 
 function normalizeKeywordValue(keyword: string): string {
   return keyword.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -400,6 +404,9 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       )
       : null;
     const cachedRecommendSkills = cachedRecommendSkillsResult?.recommendSkills ?? null;
+    const usableCachedRecommendSkills = hasNonEmptyRecommendSkills(cachedRecommendSkills)
+      ? cachedRecommendSkills
+      : null;
     const encodedSlug = skill.visibility === 'public'
       ? encodeSkillSlugForPath(skill.slug)
       : null;
@@ -411,7 +418,10 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
         'db'
       );
 
-      if (shouldRefreshPrecomputedRecommend(recommendRefreshState, recommendAlgoVersion)) {
+      if (
+        !hasNonEmptyRecommendSkills(cachedRecommendSkills)
+        || shouldRefreshPrecomputedRecommend(recommendRefreshState, recommendAlgoVersion)
+      ) {
         serverTimings.push({ name: 'recommend_refresh_scheduled', dur: 0, desc: 'stale-hit' });
         waitUntil(
           fetch(`/api/skills/${encodedSlug}/recommend`, {
@@ -439,14 +449,14 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       setHeaders({ [PUBLIC_SKILL_HTML_CACHE_HEADER]: '1' });
     }
 
-    const deferRecommendSkills = skill.visibility === 'public' && cachedRecommendSkills === null;
+    const deferRecommendSkills = skill.visibility === 'public' && usableCachedRecommendSkills === null;
     const recommendSkillsPromise = deferRecommendSkills
       ? Promise.resolve<SkillCardData[]>([])
       : timed(
         'recommend',
         async () => {
-          if (cachedRecommendSkills !== null) {
-            return cachedRecommendSkills;
+          if (usableCachedRecommendSkills !== null) {
+            return usableCachedRecommendSkills;
           }
 
           if (skill.visibility === 'public') {
@@ -471,6 +481,25 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
           }
 
           const realtimeRecommendMode = getRealtimeRecommendMode(skill.visibility, skill.tier, false);
+          if (realtimeRecommendMode === 'lightweight') {
+            const { data } = await getCached(
+              buildOnlineRecommendCacheKey(skill.id, realtimeRecommendMode),
+              () => getLightweightRecommendedSkills(
+                env,
+                skill.id,
+                skill.categories || [],
+                skill.repoOwner || '',
+                10,
+                (name, dur, desc) => {
+                  serverTimings.push({ name, dur, desc });
+                },
+                false
+              ),
+              RECOMMEND_ONLINE_CACHE_TTL_SECONDS
+            );
+            return data;
+          }
+
           const shouldUseRecommendSignals = shouldLoadRecommendSignals(realtimeRecommendMode);
           const { data } = await getCached(
             buildOnlineRecommendCacheKey(skill.id, realtimeRecommendMode),

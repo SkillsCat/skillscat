@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { describe, expect, it } from 'vitest';
 import {
+  getLightweightRecommendedSkills,
   getRecommendedSkills,
   mergeRecommendCategorySeedSkillIds,
   orderRecommendDiscoveryCategories,
@@ -263,5 +264,84 @@ describe('orderRecommendDiscoveryCategories', () => {
 
     expect(results).toHaveLength(2);
     expect(results.map((skill) => skill.id)).toContain('skill-multi');
+  });
+
+  it('uses low-cost category seeds before same-author and trending fallbacks', async () => {
+    const sqlite = createRecommendDb();
+
+    sqlite.exec(`
+      INSERT INTO skills (
+        id, name, slug, description, repo_owner, repo_name, visibility,
+        stars, forks, trending_score, last_commit_at, updated_at, indexed_at
+      )
+      VALUES
+        ('skill-current', 'Current', 'current', NULL, 'acme', 'current', 'public', 10, 1, 5, 1000, 1000, 1000),
+        ('skill-seeded', 'Seeded', 'seeded', NULL, 'seed-owner', 'seeded', 'public', 80, 5, 40, 1000, 1000, 1000),
+        ('skill-same-author', 'Same Author', 'same-author', NULL, 'acme', 'same-author', 'public', 30, 2, 15, 1000, 1000, 1000),
+        ('skill-trending', 'Trending', 'trending', NULL, 'trend-owner', 'trending', 'public', 120, 7, 90, 1000, 1000, 1000);
+
+      INSERT INTO skill_categories (skill_id, category_slug)
+      VALUES
+        ('skill-current', 'automation'),
+        ('skill-seeded', 'automation');
+
+      INSERT INTO category_public_stats (
+        category_slug, public_skill_count, top_skill_ids_json, max_freshness_ts, updated_at
+      )
+      VALUES
+        ('automation', 2, '["skill-seeded"]', 1000, 1000);
+    `);
+
+    const results = await getLightweightRecommendedSkills(
+      {
+        DB: new SqliteD1Database(sqlite) as never,
+        R2: undefined,
+      },
+      'skill-current',
+      ['automation'],
+      'acme',
+      3,
+      undefined,
+      false
+    );
+
+    expect(results.map((skill) => skill.id)).toEqual([
+      'skill-seeded',
+      'skill-same-author',
+      'skill-trending',
+    ]);
+  });
+
+  it('still returns low-cost fallback results when category seeds are missing', async () => {
+    const sqlite = createRecommendDb();
+
+    sqlite.exec(`
+      INSERT INTO skills (
+        id, name, slug, description, repo_owner, repo_name, visibility,
+        stars, forks, trending_score, last_commit_at, updated_at, indexed_at
+      )
+      VALUES
+        ('skill-current', 'Current', 'current', NULL, 'acme', 'current', 'public', 10, 1, 5, 1000, 1000, 1000),
+        ('skill-same-author', 'Same Author', 'same-author', NULL, 'acme', 'same-author', 'public', 30, 2, 15, 1000, 1000, 1000),
+        ('skill-trending', 'Trending', 'trending', NULL, 'trend-owner', 'trending', 'public', 120, 7, 90, 1000, 1000, 1000);
+    `);
+
+    const results = await getLightweightRecommendedSkills(
+      {
+        DB: new SqliteD1Database(sqlite) as never,
+        R2: undefined,
+      },
+      'skill-current',
+      ['automation'],
+      'acme',
+      2,
+      undefined,
+      false
+    );
+
+    expect(results.map((skill) => skill.id)).toEqual([
+      'skill-same-author',
+      'skill-trending',
+    ]);
   });
 });

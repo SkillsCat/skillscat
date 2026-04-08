@@ -51,6 +51,12 @@ interface RecommendCategoryPair {
 
 const EXACT_CATEGORY_OVERLAP_POOL_MAX = 2000;
 const MAX_CATEGORY_SEED_IDS = 192;
+const RECOMMEND_SKILL_COLUMNS_BASE = `
+  s.id, s.name, s.slug, s.description,
+  s.repo_owner as repoOwner, s.repo_name as repoName,
+  s.stars, s.forks, s.trending_score as trendingScore,
+  COALESCE(s.last_commit_at, s.updated_at) as updatedAt, s.last_commit_at as lastCommitAt`;
+const SKILL_COLUMNS_BASE = RECOMMEND_SKILL_COLUMNS_BASE;
 
 function parseRecommendSeedSkillIds(value: string | null): string[] {
   if (!value) return [];
@@ -304,6 +310,164 @@ async function loadRecommendMultiCategoryCandidates(
     .map(({ row }) => row);
 }
 
+function toSkillCardRow(row: RecommendSkillCandidateRow): SkillListRow {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    description: row.description,
+    repoOwner: row.repoOwner,
+    repoName: row.repoName,
+    stars: row.stars,
+    forks: row.forks,
+    trendingScore: row.trendingScore,
+    updatedAt: row.updatedAt,
+    authorAvatar: row.authorAvatar ?? null,
+  };
+}
+
+export async function getLightweightRecommendedSkills(
+  env: DbEnv,
+  skillId: string,
+  categories: string[],
+  repoOwner: string = '',
+  limit: number = 10,
+  timingCollector?: TimingCollector,
+  includeCategories: boolean = true
+): Promise<SkillCardData[]> {
+  const db = env.DB;
+  if (!db || limit <= 0) return [];
+
+  const normalizedCategories = Array.from(new Set(
+    categories
+      .map((category) => category.trim())
+      .filter((category) => category.length > 0)
+  )).slice(0, 3);
+
+  const collected: RecommendSkillCandidateRow[] = [];
+  const excludedIds = new Set<string>([skillId]);
+  const buildExcludePlaceholders = () => Array.from(excludedIds).map(() => '?').join(',');
+  const getExcludeParams = () => Array.from(excludedIds);
+
+  const pushCandidates = (rows: RecommendSkillCandidateRow[]) => {
+    for (const row of rows) {
+      if (excludedIds.has(row.id)) continue;
+      excludedIds.add(row.id);
+      collected.push(row);
+      if (collected.length >= limit) {
+        return;
+      }
+    }
+  };
+
+  if (normalizedCategories.length > 0) {
+    const discovery = await loadRecommendDiscoveryCategories(db, normalizedCategories, timingCollector);
+    const seedSkillIds = discovery.seedSkillIds
+      .filter((candidateId) => !excludedIds.has(candidateId))
+      .slice(0, Math.max(limit * 4, 24));
+
+    if (seedSkillIds.length > 0) {
+      const seedPh = seedSkillIds.map(() => '?').join(',');
+      const seedPriority = new Map(seedSkillIds.map((candidateId, index) => [candidateId, index] as const));
+      const seedRows = await timedTask(
+        timingCollector,
+        'rel_lw_seed',
+        () => db.prepare(`
+          SELECT
+            ${RECOMMEND_SKILL_COLUMNS_BASE}
+          FROM skills s INDEXED BY skills_visibility_id_idx
+          WHERE s.visibility = 'public'
+            AND s.id IN (${seedPh})
+        `).bind(...seedSkillIds).all<RecommendSkillCandidateRow>(),
+        'lightweight category seeds'
+      );
+
+      pushCandidates(
+        seedRows.results
+          .map((row) => ({
+            ...row,
+            sharedCategoryCount: discovery.seedSharedCategoryCounts.get(row.id) ?? 0,
+          }))
+          .sort((a, b) =>
+            (seedPriority.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (seedPriority.get(b.id) ?? Number.MAX_SAFE_INTEGER)
+            || (b.trendingScore || 0) - (a.trendingScore || 0)
+            || (b.stars || 0) - (a.stars || 0)
+            || a.id.localeCompare(b.id)
+          )
+      );
+    }
+  }
+
+  if (repoOwner && collected.length < limit) {
+    const exPh = buildExcludePlaceholders();
+    const sameAuthorLimit = Math.max(3, Math.min(6, limit - collected.length + 2));
+    const sameAuthorRows = await timedTask(
+      timingCollector,
+      'rel_lw_author',
+      () => db.prepare(`
+        SELECT ${RECOMMEND_SKILL_COLUMNS_BASE}
+        FROM skills s INDEXED BY skills_repo_visibility_trending_idx
+        WHERE s.repo_owner = ?
+          AND s.visibility = 'public'
+          AND s.id NOT IN (${exPh})
+        ORDER BY s.trending_score DESC
+        LIMIT ?
+      `).bind(repoOwner, ...getExcludeParams(), sameAuthorLimit).all<RecommendSkillCandidateRow>(),
+      'lightweight same author'
+    );
+    pushCandidates(sameAuthorRows.results);
+  }
+
+  if (collected.length < limit) {
+    const exPh = buildExcludePlaceholders();
+    const trendingLimit = Math.max(4, Math.min(8, limit - collected.length + 2));
+    const trendingRows = await timedTask(
+      timingCollector,
+      'rel_lw_trending',
+      () => db.prepare(`
+        SELECT ${RECOMMEND_SKILL_COLUMNS_BASE}
+        FROM skills s INDEXED BY skills_visibility_trending_desc_idx
+        WHERE s.visibility = 'public'
+          AND s.id NOT IN (${exPh})
+        ORDER BY s.trending_score DESC
+        LIMIT ?
+      `).bind(...getExcludeParams(), trendingLimit).all<RecommendSkillCandidateRow>(),
+      'lightweight trending fallback'
+    );
+    pushCandidates(trendingRows.results);
+  }
+
+  if (collected.length === 0) return [];
+
+  const top = collected
+    .slice(0, limit)
+    .map((row) => toSkillCardRow(row));
+
+  if (!includeCategories) {
+    timingCollector?.('rel_add_cats', 0, 'skipped');
+    return timedTask(
+      timingCollector,
+      'rel_add_auth',
+      () => addAuthorAvatarsToSkills(db, top.map((skill) => ({ ...skill, categories: [] }))),
+      'hydrate author avatars'
+    );
+  }
+
+  const skillsWithCategories = await timedTask(
+    timingCollector,
+    'rel_add_cats',
+    () => addCategoriesToSkills(db, top),
+    'hydrate categories'
+  );
+
+  return timedTask(
+    timingCollector,
+    'rel_add_auth',
+    () => addAuthorAvatarsToSkills(db, skillsWithCategories),
+    'hydrate author avatars'
+  );
+}
+
 /**
  * 获取相关 skills (tiered candidate discovery + adaptive scoring)
  *
@@ -353,12 +517,6 @@ export async function getRecommendedSkills(
   const candidateMap = new Map<string, { data: RecommendSkillCandidateRow; tier: number }>();
   const excludeIds: string[] = [skillId];
 
-  const SKILL_COLUMNS_BASE = `
-    s.id, s.name, s.slug, s.description,
-    s.repo_owner as repoOwner, s.repo_name as repoName,
-    s.stars, s.forks, s.trending_score as trendingScore,
-    COALESCE(s.last_commit_at, s.updated_at) as updatedAt, s.last_commit_at as lastCommitAt`;
-
   const addCandidates = (rows: RecommendSkillCandidateRow[], tier: number) => {
     for (const row of rows) {
       const existing = candidateMap.get(row.id);
@@ -407,6 +565,7 @@ export async function getRecommendedSkills(
         )
         SELECT
           ${SKILL_COLUMNS_BASE},
+          NULL as authorAvatar,
           matched.sharedCategoryCount
         FROM matched_ids matched
         CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
@@ -430,6 +589,7 @@ export async function getRecommendedSkills(
           () => db.prepare(`
         SELECT
           ${SKILL_COLUMNS_BASE}
+        , NULL as authorAvatar
         FROM skills s INDEXED BY skills_visibility_id_idx
         WHERE s.visibility = 'public'
           AND s.id IN (${seedPh})
@@ -485,6 +645,7 @@ export async function getRecommendedSkills(
         )
         SELECT
           ${SKILL_COLUMNS_BASE},
+          NULL as authorAvatar,
           matched.sharedCategoryCount
         FROM matched_ids matched
         CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
@@ -507,6 +668,7 @@ export async function getRecommendedSkills(
             () => db.prepare(`
         SELECT
           ${SKILL_COLUMNS_BASE}
+        , NULL as authorAvatar
         FROM skills s INDEXED BY skills_visibility_trending_desc_idx
         WHERE s.visibility = 'public'
           AND s.id NOT IN (${exPh})
@@ -547,6 +709,7 @@ export async function getRecommendedSkills(
       )
       SELECT
         ${SKILL_COLUMNS_BASE},
+        NULL as authorAvatar,
         matched.sharedTagCount
       FROM matched_ids matched
       CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
@@ -569,6 +732,7 @@ export async function getRecommendedSkills(
       'rel_t3',
       () => db.prepare(`
       SELECT ${SKILL_COLUMNS_BASE}
+      , NULL as authorAvatar
       FROM skills s INDEXED BY skills_repo_visibility_trending_idx
       WHERE s.repo_owner = ?
         AND s.id NOT IN (${exPh})
@@ -590,6 +754,7 @@ export async function getRecommendedSkills(
       'rel_t4',
       () => db.prepare(`
       SELECT ${SKILL_COLUMNS_BASE}
+      , NULL as authorAvatar
       FROM skills s INDEXED BY skills_visibility_trending_desc_idx
       WHERE s.id NOT IN (${exPh})
         AND s.visibility = 'public'

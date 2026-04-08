@@ -1,6 +1,11 @@
 export type RealtimeRecommendMode = 'full' | 'lightweight';
 
 export const RECOMMEND_LIGHTWEIGHT_FALLBACK_COOLDOWN_MS = 60 * 60 * 1000;
+const RECOMMEND_ONLINE_CACHE_KEY_VERSION = 'v2';
+
+function buildLegacyOnlineRecommendCacheKey(skillId: string, mode: RealtimeRecommendMode): string {
+  return `recommend:${skillId}:${mode}`;
+}
 
 export function getRealtimeRecommendMode(
   visibility: 'public' | 'private' | 'unlisted' | null | undefined,
@@ -19,13 +24,15 @@ export function shouldLoadRecommendSignals(mode: RealtimeRecommendMode): boolean
 }
 
 export function buildOnlineRecommendCacheKey(skillId: string, mode: RealtimeRecommendMode): string {
-  return `recommend:${skillId}:${mode}`;
+  return `recommend:online:${RECOMMEND_ONLINE_CACHE_KEY_VERSION}:${skillId}:${mode}`;
 }
 
 export function getOnlineRecommendCacheKeys(skillId: string): string[] {
   return [
     buildOnlineRecommendCacheKey(skillId, 'full'),
     buildOnlineRecommendCacheKey(skillId, 'lightweight'),
+    buildLegacyOnlineRecommendCacheKey(skillId, 'full'),
+    buildLegacyOnlineRecommendCacheKey(skillId, 'lightweight'),
     `recommend:${skillId}`,
   ];
 }

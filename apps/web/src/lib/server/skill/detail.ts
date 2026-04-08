@@ -3,7 +3,7 @@ import type { FileNode, SkillCardData, SkillDetail, SkillInstallData } from '$li
 import { getCached } from '$lib/server/cache';
 import { getAuthContext } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
-import { getRecommendedSkills } from '$lib/server/db/business/recommend';
+import { getLightweightRecommendedSkills, getRecommendedSkills } from '$lib/server/db/business/recommend';
 import { buildSkillInstallData } from '$lib/skill-install';
 import {
   readCachedRecommendSkills,
@@ -76,6 +76,10 @@ class PublicSkillDetailCacheBypass extends Error {
   }
 }
 
+function hasNonEmptyRecommendSkills(recommendSkills: SkillCardData[] | null | undefined): recommendSkills is SkillCardData[] {
+  return Array.isArray(recommendSkills) && recommendSkills.length > 0;
+}
+
 export function getSkillDetailCacheKey(slug: string, options?: { includeRecommendSkills?: boolean }): string {
   return options?.includeRecommendSkills === false
     ? `api:skill:${slug}${NO_RECOMMEND_SKILL_DETAIL_CACHE_SUFFIX}`
@@ -107,6 +111,18 @@ async function fetchRecommendedSkills(
   skill: SkillDetail,
   mode: RealtimeRecommendMode
 ): Promise<SkillCardData[]> {
+  if (mode === 'lightweight') {
+    return getLightweightRecommendedSkills(
+      { DB: db },
+      skill.id,
+      skill.categories,
+      skill.repoOwner || '',
+      6,
+      undefined,
+      true
+    );
+  }
+
   const shouldUseSignals = shouldLoadRecommendSignals(mode);
   return getRecommendedSkills(
     { DB: db },
@@ -139,7 +155,7 @@ async function resolveRecommendSkills(
         waitUntil: options?.waitUntil,
       });
 
-      if (cachedRecommendSkills.recommendSkills !== null) {
+      if (hasNonEmptyRecommendSkills(cachedRecommendSkills.recommendSkills)) {
         return cachedRecommendSkills.recommendSkills;
       }
     } catch (error) {
