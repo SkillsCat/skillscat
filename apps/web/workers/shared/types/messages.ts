@@ -27,4 +27,5 @@ export interface SecurityAnalysisMessage {
   skillId: string;
   trigger: 'content_update' | 'report' | 'trending_head' | 'manual';
   requestedTier?: 'free' | 'premium' | 'auto';
+  forceRefresh?: boolean;
 }

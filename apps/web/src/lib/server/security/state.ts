@@ -18,6 +18,7 @@ export interface SecurityAnalysisMessage {
   skillId: string;
   trigger: SecurityAnalysisTrigger;
   requestedTier?: SecurityAnalysisTier | 'auto';
+  forceRefresh?: boolean;
 }
 
 export interface SkillSecurityReportSummary {

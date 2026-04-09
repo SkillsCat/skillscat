@@ -154,6 +154,7 @@ function applyRerunModelOverrides(env, options) {
 
   env.SECURITY_FREE_MODEL = options.freeModel;
   env.SECURITY_FREE_MODELS = options.freeModel;
+  env.SECURITY_PREMIUM_MODEL = '';
 }
 
 function buildInClause(length) {
@@ -226,20 +227,7 @@ async function writeSnapshot(rows, options) {
   return outputPath;
 }
 
-async function deleteExistingScans(db, rows) {
-  const withFingerprint = rows.filter((row) => row.contentFingerprint);
-  for (const row of withFingerprint) {
-    await db.prepare(`
-      DELETE FROM skill_security_scans
-      WHERE skill_id = ?
-        AND content_fingerprint = ?
-    `)
-      .bind(row.id, row.contentFingerprint)
-      .run();
-  }
-}
-
-async function resetSecurityState(db, rows) {
+async function markSecurityStateForRerun(db, rows) {
   const now = Date.now();
 
   for (const row of rows) {
@@ -249,11 +237,6 @@ async function resetSecurityState(db, rows) {
         dirty = 1,
         next_update_at = 0,
         status = 'pending',
-        last_analyzed_at = NULL,
-        current_total_score = NULL,
-        current_risk_level = NULL,
-        current_free_scan_id = NULL,
-        current_premium_scan_id = NULL,
         fail_count = 0,
         last_error = NULL,
         last_error_at = NULL,
@@ -270,9 +253,12 @@ async function readUpdatedChunk(db, rows) {
   const result = await db.prepare(`
     SELECT
       s.slug,
+      ss.status,
       ss.current_risk_level AS risk,
       ss.current_total_score AS score,
-      ss.last_analyzed_at AS lastAnalyzedAt
+      ss.last_analyzed_at AS lastAnalyzedAt,
+      ss.next_update_at AS nextUpdateAt,
+      ss.last_error AS lastError
     FROM skill_security_state ss
     INNER JOIN skills s ON s.id = ss.skill_id
     WHERE ss.skill_id IN (${placeholders})
@@ -318,6 +304,7 @@ async function runChunkThroughWorker(workerModule, env, rows, requestedTier) {
         skillId: row.id,
         trigger: 'manual',
         requestedTier,
+        forceRefresh: true,
       },
       ack: () => {
         acked += 1;
@@ -384,18 +371,31 @@ async function main() {
       const currentChunk = chunks[index];
       console.log(`[security-rerun-remote] batch ${index + 1}/${chunks.length} resetting ${currentChunk.length} skills`);
 
-      await deleteExistingScans(proxy.env.DB, currentChunk);
-      await resetSecurityState(proxy.env.DB, currentChunk);
+      await markSecurityStateForRerun(proxy.env.DB, currentChunk);
 
       console.log(`[security-rerun-remote] batch ${index + 1}/${chunks.length} running local worker against production bindings`);
       await runChunkThroughWorker(workerModule, proxy.env, currentChunk, options.requestedTier);
 
       const updated = await readUpdatedChunk(proxy.env.DB, currentChunk);
-      const incomplete = updated.filter((row) => !row.risk);
+      const blocked = updated.filter((row) => row.status === 'blocked');
+      const deferred = updated.filter((row) => {
+        return !row.risk
+          && row.status === 'pending'
+          && Number.isFinite(row.nextUpdateAt)
+          && row.nextUpdateAt > Date.now()
+          && !row.lastError;
+      });
+      const incomplete = updated.filter((row) => !row.risk && !blocked.includes(row) && !deferred.includes(row));
       const distribution = summarizeByRisk(updated.filter((row) => row.risk));
-      console.log(`[security-rerun-remote] batch ${index + 1}/${chunks.length} updated=${updated.length} incomplete=${incomplete.length}`);
+      console.log(
+        `[security-rerun-remote] batch ${index + 1}/${chunks.length} updated=${updated.length} incomplete=${incomplete.length} blocked=${blocked.length} deferred=${deferred.length}`
+      );
       for (const [risk, count] of distribution) {
         console.log(`[security-rerun-remote] batch ${index + 1}/${chunks.length} ${risk}=${count}`);
+      }
+      if (deferred.length > 0) {
+        const sample = deferred.slice(0, 5).map((row) => row.slug).join(', ');
+        console.log(`[security-rerun-remote] batch ${index + 1}/${chunks.length} deferred sample: ${sample}`);
       }
 
       if (incomplete.length > 0) {

@@ -639,7 +639,7 @@ function mergeFileScores(
 ): SecurityFileScore[] {
   const merged = [...heuristic.fileScores];
   if (!aiResult) {
-    return merged;
+    return normalizeSecurityFileScores(merged);
   }
 
   for (const finding of aiResult.findings) {
@@ -1259,6 +1259,7 @@ async function processSecurityMessage(
   preloadedSkillState: Awaited<ReturnType<typeof loadSecuritySkill>> | undefined = undefined
 ): Promise<void> {
   const now = Date.now();
+  const forceRefresh = message.forceRefresh === true;
   const { skill, state } = preloadedSkillState ?? await loadSecuritySkill(env.DB, message.skillId);
   if (!skill) {
     log.warn(`Security analysis skipped, skill not found: ${message.skillId}`);
@@ -1316,7 +1317,9 @@ async function processSecurityMessage(
   }
 
   if (requestedTier === 'premium') {
-    const existingPremium = await getExistingCompletedScan(env.DB, skill.id, contentFingerprint, 'premium');
+    const existingPremium = forceRefresh
+      ? null
+      : await getExistingCompletedScan(env.DB, skill.id, contentFingerprint, 'premium');
     if (existingPremium) {
       await updateStateFromExistingScan(env.DB, {
         skillId: skill.id,
@@ -1334,7 +1337,9 @@ async function processSecurityMessage(
     }
 
     if (!canRunPremiumAnalysis(env)) {
-      const existingFree = await getExistingCompletedScan(env.DB, skill.id, contentFingerprint, 'free');
+      const existingFree = forceRefresh
+        ? null
+        : await getExistingCompletedScan(env.DB, skill.id, contentFingerprint, 'free');
       if (existingFree) {
         await updateStateFromExistingScan(env.DB, {
           skillId: skill.id,
@@ -1352,7 +1357,9 @@ async function processSecurityMessage(
       }
     }
   } else {
-    const existingPremium = await getExistingCompletedScan(env.DB, skill.id, contentFingerprint, 'premium');
+    const existingPremium = forceRefresh
+      ? null
+      : await getExistingCompletedScan(env.DB, skill.id, contentFingerprint, 'premium');
     if (existingPremium) {
       await updateStateFromExistingScan(env.DB, {
         skillId: skill.id,
@@ -1369,7 +1376,9 @@ async function processSecurityMessage(
       return;
     }
 
-    const existingRequested = await getExistingCompletedScan(env.DB, skill.id, contentFingerprint, 'free');
+    const existingRequested = forceRefresh
+      ? null
+      : await getExistingCompletedScan(env.DB, skill.id, contentFingerprint, 'free');
     if (existingRequested) {
       await updateStateFromExistingScan(env.DB, {
         skillId: skill.id,
