@@ -58,6 +58,7 @@ export interface McpRequestContext {
   db: Parameters<typeof resolveRegistrySearch>[0]['db'];
   r2: Parameters<typeof resolveSkillFiles>[0]['r2'];
   githubToken?: string;
+  githubRateLimitKV?: KVNamespace;
   request: Request;
   locals: App.Locals;
   waitUntil?: WaitUntilFn;
@@ -315,6 +316,7 @@ async function callTool(context: McpRequestContext, name: string, rawArguments: 
             db: context.db,
             r2: context.r2,
             githubToken: context.githubToken,
+            githubRateLimitKV: context.githubRateLimitKV,
             request: context.request,
             locals: context.locals,
             waitUntil: context.waitUntil,

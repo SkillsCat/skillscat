@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import { parseSkillFilesInput, resolveSkillFiles } from '$lib/server/skill/files';
 
 function responseHeaders(opts: { cacheControl: string; cacheStatus?: 'HIT' | 'MISS' | 'BYPASS' }): Record<string, string> {
@@ -36,7 +37,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
   const input = parseSkillFilesInput({ slug: params.slug });
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
-  const githubToken = platform?.env?.GITHUB_TOKEN;
+  const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
   const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
 
   if (!input) {
@@ -51,6 +52,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
       db,
       r2,
       githubToken,
+      githubRateLimitKV: platform?.env?.KV,
       request,
       locals,
       waitUntil,

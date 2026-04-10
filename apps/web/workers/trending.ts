@@ -36,6 +36,7 @@ import {
 import {
   buildSkillMetricDate,
 } from '../src/lib/server/skill/metrics';
+import { getGitHubRequestAuthFromEnv, hasGitHubAuthConfigured } from '../src/lib/server/github-client/env';
 
 const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
@@ -183,15 +184,14 @@ async function batchFetchGitHubRepos(
 ): Promise<Map<string, GitHubGraphQLRepoData>> {
   const results = new Map<string, GitHubGraphQLRepoData>();
 
-  if (!env.GITHUB_TOKEN || repos.length === 0) {
+  if (!hasGitHubAuthConfigured(env) || repos.length === 0) {
     return results;
   }
 
   try {
     const batch = await graphqlBatchRepoMetadata(repos, {
-      token: env.GITHUB_TOKEN,
+      ...getGitHubRequestAuthFromEnv(env),
       userAgent: 'SkillsCat-Trending-Worker/2.0',
-      rateLimitKV: env.KV,
     });
     batch.forEach((value, key) => {
       results.set(key, value as GitHubGraphQLRepoData);

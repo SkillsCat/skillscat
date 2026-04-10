@@ -9,8 +9,11 @@ export interface GitHubRateLimitSnapshot {
   used: number;
   resetAtEpochSec: number;
   updatedAtEpochMs: number;
-  source: 'headers' | 'rate_limit_api';
+  source: 'headers' | 'rate_limit_api' | 'aggregate';
   endpointId?: string;
+  tokenId?: string;
+  tokenCount?: number;
+  knownTokenCount?: number;
 }
 
 export interface GitHubRateLimitStorageOptions {
@@ -36,8 +39,10 @@ interface RateLimitApiBody {
 
 const DEFAULT_RATE_LIMIT_KEY_PREFIX = 'github-rate-limit';
 
-function getBucketKey(bucket: GitHubRateLimitBucket, keyPrefix: string): string {
-  return `${keyPrefix}:${bucket}`;
+function getBucketKey(bucket: GitHubRateLimitBucket, keyPrefix: string, tokenId?: string): string {
+  return tokenId
+    ? `${keyPrefix}:token:${tokenId}:${bucket}`
+    : `${keyPrefix}:${bucket}`;
 }
 
 function parseFiniteNumber(value: string | null | undefined): number | null {
@@ -78,9 +83,10 @@ function computeSnapshotTtlSeconds(resetAtEpochSec: number): number {
 
 export function getRateLimitKvKey(
   bucket: GitHubRateLimitBucket,
-  keyPrefix: string = DEFAULT_RATE_LIMIT_KEY_PREFIX
+  keyPrefix: string = DEFAULT_RATE_LIMIT_KEY_PREFIX,
+  options: { tokenId?: string } = {}
 ): string {
-  return getBucketKey(bucket, keyPrefix);
+  return getBucketKey(bucket, keyPrefix, options.tokenId);
 }
 
 export async function recordRateLimitFromHeaders(
@@ -89,6 +95,7 @@ export async function recordRateLimitFromHeaders(
   options: GitHubRateLimitStorageOptions & {
     endpointId?: GitHubEndpointId | string;
     source?: GitHubRateLimitSnapshot['source'];
+    tokenId?: string;
   } = {}
 ): Promise<GitHubRateLimitSnapshot | null> {
   const kv = options.kv;
@@ -112,10 +119,11 @@ export async function recordRateLimitFromHeaders(
     updatedAtEpochMs: Date.now(),
     source: options.source ?? 'headers',
     endpointId: options.endpointId,
+    tokenId: options.tokenId,
   };
 
   await kv.put(
-    getBucketKey(bucket, options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX),
+    getBucketKey(bucket, options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX, options.tokenId),
     JSON.stringify(snapshot),
     { expirationTtl: computeSnapshotTtlSeconds(snapshot.resetAtEpochSec) }
   );
@@ -127,6 +135,7 @@ export async function recordRateLimitFromRateLimitBody(
   body: unknown,
   options: GitHubRateLimitStorageOptions & {
     endpointId?: GitHubEndpointId | string;
+    tokenId?: string;
   } = {}
 ): Promise<{ rest: GitHubRateLimitSnapshot | null; graphql: GitHubRateLimitSnapshot | null }> {
   const kv = options.kv;
@@ -148,8 +157,9 @@ export async function recordRateLimitFromRateLimitBody(
       updatedAtEpochMs: now,
       source: 'rate_limit_api',
       endpointId: options.endpointId,
+      tokenId: options.tokenId,
     };
-    await kv.put(getBucketKey('rest', keyPrefix), JSON.stringify(rest), {
+    await kv.put(getBucketKey('rest', keyPrefix, options.tokenId), JSON.stringify(rest), {
       expirationTtl: computeSnapshotTtlSeconds(rest.resetAtEpochSec),
     });
   }
@@ -162,8 +172,9 @@ export async function recordRateLimitFromRateLimitBody(
       updatedAtEpochMs: now,
       source: 'rate_limit_api',
       endpointId: options.endpointId,
+      tokenId: options.tokenId,
     };
-    await kv.put(getBucketKey('graphql', keyPrefix), JSON.stringify(graphql), {
+    await kv.put(getBucketKey('graphql', keyPrefix, options.tokenId), JSON.stringify(graphql), {
       expirationTtl: computeSnapshotTtlSeconds(graphql.resetAtEpochSec),
     });
   }
@@ -173,12 +184,12 @@ export async function recordRateLimitFromRateLimitBody(
 
 export async function readRateLimitSnapshot(
   bucket: GitHubRateLimitBucket,
-  options: GitHubRateLimitStorageOptions = {}
+  options: GitHubRateLimitStorageOptions & { tokenId?: string } = {}
 ): Promise<GitHubRateLimitSnapshot | null> {
   const kv = options.kv;
   if (!kv) return null;
 
-  const raw = await kv.get(getBucketKey(bucket, options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX));
+  const raw = await kv.get(getBucketKey(bucket, options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX, options.tokenId));
   if (!raw) return null;
 
   try {
@@ -203,12 +214,95 @@ export async function readRateLimitSnapshot(
       used,
       resetAtEpochSec,
       updatedAtEpochMs,
-      source: parsed.source === 'rate_limit_api' ? 'rate_limit_api' : 'headers',
+      source: parsed.source === 'rate_limit_api'
+        ? 'rate_limit_api'
+        : parsed.source === 'aggregate'
+          ? 'aggregate'
+          : 'headers',
       endpointId: parsed.endpointId,
+      tokenId: typeof parsed.tokenId === 'string' ? parsed.tokenId : undefined,
+      tokenCount: Number.isFinite(Number(parsed.tokenCount)) ? Number(parsed.tokenCount) : undefined,
+      knownTokenCount: Number.isFinite(Number(parsed.knownTokenCount)) ? Number(parsed.knownTokenCount) : undefined,
     };
   } catch {
     return null;
   }
+}
+
+export function aggregateRateLimitSnapshots(
+  bucket: GitHubRateLimitBucket,
+  snapshots: GitHubRateLimitSnapshot[],
+  options: { tokenCount?: number } = {}
+): GitHubRateLimitSnapshot | null {
+  const valid = snapshots.filter((snapshot) => snapshot.bucket === bucket);
+  if (valid.length === 0) {
+    return null;
+  }
+
+  return {
+    bucket,
+    limit: valid.reduce((sum, snapshot) => sum + snapshot.limit, 0),
+    remaining: valid.reduce((sum, snapshot) => sum + snapshot.remaining, 0),
+    used: valid.reduce((sum, snapshot) => sum + snapshot.used, 0),
+    resetAtEpochSec: valid.reduce((max, snapshot) => Math.max(max, snapshot.resetAtEpochSec), 0),
+    updatedAtEpochMs: valid.reduce((min, snapshot) => Math.min(min, snapshot.updatedAtEpochMs), Number.POSITIVE_INFINITY),
+    source: 'aggregate',
+    endpointId: 'aggregate',
+    tokenCount: options.tokenCount ?? valid.length,
+    knownTokenCount: valid.length,
+  };
+}
+
+export async function readAggregatedRateLimitSnapshot(
+  bucket: GitHubRateLimitBucket,
+  options: GitHubRateLimitStorageOptions & {
+    tokenIds?: string[];
+    maxAgeMs?: number;
+    includeStale?: boolean;
+    nowMs?: number;
+  } = {}
+): Promise<GitHubRateLimitSnapshot | null> {
+  const kv = options.kv;
+  if (!kv) return null;
+
+  const tokenIds = (options.tokenIds || []).filter(Boolean);
+  if (tokenIds.length === 0) {
+    return readRateLimitSnapshot(bucket, {
+      kv,
+      keyPrefix: options.keyPrefix,
+    });
+  }
+
+  const nowMs = options.nowMs ?? Date.now();
+  const snapshots = (await Promise.all(tokenIds.map((tokenId) => readRateLimitSnapshot(bucket, {
+    kv,
+    keyPrefix: options.keyPrefix,
+    tokenId,
+  }))))
+    .filter((snapshot): snapshot is GitHubRateLimitSnapshot => Boolean(snapshot))
+    .filter((snapshot) => snapshot.resetAtEpochSec * 1000 > nowMs)
+    .filter((snapshot) => {
+      if (options.includeStale || options.maxAgeMs === undefined) {
+        return true;
+      }
+
+      return !isRateLimitSnapshotStale(snapshot, options.maxAgeMs, nowMs);
+    });
+
+  if (snapshots.length === 0) {
+    if (tokenIds.length === 1) {
+      return readRateLimitSnapshot(bucket, {
+        kv,
+        keyPrefix: options.keyPrefix,
+      });
+    }
+
+    return null;
+  }
+
+  return aggregateRateLimitSnapshots(bucket, snapshots, {
+    tokenCount: tokenIds.length,
+  });
 }
 
 export function isRateLimitSnapshotStale(

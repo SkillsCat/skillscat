@@ -7,6 +7,7 @@ import {
   resolveSubmitApiLocale,
   type SubmitApiMessageDescriptor,
 } from '$lib/i18n/submit-api';
+import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import type { SkillMdLocation, ScanResult } from '$lib/types';
 import { githubRequest } from '$lib/server/github-client/request';
 import { getCached } from '$lib/server/cache';
@@ -1059,7 +1060,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   try {
     const db = platform?.env?.DB;
     const queue = platform?.env?.INDEXING_QUEUE;
-    const githubToken = platform?.env?.GITHUB_TOKEN;
+    const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
 
     if (!db) {
       throw new SubmitRouteError({
@@ -1633,7 +1634,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
         const { owner, repo } = repoInfo;
 
         const db = platform?.env?.DB;
-        const githubToken = platform?.env?.GITHUB_TOKEN;
+        const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
 
         // Fetch repository info first
         const repoData = await fetchGitHubRepo(owner, repo, githubToken, 'submit_fast_fail');

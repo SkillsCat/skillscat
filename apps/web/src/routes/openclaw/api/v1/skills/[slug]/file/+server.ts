@@ -1,5 +1,6 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import {
   guessOpenClawTextContentType,
   isSupportedOpenClawTag,
@@ -70,11 +71,12 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
   const compatSlug = encodeClawHubCompatSlug(skill.slug);
   const contentType = guessOpenClawTextContentType(path);
   const buildFileContent = async () => {
-    const githubToken = platform?.env?.GITHUB_TOKEN;
+    const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
     const fallbackFiles = await resolveOpenClawBundleFiles({
       skill,
       r2,
       githubToken,
+      githubRateLimitKV: platform?.env?.KV,
     });
     const files = await resolveOpenClawFilesForVersion({
       r2,

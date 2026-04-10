@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import {
   buildOpenClawResponseHeaders,
   buildOpenClawVersionFiles,
@@ -80,12 +81,13 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
   const selectedVersion = versionState.selectedVersion;
 
   const r2 = platform?.env?.R2;
-  const githubToken = platform?.env?.GITHUB_TOKEN;
+  const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
   const buildPayload = async () => {
     const fallbackFiles = await resolveOpenClawBundleFiles({
       skill,
       r2,
       githubToken,
+      githubRateLimitKV: platform?.env?.KV,
     });
     const versionFiles = await resolveOpenClawFilesForVersion({
       r2,

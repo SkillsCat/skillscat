@@ -6,12 +6,18 @@
  */
 
 import type { GithubEventsEnv, GitHubEvent, IndexingMessage } from './shared/types';
+import { getGitHubRequestAuthFromEnv } from '../src/lib/server/github-client/env';
 import { getRateLimit, listPublicEvents, searchCode } from '../src/lib/server/github-client/rest';
 import {
   isRateLimitSnapshotStale,
-  readRateLimitSnapshot,
+  readAggregatedRateLimitSnapshot,
   type GitHubRateLimitSnapshot,
 } from '../src/lib/server/github-client/rate-limit-kv';
+import {
+  getGitHubTokenInputFromEnv,
+  resolveGitHubTokenCandidates,
+  resolveGitHubTokenIds,
+} from '../src/lib/server/github-client/token-pool';
 
 const DEFAULT_EVENTS_PER_PAGE = 100;
 const DEFAULT_EVENTS_PAGES = 1;
@@ -212,9 +218,8 @@ async function fetchGitHubEvents(
   const response = await listPublicEvents({
     page,
     perPage,
-    token: env.GITHUB_TOKEN,
+    ...getGitHubRequestAuthFromEnv(env),
     userAgent: 'SkillsCat-Worker/1.0',
-    rateLimitKV: env.KV,
   });
   if (!response.ok) {
     if (isGitHubRateLimited(response)) {
@@ -339,28 +344,50 @@ async function setCodeSearchHeadCursor(env: GithubEventsEnv, fingerprint: string
   });
 }
 
+async function readGitHubRateLimitBudget(
+  env: GithubEventsEnv,
+  bucket: 'rest' | 'graphql',
+  options: { maxAgeMs?: number; includeStale?: boolean } = {}
+): Promise<GitHubRateLimitSnapshot | null> {
+  const tokenIds = await resolveGitHubTokenIds(getGitHubTokenInputFromEnv(env));
+  return readAggregatedRateLimitSnapshot(bucket, {
+    kv: env.KV,
+    tokenIds,
+    maxAgeMs: options.maxAgeMs,
+    includeStale: options.includeStale,
+  });
+}
+
 async function readOrRefreshRestRateLimitSnapshot(env: GithubEventsEnv): Promise<GitHubRateLimitSnapshot | null> {
-  let snapshot = await readRateLimitSnapshot('rest', { kv: env.KV });
+  let snapshot = await readGitHubRateLimitBudget(env, 'rest', {
+    maxAgeMs: RATE_LIMIT_SNAPSHOT_MAX_AGE_MS,
+  });
 
   if (!isRateLimitSnapshotStale(snapshot, RATE_LIMIT_SNAPSHOT_MAX_AGE_MS)) {
     return snapshot;
   }
 
   try {
-    const response = await getRateLimit({
-      token: env.GITHUB_TOKEN,
-      userAgent: 'SkillsCat-Worker/1.0',
-      rateLimitKV: env.KV,
-    });
+    const tokenCandidates = await resolveGitHubTokenCandidates(getGitHubTokenInputFromEnv(env));
 
-    if (!response.ok) {
-      console.warn(`Failed to refresh GitHub rate limit snapshot: ${response.status}`);
+    for (const candidate of tokenCandidates) {
+      const response = await getRateLimit({
+        token: candidate.value,
+        userAgent: 'SkillsCat-Worker/1.0',
+        rateLimitKV: env.KV,
+      });
+
+      if (!response.ok) {
+        console.warn(`Failed to refresh GitHub rate limit snapshot for token ${candidate.id}: ${response.status}`);
+      }
     }
   } catch (error) {
     console.warn('Failed to refresh GitHub rate limit snapshot due to network error:', error);
   }
 
-  snapshot = await readRateLimitSnapshot('rest', { kv: env.KV });
+  snapshot = await readGitHubRateLimitBudget(env, 'rest', {
+    maxAgeMs: RATE_LIMIT_SNAPSHOT_MAX_AGE_MS,
+  });
   return snapshot;
 }
 
@@ -568,9 +595,8 @@ async function processCodeSearchDiscovery(
       perPage: config.perPage,
       sort: 'indexed',
       order: 'desc',
-      token: env.GITHUB_TOKEN,
+      ...getGitHubRequestAuthFromEnv(env),
       userAgent: 'SkillsCat-Worker/1.0',
-      rateLimitKV: env.KV,
     });
 
     if (!response.ok) {
@@ -779,7 +805,9 @@ export default {
       }
 
       const eventsResult = await processEvents(env, restBeforeEvents);
-      const restAfterEvents = await readRateLimitSnapshot('rest', { kv: env.KV });
+      const restAfterEvents = await readGitHubRateLimitBudget(env, 'rest', {
+        includeStale: true,
+      });
 
       if (!await hasDiscoveryRunLockOwnership(env, lockToken)) {
         console.log('GitHub Events Worker lock ownership lost before code search processing');
@@ -787,8 +815,8 @@ export default {
       }
 
       const searchResult = await processCodeSearchDiscovery(env, restAfterEvents);
-      const restSnapshot = await readRateLimitSnapshot('rest', { kv: env.KV });
-      const graphqlSnapshot = await readRateLimitSnapshot('graphql', { kv: env.KV });
+      const restSnapshot = await readGitHubRateLimitBudget(env, 'rest', { includeStale: true });
+      const graphqlSnapshot = await readGitHubRateLimitBudget(env, 'graphql', { includeStale: true });
 
       console.log(
         `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, rest_remaining=${restSnapshot?.remaining ?? 'unknown'}, graphql_remaining=${graphqlSnapshot?.remaining ?? 'unknown'}`

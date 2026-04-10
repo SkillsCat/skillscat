@@ -20,6 +20,7 @@ declare global {
         DEEPSEEK_API_KEY: string;
         VIRUSTOTAL_API_KEY?: string;
         GITHUB_TOKEN?: string;
+        GITHUB_TOKENS?: string;
         WORKER_SECRET?: string;
         CACHE_VERSION?: string;
         SITEMAP_REFRESH_MIN_INTERVAL_SECONDS?: string;

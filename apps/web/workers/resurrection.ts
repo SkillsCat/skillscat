@@ -11,6 +11,7 @@
 
 import type { BaseEnv, GitHubGraphQLRepoData, SkillTier, ExecutionContext, ScheduledController } from './shared/types';
 import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
+import { getGitHubRequestAuthFromEnv, hasGitHubAuthConfigured } from '../src/lib/server/github-client/env';
 import { restoreArchivedSkillFromR2 } from '../src/lib/server/skill/resurrection';
 
 interface ResurrectionEnv extends BaseEnv {}
@@ -58,15 +59,14 @@ async function batchFetchGitHubRepos(
 ): Promise<Map<string, GitHubGraphQLRepoData>> {
   const results = new Map<string, GitHubGraphQLRepoData>();
 
-  if (!env.GITHUB_TOKEN || repos.length === 0) {
+  if (!hasGitHubAuthConfigured(env) || repos.length === 0) {
     return results;
   }
 
   try {
     const batch = await graphqlBatchRepoMetadata(repos, {
-      token: env.GITHUB_TOKEN,
+      ...getGitHubRequestAuthFromEnv(env),
       userAgent: 'SkillsCat-Resurrection-Worker/1.0',
-      rateLimitKV: env.KV,
     });
     batch.forEach((value, key) => {
       results.set(key, value as GitHubGraphQLRepoData);

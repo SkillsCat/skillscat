@@ -1,5 +1,6 @@
 # SkillsCat Web - Preview 主配置
 # 复制此文件为 wrangler.preview.toml 并填入你的配置
+# GitHub API 鉴权请通过 wrangler secret 设置 `GITHUB_TOKEN` 或 `GITHUB_TOKENS`
 
 name = "skillscat-web"
 main = ".svelte-kit/cloudflare/_worker.js"

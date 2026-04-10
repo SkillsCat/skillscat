@@ -22,6 +22,7 @@ const REQUIRED_SECRET_KEYS = [
   'GITHUB_TOKEN'
 ];
 const OPTIONAL_SECRET_KEYS = [
+  'GITHUB_TOKENS',
   'OPENROUTER_API_KEY',
   'DEEPSEEK_API_KEY',
   'VIRUSTOTAL_API_KEY'
@@ -40,6 +41,7 @@ Examples:
   node scripts/reset-worker-secrets.mjs --dry-run
   node scripts/reset-worker-secrets.mjs --yes --from-file apps/web/.dev.vars
   SKILLSCAT_GITHUB_TOKEN=your-token node scripts/reset-worker-secrets.mjs --set GITHUB_TOKEN=$SKILLSCAT_GITHUB_TOKEN --only GITHUB_TOKEN
+  SKILLSCAT_GITHUB_TOKENS="token-a,token-b" node scripts/reset-worker-secrets.mjs --set GITHUB_TOKENS=$SKILLSCAT_GITHUB_TOKENS --only GITHUB_TOKENS
 `.trim());
 }
 
@@ -286,6 +288,10 @@ function isPlaceholderValue(value) {
   return false;
 }
 
+function hasResolvedGitHubTokenSecret(values) {
+  return !isPlaceholderValue(values.GITHUB_TOKEN) || !isPlaceholderValue(values.GITHUB_TOKENS);
+}
+
 function resolveSelectedKeys(options) {
   if (options.only.length === 0) {
     return [...ALL_SECRET_KEYS];
@@ -337,6 +343,13 @@ async function resolveSecrets(options, selectedKeys) {
     const value = fromCli ?? fromEnv ?? fromFile ?? '';
 
     if (isPlaceholderValue(value)) {
+      if (key === 'GITHUB_TOKEN' && hasResolvedGitHubTokenSecret({
+        GITHUB_TOKEN: value,
+        GITHUB_TOKENS: options.sets.get('GITHUB_TOKENS') ?? process.env.GITHUB_TOKENS ?? fileSecrets.GITHUB_TOKENS ?? ''
+      })) {
+        continue;
+      }
+
       if (REQUIRED_SECRET_KEYS.includes(key)) {
         missingRequired.push(key);
       }
@@ -357,7 +370,11 @@ async function resolveSecrets(options, selectedKeys) {
   }
 
   const missingAfterPrompt = selectedKeys.filter(
-    (key) => REQUIRED_SECRET_KEYS.includes(key) && !secretsToWrite[key]
+    (key) => {
+      if (!REQUIRED_SECRET_KEYS.includes(key)) return false;
+      if (key === 'GITHUB_TOKEN') return !hasResolvedGitHubTokenSecret(secretsToWrite);
+      return !secretsToWrite[key];
+    }
   );
   if (missingAfterPrompt.length > 0) {
     throw new Error(`Missing required secrets: ${missingAfterPrompt.join(', ')}`);

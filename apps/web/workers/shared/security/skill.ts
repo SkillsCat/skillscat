@@ -6,6 +6,7 @@ import {
   buildUploadSkillR2Prefix,
 } from '../../../src/lib/skill-path';
 import { githubRequest } from '../../../src/lib/server/github-client/request';
+import { getGitHubRequestAuthFromEnv } from '../../../src/lib/server/github-client/env';
 import type { BaseEnv, DirectoryFile } from '../types';
 
 export interface SecuritySkillRow {
@@ -329,10 +330,10 @@ export async function fetchGitHubBlobBytes(
   owner: string,
   repo: string,
   sha: string,
-  env: Pick<BaseEnv, 'GITHUB_TOKEN'>
+  env: Pick<BaseEnv, 'GITHUB_TOKEN' | 'GITHUB_TOKENS' | 'KV'>
 ): Promise<Uint8Array | null> {
   const response = await githubRequest(`https://api.github.com/repos/${owner}/${repo}/git/blobs/${sha}`, {
-    token: env.GITHUB_TOKEN,
+    ...getGitHubRequestAuthFromEnv(env),
     userAgent: 'SkillsCat-Security-Worker/1.0',
   });
 

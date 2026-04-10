@@ -1,5 +1,6 @@
 # VirusTotal Worker 配置
 # 复制此文件为 wrangler.virustotal.toml 并填入你的配置
+# GitHub API 鉴权请通过 wrangler secret 设置 `GITHUB_TOKEN` 或 `GITHUB_TOKENS`
 # 按分钟预算轮询 VirusTotal public API，不走专用 queue
 
 name = "skillscat-virustotal"

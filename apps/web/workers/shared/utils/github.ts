@@ -3,7 +3,7 @@ import { githubRequest } from '../../../src/lib/server/github-client/request';
 const GITHUB_API_BASE = 'https://api.github.com';
 
 export interface GitHubFetchOptions {
-  token?: string;
+  token?: string | string[];
   apiVersion?: string;
   userAgent?: string;
   method?: string;

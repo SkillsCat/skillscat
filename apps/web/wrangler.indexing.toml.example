@@ -1,6 +1,7 @@
 # Indexing Worker 配置
 # 复制此文件为 wrangler.indexing.toml 并填入你的配置
 # 消费 indexing 队列，获取 GitHub 仓库信息并入库
+# GitHub API 鉴权请通过 wrangler secret 设置 `GITHUB_TOKEN` 或 `GITHUB_TOKENS`
 
 name = "skillscat-indexing"
 main = "workers/indexing.ts"

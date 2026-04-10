@@ -1,5 +1,6 @@
 # Security Analysis Worker 配置
 # 复制此文件为 wrangler.security-analysis.toml 并填入你的配置
+# GitHub API 鉴权请通过 wrangler secret 设置 `GITHUB_TOKEN` 或 `GITHUB_TOKENS`
 # 消费 security-analysis 队列，并定时回补 dirty / missing 的安全分析状态
 
 name = "skillscat-security-analysis"

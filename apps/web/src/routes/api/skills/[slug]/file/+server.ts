@@ -2,6 +2,7 @@ import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getCached } from '$lib/server/cache';
 import { getPublicSkillFileCacheKey } from '$lib/server/cache/keys';
+import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import { githubRequest } from '$lib/server/github-client/request';
 import { resolveSkillSourceInfo, type SkillSourceInfo } from '$lib/server/skill/source';
 import {
@@ -76,7 +77,8 @@ async function loadSkillFilePayload(
   skill: SkillSourceInfo,
   filePath: string,
   r2: R2Bucket,
-  githubToken?: string
+  githubToken?: string,
+  githubRateLimitKV?: KVNamespace
 ): Promise<FilePayload> {
   const { primaryKey, keys } = buildCandidateR2Keys(skill, filePath);
 
@@ -97,6 +99,7 @@ async function loadSkillFilePayload(
 
       const response = await githubRequest(contentUrl, {
         token: githubToken,
+        rateLimitKV: githubRateLimitKV,
         userAgent: 'SkillsCat/1.0',
       });
 
@@ -136,7 +139,7 @@ async function loadSkillFilePayload(
  */
 export const GET: RequestHandler = async ({ params, platform, request, url, locals }) => {
   const r2 = platform?.env?.R2;
-  const githubToken = platform?.env?.GITHUB_TOKEN;
+  const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
   const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
 
   if (!r2) {
@@ -182,7 +185,13 @@ export const GET: RequestHandler = async ({ params, platform, request, url, loca
   if (resolved.skill.visibility === 'public') {
     const { data, hit } = await getCached(
       getPublicSkillFileCacheKey(slug, filePath, resolved.skill.updated_at),
-      () => loadSkillFilePayload(resolved.skill as SkillSourceInfo, filePath, r2, githubToken),
+      () => loadSkillFilePayload(
+        resolved.skill as SkillSourceInfo,
+        filePath,
+        r2,
+        githubToken,
+        platform?.env?.KV
+      ),
       PUBLIC_FILE_CACHE_TTL_SECONDS,
       { waitUntil }
     );
@@ -195,7 +204,7 @@ export const GET: RequestHandler = async ({ params, platform, request, url, loca
     });
   }
 
-  const data = await loadSkillFilePayload(resolved.skill, filePath, r2, githubToken);
+  const data = await loadSkillFilePayload(resolved.skill, filePath, r2, githubToken, platform?.env?.KV);
   return json(data, {
     headers: {
       'Cache-Control': resolved.cacheControl,

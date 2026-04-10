@@ -1,4 +1,6 @@
 import type { GitHubRequestOptions } from './request';
+import { recordRateLimitFromHeaders, type GitHubRateLimitBucket } from './rate-limit-kv';
+import { orderGitHubTokenCandidates, resolveGitHubTokenCandidates } from './token-pool';
 
 export const DEFAULT_API_VERSION = '2022-11-28';
 export const DEFAULT_USER_AGENT = 'SkillsCat/1.0';
@@ -9,6 +11,13 @@ export const DEFAULT_RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]
 export interface RawGitHubRequestOptions extends GitHubRequestOptions {
   retryRateLimit?: boolean;
 }
+
+export interface GitHubResponseMetadata {
+  tokenId?: string;
+  tokenIds?: string[];
+}
+
+const responseMetadata = new WeakMap<Response, GitHubResponseMetadata>();
 
 export function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -94,7 +103,12 @@ export function isGitHubApiHost(host: string | null): boolean {
 
 export function buildGitHubRequestHeaders(
   url: string,
-  options: Pick<RawGitHubRequestOptions, 'token' | 'headers' | 'apiVersion' | 'userAgent'>
+  options: {
+    token?: string;
+    headers?: HeadersInit;
+    apiVersion?: string;
+    userAgent?: string;
+  }
 ): Headers {
   const host = getUrlHost(url);
   const githubDomain = isGitHubDomain(host);
@@ -111,6 +125,29 @@ export function buildGitHubRequestHeaders(
   }
 
   return headers;
+}
+
+export function setGitHubResponseMetadata(response: Response, metadata: GitHubResponseMetadata): void {
+  responseMetadata.set(response, metadata);
+}
+
+export function getGitHubResponseMetadata(response: Response): GitHubResponseMetadata | undefined {
+  return responseMetadata.get(response);
+}
+
+function getGitHubRateLimitBucket(url: string): GitHubRateLimitBucket | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+
+  if (!isGitHubApiHost(parsed.hostname.toLowerCase())) {
+    return null;
+  }
+
+  return parsed.pathname === '/graphql' ? 'graphql' : 'rest';
 }
 
 /**
@@ -132,50 +169,114 @@ export async function rawGitHubRequest(
     retryRateLimit = true,
     cache: _cache,
     graphqlFallback: _graphqlFallback,
-    endpointId: _endpointId,
+    endpointId,
     cacheTtlSeconds: _cacheTtlSeconds,
     viewerScoped: _viewerScoped,
-    rateLimitKV: _rateLimitKV,
-    rateLimitKeyPrefix: _rateLimitKeyPrefix,
+    rateLimitKV,
+    rateLimitKeyPrefix,
     ...requestInit
   } = options;
 
-  const headers = buildGitHubRequestHeaders(url, {
-    token,
-    headers: extraHeaders,
-    apiVersion,
-    userAgent,
-  });
-
   const statuses = new Set(retryableStatuses ?? Array.from(DEFAULT_RETRYABLE_STATUSES));
-  let lastError: unknown;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const response = await fetch(url, {
-        ...requestInit,
-        headers,
+  const rateLimitBucket = getGitHubRateLimitBucket(url);
+  const tokenCandidates = await resolveGitHubTokenCandidates(token);
+  const orderedCandidates = rateLimitBucket
+    ? await orderGitHubTokenCandidates(tokenCandidates, {
+      bucket: rateLimitBucket,
+      kv: rateLimitKV,
+      keyPrefix: rateLimitKeyPrefix,
+    })
+    : tokenCandidates;
+  const poolTokenIds = tokenCandidates.map((candidate) => candidate.id);
+
+  const requestWithCandidate = async (
+    activeToken?: string,
+    allowRateLimitRetry: boolean = retryRateLimit
+  ): Promise<Response> => {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const headers = buildGitHubRequestHeaders(url, {
+        token: activeToken,
+        headers: extraHeaders,
+        apiVersion,
+        userAgent,
       });
 
-      if (attempt < maxRetries && shouldRetryResponse(response, statuses, retryRateLimit)) {
-        const retryAfterMs = parseRetryAfterMs(response.headers);
-        const delayMs = Math.min(
-          maxDelayMs,
-          retryAfterMs ?? getBackoffDelayMs(attempt, maxDelayMs)
-        );
-        await sleep(delayMs);
-        continue;
-      }
+      try {
+        const response = await fetch(url, {
+          ...requestInit,
+          headers,
+        });
 
-      return response;
-    } catch (err) {
-      lastError = err;
-      if (attempt >= maxRetries) throw err;
-      const delayMs = getBackoffDelayMs(attempt, maxDelayMs);
-      await sleep(delayMs);
+        if (attempt < maxRetries && shouldRetryResponse(response, statuses, allowRateLimitRetry)) {
+          const retryAfterMs = parseRetryAfterMs(response.headers);
+          const delayMs = Math.min(
+            maxDelayMs,
+            retryAfterMs ?? getBackoffDelayMs(attempt, maxDelayMs)
+          );
+          await sleep(delayMs);
+          continue;
+        }
+
+        return response;
+      } catch (err) {
+        lastError = err;
+        if (attempt >= maxRetries) throw err;
+        const delayMs = getBackoffDelayMs(attempt, maxDelayMs);
+        await sleep(delayMs);
+      }
     }
+
+    if (lastError instanceof Error) throw lastError;
+    throw new Error('GitHub request failed');
+  };
+
+  if (orderedCandidates.length === 0) {
+    return requestWithCandidate(undefined, retryRateLimit);
   }
 
-  if (lastError instanceof Error) throw lastError;
+  let lastRateLimitedResponse: Response | null = null;
+
+  for (let index = 0; index < orderedCandidates.length; index++) {
+    const candidate = orderedCandidates[index];
+    const response = await requestWithCandidate(
+      candidate.value,
+      retryRateLimit && orderedCandidates.length <= 1
+    );
+
+    setGitHubResponseMetadata(response, {
+      tokenId: candidate.id,
+      tokenIds: poolTokenIds,
+    });
+
+    const shouldRotateToNextToken = rateLimitBucket
+      && orderedCandidates.length > 1
+      && isGitHubRateLimitResponse(response)
+      && index < orderedCandidates.length - 1;
+
+    if (shouldRotateToNextToken) {
+      lastRateLimitedResponse = response;
+
+      if (rateLimitKV) {
+        await recordRateLimitFromHeaders(response.headers, rateLimitBucket, {
+          kv: rateLimitKV,
+          keyPrefix: rateLimitKeyPrefix,
+          endpointId,
+          tokenId: candidate.id,
+        });
+      }
+
+      continue;
+    }
+
+    return response;
+  }
+
+  if (lastRateLimitedResponse) {
+    return lastRateLimitedResponse;
+  }
+
   throw new Error('GitHub request failed');
 }

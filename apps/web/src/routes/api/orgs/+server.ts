@@ -1,15 +1,21 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import { getUserByLogin } from '$lib/server/github-client/rest';
 
 /**
  * Check if a name exists on GitHub (as user or organization)
  */
-async function checkGitHubNameExists(name: string, githubToken: string): Promise<boolean> {
+async function checkGitHubNameExists(
+  name: string,
+  githubToken: string,
+  githubRateLimitKV?: KVNamespace
+): Promise<boolean> {
   try {
     // Check if it's a user or org on GitHub
     const response = await getUserByLogin(name, {
       token: githubToken,
+      rateLimitKV: githubRateLimitKV,
       userAgent: 'SkillsCat/1.0',
     });
     // 200 means the name exists, 404 means it doesn't
@@ -66,9 +72,9 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   }
 
   // Check if name exists on GitHub
-  const githubToken = platform?.env?.GITHUB_TOKEN;
+  const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
   if (githubToken) {
-    const existsOnGitHub = await checkGitHubNameExists(slug, githubToken);
+    const existsOnGitHub = await checkGitHubNameExists(slug, githubToken, platform?.env?.KV);
     if (existsOnGitHub) {
       throw error(409, 'This name is already taken on GitHub');
     }

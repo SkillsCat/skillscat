@@ -1,6 +1,7 @@
 import type { GitHubRequestOptions } from './request';
 import {
   buildGitHubRequestHeaders,
+  getGitHubResponseMetadata,
   getUrlHost,
   isGitHubApiHost,
   isGitHubRateLimitResponse,
@@ -154,11 +155,13 @@ async function maybeRecordRestRateLimitFromResponse(
   options: GitHubRequestOptions
 ): Promise<void> {
   if (!options.rateLimitKV) return;
+  const metadata = getGitHubResponseMetadata(response);
 
   await recordRateLimitFromHeaders(response.headers, 'rest', {
     kv: options.rateLimitKV,
     keyPrefix: options.rateLimitKeyPrefix,
     endpointId: options.endpointId,
+    tokenId: metadata?.tokenId,
   });
 
   if (options.endpointId !== 'rate_limit' || !response.ok) return;
@@ -172,6 +175,7 @@ async function maybeRecordRestRateLimitFromResponse(
       kv: options.rateLimitKV,
       keyPrefix: options.rateLimitKeyPrefix,
       endpointId: options.endpointId,
+      tokenId: metadata?.tokenId,
     });
   } catch {
     // Ignore invalid rate_limit payloads; headers-based snapshot is already recorded.

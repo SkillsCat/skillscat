@@ -1,7 +1,7 @@
 import { sendGitHubRequestThroughGateway } from './gateway';
 
 export interface GitHubRequestOptions extends Omit<RequestInit, 'headers' | 'cache'> {
-  token?: string;
+  token?: string | string[];
   headers?: HeadersInit;
   apiVersion?: string;
   userAgent?: string;

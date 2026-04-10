@@ -1,6 +1,7 @@
 # GitHub Events Worker 配置
 # 复制此文件为 wrangler.github-events.toml 并填入你的配置
 # 轮询 GitHub Events API，发现新的 SKILL.md 文件
+# GitHub API 鉴权请通过 wrangler secret 设置 `GITHUB_TOKEN` 或 `GITHUB_TOKENS`
 
 name = "skillscat-github-events"
 main = "workers/github-events.ts"

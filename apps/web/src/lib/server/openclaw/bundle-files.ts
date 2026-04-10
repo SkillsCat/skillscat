@@ -98,7 +98,8 @@ async function readAllTextFilesFromR2(r2: R2Bucket | undefined, prefix: string):
 
 async function fetchGitHubBundleFiles(
   skill: Pick<SkillDetail, 'repoOwner' | 'repoName' | 'skillPath' | 'readme'>,
-  githubToken?: string
+  githubToken?: string,
+  githubRateLimitKV?: KVNamespace
 ): Promise<SkillFile[]> {
   if (!skill.repoOwner || !skill.repoName) {
     throw new Error('GitHub-backed skill is missing repository coordinates.');
@@ -106,6 +107,7 @@ async function fetchGitHubBundleFiles(
 
   const requestOptions = {
     token: githubToken,
+    rateLimitKV: githubRateLimitKV,
     userAgent: 'SkillsCat-OpenClaw/1.0',
   };
 
@@ -184,8 +186,9 @@ export async function resolveOpenClawBundleFiles(input: {
   >;
   r2: R2Bucket | undefined;
   githubToken?: string;
+  githubRateLimitKV?: KVNamespace;
 }): Promise<SkillFile[]> {
-  const { skill, r2, githubToken } = input;
+  const { skill, r2, githubToken, githubRateLimitKV } = input;
 
   if (skill.sourceType === 'upload') {
     const prefix = buildUploadSkillR2Prefix(skill.slug);
@@ -219,5 +222,5 @@ export async function resolveOpenClawBundleFiles(input: {
     }
   }
 
-  return fetchGitHubBundleFiles(skill, githubToken);
+  return fetchGitHubBundleFiles(skill, githubToken, githubRateLimitKV);
 }

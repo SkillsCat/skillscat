@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import {
   createStoredZip,
   decodeClawHubCompatSlug,
@@ -58,7 +59,7 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
 
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
-  const githubToken = platform?.env?.GITHUB_TOKEN;
+  const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
   const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
 
   const detail = await resolveSkillDetail({
@@ -114,6 +115,7 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
         skill,
         r2,
         githubToken,
+        githubRateLimitKV: platform?.env?.KV,
       });
       const files = await resolveOpenClawFilesForVersion({
         r2,

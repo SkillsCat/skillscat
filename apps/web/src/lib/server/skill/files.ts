@@ -130,6 +130,7 @@ async function getLatestCommitSha(
   owner: string,
   repo: string,
   githubToken?: string,
+  githubRateLimitKV?: KVNamespace,
   options: { cacheTtlSeconds?: number; cacheKeySuffix?: string } = {}
 ): Promise<{ sha: string; branch: string } | null> {
   const cacheTtlSeconds = options.cacheTtlSeconds ?? COMMIT_CACHE_TTL;
@@ -139,6 +140,7 @@ async function getLatestCommitSha(
     async () => {
       const repoRes = await getRepo(owner, repo, {
         token: githubToken,
+        rateLimitKV: githubRateLimitKV,
         userAgent: 'SkillsCat/1.0',
       });
       if (!repoRes.ok) {
@@ -150,6 +152,7 @@ async function getLatestCommitSha(
 
       const commitRes = await getCommitByRef(owner, repo, branch, {
         token: githubToken,
+        rateLimitKV: githubRateLimitKV,
         userAgent: 'SkillsCat/1.0',
       });
       if (!commitRes.ok) return null;
@@ -168,10 +171,12 @@ async function fetchGitHubFiles(
   repo: string,
   branch: string,
   skillPath: string | null,
-  githubToken?: string
+  githubToken?: string,
+  githubRateLimitKV?: KVNamespace
 ): Promise<SkillFile[]> {
   const treeRes = await getTreeRecursive(owner, repo, branch, {
     token: githubToken,
+    rateLimitKV: githubRateLimitKV,
     userAgent: 'SkillsCat/1.0',
   });
   if (!treeRes.ok) throw new Error(`Failed to fetch tree: ${treeRes.status}`);
@@ -194,6 +199,7 @@ async function fetchGitHubFiles(
 
     const blobRes = await getBlob(owner, repo, item.sha, {
       token: githubToken,
+      rateLimitKV: githubRateLimitKV,
       userAgent: 'SkillsCat/1.0',
     });
     if (!blobRes.ok) continue;
@@ -289,10 +295,12 @@ async function buildSkillFilesData(
     skill,
     r2,
     githubToken,
+    githubRateLimitKV,
   }: {
     skill: SkillInfo;
     r2: R2Bucket;
     githubToken?: string;
+    githubRateLimitKV?: KVNamespace;
   }
 ): Promise<SkillFilesResult> {
   const files: SkillFile[] = [];
@@ -333,6 +341,7 @@ async function buildSkillFilesData(
           skill.repo_owner,
           skill.repo_name,
           githubToken,
+          githubRateLimitKV,
           {
             cacheTtlSeconds: commitCacheTtl,
             cacheKeySuffix: hasR2Files ? 'stale' : 'default'
@@ -353,7 +362,8 @@ async function buildSkillFilesData(
             skill.repo_name,
             latestCommit.branch,
             skill.skill_path,
-            githubToken
+            githubToken,
+            githubRateLimitKV
           );
 
           if (githubFiles.length > 0) {
@@ -392,6 +402,7 @@ export async function resolveSkillFiles(
     db,
     r2,
     githubToken,
+    githubRateLimitKV,
     request,
     locals,
     waitUntil,
@@ -399,6 +410,7 @@ export async function resolveSkillFiles(
     db: D1Database | undefined;
     r2: R2Bucket | undefined;
     githubToken?: string;
+    githubRateLimitKV?: KVNamespace;
     request: Request;
     locals: App.Locals;
     waitUntil?: WaitUntilFn;
@@ -426,7 +438,7 @@ export async function resolveSkillFiles(
         }
 
         return {
-          result: await buildSkillFilesData({ skill, r2, githubToken }),
+          result: await buildSkillFilesData({ skill, r2, githubToken, githubRateLimitKV }),
         };
       },
       PUBLIC_CACHE_TTL_SECONDS,
@@ -467,7 +479,7 @@ export async function resolveSkillFiles(
     }
   }
 
-  const result = await buildSkillFilesData({ skill: bypassSkill, r2, githubToken });
+  const result = await buildSkillFilesData({ skill: bypassSkill, r2, githubToken, githubRateLimitKV });
 
   return {
     data: result,

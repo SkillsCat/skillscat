@@ -33,6 +33,7 @@ import {
   buildFileTree,
 } from './shared/utils';
 import { githubRequest } from '../src/lib/server/github-client/request';
+import { getGitHubRequestAuthFromEnv } from '../src/lib/server/github-client/env';
 import { invalidateCache } from '../src/lib/server/cache';
 import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '../src/lib/server/cache/keys';
 import { markRecommendDirty } from '../src/lib/server/ranking/recommend-precompute';
@@ -566,7 +567,7 @@ async function getLatestCommitSha(
   // Get latest commit
   const commitUrl = `https://api.github.com/repos/${owner}/${name}/commits/${branch}`;
   const commitInfo = await githubFetch<{ sha: string }>(commitUrl, {
-    token: env.GITHUB_TOKEN,
+    ...getGitHubRequestAuthFromEnv(env),
     apiVersion: env.GITHUB_API_VERSION,
     userAgent: 'SkillsCat-Indexing-Worker/1.0',
   });
@@ -603,7 +604,7 @@ async function getSkillCommitDates(
 ): Promise<{ lastCommitAt: number | null; firstCommitAt: number | null }> {
   const commitsUrl = `https://api.github.com/repos/${owner}/${name}/commits?per_page=1&path=${encodeURIComponent(skillMdPath)}`;
   const newestResponse = await githubRequest(commitsUrl, {
-    token: env.GITHUB_TOKEN,
+    ...getGitHubRequestAuthFromEnv(env),
     apiVersion: env.GITHUB_API_VERSION,
     userAgent: 'SkillsCat-Indexing-Worker/1.0',
   });
@@ -637,7 +638,7 @@ async function getSkillCommitDates(
   const lastPageUrl = extractLastLinkUrl(newestResponse.headers.get('link'));
   if (lastPageUrl) {
     const oldestResponse = await githubRequest(lastPageUrl, {
-      token: env.GITHUB_TOKEN,
+      ...getGitHubRequestAuthFromEnv(env),
       apiVersion: env.GITHUB_API_VERSION,
       userAgent: 'SkillsCat-Indexing-Worker/1.0',
     });
@@ -679,7 +680,7 @@ async function getRepositoryTree(
 ): Promise<GitHubTreeResponse> {
   const treeUrl = `https://api.github.com/repos/${owner}/${name}/git/trees/${branch}?recursive=1`;
   const treeData = await githubFetch<GitHubTreeResponse>(treeUrl, {
-    token: env.GITHUB_TOKEN,
+    ...getGitHubRequestAuthFromEnv(env),
     apiVersion: env.GITHUB_API_VERSION,
     userAgent: 'SkillsCat-Indexing-Worker/1.0',
   });
@@ -896,7 +897,7 @@ async function fetchDirectoryFiles(
 
       const blobUrl = `https://api.github.com/repos/${owner}/${name}/git/blobs/${item.sha}`;
       const blobData = await githubFetch<{ content: string; encoding: string }>(blobUrl, {
-        token: env.GITHUB_TOKEN,
+        ...getGitHubRequestAuthFromEnv(env),
         apiVersion: env.GITHUB_API_VERSION,
         userAgent: 'SkillsCat-Indexing-Worker/1.0',
       });
@@ -988,7 +989,7 @@ async function getRepoInfo(
   env: IndexingEnv
 ): Promise<GitHubRepo | null> {
   return githubFetch<GitHubRepo>(getRepoApiUrl(owner, name), {
-    token: env.GITHUB_TOKEN,
+    ...getGitHubRequestAuthFromEnv(env),
     apiVersion: env.GITHUB_API_VERSION,
     userAgent: 'SkillsCat-Indexing-Worker/1.0',
   });
@@ -1020,7 +1021,7 @@ async function getSkillMd(
     const content = await githubFetch<GitHubContent>(
       getContentsApiUrl(owner, name, path),
       {
-        token: env.GITHUB_TOKEN,
+        ...getGitHubRequestAuthFromEnv(env),
         apiVersion: env.GITHUB_API_VERSION,
         userAgent: 'SkillsCat-Indexing-Worker/1.0',
       }
@@ -1773,7 +1774,7 @@ async function processMessage(
         skillMdContent = decodeBase64ToUtf8(skillMd.content);
       } else if (skillMd.download_url) {
         const response = await githubRequest(skillMd.download_url, {
-          token: env.GITHUB_TOKEN,
+          ...getGitHubRequestAuthFromEnv(env),
           apiVersion: env.GITHUB_API_VERSION,
           userAgent: 'SkillsCat-Worker/1.0',
         });

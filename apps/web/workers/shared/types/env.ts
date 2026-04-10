@@ -6,6 +6,7 @@ export interface BaseEnv {
   R2: R2Bucket;
   PUBLIC_APP_URL?: string;
   GITHUB_TOKEN?: string;
+  GITHUB_TOKENS?: string;
   WORKER_SECRET?: string;
   CACHE_VERSION?: string;
   INDEXNOW_ENABLED?: string;

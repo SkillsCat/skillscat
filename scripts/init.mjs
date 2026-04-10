@@ -131,6 +131,25 @@ const OPTIONAL_SECRETS_BY_WORKER = {
   resurrection: [],
 };
 
+function splitGitHubTokenValue(value) {
+  return String(value || '')
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getConfiguredGitHubTokenValue(existingVars = {}) {
+  return existingVars.GITHUB_TOKENS || existingVars.GITHUB_TOKEN || '';
+}
+
+function shouldUseGitHubTokensKey(value, existingVars = {}) {
+  if (existingVars.GITHUB_TOKENS) {
+    return true;
+  }
+
+  return splitGitHubTokenValue(value).length > 1;
+}
+
 // 颜色输出
 const colors = {
   reset: '\x1b[0m',
@@ -2019,7 +2038,7 @@ ${colors.cyan}╔═════════════════════
         lines.push(`  Authorization callback URL: ${(isProduction && needsProductionAppUrl) ? 'https://your-domain.com' : 'http://localhost:5173'}/api/auth/callback/github`);
       }
       if (needsGitHubToken) {
-        lines.push('- GitHub Token: https://github.com/settings/tokens (需要 public_repo 权限)');
+        lines.push('- GitHub Token(s): https://github.com/settings/tokens (需要 public_repo 权限；支持单个 GITHUB_TOKEN 或逗号/换行分隔的 GITHUB_TOKENS)');
       }
       if (needsOpenRouter) {
         lines.push('- OpenRouter: https://openrouter.ai/keys (可选，用于 AI 分类)');
@@ -2053,7 +2072,7 @@ ${colors.cyan}╔═════════════════════
           githubClientSecret = existingVars.GITHUB_CLIENT_SECRET || '<dry-run-github-client-secret>';
         }
         if (needsGitHubToken) {
-          githubToken = existingVars.GITHUB_TOKEN || '<dry-run-github-token>';
+          githubToken = getConfiguredGitHubTokenValue(existingVars) || '<dry-run-github-token>';
         }
         if (needsOpenRouter) {
           openrouterApiKey = existingVars.OPENROUTER_API_KEY || '';
@@ -2073,7 +2092,8 @@ ${colors.cyan}╔═════════════════════
           githubClientSecret = existingVars.GITHUB_CLIENT_SECRET || await ask(rl, 'GitHub Client Secret', '');
         }
         if (needsGitHubToken) {
-          githubToken = existingVars.GITHUB_TOKEN || await ask(rl, 'GitHub Personal Access Token', '');
+          githubToken = getConfiguredGitHubTokenValue(existingVars)
+            || await ask(rl, 'GitHub Personal Access Token(s) (single token or comma/newline separated)', '');
         }
         if (needsOpenRouter) {
           openrouterApiKey = existingVars.OPENROUTER_API_KEY || await ask(rl, 'OpenRouter API Key (可选，免费模型)', '');
@@ -2155,7 +2175,7 @@ ${colors.cyan}╔═════════════════════
                 secrets.GITHUB_CLIENT_SECRET = githubClientSecret;
               }
               if (workerRequiredSecrets.has('GITHUB_TOKEN') && githubToken) {
-                secrets.GITHUB_TOKEN = githubToken;
+                secrets[shouldUseGitHubTokensKey(githubToken, existingVars) ? 'GITHUB_TOKENS' : 'GITHUB_TOKEN'] = githubToken;
               }
               if (workerOptionalSecrets.has('OPENROUTER_API_KEY') && openrouterApiKey) {
                 secrets.OPENROUTER_API_KEY = openrouterApiKey;
@@ -2209,7 +2229,7 @@ ${colors.cyan}╔═════════════════════
           devVars.GITHUB_CLIENT_SECRET = githubClientSecret || 'your-github-client-secret';
         }
         if (needsGitHubToken) {
-          devVars.GITHUB_TOKEN = githubToken || 'your-github-token';
+          devVars[shouldUseGitHubTokensKey(githubToken, existingVars) ? 'GITHUB_TOKENS' : 'GITHUB_TOKEN'] = githubToken || 'your-github-token';
         }
         if (needsOpenRouter) {
           devVars.OPENROUTER_API_KEY = openrouterApiKey || '';

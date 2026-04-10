@@ -1,5 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import { invalidateCache } from '$lib/server/cache';
 import {
   getOrgPageSnapshotCacheKey,
@@ -26,7 +27,8 @@ import { getOnlineRecommendCacheKeys } from '$lib/server/ranking/recommend-runti
 async function verifyGitHubRepo(
   repoUrl: string,
   userGithubId: number | null,
-  githubToken?: string
+  githubToken?: string,
+  githubRateLimitKV?: KVNamespace
 ): Promise<{ valid: boolean; error?: string }> {
   // Parse GitHub URL
   const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
@@ -38,6 +40,7 @@ async function verifyGitHubRepo(
 
   const response = await getRepo(owner, repo.replace(/\.git$/, ''), {
     token: githubToken,
+    rateLimitKV: githubRateLimitKV,
     userAgent: 'SkillsCat/1.0',
   });
 
@@ -156,9 +159,9 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
         .first<{ account_id: string }>();
 
       const userGithubId = account ? parseInt(account.account_id, 10) : null;
-      const githubToken = platform?.env?.GITHUB_TOKEN;
+      const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
 
-      const verification = await verifyGitHubRepo(repoUrl, userGithubId, githubToken);
+      const verification = await verifyGitHubRepo(repoUrl, userGithubId, githubToken, platform?.env?.KV);
       if (!verification.valid) {
         throw error(400, verification.error!);
       }
