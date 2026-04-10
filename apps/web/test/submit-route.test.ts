@@ -1403,8 +1403,10 @@ describe('submit route', () => {
     expect(payload.submitted).toBe(0);
     expect(payload.existing).toBe(2);
     expect(payload.refreshQueued).toBe(1);
-    expect(payload.message).toContain('2 already exist');
-    expect(payload.message).toContain('1 existing skill');
+    expect(payload.message).toBe([
+      '2 already exist.',
+      '1 existing skill(s) were queued for refresh.',
+    ].join('\n'));
     expect(payload.results).toEqual([
       {
         path: 'skills/alpha/SKILL.md',

@@ -1403,6 +1403,32 @@ describe('CLI commands with mocked network', () => {
     expect(result.stdout).toContain('Skill submitted successfully');
   });
 
+  it('submit prints multi-line success messages clearly', async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      if (url.endsWith('/api/submit')) {
+        return mockResponse({
+          success: true,
+          message: [
+            'Submitted 31 skill(s) for processing.',
+            '19 already exist.',
+            '8 existing skill(s) were queued for refresh.',
+          ].join('\n'),
+        }, 200);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { submit } = await import('../src/commands/submit');
+    const result = await runCommand(() => submit('testowner/testrepo'));
+
+    expect(result.stdout).toContain('Submitted 31 skill(s) for processing.');
+    expect(result.stdout).toContain('19 already exist.');
+    expect(result.stdout).toContain('8 existing skill(s) were queued for refresh.');
+  });
+
   it('submit auto-detects dot-directory skills from the current repository', async () => {
     mkdirSync(join(process.cwd(), '.git', 'ignored-skill'), { recursive: true });
     mkdirSync(join(process.cwd(), '.claude', 'skills', 'dot-skill'), { recursive: true });

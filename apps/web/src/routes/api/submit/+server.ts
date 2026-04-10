@@ -177,7 +177,7 @@ function buildSubmitMultipleMessage(
     return formatSubmitApiMessage(locale, { key: 'failedToQueueSkill' });
   }
 
-  return parts.join(' ');
+  return parts.join('\n');
 }
 
 const SUBMIT_ON_DEMAND_REFRESH_INTERVALS = {

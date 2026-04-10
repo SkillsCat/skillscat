@@ -21,6 +21,12 @@ interface SubmitResponse {
   skills?: Array<{ path: string; skillPath: string; depth: number }>;
 }
 
+function printSubmitMessage(message: string): void {
+  for (const line of message.split('\n')) {
+    console.log(pc.dim(line));
+  }
+}
+
 const IGNORED_DISCOVERY_DIRS = new Set([
   '.git',
 ]);
@@ -367,7 +373,7 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
     } else {
       console.log(pc.green('Skill submitted successfully!'));
     }
-    console.log(pc.dim(result.message || 'It will appear in the catalog once processed.'));
+    printSubmitMessage(result.message || 'It will appear in the catalog once processed.');
 
     if (result.existingSlug) {
       console.log();
