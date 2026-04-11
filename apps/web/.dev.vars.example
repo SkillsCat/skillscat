@@ -16,7 +16,7 @@ GITHUB_CLIENT_SECRET=your-github-client-secret
 # ========== GitHub Personal Access Token(s) ==========
 # 创建 Token: https://github.com/settings/tokens
 # 需要的权限: public_repo (用于读取公开仓库信息)
-# 单 token 用 GITHUB_TOKEN；多 token 池可用 GITHUB_TOKENS，支持逗号分隔、换行分隔或 JSON 数组
+# 单 token 用 GITHUB_TOKEN；多 token 池可用 GITHUB_TOKENS，推荐逗号分隔或单行 JSON 数组
 GITHUB_TOKEN=your-github-token
 # GITHUB_TOKENS=["ghp_token_a","ghp_token_b"]
 
