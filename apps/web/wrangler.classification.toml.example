@@ -49,6 +49,10 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-kv-namespace-id>"
 
+[[analytics_engine_datasets]]
+binding = "CLASSIFICATION_ANALYTICS"
+dataset = "skillscat_classification_batches"
+
 [vars]
 AI_MODEL = "openrouter/free"
 CLASSIFICATION_PAID_MODEL = "openai/gpt-5.4-nano"
@@ -77,6 +81,10 @@ bucket_name = "skillscat-storage"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
+
+[[env.production.analytics_engine_datasets]]
+binding = "CLASSIFICATION_ANALYTICS"
+dataset = "skillscat_classification_batches"
 
 [env.production.vars]
 AI_MODEL = "openrouter/free"

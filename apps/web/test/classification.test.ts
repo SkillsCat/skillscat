@@ -116,6 +116,129 @@ describe('loadSkillMdForClassification', () => {
 });
 
 describe('classification queue preloading', () => {
+  it('writes one analytics datapoint per processed batch', async () => {
+    const writeDataPoint = vi.fn();
+    const env = {
+      DB: {
+        prepare: (sql: string) => {
+          if (sql.includes('FROM skills') && sql.includes('WHERE id IN')) {
+            return {
+              bind: (...args: unknown[]) => {
+                expect(args).toEqual(['skill-keyword']);
+                return {
+                  all: async () => ({
+                    results: [{
+                      id: 'skill-keyword',
+                      slug: 'owner/skill-keyword',
+                      source_type: 'github',
+                      repo_owner: 'owner',
+                      repo_name: 'repo',
+                      skill_path: null,
+                      readme: null,
+                    }],
+                  }),
+                };
+              },
+            };
+          }
+
+          if (sql === 'SELECT category_slug FROM skill_categories WHERE skill_id = ?') {
+            return {
+              bind: () => ({
+                all: async () => ({ results: [] }),
+              }),
+            };
+          }
+
+          if (sql === 'DELETE FROM skill_categories WHERE skill_id = ?') {
+            return {
+              bind: () => ({
+                run: async () => ({ success: true }),
+              }),
+            };
+          }
+
+          if (sql.includes('INSERT OR IGNORE INTO skill_categories')) {
+            return {
+              bind: () => ({
+                run: async () => ({ success: true }),
+              }),
+            };
+          }
+
+          if (sql === 'UPDATE skills SET classification_method = ?, updated_at = ? WHERE id = ?') {
+            return {
+              bind: () => ({
+                run: async () => ({ success: true }),
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      },
+      KV: {
+        get: vi.fn(async () => null),
+        put: vi.fn(async () => {}),
+      },
+      R2: {
+        get: vi.fn(async (key: string) => {
+          if (key === 'skills/github/owner/repo/SKILL.md') {
+            return {
+              async text() {
+                return 'This skill automates git workflows and repository maintenance.';
+              },
+            } as R2ObjectBody;
+          }
+
+          return null;
+        }),
+      },
+      CLASSIFICATION_ANALYTICS: {
+        writeDataPoint,
+      },
+      AI_MODEL: 'openrouter/free',
+      CLASSIFICATION_PAID_MODEL: 'openai/gpt-5.4-nano',
+    } as never;
+
+    await classificationWorker.queue({
+      messages: [
+        {
+          id: 'msg-direct',
+          body: {
+            type: 'classify',
+            skillId: 'skill-direct',
+            repoOwner: 'owner',
+            repoName: 'repo',
+            skillMdPath: 'skills/github/owner/repo/SKILL.md',
+            frontmatterCategories: ['automation'],
+          },
+          ack: vi.fn(),
+          retry: vi.fn(),
+        },
+        {
+          id: 'msg-keyword',
+          body: {
+            type: 'classify',
+            skillId: 'skill-keyword',
+            repoOwner: 'owner',
+            repoName: 'repo',
+            skillMdPath: 'skills/github/owner/repo/SKILL.md',
+          },
+          ack: vi.fn(),
+          retry: vi.fn(),
+        },
+      ],
+    } as never, env, {} as never);
+
+    expect(writeDataPoint).toHaveBeenCalledTimes(1);
+    expect(writeDataPoint).toHaveBeenCalledWith({
+      blobs: ['succeeded', 'openrouter/free', 'openai/gpt-5.4-nano'],
+      doubles: [2, 2, 0, 0, 1, 0, 1],
+      indexes: ['classification-batch'],
+    });
+  });
+
   it('skips storage preload for direct frontmatter matches', async () => {
     const sqls: string[] = [];
     const env = {

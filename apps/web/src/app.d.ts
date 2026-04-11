@@ -11,6 +11,7 @@ declare global {
         PUBLIC_APP_URL?: string;
         INDEXING_QUEUE: Queue;
         CLASSIFICATION_QUEUE: Queue;
+        CLASSIFICATION_ANALYTICS?: AnalyticsEngineDataset;
         SECURITY_ANALYSIS_QUEUE: Queue;
         METRICS_QUEUE: Queue;
         GITHUB_CLIENT_ID: string;

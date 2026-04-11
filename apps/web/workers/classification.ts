@@ -81,6 +81,16 @@ interface ClassificationSkillStorageRow extends ClassificationSkillStorageLocati
   id: string;
 }
 
+interface ClassificationBatchMetricStats {
+  total: number;
+  succeeded: number;
+  retried: number;
+  skipped: number;
+  direct: number;
+  ai: number;
+  keyword: number;
+}
+
 async function loadClassificationSkillStorageLocations(
   env: Pick<ClassificationEnv, 'DB'>,
   skillIds: string[]
@@ -710,33 +720,43 @@ async function saveClassification(
   await markSearchDirty(env.DB, skillId, now);
 }
 
-/**
- * Record classification metrics to KV
- */
-async function recordClassificationMetric(
+function writeClassificationBatchMetric(
   env: ClassificationEnv,
-  method: ClassificationMethod
-): Promise<void> {
-  const hourKey = `metrics:classification:${new Date().toISOString().slice(0, 13)}`;
+  stats: ClassificationBatchMetricStats,
+  preloadStatus: 'skipped' | 'succeeded' | 'failed'
+): void {
+  if (!env.CLASSIFICATION_ANALYTICS) {
+    return;
+  }
 
-  const existing = await env.KV.get(hourKey, 'json') as Record<string, number> | null;
-  const updated = {
-    ai: (existing?.ai || 0) + (method === 'ai' ? 1 : 0),
-    keyword: (existing?.keyword || 0) + (method === 'keyword' ? 1 : 0),
-    direct: (existing?.direct || 0) + (method === 'direct' ? 1 : 0),
-    total: (existing?.total || 0) + 1,
-  };
-
-  await env.KV.put(hourKey, JSON.stringify(updated), {
-    expirationTtl: 7 * 24 * 60 * 60, // 7 days
-  });
+  try {
+    env.CLASSIFICATION_ANALYTICS.writeDataPoint({
+      blobs: [
+        preloadStatus,
+        env.AI_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL,
+        env.CLASSIFICATION_PAID_MODEL?.trim() || DEFAULT_CLASSIFICATION_PAID_MODEL,
+      ],
+      doubles: [
+        stats.total,
+        stats.succeeded,
+        stats.retried,
+        stats.skipped,
+        stats.direct,
+        stats.ai,
+        stats.keyword,
+      ],
+      indexes: ['classification-batch'],
+    });
+  } catch (error) {
+    log.error('Failed to write classification batch analytics datapoint:', error);
+  }
 }
 
 async function processMessage(
   message: ClassificationMessageWithMeta,
   env: ClassificationEnv,
   preloadedSkill: ClassificationSkillStorageLocation | null | undefined = undefined
-): Promise<void> {
+): Promise<ClassificationMethod | null> {
   const { skillId, repoOwner, repoName, skillMdPath, stars = 0, tags = [], frontmatterCategories, isReclassification } = message;
 
   log.log(`Processing skill: ${skillId} (${repoOwner}/${repoName})${isReclassification ? ' [RECLASSIFICATION]' : ''}`, JSON.stringify(message));
@@ -754,14 +774,6 @@ async function processMessage(
     if (directMatch) {
       log.log(`Direct category match for ${skillId}: ${directMatch.categories.join(', ')}`);
 
-      // Record metric for direct classification
-      try {
-        await recordClassificationMetric(env, 'direct');
-        log.log(`Metric recorded for ${skillId}: direct`);
-      } catch (metricError) {
-        log.error(`Failed to record metric for ${skillId}:`, metricError);
-      }
-
       // Save classification and return early
       try {
         await saveClassification(skillId, directMatch, 'direct', env);
@@ -770,7 +782,7 @@ async function processMessage(
         log.error(`Failed to save direct classification for ${skillId}:`, saveError);
         throw saveError;
       }
-      return;
+      return 'direct';
     }
   }
 
@@ -779,21 +791,12 @@ async function processMessage(
   const method = isReclassification ? 'ai' : determineClassificationMethod(repoOwner, stars);
   log.log(`Method for ${skillId}: ${method} (stars: ${stars}${isReclassification ? ', reclassification' : ''})`);
 
-  // Record metric
-  try {
-    await recordClassificationMetric(env, method);
-    log.log(`Metric recorded for ${skillId}: ${method}`);
-  } catch (metricError) {
-    log.error(`Failed to record metric for ${skillId}:`, metricError);
-    // Don't fail the whole process for metric errors
-  }
-
   // Get SKILL.md content
   log.log(`Fetching SKILL.md from R2: ${skillMdPath}`);
   const skillMdContent = await loadSkillMdForClassification(env, skillId, skillMdPath, preloadedSkill);
   if (!skillMdContent) {
     log.error(`SKILL.md not found in R2: ${skillMdPath}`);
-    return;
+    return null;
   }
   log.log(`SKILL.md content length: ${skillMdContent.length} chars`);
 
@@ -820,6 +823,8 @@ async function processMessage(
     log.error(`Failed to save classification for ${skillId}:`, saveError);
     throw saveError;
   }
+
+  return method;
 }
 
 export default {
@@ -830,6 +835,7 @@ export default {
   ): Promise<void> {
     log.log(`Processing batch of ${batch.messages.length} messages`);
     let preloadedSkillsById = new Map<string, ClassificationSkillStorageLocation>();
+    let preloadStatus: 'skipped' | 'succeeded' | 'failed' = 'skipped';
     const skillIdsToPreload = Array.from(new Set(
       batch.messages
         .map((message) => message.body)
@@ -840,10 +846,22 @@ export default {
     if (skillIdsToPreload.length > 0) {
       try {
         preloadedSkillsById = await loadClassificationSkillStorageLocations(env, skillIdsToPreload);
+        preloadStatus = 'succeeded';
       } catch (error) {
+        preloadStatus = 'failed';
         log.warn('Failed to preload classification skill storage locations, falling back to per-message lookups', error);
       }
     }
+
+    const batchMetricStats: ClassificationBatchMetricStats = {
+      total: batch.messages.length,
+      succeeded: 0,
+      retried: 0,
+      skipped: 0,
+      direct: 0,
+      ai: 0,
+      keyword: 0,
+    };
 
     for (const message of batch.messages) {
       try {
@@ -851,14 +869,27 @@ export default {
         const preloadedSkill = preloadedSkillsById.has(message.body.skillId)
           ? (preloadedSkillsById.get(message.body.skillId) ?? null)
           : undefined;
-        await processMessage(message.body, env, preloadedSkill);
+        const method = await processMessage(message.body, env, preloadedSkill);
+        batchMetricStats.succeeded += 1;
+        if (method === null) {
+          batchMetricStats.skipped += 1;
+        } else {
+          batchMetricStats[method] += 1;
+        }
         message.ack();
         log.log(`Message acknowledged: ${message.id}`);
       } catch (error) {
+        batchMetricStats.retried += 1;
         log.error(`Error processing message ${message.id}:`, error);
         message.retry();
         log.log(`Message scheduled for retry: ${message.id}`);
       }
     }
+
+    writeClassificationBatchMetric(
+      env,
+      batchMetricStats,
+      preloadStatus
+    );
   },
 };

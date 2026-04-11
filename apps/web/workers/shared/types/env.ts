@@ -43,6 +43,7 @@ export interface ClassificationEnv extends BaseEnv {
   OPENROUTER_API_KEY?: string;
   AI_MODEL?: string;
   CLASSIFICATION_PAID_MODEL?: string;
+  CLASSIFICATION_ANALYTICS?: AnalyticsEngineDataset;
   FREE_MODELS?: string;
   DEEPSEEK_API_KEY?: string;
 }
