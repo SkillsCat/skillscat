@@ -17,6 +17,7 @@ import { publish } from './commands/publish';
 import { submit } from './commands/submit';
 import { report } from './commands/report';
 import { unpublishSkill } from './commands/unpublish';
+import { view } from './commands/view';
 import { configSet, configGet, configList, configDelete } from './commands/config';
 import { setVerbose } from './utils/core/verbose';
 
@@ -109,6 +110,13 @@ program
   .command('info <source>')
   .description('Show detailed information about a skill or repository')
   .action(info);
+
+// View command
+program
+  .command('view <slug>')
+  .description('Open a published skill in the browser or print its rendered output')
+  .option('-o, --output <format>', 'Print `html` or `markdown` to stdout instead of opening a browser')
+  .action(view);
 
 // Login command
 program

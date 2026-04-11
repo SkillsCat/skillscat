@@ -21,3 +21,27 @@ export function slugToPath(slug: string): string {
   const { owner, name } = parseSlug(slug);
   return `${owner}/${name}`;
 }
+
+/**
+ * Encode a slug for use in /skills/[owner]/[...name] paths
+ * @param slug - Skill slug in format "owner/name[/nested]"
+ * @returns Encoded path segment like "owner/name" (without leading slash)
+ */
+export function encodeSlugForSkillPath(slug: string): string {
+  const { owner, name } = parseSlug(slug);
+  const encodedName = name
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+
+  return `${encodeURIComponent(owner)}/${encodedName}`;
+}
+
+/**
+ * Build the canonical web skill path from a slug
+ * @param slug - Skill slug in format "owner/name[/nested]"
+ * @returns Path like "/skills/owner/name"
+ */
+export function buildSkillPath(slug: string): string {
+  return `/skills/${encodeSlugForSkillPath(slug)}`;
+}

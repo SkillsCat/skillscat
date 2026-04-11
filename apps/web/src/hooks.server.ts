@@ -28,6 +28,7 @@ import {
   getSkillPublicHintCacheKey,
 } from '$lib/server/cache/keys';
 import { getPublicDiscoveryHtmlCacheKey } from '$lib/server/cache/public-html';
+import { resolveTokenBackedUser } from '$lib/server/auth/request-user';
 
 const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
 const STATUS_OVERRIDE_HEADER = 'X-Skillscat-Status-Override';
@@ -891,7 +892,10 @@ export const handle: Handle = async ({ event, resolve }) => {
     }
   } else {
     event.locals.session = null;
-    event.locals.user = null;
+    event.locals.user = await resolveTokenBackedUser(event.request, env.DB);
+    event.locals.auth = async () => ({
+      user: event.locals.user,
+    });
   }
 
   const openClawSkillResponse = await maybeRespondWithOpenClawSkillMarkdown(
