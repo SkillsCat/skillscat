@@ -26,6 +26,7 @@ const DEFAULT_EVENTS_REST_RESERVE = 300;
 const DEFAULT_SEARCH_DISCOVERY_QUERY = 'filename:SKILL.md';
 const DEFAULT_SEARCH_DISCOVERY_PAGES = 1;
 const DEFAULT_SEARCH_DISCOVERY_PER_PAGE = 100;
+const DEFAULT_SEARCH_DISCOVERY_INTERVAL_SECONDS = 15 * 60;
 const DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS = 5 * 60;
 const DEFAULT_MIN_REST_REMAINING = 1000;
 const DEFAULT_REST_RESERVE = 300;
@@ -59,6 +60,8 @@ interface RepoIdentity {
   owner: string;
   name: string;
 }
+
+type QueuedRepoSet = Set<string>;
 
 interface GitHubEventsFetchResult {
   events: GitHubEvent[];
@@ -164,6 +167,7 @@ function getSearchDiscoveryConfig(env: GithubEventsEnv): {
   query: string;
   pages: number;
   perPage: number;
+  intervalSeconds: number;
   cronIntervalSeconds: number;
   minRestRemaining: number;
   restReserve: number;
@@ -173,6 +177,10 @@ function getSearchDiscoveryConfig(env: GithubEventsEnv): {
     query: (env.GITHUB_SEARCH_DISCOVERY_QUERY || DEFAULT_SEARCH_DISCOVERY_QUERY).trim() || DEFAULT_SEARCH_DISCOVERY_QUERY,
     pages: parsePositiveInt(env.GITHUB_SEARCH_DISCOVERY_PAGES, DEFAULT_SEARCH_DISCOVERY_PAGES),
     perPage: parsePositiveInt(env.GITHUB_SEARCH_DISCOVERY_PER_PAGE, DEFAULT_SEARCH_DISCOVERY_PER_PAGE),
+    intervalSeconds: parsePositiveInt(
+      env.GITHUB_SEARCH_DISCOVERY_INTERVAL_SECONDS,
+      DEFAULT_SEARCH_DISCOVERY_INTERVAL_SECONDS
+    ),
     cronIntervalSeconds: parsePositiveInt(
       env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
       DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS
@@ -184,6 +192,27 @@ function getSearchDiscoveryConfig(env: GithubEventsEnv): {
 
 function getDiscoveryLockTtlSeconds(env: GithubEventsEnv): number {
   return parsePositiveInt(env.GITHUB_DISCOVERY_LOCK_TTL_SECONDS, DEFAULT_DISCOVERY_LOCK_TTL_SECONDS);
+}
+
+export function buildRepoQueuedDedupIdentity(owner: string, name: string, skillPath?: string): string {
+  const normalizedPath = normalizeSkillPath(skillPath).toLowerCase();
+  return `${owner.toLowerCase()}/${name.toLowerCase()}:${normalizedPath}`;
+}
+
+export function shouldRunSearchDiscoveryThisTick(
+  nowMs: number,
+  cronIntervalSeconds: number,
+  searchIntervalSeconds: number
+): boolean {
+  const normalizedCronInterval = Math.max(1, Math.floor(cronIntervalSeconds));
+  const normalizedSearchInterval = Math.max(1, Math.floor(searchIntervalSeconds));
+
+  if (normalizedSearchInterval <= normalizedCronInterval) {
+    return true;
+  }
+
+  const nowEpochSec = Math.floor(nowMs / 1000);
+  return (nowEpochSec % normalizedSearchInterval) < normalizedCronInterval;
 }
 
 export function computeAllowedSearchPages(
@@ -289,8 +318,7 @@ async function markEventProcessed(env: GithubEventsEnv, eventId: string): Promis
 }
 
 function getRepoQueuedKey(owner: string, name: string, skillPath?: string): string {
-  const normalizedPath = normalizeSkillPath(skillPath).toLowerCase();
-  return `github-events:repo-queued:${owner.toLowerCase()}/${name.toLowerCase()}:${normalizedPath}`;
+  return `github-events:repo-queued:${buildRepoQueuedDedupIdentity(owner, name, skillPath)}`;
 }
 
 /**
@@ -396,7 +424,8 @@ async function readOrRefreshRestRateLimitSnapshot(env: GithubEventsEnv): Promise
  */
 async function processEvents(
   env: GithubEventsEnv,
-  restSnapshot: GitHubRateLimitSnapshot | null
+  restSnapshot: GitHubRateLimitSnapshot | null,
+  queuedRepoKeysInRun: QueuedRepoSet
 ): Promise<EventsDiscoveryResult> {
   let processed = 0;
   let queued = 0;
@@ -493,13 +522,21 @@ async function processEvents(
 
         const message = extractRepoInfo(event);
         if (message) {
+          const repoQueuedIdentity = buildRepoQueuedDedupIdentity(message.repoOwner, message.repoName);
+          if (queuedRepoKeysInRun.has(repoQueuedIdentity)) {
+            await markEventProcessed(env, event.id);
+            continue;
+          }
+
           if (await wasRepoQueuedRecently(env, message.repoOwner, message.repoName)) {
+            queuedRepoKeysInRun.add(repoQueuedIdentity);
             await markEventProcessed(env, event.id);
             continue;
           }
 
           await env.INDEXING_QUEUE.send(message);
           await markRepoQueued(env, message.repoOwner, message.repoName);
+          queuedRepoKeysInRun.add(repoQueuedIdentity);
           queued++;
           console.log(`Queued repo for indexing: ${message.repoOwner}/${message.repoName}`);
         }
@@ -530,7 +567,9 @@ async function processEvents(
 
 async function processCodeSearchDiscovery(
   env: GithubEventsEnv,
-  initialRestSnapshot?: GitHubRateLimitSnapshot | null
+  queuedRepoKeysInRun: QueuedRepoSet,
+  initialRestSnapshot?: GitHubRateLimitSnapshot | null,
+  nowMs: number = Date.now()
 ): Promise<SearchDiscoveryResult> {
   const config = getSearchDiscoveryConfig(env);
   const baseResult: SearchDiscoveryResult = {
@@ -545,6 +584,13 @@ async function processCodeSearchDiscovery(
     return {
       ...baseResult,
       skippedReason: 'disabled',
+    };
+  }
+
+  if (!shouldRunSearchDiscoveryThisTick(nowMs, config.cronIntervalSeconds, config.intervalSeconds)) {
+    return {
+      ...baseResult,
+      skippedReason: 'interval_throttled',
     };
   }
 
@@ -654,7 +700,14 @@ async function processCodeSearchDiscovery(
       }
 
       const skillPath = getSkillPathFromSkillMdPath(item.path);
+      const repoQueuedIdentity = buildRepoQueuedDedupIdentity(repo.owner, repo.name, skillPath);
+      if (queuedRepoKeysInRun.has(repoQueuedIdentity)) {
+        await markSearchFingerprintProcessed(env, fingerprint);
+        continue;
+      }
+
       if (await wasRepoQueuedRecently(env, repo.owner, repo.name, skillPath)) {
+        queuedRepoKeysInRun.add(repoQueuedIdentity);
         await markSearchFingerprintProcessed(env, fingerprint);
         continue;
       }
@@ -670,6 +723,7 @@ async function processCodeSearchDiscovery(
 
       await env.INDEXING_QUEUE.send(message);
       await markRepoQueued(env, repo.owner, repo.name, skillPath);
+      queuedRepoKeysInRun.add(repoQueuedIdentity);
       await markSearchFingerprintProcessed(env, fingerprint);
       queued++;
     }
@@ -792,6 +846,9 @@ export default {
     console.log('GitHub Events Worker triggered at:', new Date().toISOString());
 
     try {
+      const nowMs = Date.now();
+      const queuedRepoKeysInRun: QueuedRepoSet = new Set();
+
       if (!await hasDiscoveryRunLockOwnership(env, lockToken)) {
         console.log('GitHub Events Worker lock ownership lost before discovery start');
         return;
@@ -804,7 +861,7 @@ export default {
         return;
       }
 
-      const eventsResult = await processEvents(env, restBeforeEvents);
+      const eventsResult = await processEvents(env, restBeforeEvents, queuedRepoKeysInRun);
       const restAfterEvents = await readGitHubRateLimitBudget(env, 'rest', {
         includeStale: true,
       });
@@ -814,7 +871,7 @@ export default {
         return;
       }
 
-      const searchResult = await processCodeSearchDiscovery(env, restAfterEvents);
+      const searchResult = await processCodeSearchDiscovery(env, queuedRepoKeysInRun, restAfterEvents, nowMs);
       const restSnapshot = await readGitHubRateLimitBudget(env, 'rest', { includeStale: true });
       const graphqlSnapshot = await readGitHubRateLimitBudget(env, 'graphql', { includeStale: true });
 

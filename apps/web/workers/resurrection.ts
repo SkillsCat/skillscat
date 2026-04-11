@@ -161,22 +161,28 @@ async function checkAndResurrectSingle(
   };
 }
 
-/**
- * Record resurrection metrics to KV
- */
-async function recordMetrics(
+function recordMetrics(
   env: ResurrectionEnv,
   stats: { checked: number; resurrected: number; failed: number; githubCalls: number }
-): Promise<void> {
-  const now = new Date();
-  const quarterKey = `metrics:resurrection:${now.getFullYear()}-Q${Math.ceil((now.getMonth() + 1) / 3)}`;
+): void {
+  if (!env.WORKER_ANALYTICS) {
+    return;
+  }
 
-  await env.KV.put(quarterKey, JSON.stringify({
-    ...stats,
-    timestamp: Date.now(),
-  }), {
-    expirationTtl: 365 * 24 * 60 * 60, // 1 year
-  });
+  try {
+    env.WORKER_ANALYTICS.writeDataPoint({
+      blobs: ['scheduled'],
+      doubles: [
+        stats.checked,
+        stats.resurrected,
+        stats.failed,
+        stats.githubCalls,
+      ],
+      indexes: ['resurrection-run'],
+    });
+  } catch (error) {
+    console.error('Failed to write resurrection analytics datapoint:', error);
+  }
 }
 
 export default {

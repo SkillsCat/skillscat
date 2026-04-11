@@ -219,22 +219,23 @@ async function archiveSkill(
   }
 }
 
-/**
- * Record archive metrics to KV
- */
-async function recordMetrics(
+function recordMetrics(
   env: ArchiveEnv,
   stats: { total: number; archived: number; failed: number }
-): Promise<void> {
-  const now = new Date();
-  const monthKey = `metrics:archive:${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+): void {
+  if (!env.WORKER_ANALYTICS) {
+    return;
+  }
 
-  await env.KV.put(monthKey, JSON.stringify({
-    ...stats,
-    timestamp: Date.now(),
-  }), {
-    expirationTtl: 365 * 24 * 60 * 60, // 1 year
-  });
+  try {
+    env.WORKER_ANALYTICS.writeDataPoint({
+      blobs: ['scheduled'],
+      doubles: [stats.total, stats.archived, stats.failed],
+      indexes: ['archive-run'],
+    });
+  } catch (error) {
+    console.error('Failed to write archive analytics datapoint:', error);
+  }
 }
 
 export default {

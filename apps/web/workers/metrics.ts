@@ -1,7 +1,6 @@
 import {
-  markSkillNeedsUpdate,
+  resolveNextUpdateAtAfterAccess,
   queueArchivedSkillResurrectionCheck,
-  shouldMarkSkillNeedsUpdate,
 } from '../src/lib/server/db/business/access';
 import {
   buildSkillMetricDate,
@@ -173,6 +172,13 @@ export async function processQueuedSkillMetrics(
       continue;
     }
 
+    const nextUpdateAt = resolveNextUpdateAtAfterAccess({
+      tier: skill.tier,
+      nextUpdateAt: skill.next_update_at,
+      lastAccessedAt: skill.last_accessed_at,
+      occurredAt: access.lastOccurredAt,
+    });
+
     statements.push(
       env.DB.prepare(`
         UPDATE skills
@@ -181,13 +187,15 @@ export async function processQueuedSkillMetrics(
               ELSE last_accessed_at
             END,
             access_count_7d = access_count_7d + ?,
-            access_count_30d = access_count_30d + ?
+            access_count_30d = access_count_30d + ?,
+            next_update_at = ?
         WHERE id = ?
       `).bind(
         access.lastOccurredAt,
         access.lastOccurredAt,
         access.count,
         access.count,
+        nextUpdateAt,
         skillId
       )
     );
@@ -195,15 +203,6 @@ export async function processQueuedSkillMetrics(
     if (skill.tier === 'archived') {
       sideEffects.push(queueArchivedSkillResurrectionCheck(env, skillId));
       continue;
-    }
-
-    if (shouldMarkSkillNeedsUpdate({
-      tier: skill.tier,
-      nextUpdateAt: skill.next_update_at,
-      lastAccessedAt: skill.last_accessed_at,
-      occurredAt: access.lastOccurredAt,
-    })) {
-      sideEffects.push(markSkillNeedsUpdate(env, skillId, access.lastOccurredAt));
     }
   }
 

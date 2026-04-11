@@ -246,26 +246,26 @@ function getNextUpdateTime(tier: SkillTier): number | null {
 }
 
 /**
- * Update skills marked for update via KV (user-driven updates)
+ * Update skills explicitly marked for immediate refresh by access traffic.
+ * These rows store a negative next_update_at sentinel so we can avoid a
+ * separate KV marker while still preserving backlog order across runs.
  */
 async function updateMarkedSkills(
   env: TrendingEnv
 ): Promise<{ count: number; updatedIds: string[] }> {
-  const list = await env.KV.list({ prefix: 'needs_update:', limit: 100 });
-
-  if (list.keys.length === 0) {
-    return { count: 0, updatedIds: [] };
-  }
-
-  const skillIds = list.keys.map((k) => k.name.replace('needs_update:', ''));
-
-  const placeholders = skillIds.map(() => '?').join(',');
   const skills = await env.DB.prepare(`
     SELECT ${SKILL_REFRESH_SELECT_COLUMNS}
-    FROM skills WHERE id IN (${placeholders})
+    FROM skills INDEXED BY skills_next_update_idx
+    WHERE visibility = 'public'
+      AND next_update_at < 0
+    ORDER BY next_update_at DESC
+    LIMIT 100
   `)
-    .bind(...skillIds)
     .all<SkillRecord>();
+
+  if (skills.results.length === 0) {
+    return { count: 0, updatedIds: [] };
+  }
 
   // Batch fetch from GitHub
   const reposToFetch = skills.results.map(s => ({
@@ -347,8 +347,6 @@ async function updateMarkedSkills(
 
     await env.DB.batch(statements);
   }
-
-  await Promise.all(list.keys.map((k) => env.KV.delete(k.name)));
 
   return {
     count: updates.length,
@@ -982,10 +980,7 @@ export async function queueTrendingHeadSecurityPremium(env: TrendingEnv): Promis
   return queued;
 }
 
-/**
- * Record cost metrics to KV for monitoring
- */
-async function recordMetrics(
+function recordMetrics(
   env: TrendingEnv,
   metrics: {
     markedUpdates: number;
@@ -993,24 +988,31 @@ async function recordMetrics(
     warmUpdates: number;
     coolUpdates: number;
     githubApiCalls: number;
+    downloadsFlushed: number;
+    premiumSecurityQueued: number;
   }
-): Promise<void> {
-  const now = Date.now();
-  const hourKey = `metrics:trending:${new Date().toISOString().slice(0, 13)}`;
+): void {
+  if (!env.WORKER_ANALYTICS) {
+    return;
+  }
 
-  const existing = await env.KV.get(hourKey, 'json') as Record<string, number> | null;
-  const updated = {
-    markedUpdates: (existing?.markedUpdates || 0) + metrics.markedUpdates,
-    hotUpdates: (existing?.hotUpdates || 0) + metrics.hotUpdates,
-    warmUpdates: (existing?.warmUpdates || 0) + metrics.warmUpdates,
-    coolUpdates: (existing?.coolUpdates || 0) + metrics.coolUpdates,
-    githubApiCalls: (existing?.githubApiCalls || 0) + metrics.githubApiCalls,
-    lastRun: now,
-  };
-
-  await env.KV.put(hourKey, JSON.stringify(updated), {
-    expirationTtl: 7 * 24 * 60 * 60, // 7 days
-  });
+  try {
+    env.WORKER_ANALYTICS.writeDataPoint({
+      blobs: ['scheduled', env.CACHE_VERSION?.trim() || 'default'],
+      doubles: [
+        metrics.markedUpdates,
+        metrics.hotUpdates,
+        metrics.warmUpdates,
+        metrics.coolUpdates,
+        metrics.githubApiCalls,
+        metrics.downloadsFlushed,
+        metrics.premiumSecurityQueued,
+      ],
+      indexes: ['trending-run'],
+    });
+  } catch (error) {
+    console.error('Failed to write trending analytics datapoint:', error);
+  }
 }
 
 export default {
@@ -1097,6 +1099,8 @@ export default {
       warmUpdates: warmResult.count,
       coolUpdates: coolResult.count,
       githubApiCalls: totalBatches,
+      downloadsFlushed,
+      premiumSecurityQueued,
     });
 
     console.log('Trending update completed');

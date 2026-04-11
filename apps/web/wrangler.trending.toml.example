@@ -31,10 +31,14 @@ database_id = "<your-database-id>"
 binding = "R2"
 bucket_name = "skillscat-storage"
 
-# KV Namespace - 读取需要更新的标记
+# KV Namespace - 保留轻量运行状态（如下载 flush 游标）
 [[kv_namespaces]]
 binding = "KV"
 id = "<your-kv-namespace-id>"
+
+[[analytics_engine_datasets]]
+binding = "WORKER_ANALYTICS"
+dataset = "skillscat_trending_runs"
 
 [[queues.producers]]
 binding = "SECURITY_ANALYSIS_QUEUE"
@@ -66,6 +70,10 @@ bucket_name = "skillscat-storage"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
+
+[[env.production.analytics_engine_datasets]]
+binding = "WORKER_ANALYTICS"
+dataset = "skillscat_trending_runs"
 
 [[env.production.queues.producers]]
 binding = "SECURITY_ANALYSIS_QUEUE"

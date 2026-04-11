@@ -36,6 +36,10 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-kv-namespace-id>"
 
+[[analytics_engine_datasets]]
+binding = "WORKER_ANALYTICS"
+dataset = "skillscat_resurrection_runs"
+
 [env.production]
 name = "skillscat-resurrection-production"
 
@@ -54,3 +58,7 @@ bucket_name = "skillscat-storage"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
+
+[[env.production.analytics_engine_datasets]]
+binding = "WORKER_ANALYTICS"
+dataset = "skillscat_resurrection_runs"

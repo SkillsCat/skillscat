@@ -27,31 +27,17 @@ const TIER_CONFIG = {
 
 export type SkillTier = keyof typeof TIER_CONFIG;
 
-const NEEDS_UPDATE_MARK_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-const MAX_MARKED_UPDATE_ENTRIES = 5_000;
-
-const recentNeedsUpdateMark = new Map<string, number>();
-
-function pruneExpiredEntries(map: Map<string, number>, now: number, windowMs: number): void {
-  for (const [key, timestamp] of map.entries()) {
-    if (now - timestamp > windowMs) {
-      map.delete(key);
-    }
-  }
+// Negative values are reserved for "refresh immediately" markers. We encode the
+// access timestamp so marked rows can still be processed in a stable order.
+export function isImmediateRefreshNextUpdateAt(nextUpdateAt: number | null | undefined): boolean {
+  return typeof nextUpdateAt === 'number' && nextUpdateAt < 0;
 }
 
-function shouldWriteNeedsUpdateMarker(skillId: string, now: number): boolean {
-  const lastMarkedAt = recentNeedsUpdateMark.get(skillId);
-  if (lastMarkedAt && now - lastMarkedAt < NEEDS_UPDATE_MARK_WINDOW_MS) {
-    return false;
-  }
-
-  recentNeedsUpdateMark.set(skillId, now);
-  if (recentNeedsUpdateMark.size > MAX_MARKED_UPDATE_ENTRIES) {
-    pruneExpiredEntries(recentNeedsUpdateMark, now, NEEDS_UPDATE_MARK_WINDOW_MS);
-  }
-
-  return true;
+export function buildImmediateRefreshNextUpdateAt(occurredAt: number): number {
+  const normalizedOccurredAt = Number.isFinite(occurredAt)
+    ? Math.max(1, Math.floor(occurredAt))
+    : Date.now();
+  return -normalizedOccurredAt;
 }
 
 export function getSkillUpdateInterval(tier: SkillTier | null | undefined): number {
@@ -65,7 +51,15 @@ export function shouldMarkSkillNeedsUpdate(input: {
   lastAccessedAt: number | null;
   occurredAt: number;
 }): boolean {
+  if (isImmediateRefreshNextUpdateAt(input.nextUpdateAt)) {
+    return false;
+  }
+
   const tier = input.tier || 'cold';
+  if (tier === 'archived') {
+    return false;
+  }
+
   const updateInterval = getSkillUpdateInterval(tier);
 
   return (
@@ -75,18 +69,17 @@ export function shouldMarkSkillNeedsUpdate(input: {
   );
 }
 
-export async function markSkillNeedsUpdate(
-  env: Pick<DbEnv, 'KV'>,
-  skillId: string,
-  now: number
-): Promise<void> {
-  if (!env.KV || !shouldWriteNeedsUpdateMarker(skillId, now)) {
-    return;
+export function resolveNextUpdateAtAfterAccess(input: {
+  tier: SkillTier | null | undefined;
+  nextUpdateAt: number | null;
+  lastAccessedAt: number | null;
+  occurredAt: number;
+}): number | null {
+  if (!shouldMarkSkillNeedsUpdate(input)) {
+    return input.nextUpdateAt;
   }
 
-  await env.KV.put(`needs_update:${skillId}`, '1', {
-    expirationTtl: 60 * 60,
-  });
+  return buildImmediateRefreshNextUpdateAt(input.occurredAt);
 }
 
 /**
@@ -123,33 +116,34 @@ export async function recordSkillAccess(
 
     if (!skill) return;
 
+    const tier = skill.tier || 'cold';
+
     // Update access tracking
+    const nextUpdateAt = resolveNextUpdateAtAfterAccess({
+      tier,
+      nextUpdateAt: skill.next_update_at,
+      lastAccessedAt: skill.last_accessed_at,
+      occurredAt: now,
+    });
+
     await env.DB.prepare(`
       UPDATE skills
       SET last_accessed_at = ?,
           access_count_7d = access_count_7d + 1,
-          access_count_30d = access_count_30d + 1
+          access_count_30d = access_count_30d + 1,
+          next_update_at = ?
       WHERE id = ?
     `)
-      .bind(now, skillId)
+      .bind(now, nextUpdateAt, skillId)
       .run();
 
     // Handle archived skills - check for resurrection
-    const tier = skill.tier || 'cold';
     if (tier === 'archived') {
       // Trigger resurrection check asynchronously
       queueArchivedSkillResurrectionCheck(env, skillId).catch(console.error);
       return;
     }
 
-    if (shouldMarkSkillNeedsUpdate({
-      tier,
-      nextUpdateAt: skill.next_update_at,
-      lastAccessedAt: skill.last_accessed_at,
-      occurredAt: now,
-    })) {
-      await markSkillNeedsUpdate(env, skillId, now);
-    }
   } catch (error) {
     console.error('Error recording skill access:', error);
   }

@@ -4,6 +4,7 @@ export interface BaseEnv {
   DB: D1Database;
   KV: KVNamespace;
   R2: R2Bucket;
+  WORKER_ANALYTICS?: AnalyticsEngineDataset;
   PUBLIC_APP_URL?: string;
   GITHUB_TOKEN?: string;
   GITHUB_TOKENS?: string;
@@ -26,6 +27,7 @@ export interface GithubEventsEnv extends BaseEnv {
   GITHUB_SEARCH_DISCOVERY_QUERY?: string;
   GITHUB_SEARCH_DISCOVERY_PAGES?: string;
   GITHUB_SEARCH_DISCOVERY_PER_PAGE?: string;
+  GITHUB_SEARCH_DISCOVERY_INTERVAL_SECONDS?: string;
   GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS?: string;
   GITHUB_DISCOVERY_MIN_REST_REMAINING?: string;
   GITHUB_DISCOVERY_REST_RESERVE?: string;

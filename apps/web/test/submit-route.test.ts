@@ -959,6 +959,94 @@ describe('submit route', () => {
     ]);
   });
 
+  it('does not treat immediate trending refresh sentinels as an indexing refresh queue signal', async () => {
+    const queue = {
+      send: vi.fn(async () => undefined),
+    };
+    const db = buildDbMock({
+      '': {
+        slug: 'forker/toolbox',
+        tier: 'cold',
+        nextUpdateAt: -Date.now(),
+        indexedAt: Date.now() - 5 * 60 * 1000,
+      },
+    });
+
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          default_branch: 'main',
+          fork: false,
+          owner: { login: 'forker' },
+        });
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
+        return jsonResponse({
+          name: 'SKILL.md',
+          path: 'SKILL.md',
+          type: 'file',
+        });
+      }
+
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const { POST } = await import('../src/routes/api/submit/+server');
+    const response = await POST({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: db,
+          GITHUB_TOKEN: 'test-token',
+          INDEXING_QUEUE: queue,
+        },
+      },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: 'https://github.com/forker/toolbox',
+        }),
+      }),
+    } as never);
+
+    const payload = await response.json() as {
+      success: boolean;
+      submitted: number;
+      existing: number;
+      refreshQueued: number;
+      results: Array<{ path: string; status: string; slug?: string; refreshQueued?: boolean }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(payload.submitted).toBe(0);
+    expect(payload.existing).toBe(1);
+    expect(payload.refreshQueued).toBe(0);
+    expect(payload.results).toEqual([
+      {
+        path: 'SKILL.md',
+        status: 'exists',
+        slug: 'forker/toolbox',
+        refreshQueued: false,
+      },
+    ]);
+    expect(queue.send).not.toHaveBeenCalled();
+  });
+
   it('directly resurrects archived skills during root multi-submit before queueing remaining skills', async () => {
     const queue = {
       send: vi.fn(async () => undefined),

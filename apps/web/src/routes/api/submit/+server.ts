@@ -12,6 +12,7 @@ import type { SkillMdLocation, ScanResult } from '$lib/types';
 import { githubRequest } from '$lib/server/github-client/request';
 import { getCached } from '$lib/server/cache';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
+import { isImmediateRefreshNextUpdateAt } from '$lib/server/db/business/access';
 import { restoreArchivedSkillFromR2 } from '$lib/server/skill/resurrection';
 
 const log = createLogger('Submit');
@@ -273,6 +274,13 @@ function shouldQueueExistingSkillRefreshOnSubmit(
   }
 
   if (typeof existing.next_update_at === 'number') {
+    if (isImmediateRefreshNextUpdateAt(existing.next_update_at)) {
+      if (typeof existing.indexed_at !== 'number') {
+        return false;
+      }
+      return now - existing.indexed_at >= interval;
+    }
+
     return existing.next_update_at <= now;
   }
 

@@ -11,6 +11,7 @@
 import type { BaseEnv, SkillTier } from './shared/types';
 import { TIER_CONFIG } from './shared/types';
 import { getNextRecommendUpdateAt } from '../src/lib/server/ranking/recommend-precompute';
+import { isImmediateRefreshNextUpdateAt } from '../src/lib/server/db/business/access';
 
 interface TierRecalcEnv extends BaseEnv {}
 
@@ -18,6 +19,7 @@ interface SkillForTierCalc {
   id: string;
   stars: number;
   tier: SkillTier;
+  next_update_at: number | null;
   last_accessed_at: number | null;
   access_count_7d: number;
   access_count_30d: number;
@@ -82,6 +84,17 @@ function getNextUpdateTime(tier: SkillTier): number | null {
   return Date.now() + interval;
 }
 
+export function resolveTierRecalcNextUpdateAt(
+  currentNextUpdateAt: number | null,
+  nextTier: SkillTier
+): number | null {
+  if (isImmediateRefreshNextUpdateAt(currentNextUpdateAt)) {
+    return currentNextUpdateAt;
+  }
+
+  return getNextUpdateTime(nextTier);
+}
+
 /**
  * Reset access counts for expired windows
  */
@@ -141,7 +154,7 @@ async function recalculateTiers(env: TierRecalcEnv): Promise<{
     let rows: SkillForTierCalc[] = [];
     if (lastSeenId) {
       const result = await env.DB.prepare(`
-        SELECT id, stars, tier, last_accessed_at, access_count_7d, access_count_30d, last_commit_at
+        SELECT id, stars, tier, next_update_at, last_accessed_at, access_count_7d, access_count_30d, last_commit_at
         FROM skills
         WHERE visibility = 'public' AND id > ?
         ORDER BY id
@@ -152,7 +165,7 @@ async function recalculateTiers(env: TierRecalcEnv): Promise<{
       rows = result.results || [];
     } else {
       const result = await env.DB.prepare(`
-        SELECT id, stars, tier, last_accessed_at, access_count_7d, access_count_30d, last_commit_at
+        SELECT id, stars, tier, next_update_at, last_accessed_at, access_count_7d, access_count_30d, last_commit_at
         FROM skills
         WHERE visibility = 'public'
         ORDER BY id
@@ -177,7 +190,7 @@ async function recalculateTiers(env: TierRecalcEnv): Promise<{
         updates.push({
           id: skill.id,
           tier: newTier,
-          nextUpdateAt: getNextUpdateTime(newTier),
+          nextUpdateAt: resolveTierRecalcNextUpdateAt(skill.next_update_at, newTier),
         });
         changed++;
       }
@@ -227,21 +240,31 @@ async function recalculateTiers(env: TierRecalcEnv): Promise<{
   return { total, changed, byTier };
 }
 
-/**
- * Record metrics to KV
- */
-async function recordMetrics(
+function recordMetrics(
   env: TierRecalcEnv,
   stats: { total: number; changed: number; byTier: Record<SkillTier, number> }
-): Promise<void> {
-  const dateKey = `metrics:tier-recalc:${new Date().toISOString().slice(0, 10)}`;
+): void {
+  if (!env.WORKER_ANALYTICS) {
+    return;
+  }
 
-  await env.KV.put(dateKey, JSON.stringify({
-    ...stats,
-    timestamp: Date.now(),
-  }), {
-    expirationTtl: 30 * 24 * 60 * 60, // 30 days
-  });
+  try {
+    env.WORKER_ANALYTICS.writeDataPoint({
+      blobs: ['scheduled'],
+      doubles: [
+        stats.total,
+        stats.changed,
+        stats.byTier.hot,
+        stats.byTier.warm,
+        stats.byTier.cool,
+        stats.byTier.cold,
+        stats.byTier.archived,
+      ],
+      indexes: ['tier-recalc-run'],
+    });
+  } catch (error) {
+    console.error('Failed to write tier-recalc analytics datapoint:', error);
+  }
 }
 
 export default {
