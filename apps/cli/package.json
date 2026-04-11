@@ -14,7 +14,10 @@
     "dev": "rollup -c -w",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
-    "test": "vitest run"
+    "test": "pnpm run test:unit",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:preview": "vitest run --config vitest.config.ts",
+    "test:all": "pnpm run test:unit && pnpm run test:preview"
   },
   "dependencies": {
     "commander": "^12.1.0",

@@ -66,7 +66,10 @@
     "release:cli:major": "node scripts/cli-release.mjs publish --bump major",
     "release:cli:minor": "node scripts/cli-release.mjs publish --bump minor",
     "release:cli:patch": "node scripts/cli-release.mjs publish --bump patch",
-    "test:cli": "pnpm --filter ./apps/cli test"
+    "test:cli": "pnpm --filter ./apps/cli test",
+    "test:cli:unit": "pnpm --filter ./apps/cli test:unit",
+    "test:cli:preview": "pnpm --filter ./apps/cli test:preview",
+    "test:cli:all": "pnpm --filter ./apps/cli test:all"
   },
   "devDependencies": {
     "eslint": "^9.39.4",

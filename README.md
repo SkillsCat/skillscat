@@ -151,10 +151,11 @@ pnpm preview:web
 | `pnpm lint` | Run ESLint |
 | `pnpm db:generate` | Generate Drizzle migrations from schema changes |
 | `pnpm db:migrate` | Apply local D1 migrations |
-| `pnpm test:cli` | Run CLI tests |
+| `pnpm test:cli` | Run CLI unit tests |
+| `pnpm test:cli:preview` | Run CLI preview integration tests |
 | `pnpm deploy` | Deploy the web app |
 | `pnpm deploy:workers` | Deploy background workers |
-| `pnpm publish:cli` | Publish the CLI package |
+| `pnpm publish:cli` | Publish the CLI package without running tests |
 
 ## Web and CLI Notes
 

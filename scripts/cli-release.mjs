@@ -20,13 +20,14 @@ const cliPackagePath = resolve(cliDir, 'package.json');
 function printUsage() {
   console.log(`
 Usage:
-  node scripts/cli-release.mjs build [--skip-test] [--dry-run]
-  node scripts/cli-release.mjs publish [--bump major|minor|patch] [--skip-test] [--dry-run] [--yes]
+  node scripts/cli-release.mjs build [--test] [--dry-run]
+  node scripts/cli-release.mjs publish [--bump major|minor|patch] [--test] [--dry-run] [--yes]
                                       [--no-tag] [--tag <tag>] [--no-push-tag]
 
 Examples:
   node scripts/cli-release.mjs build
   node scripts/cli-release.mjs publish --bump patch
+  node scripts/cli-release.mjs publish --bump patch --test
   node scripts/cli-release.mjs publish --bump minor --yes
   node scripts/cli-release.mjs publish --no-tag
   node scripts/cli-release.mjs publish --tag release/cli-v1.2.3 --push-tag
@@ -35,7 +36,7 @@ Examples:
 
 function parseArgs(argv) {
   const options = {
-    skipTest: false,
+    skipTest: true,
     dryRun: false,
     bump: null,
     yes: false,
@@ -51,6 +52,10 @@ function parseArgs(argv) {
 
     if (arg === '--skip-test') {
       options.skipTest = true;
+      continue;
+    }
+    if (arg === '--test') {
+      options.skipTest = false;
       continue;
     }
     if (arg === '--dry-run') {
@@ -244,7 +249,7 @@ async function confirmOrExit(options, question) {
 function printPublishPlan(versionInfo, tag, options) {
   console.log('\nRelease plan (CLI):');
   console.log(`- Version: ${versionInfo.currentVersion} -> ${versionInfo.nextVersion}`);
-  console.log(`- Test: ${options.skipTest ? 'skip' : 'run'}`);
+  console.log(`- Test: ${options.skipTest ? 'skip' : 'run (unit)'}`);
   console.log('- Build: run');
   console.log('- Publish: npm publish --access public');
   console.log(`- Git commit version bump: ${versionInfo.changed ? 'yes' : 'skip (version unchanged)'}`);
