@@ -17,11 +17,19 @@ const projectRoot = resolve(__dirname, '..');
 const cliDir = resolve(projectRoot, 'apps/cli');
 const cliPackagePath = resolve(cliDir, 'package.json');
 
+class StepError extends Error {
+  constructor(message, exitCode = 1) {
+    super(message);
+    this.name = 'StepError';
+    this.exitCode = exitCode;
+  }
+}
+
 function printUsage() {
   console.log(`
 Usage:
   node scripts/cli-release.mjs build [--test] [--dry-run]
-  node scripts/cli-release.mjs publish [--bump major|minor|patch] [--test] [--dry-run] [--yes]
+  node scripts/cli-release.mjs publish [--bump major|minor|patch] [--no-bump] [--test] [--dry-run] [--yes]
                                       [--no-tag] [--tag <tag>] [--no-push-tag]
 
 Examples:
@@ -39,6 +47,9 @@ function parseArgs(argv) {
     skipTest: true,
     dryRun: false,
     bump: null,
+    noBump: false,
+    bumpProvided: false,
+    noBumpProvided: false,
     yes: false,
     noTag: false,
     tag: '',
@@ -56,6 +67,12 @@ function parseArgs(argv) {
     }
     if (arg === '--test') {
       options.skipTest = false;
+      continue;
+    }
+    if (arg === '--no-bump') {
+      options.bump = null;
+      options.noBump = true;
+      options.noBumpProvided = true;
       continue;
     }
     if (arg === '--dry-run') {
@@ -84,6 +101,8 @@ function parseArgs(argv) {
         throw new Error('--bump requires major | minor | patch');
       }
       options.bump = value;
+      options.noBump = false;
+      options.bumpProvided = true;
       i += 1;
       continue;
     }
@@ -93,6 +112,8 @@ function parseArgs(argv) {
         throw new Error('--bump requires major | minor | patch');
       }
       options.bump = value;
+      options.noBump = false;
+      options.bumpProvided = true;
       continue;
     }
     if (arg === '--tag') {
@@ -118,6 +139,9 @@ function parseArgs(argv) {
 
   if (options.noTag && options.tag) {
     throw new Error('Cannot use --no-tag and --tag together');
+  }
+  if (options.bumpProvided && options.noBumpProvided) {
+    throw new Error('Cannot use --bump and --no-bump together');
   }
 
   return options;
@@ -170,12 +194,22 @@ function runStep(label, command, args, options = {}) {
     encoding: capture ? 'utf8' : undefined
   });
 
+  if (result.error) {
+    throw new StepError(
+      `[${label}] ${display} failed: ${result.error.message}`,
+      result.status ?? 1
+    );
+  }
+
   if (result.status !== 0) {
     const stderr = capture ? (result.stderr ?? '').trim() : '';
     if (stderr) {
       console.error(stderr);
     }
-    process.exit(result.status ?? 1);
+    throw new StepError(
+      `[${label}] ${display} failed with exit code ${result.status ?? 1}`,
+      result.status ?? 1
+    );
   }
 
   return {
@@ -189,27 +223,62 @@ function getCliVersion() {
   return pkg.version ?? INITIAL_VERSION;
 }
 
-function maybeBumpCliVersion(options) {
-  const pkg = readJson(cliPackagePath);
+function ensureDefaultBump(options) {
+  if (options.bump || options.noBump) {
+    return;
+  }
+
+  options.bump = 'patch';
+  console.log('[bump] No --bump provided, defaulting to patch.');
+}
+
+function prepareCliVersion(options) {
+  const originalContent = readFileSync(cliPackagePath, 'utf8');
+  const pkg = JSON.parse(originalContent);
   const currentVersion = pkg.version ?? INITIAL_VERSION;
   const nextVersion = options.bump ? bumpVersion(currentVersion, options.bump) : currentVersion;
   const changed = currentVersion !== nextVersion;
 
   console.log(`CLI version: ${currentVersion}${nextVersion !== currentVersion ? ` -> ${nextVersion}` : ''}`);
 
-  if (!options.bump) {
-    return { currentVersion, nextVersion, changed };
+  return {
+    currentVersion,
+    nextVersion,
+    changed,
+    originalContent,
+    applied: false
+  };
+}
+
+function applyCliVersion(versionInfo, options) {
+  if (!versionInfo.changed) {
+    return;
   }
 
   if (options.dryRun) {
     console.log('[version] Dry-run enabled, apps/cli/package.json will not be changed.');
-    return { currentVersion, nextVersion, changed };
+    return;
   }
 
-  pkg.version = nextVersion;
+  const pkg = JSON.parse(versionInfo.originalContent);
+  pkg.version = versionInfo.nextVersion;
   writeJson(cliPackagePath, pkg);
-  console.log(`[version] Updated apps/cli/package.json -> ${nextVersion}`);
-  return { currentVersion, nextVersion, changed };
+  versionInfo.applied = true;
+  console.log(`[version] Updated apps/cli/package.json -> ${versionInfo.nextVersion}`);
+}
+
+function rollbackCliVersion(versionInfo) {
+  if (!versionInfo?.applied) {
+    return;
+  }
+
+  try {
+    writeFileSync(cliPackagePath, versionInfo.originalContent);
+    versionInfo.applied = false;
+    console.log(`[rollback] Restored apps/cli/package.json -> ${versionInfo.currentVersion}`);
+  } catch (error) {
+    console.error(`[rollback] Failed to restore apps/cli/package.json: ${error.message}`);
+  }
 }
 
 function resolveTag(version, options) {
@@ -317,18 +386,27 @@ function runTagFlow(tag, version, options) {
 }
 
 async function runPublish(options) {
-  const versionInfo = maybeBumpCliVersion(options);
+  ensureDefaultBump(options);
+  const versionInfo = prepareCliVersion(options);
   const tag = resolveTag(versionInfo.nextVersion, options);
 
   assertTagNotExists(tag, options);
   printPublishPlan(versionInfo, tag, options);
   await confirmOrExit(options, 'Continue CLI publish');
 
-  runBuild(options);
-  runStep('publish', 'npm', ['publish', '--access', 'public'], {
-    cwd: cliDir,
-    dryRun: options.dryRun
-  });
+  applyCliVersion(versionInfo, options);
+
+  try {
+    runBuild(options);
+    runStep('publish', 'npm', ['publish', '--access', 'public'], {
+      cwd: cliDir,
+      dryRun: options.dryRun
+    });
+  } catch (error) {
+    rollbackCliVersion(versionInfo);
+    throw error;
+  }
+
   runPublishGitFlow(versionInfo, options);
   runTagFlow(tag, versionInfo.nextVersion, options);
 
@@ -362,6 +440,8 @@ async function main() {
 
 main().catch((error) => {
   console.error(`[cli-release] ${error.message}`);
-  printUsage();
-  process.exit(1);
+  if (!(error instanceof StepError)) {
+    printUsage();
+  }
+  process.exit(error.exitCode ?? 1);
 });

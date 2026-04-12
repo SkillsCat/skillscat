@@ -11,13 +11,6 @@ const INITIAL_VERSION = '0.1.0';
 const DEFAULT_TAG_PREFIX = 'web/v';
 const ALLOWED_BUMPS = new Set(['major', 'minor', 'patch']);
 const ALLOWED_WORKER_ENVS = new Set(['production', 'local']);
-const ANSI = {
-  reset: '\x1b[0m',
-  bold: '\x1b[1m',
-  cyan: '\x1b[36m',
-  yellow: '\x1b[33m',
-  dim: '\x1b[2m'
-};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -25,16 +18,23 @@ const projectRoot = resolve(__dirname, '..');
 const webDir = resolve(projectRoot, 'apps/web');
 const webPackagePath = resolve(webDir, 'package.json');
 
+class StepError extends Error {
+  constructor(message, exitCode = 1) {
+    super(message);
+    this.name = 'StepError';
+    this.exitCode = exitCode;
+  }
+}
+
 function printUsage() {
   console.log(`
 Usage:
   node scripts/web-release.mjs build [--dry-run]
-  node scripts/web-release.mjs deploy [--bump major|minor|patch] [--skip-build] [--dry-run] [--yes]
+  node scripts/web-release.mjs deploy [--bump major|minor|patch] [--no-bump] [--skip-build] [--dry-run] [--yes]
                                       [--no-tag] [--tag <tag>] [--no-push-tag]
-  node scripts/web-release.mjs deploy-all [--bump major|minor|patch] [--skip-build] [--dry-run] [--yes]
+  node scripts/web-release.mjs deploy-all [--bump major|minor|patch] [--no-bump] [--skip-build] [--dry-run] [--yes]
                                           [--no-tag] [--tag <tag>] [--no-push-tag]
                                           [--workers-env production|local]
-                                          (interactive bump prompt when --bump is omitted)
 
 Examples:
   node scripts/web-release.mjs deploy --bump patch
@@ -47,6 +47,9 @@ Examples:
 function parseArgs(argv) {
   const options = {
     bump: null,
+    noBump: false,
+    bumpProvided: false,
+    noBumpProvided: false,
     skipBuild: false,
     dryRun: false,
     yes: false,
@@ -63,6 +66,12 @@ function parseArgs(argv) {
 
     if (arg === '--skip-build') {
       options.skipBuild = true;
+      continue;
+    }
+    if (arg === '--no-bump') {
+      options.bump = null;
+      options.noBump = true;
+      options.noBumpProvided = true;
       continue;
     }
     if (arg === '--dry-run') {
@@ -91,6 +100,8 @@ function parseArgs(argv) {
         throw new Error('--bump requires major | minor | patch');
       }
       options.bump = value;
+      options.noBump = false;
+      options.bumpProvided = true;
       i += 1;
       continue;
     }
@@ -100,6 +111,8 @@ function parseArgs(argv) {
         throw new Error('--bump requires major | minor | patch');
       }
       options.bump = value;
+      options.noBump = false;
+      options.bumpProvided = true;
       continue;
     }
     if (arg === '--tag') {
@@ -143,6 +156,9 @@ function parseArgs(argv) {
   if (options.noTag && options.tag) {
     throw new Error('Cannot use --no-tag and --tag together');
   }
+  if (options.bumpProvided && options.noBumpProvided) {
+    throw new Error('Cannot use --bump and --no-bump together');
+  }
 
   return options;
 }
@@ -153,10 +169,6 @@ function readJson(filePath) {
 
 function writeJson(filePath, value) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
-}
-
-function style(text, code) {
-  return output.isTTY ? `${code}${text}${ANSI.reset}` : text;
 }
 
 function bumpVersion(version, bumpType) {
@@ -198,12 +210,22 @@ function runStep(label, command, args, options = {}) {
     encoding: capture ? 'utf8' : undefined
   });
 
+  if (result.error) {
+    throw new StepError(
+      `[${label}] ${display} failed: ${result.error.message}`,
+      result.status ?? 1
+    );
+  }
+
   if (result.status !== 0) {
     const stderr = capture ? (result.stderr ?? '').trim() : '';
     if (stderr) {
       console.error(stderr);
     }
-    process.exit(result.status ?? 1);
+    throw new StepError(
+      `[${label}] ${display} failed with exit code ${result.status ?? 1}`,
+      result.status ?? 1
+    );
   }
 
   return {
@@ -217,69 +239,62 @@ function getWebVersion() {
   return pkg.version ?? INITIAL_VERSION;
 }
 
-function maybeBumpWebVersion(options) {
-  const pkg = readJson(webPackagePath);
+function ensureDefaultBump(options) {
+  if (options.bump || options.noBump) {
+    return;
+  }
+
+  options.bump = 'patch';
+  console.log('[bump] No --bump provided, defaulting to patch.');
+}
+
+function prepareWebVersion(options) {
+  const originalContent = readFileSync(webPackagePath, 'utf8');
+  const pkg = JSON.parse(originalContent);
   const currentVersion = pkg.version ?? INITIAL_VERSION;
   const nextVersion = options.bump ? bumpVersion(currentVersion, options.bump) : currentVersion;
   const changed = currentVersion !== nextVersion;
 
   console.log(`Web version: ${currentVersion}${nextVersion !== currentVersion ? ` -> ${nextVersion}` : ''}`);
 
-  if (!options.bump) {
-    return { currentVersion, nextVersion, changed };
+  return {
+    currentVersion,
+    nextVersion,
+    changed,
+    originalContent,
+    applied: false
+  };
+}
+
+function applyWebVersion(versionInfo, options) {
+  if (!versionInfo.changed) {
+    return;
   }
 
   if (options.dryRun) {
     console.log('[version] Dry-run enabled, apps/web/package.json will not be changed.');
-    return { currentVersion, nextVersion, changed };
+    return;
   }
 
-  pkg.version = nextVersion;
+  const pkg = JSON.parse(versionInfo.originalContent);
+  pkg.version = versionInfo.nextVersion;
   writeJson(webPackagePath, pkg);
-  console.log(`[version] Updated apps/web/package.json -> ${nextVersion}`);
-  return { currentVersion, nextVersion, changed };
+  versionInfo.applied = true;
+  console.log(`[version] Updated apps/web/package.json -> ${versionInfo.nextVersion}`);
 }
 
-function buildDeployAllBumpChoices(currentVersion) {
-  return [
-    {
-      key: '1',
-      label: 'major',
-      bump: 'major',
-      nextVersion: bumpVersion(currentVersion, 'major'),
-      aliases: ['major']
-    },
-    {
-      key: '2',
-      label: 'minor',
-      bump: 'minor',
-      nextVersion: bumpVersion(currentVersion, 'minor'),
-      aliases: ['minor']
-    },
-    {
-      key: '3',
-      label: 'patch',
-      bump: 'patch',
-      nextVersion: bumpVersion(currentVersion, 'patch'),
-      aliases: ['patch'],
-      recommended: true
-    },
-    {
-      key: '4',
-      label: 'no bump',
-      bump: null,
-      nextVersion: currentVersion,
-      aliases: ['no-bump', 'no bump', 'none', 'skip']
-    }
-  ];
-}
+function rollbackWebVersion(versionInfo) {
+  if (!versionInfo?.applied) {
+    return;
+  }
 
-function getRecommendedDeployAllBumpChoice(choices) {
-  return (
-    choices.find((choice) => choice.recommended) ??
-    choices.find((choice) => choice.bump === 'patch') ??
-    choices[0]
-  );
+  try {
+    writeFileSync(webPackagePath, versionInfo.originalContent);
+    versionInfo.applied = false;
+    console.log(`[rollback] Restored apps/web/package.json -> ${versionInfo.currentVersion}`);
+  } catch (error) {
+    console.error(`[rollback] Failed to restore apps/web/package.json: ${error.message}`);
+  }
 }
 
 function resolveTag(version, options) {
@@ -313,74 +328,6 @@ async function confirmOrExit(options, question) {
   } finally {
     rl.close();
   }
-}
-
-async function ensureDeployAllBump(options) {
-  if (options.bump) return;
-
-  const currentVersion = getWebVersion();
-  const bumpChoices = buildDeployAllBumpChoices(currentVersion);
-  const recommendedChoice = getRecommendedDeployAllBumpChoice(bumpChoices);
-
-  if (options.yes) {
-    options.bump = recommendedChoice.bump;
-    console.log(`[bump] --yes provided without --bump, defaulting to ${recommendedChoice.label}.`);
-    return;
-  }
-
-  if (!input.isTTY) {
-    throw new Error('deploy-all requires --bump major|minor|patch in non-interactive mode.');
-  }
-
-  const sep = '------------------------------------------------------------';
-  console.log(`\n${sep}`);
-  console.log(style('Deploy-All Version Selection', `${ANSI.bold}${ANSI.cyan}`));
-  console.log(`Current version : ${currentVersion}`);
-  for (const choice of bumpChoices) {
-    const versionDisplay =
-      choice.bump === null
-        ? `keep ${currentVersion}`
-        : `${currentVersion} -> ${choice.nextVersion}`;
-    const recommendDisplay = choice.recommended ? ` ${style('(recommended)', ANSI.dim)}` : '';
-    console.log(`${choice.key}) ${choice.label.padEnd(12)}: ${versionDisplay}${recommendDisplay}`);
-  }
-  console.log(style('Tip: no bump may conflict with an existing tag unless you use --no-tag or --tag.', ANSI.dim));
-  console.log(sep);
-
-  const rl = createInterface({ input, output });
-  try {
-    while (true) {
-      const answer = (
-        await rl.question(
-          style(
-            `Choose [${bumpChoices.map((choice) => choice.key).join('/')}] (default: ${recommendedChoice.key}): `,
-            ANSI.yellow
-          )
-        )
-      )
-        .trim()
-        .toLowerCase();
-
-      if (!answer) {
-        options.bump = recommendedChoice.bump;
-        break;
-      }
-
-      const selectedChoice = bumpChoices.find(
-        (choice) => answer === choice.key || choice.aliases.includes(answer)
-      );
-      if (selectedChoice) {
-        options.bump = selectedChoice.bump;
-        break;
-      }
-
-      console.log('Invalid choice. Please input 1, 2, 3, 4, major, minor, patch, or none.');
-    }
-  } finally {
-    rl.close();
-  }
-
-  console.log(`[bump] Selected: ${options.bump ?? 'no bump'}`);
 }
 
 function printPlan(mode, versionInfo, tag, options) {
@@ -474,11 +421,8 @@ function runTagFlow(tag, version, options) {
 }
 
 async function runDeploy(command, options) {
-  if (command === 'deploy-all') {
-    await ensureDeployAllBump(options);
-  }
-
-  const versionInfo = maybeBumpWebVersion(options);
+  ensureDefaultBump(options);
+  const versionInfo = prepareWebVersion(options);
   const tag = resolveTag(versionInfo.nextVersion, options);
 
   assertTagNotExists(tag, options);
@@ -490,14 +434,21 @@ async function runDeploy(command, options) {
       : 'Continue web deploy'
   );
 
-  if (!options.skipBuild) {
-    runWebBuild(options);
-  }
+  applyWebVersion(versionInfo, options);
 
-  runWebDeploy(options);
+  try {
+    if (!options.skipBuild) {
+      runWebBuild(options);
+    }
 
-  if (command === 'deploy-all') {
-    runWorkersDeploy(options);
+    runWebDeploy(options);
+
+    if (command === 'deploy-all') {
+      runWorkersDeploy(options);
+    }
+  } catch (error) {
+    rollbackWebVersion(versionInfo);
+    throw error;
   }
 
   runVersionCommitFlow(versionInfo, options);
@@ -537,6 +488,8 @@ async function main() {
 
 main().catch((error) => {
   console.error(`[web-release] ${error.message}`);
-  printUsage();
-  process.exit(1);
+  if (!(error instanceof StepError)) {
+    printUsage();
+  }
+  process.exit(error.exitCode ?? 1);
 });
