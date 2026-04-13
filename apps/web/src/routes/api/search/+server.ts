@@ -3,7 +3,11 @@ import type { RequestHandler } from './$types';
 import { CATEGORIES } from '$lib/constants';
 import type { ApiResponse } from '$lib/types';
 import { getCached } from '$lib/server/cache';
-import { computeSearchScore, normalizeSearchText } from '$lib/server/ranking/search-precompute';
+import {
+  computeSearchScore,
+  normalizeSearchText,
+  SEARCH_SUGGESTION_MAX_PREFIX_LENGTH,
+} from '$lib/server/ranking/search-precompute';
 import { buildPrefixRange, type PrefixRange } from '$lib/server/text/prefix-range';
 
 const MIN_QUERY_LENGTH = 2;
@@ -17,6 +21,7 @@ const TERM_CANDIDATE_LIMIT_MULTIPLIER = 4;
 const PREFIX_CANDIDATE_LIMIT_MULTIPLIER = 3;
 const CATEGORY_CANDIDATE_LIMIT_MULTIPLIER = 2;
 const MAX_CANDIDATE_LIMIT = 80;
+const PREFIX_INDEX_MAX_ROWS_PER_TOKEN = 24;
 const MAX_MATCHED_CATEGORIES = 4;
 const MAX_QUERY_TOKENS = 8;
 const MIN_QUERY_TOKEN_LENGTH = 2;
@@ -27,6 +32,7 @@ const TOKEN_SPLIT_REGEX = /[^\p{L}\p{N}]+/u;
 
 let hasSkillSearchStateTable: boolean | null = null;
 let hasSkillSearchTermsTable: boolean | null = null;
+let hasSkillSearchPrefixesTable: boolean | null = null;
 
 interface SearchSuggestionSkill {
   id: string;
@@ -118,6 +124,18 @@ function splitQueryTokens(query: string): string[] {
     if (!term || term.length < MIN_QUERY_TOKEN_LENGTH) continue;
     dedup.add(term);
     if (dedup.size >= MAX_QUERY_TOKENS) break;
+  }
+
+  return Array.from(dedup);
+}
+
+function buildSuggestionPrefixTokens(queryTokens: string[]): string[] {
+  const dedup = new Set<string>();
+
+  for (const token of queryTokens) {
+    const normalized = normalizeText(token);
+    if (!normalized) continue;
+    dedup.add(normalized.slice(0, SEARCH_SUGGESTION_MAX_PREFIX_LENGTH));
   }
 
   return Array.from(dedup);
@@ -500,6 +518,102 @@ async function fetchTermCandidates(
   return Array.from(merged.values());
 }
 
+async function fetchPrefixCandidates(
+  db: D1Database,
+  prefixTokens: string[],
+  limit: number,
+  useSearchState: boolean,
+  category: string
+): Promise<SearchCandidateRow[]> {
+  if (prefixTokens.length === 0) return [];
+
+  const candidateLimit = getCandidateLimit(limit, TERM_CANDIDATE_LIMIT_MULTIPLIER);
+  const perTokenLimit = Math.min(
+    PREFIX_INDEX_MAX_ROWS_PER_TOKEN,
+    Math.max(limit, Math.ceil(candidateLimit / Math.max(prefixTokens.length, 1)))
+  );
+  const searchStateJoinSql = useSearchState ? 'LEFT JOIN skill_search_state ss ON ss.skill_id = s.id' : '';
+  const searchScoreSelectSql = useSearchState ? 'ss.score as precomputedScore' : 'NULL as precomputedScore';
+  const searchScoreOrderSql = useSearchState ? 'COALESCE(ss.score, 0) DESC,' : '';
+  const categoryJoinSql = category
+    ? `
+      INNER JOIN skill_categories sc INDEXED BY skill_categories_category_skill_idx
+        ON sc.skill_id = sp.skill_id
+       AND sc.category_slug = ?
+    `
+    : '';
+  const categoryParams = category ? [category] : [];
+
+  const perPrefixSql = prefixTokens
+    .map(() => `
+      SELECT skillId, weight FROM (
+        SELECT
+          sp.skill_id as skillId,
+          sp.weight as weight
+        FROM skill_search_prefixes sp INDEXED BY skill_search_prefixes_prefix_weight_skill_idx
+        ${categoryJoinSql}
+        WHERE sp.prefix = ?
+        ORDER BY sp.weight DESC, sp.skill_id ASC
+        LIMIT ?
+      )
+    `)
+    .join('\n      UNION ALL\n');
+  const perPrefixParams = prefixTokens.flatMap((prefix) => [
+    ...categoryParams,
+    prefix,
+    perTokenLimit,
+  ]);
+
+  const rows = await db.prepare(`
+    WITH matched_prefixes AS (
+      SELECT
+        skillId,
+        COUNT(*) as matchedTermCount,
+        MAX(weight) as matchedTermWeight,
+        SUM(weight) as matchedPrefixTotalWeight
+      FROM (
+        ${perPrefixSql}
+      )
+      GROUP BY skillId
+    )
+    SELECT
+      s.id,
+      s.name,
+      s.slug,
+      s.description,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.stars,
+      a.avatar_url as authorAvatar,
+      ${searchScoreSelectSql},
+      s.trending_score as trendingScore,
+      s.download_count_30d as downloadCount30d,
+      s.download_count_90d as downloadCount90d,
+      s.access_count_30d as accessCount30d,
+      s.last_commit_at as lastCommitAt,
+      s.updated_at as updatedAt,
+      s.tier,
+      matched.matchedTermCount as matchedTermCount,
+      matched.matchedTermWeight as matchedTermWeight
+    FROM matched_prefixes matched
+    JOIN skills s ON s.id = matched.skillId
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    ${searchStateJoinSql}
+    WHERE s.visibility = 'public'
+    ORDER BY
+      matched.matchedTermCount DESC,
+      matched.matchedPrefixTotalWeight DESC,
+      matched.matchedTermWeight DESC,
+      ${searchScoreOrderSql}
+      s.trending_score DESC
+    LIMIT ?
+  `)
+    .bind(...perPrefixParams, candidateLimit)
+    .all<SearchCandidateRow>();
+
+  return rows.results || [];
+}
+
 async function fetchTextCandidates(
   db: D1Database,
   query: string,
@@ -707,6 +821,147 @@ async function fetchTextCandidates(
   return Array.from(merged.values());
 }
 
+async function fetchTextPrefixCandidates(
+  db: D1Database,
+  query: string,
+  limit: number,
+  useSearchState: boolean,
+  excludedIds: string[],
+  category: string
+): Promise<SearchCandidateRow[]> {
+  const prefixRange = buildPrefixRange(query);
+  const prefixLimit = getCandidateLimit(limit, PREFIX_CANDIDATE_LIMIT_MULTIPLIER);
+  const prefixPerColumnLimit = Math.max(limit, Math.ceil(prefixLimit / 2));
+  const searchStateJoinSql = useSearchState ? 'LEFT JOIN skill_search_state ss ON ss.skill_id = s.id' : '';
+  const searchScoreSelectSql = useSearchState ? 'ss.score as precomputedScore' : 'NULL as precomputedScore';
+  const searchScoreOrderSql = useSearchState ? 'COALESCE(ss.score, 0) DESC,' : '';
+  const prefixExclusion = buildExclusionClause(excludedIds, 's.id');
+  const categorySql = category
+    ? `
+          AND EXISTS (
+            SELECT 1
+            FROM skill_categories sc INDEXED BY skill_categories_category_skill_idx
+            WHERE sc.category_slug = ?
+              AND sc.skill_id = s.id
+          )
+    `
+    : '';
+  const categoryParams = category ? [category] : [];
+  const prefixParams = buildLowerPrefixParams(prefixRange);
+  const exactQuery = query;
+  const prefixLike = `${query}%`;
+
+  const prefixRows = await db.prepare(`
+    WITH prefix_ids AS (
+      SELECT id FROM (
+        SELECT id
+        FROM skills s INDEXED BY skills_visibility_lower_name_idx
+        WHERE s.visibility = 'public'
+          AND ${buildLowerPrefixPredicate('s.name', prefixRange)}
+          ${categorySql}
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT id FROM (
+        SELECT id
+        FROM skills s INDEXED BY skills_visibility_lower_slug_idx
+        WHERE s.visibility = 'public'
+          AND ${buildLowerPrefixPredicate('s.slug', prefixRange)}
+          ${categorySql}
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT id FROM (
+        SELECT id
+        FROM skills s INDEXED BY skills_visibility_lower_repo_owner_idx
+        WHERE s.visibility = 'public'
+          AND ${buildLowerPrefixPredicate('s.repo_owner', prefixRange)}
+          ${categorySql}
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT id FROM (
+        SELECT id
+        FROM skills s INDEXED BY skills_visibility_lower_repo_name_idx
+        WHERE s.visibility = 'public'
+          AND ${buildLowerPrefixPredicate('s.repo_name', prefixRange)}
+          ${categorySql}
+        LIMIT ?
+      )
+    ),
+    dedup_ids AS (
+      SELECT id
+      FROM prefix_ids
+      GROUP BY id
+      LIMIT ?
+    )
+    SELECT
+      s.id,
+      s.name,
+      s.slug,
+      s.description,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.stars,
+      a.avatar_url as authorAvatar,
+      ${searchScoreSelectSql},
+      s.trending_score as trendingScore,
+      s.download_count_30d as downloadCount30d,
+      s.download_count_90d as downloadCount90d,
+      s.access_count_30d as accessCount30d,
+      s.last_commit_at as lastCommitAt,
+      s.updated_at as updatedAt,
+      s.tier
+    FROM dedup_ids d
+    CROSS JOIN skills s
+    LEFT JOIN authors a ON s.repo_owner = a.username
+    ${searchStateJoinSql}
+    WHERE s.id = d.id
+      ${prefixExclusion.sql}
+    ORDER BY
+      CASE
+        WHEN LOWER(s.name) = ? THEN 0
+        WHEN LOWER(s.slug) = ? THEN 1
+        WHEN LOWER(s.repo_owner) = ? THEN 2
+        WHEN LOWER(s.repo_name) = ? THEN 3
+        WHEN LOWER(s.name) LIKE ? THEN 4
+        WHEN LOWER(s.slug) LIKE ? THEN 5
+        WHEN LOWER(s.repo_owner) LIKE ? THEN 6
+        WHEN LOWER(s.repo_name) LIKE ? THEN 7
+        ELSE 8
+      END ASC,
+      ${searchScoreOrderSql}
+      s.trending_score DESC
+    LIMIT ?
+  `).bind(
+    ...prefixParams,
+    ...categoryParams,
+    prefixPerColumnLimit,
+    ...prefixParams,
+    ...categoryParams,
+    prefixPerColumnLimit,
+    ...prefixParams,
+    ...categoryParams,
+    prefixPerColumnLimit,
+    ...prefixParams,
+    ...categoryParams,
+    prefixPerColumnLimit,
+    prefixLimit,
+    ...prefixExclusion.params,
+    exactQuery,
+    exactQuery,
+    exactQuery,
+    exactQuery,
+    prefixLike,
+    prefixLike,
+    prefixLike,
+    prefixLike,
+    prefixLimit
+  ).all<SearchCandidateRow>();
+
+  return prefixRows.results || [];
+}
+
 async function fetchCategoryCandidates(
   db: D1Database,
   categorySlugs: string[],
@@ -773,29 +1028,42 @@ async function fetchCategoryCandidates(
   return result.results || [];
 }
 
-async function resolveSearchTableSupport(db: D1Database): Promise<{ searchState: boolean; searchTerms: boolean }> {
-  if (hasSkillSearchStateTable !== null && hasSkillSearchTermsTable !== null) {
-    return { searchState: hasSkillSearchStateTable, searchTerms: hasSkillSearchTermsTable };
+async function resolveSearchTableSupport(
+  db: D1Database
+): Promise<{ searchState: boolean; searchTerms: boolean; searchPrefixes: boolean }> {
+  if (
+    hasSkillSearchStateTable !== null
+    && hasSkillSearchTermsTable !== null
+    && hasSkillSearchPrefixesTable !== null
+  ) {
+    return {
+      searchState: hasSkillSearchStateTable,
+      searchTerms: hasSkillSearchTermsTable,
+      searchPrefixes: hasSkillSearchPrefixesTable,
+    };
   }
 
   try {
     const result = await db.prepare(`
       SELECT name
       FROM sqlite_master
-      WHERE type = 'table' AND name IN ('skill_search_state', 'skill_search_terms')
+      WHERE type = 'table' AND name IN ('skill_search_state', 'skill_search_terms', 'skill_search_prefixes')
     `).all<{ name: string }>();
 
     const names = new Set((result.results || []).map((row) => row.name));
     hasSkillSearchStateTable = names.has('skill_search_state');
     hasSkillSearchTermsTable = names.has('skill_search_terms');
+    hasSkillSearchPrefixesTable = names.has('skill_search_prefixes');
   } catch {
     hasSkillSearchStateTable = false;
     hasSkillSearchTermsTable = false;
+    hasSkillSearchPrefixesTable = false;
   }
 
   return {
     searchState: Boolean(hasSkillSearchStateTable),
-    searchTerms: Boolean(hasSkillSearchTermsTable)
+    searchTerms: Boolean(hasSkillSearchTermsTable),
+    searchPrefixes: Boolean(hasSkillSearchPrefixesTable),
   };
 }
 
@@ -807,6 +1075,8 @@ async function fetchSuggestions(
 ): Promise<SearchSuggestionsResult> {
   const tableSupport = await resolveSearchTableSupport(db);
   const queryTokens = splitQueryTokens(query);
+  const prefixTokens = buildSuggestionPrefixTokens(queryTokens);
+  const hasLongPrefixToken = queryTokens.some((token) => token.length > SEARCH_SUGGESTION_MAX_PREFIX_LENGTH);
 
   const matchedCategories = category ? [] : matchCategories(query);
   const matchedCategorySlugs = matchedCategories.map((item) => item.slug);
@@ -816,15 +1086,50 @@ async function fetchSuggestions(
     .sort((a, b) => (matchedCategoryMap.get(a.slug) ?? 0) - (matchedCategoryMap.get(b.slug) ?? 0));
 
   const textCandidates = new Map<string, SearchCandidateRow>();
+  const usedPrefixIndex = tableSupport.searchPrefixes && prefixTokens.length > 0;
 
-  if (tableSupport.searchTerms && queryTokens.length > 0) {
+  if (usedPrefixIndex) {
+    const prefixCandidates = await fetchPrefixCandidates(db, prefixTokens, limit, tableSupport.searchState, category);
+    for (const row of prefixCandidates) {
+      textCandidates.set(row.id, row);
+    }
+  }
+
+  const shouldFallbackToTermIndex = (
+    tableSupport.searchTerms
+    && queryTokens.length > 0
+    && (!usedPrefixIndex || textCandidates.size === 0)
+  );
+
+  if (shouldFallbackToTermIndex) {
     const termCandidates = await fetchTermCandidates(db, queryTokens, limit, tableSupport.searchState, category);
     for (const row of termCandidates) {
       textCandidates.set(row.id, row);
     }
   }
 
-  const shouldUseTextFallback = !category || !tableSupport.searchTerms;
+  if (usedPrefixIndex && hasLongPrefixToken) {
+    const precisionRows = await fetchTextPrefixCandidates(
+      db,
+      query,
+      limit,
+      tableSupport.searchState,
+      Array.from(textCandidates.keys()),
+      category
+    );
+
+    for (const row of precisionRows) {
+      if (!textCandidates.has(row.id)) {
+        textCandidates.set(row.id, row);
+      }
+    }
+  }
+
+  const shouldUseTextFallback = (
+    textCandidates.size < limit
+    && (!usedPrefixIndex || textCandidates.size === 0)
+    && (!tableSupport.searchTerms || !category || textCandidates.size === 0)
+  );
   if (textCandidates.size < limit && shouldUseTextFallback) {
     const fallbackRows = await fetchTextCandidates(
       db,

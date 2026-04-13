@@ -1,0 +1,2 @@
+DROP INDEX `skill_search_prefixes_prefix_skill_weight_idx`;--> statement-breakpoint
+CREATE INDEX `skill_search_prefixes_prefix_weight_skill_idx` ON `skill_search_prefixes` (`prefix`,weight DESC,`skill_id`);

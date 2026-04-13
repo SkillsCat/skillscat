@@ -337,6 +337,21 @@ export const skillSearchTerms = sqliteTable('skill_search_terms', {
   index('skill_search_terms_term_weight_idx').on(table.term, table.weight)
 ]);
 
+// ========== Search Suggestion Prefix Index (one row per skill-prefix) ==========
+export const skillSearchPrefixes = sqliteTable('skill_search_prefixes', {
+  skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  prefix: text('prefix').notNull(),
+  source: text('source').notNull().default('token'),
+  weight: real('weight').notNull().default(1),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  primaryKey({ columns: [table.skillId, table.prefix] }),
+  index('skill_search_prefixes_prefix_idx').on(table.prefix),
+  index('skill_search_prefixes_prefix_weight_skill_idx').on(table.prefix, sql.raw('weight DESC'), table.skillId),
+  index('skill_search_prefixes_skill_idx').on(table.skillId)
+]);
+
 // ========== Skill Security State (one row per skill) ==========
 export const skillSecurityState = sqliteTable('skill_security_state', {
   skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),

@@ -169,6 +169,20 @@
       "when": 1775580773917,
       "tag": "0023_silent_franklin_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1776106888546,
+      "tag": "0024_glamorous_fabian_cortez",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1776107070312,
+      "tag": "0025_romantic_guardsmen",
+      "breakpoints": true
     }
   ]
 }

@@ -15,9 +15,11 @@ import {
   RECOMMEND_PRECOMPUTE_COOL_RECENT_ACCESS_WINDOW_MS,
 } from '../src/lib/server/ranking/recommend-precompute';
 import {
+  buildSearchPrefixEntries,
   buildSearchTermEntries,
   computeSearchScore,
   normalizeSearchAlgoVersion,
+  replaceSearchPrefixesForSkill,
   replaceSearchTermsForSkill,
   upsertSearchStateFailure,
   upsertSearchStateSuccess,
@@ -511,8 +513,12 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
   const searchMissingScanLimit = parseMissingStateScanLimit(env.SEARCH_MISSING_STATE_SCAN_LIMIT);
   const includeSearchMissingStateScan = shouldRunMissingStateScan(now, searchMissingScanHour);
   const searchTermsEnabled = await hasTable(env.DB, 'skill_search_terms').catch(() => false);
+  const searchPrefixesEnabled = await hasTable(env.DB, 'skill_search_prefixes').catch(() => false);
   if (!searchTermsEnabled) {
     console.warn('Search precompute term index table missing; quality score precompute will continue without terms');
+  }
+  if (!searchPrefixesEnabled) {
+    console.warn('Search precompute prefix index table missing; suggestion precompute will continue without prefixes');
   }
 
   let candidatesResult;
@@ -716,6 +722,23 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
         await replaceSearchTermsForSkill(env.DB, {
           skillId: candidate.id,
           terms,
+          now
+        });
+      }
+
+      if (searchPrefixesEnabled) {
+        const prefixes = buildSearchPrefixEntries({
+          name: candidate.name,
+          slug: candidate.slug,
+          repoOwner: candidate.repo_owner,
+          repoName: candidate.repo_name,
+          categories: parseJsonStringArray(candidate.categories_json),
+          tags: parseJsonStringArray(candidate.tags_json)
+        });
+
+        await replaceSearchPrefixesForSkill(env.DB, {
+          skillId: candidate.id,
+          prefixes,
           now
         });
       }

@@ -32,6 +32,12 @@ export interface SearchTermEntry {
   source: string;
 }
 
+export interface SearchPrefixEntry {
+  prefix: string;
+  weight: number;
+  source: string;
+}
+
 export interface SearchTermsDocument {
   name?: string | null;
   slug?: string | null;
@@ -46,6 +52,9 @@ export const DEFAULT_SEARCH_ALGO_VERSION = 'v1';
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 const SEARCH_STATE_BATCH_SIZE = 100;
 const MAX_TERMS_PER_SKILL = 96;
+export const SEARCH_SUGGESTION_MIN_PREFIX_LENGTH = 2;
+export const SEARCH_SUGGESTION_MAX_PREFIX_LENGTH = 8;
+const MAX_PREFIXES_PER_SKILL = 160;
 const TOKEN_SPLIT_REGEX = /[^\p{L}\p{N}]+/u;
 const MAX_TERM_LENGTH = 48;
 const MIN_TERM_LENGTH = 2;
@@ -58,6 +67,7 @@ const SOURCE_WEIGHTS: Record<string, number> = {
   tag: 7,
   description: 2,
 };
+const PREFIX_SOURCE_ALLOWLIST = new Set(['name', 'slug', 'repo', 'category', 'tag']);
 
 function toNonNegative(value: number | null | undefined): number {
   if (!Number.isFinite(value)) return 0;
@@ -182,6 +192,55 @@ export function buildSearchTermEntries(document: SearchTermsDocument): SearchTer
     .slice(0, MAX_TERMS_PER_SKILL)
     .map((entry) => ({
       term: entry.term,
+      source: entry.source || DEFAULT_SOURCE,
+      weight: Math.max(0.1, Math.round(entry.weight * 100) / 100),
+    }));
+}
+
+function mergePrefix(
+  map: Map<string, SearchPrefixEntry>,
+  rawPrefix: string,
+  source: string,
+  baseWeight: number
+): void {
+  const prefix = normalizeSearchToken(rawPrefix);
+  if (!prefix || prefix.length < SEARCH_SUGGESTION_MIN_PREFIX_LENGTH) return;
+
+  const weight = Math.max(0.1, Math.min(40, baseWeight));
+  const existing = map.get(prefix);
+  if (!existing) {
+    map.set(prefix, { prefix, source, weight });
+    return;
+  }
+
+  const nextWeight = Math.min(40, existing.weight + weight * 0.5);
+  if (weight > existing.weight) {
+    existing.source = source;
+  }
+  existing.weight = nextWeight;
+}
+
+export function buildSearchPrefixEntries(document: SearchTermsDocument): SearchPrefixEntry[] {
+  const map = new Map<string, SearchPrefixEntry>();
+  const terms = buildSearchTermEntries(document)
+    .filter((entry) => PREFIX_SOURCE_ALLOWLIST.has(entry.source));
+
+  for (const entry of terms) {
+    const maxPrefixLength = Math.min(SEARCH_SUGGESTION_MAX_PREFIX_LENGTH, entry.term.length);
+    for (let length = SEARCH_SUGGESTION_MIN_PREFIX_LENGTH; length <= maxPrefixLength; length++) {
+      mergePrefix(map, entry.term.slice(0, length), entry.source, entry.weight);
+    }
+  }
+
+  return Array.from(map.values())
+    .sort((a, b) => {
+      if (b.weight !== a.weight) return b.weight - a.weight;
+      if (a.prefix.length !== b.prefix.length) return a.prefix.length - b.prefix.length;
+      return a.prefix.localeCompare(b.prefix);
+    })
+    .slice(0, MAX_PREFIXES_PER_SKILL)
+    .map((entry) => ({
+      prefix: entry.prefix,
       source: entry.source || DEFAULT_SOURCE,
       weight: Math.max(0.1, Math.round(entry.weight * 100) / 100),
     }));
@@ -389,6 +448,49 @@ export async function replaceSearchTermsForSkill(
     params.terms.map((entry) => insertStmt.bind(
       skillId,
       entry.term,
+      entry.source || DEFAULT_SOURCE,
+      entry.weight,
+      now,
+      now
+    ))
+  );
+}
+
+export async function replaceSearchPrefixesForSkill(
+  db: D1Database | undefined,
+  params: {
+    skillId: string;
+    prefixes: SearchPrefixEntry[];
+    now?: number;
+  }
+): Promise<void> {
+  if (!db) return;
+  const now = params.now ?? Date.now();
+  const skillId = params.skillId;
+
+  await db.prepare('DELETE FROM skill_search_prefixes WHERE skill_id = ?')
+    .bind(skillId)
+    .run();
+
+  if (!params.prefixes.length) {
+    return;
+  }
+
+  const insertStmt = db.prepare(`
+    INSERT INTO skill_search_prefixes (
+      skill_id,
+      prefix,
+      source,
+      weight,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  await db.batch(
+    params.prefixes.map((entry) => insertStmt.bind(
+      skillId,
+      entry.prefix,
       entry.source || DEFAULT_SOURCE,
       entry.weight,
       now,
