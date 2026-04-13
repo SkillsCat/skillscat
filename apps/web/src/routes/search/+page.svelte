@@ -84,6 +84,7 @@
     'auth': LockPasswordIcon,
     'caching': Loading01Icon,
     // Frontend
+    design: PaintBrush01Icon,
     'ui-components': PaintBrush01Icon,
     'accessibility': AccessIcon,
     'animation': SparklesIcon,

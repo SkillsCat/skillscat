@@ -104,10 +104,16 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
     name: 'Frontend',
     categories: [
       {
+        slug: 'design',
+        name: 'Design',
+        description: 'UI/UX direction, visual design, and design systems',
+        keywords: ['design', 'ui/ux', 'ux', 'figma', 'wireframe', 'prototype', 'layout', 'typography', 'spacing', 'color', 'palette', 'brand', 'branding', 'visual hierarchy', 'interaction', 'design system', 'user flow']
+      },
+      {
         slug: 'ui-components',
         name: 'UI Components',
-        description: 'UI component generation and styling',
-        keywords: ['ui', 'component', 'css', 'style', 'design', 'tailwind', 'react', 'vue', 'svelte', 'html']
+        description: 'Code-based UI component generation and styling',
+        keywords: ['ui', 'component', 'component library', 'css', 'style', 'styling', 'tailwind', 'shadcn', 'react', 'vue', 'svelte', 'html']
       },
       {
         slug: 'accessibility',
@@ -273,7 +279,7 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
         slug: 'embeddings',
         name: 'Embeddings',
         description: 'Vector embeddings and similarity',
-        keywords: ['embedding', 'vector', 'similarity', 'rag', 'semantic', 'search']
+        keywords: ['embedding', 'embeddings', 'vector', 'vector db', 'similarity', 'retrieval', 'rag', 'semantic search', 'rerank', 'qdrant', 'pinecone', 'weaviate', 'faiss', 'milvus']
       },
       {
         slug: 'agents',

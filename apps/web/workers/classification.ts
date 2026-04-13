@@ -2,11 +2,11 @@
  * Classification Worker
  *
  * Cost-optimized skill classification:
- * - AI classification for high-quality repos (stars>=100 or known orgs)
+ * - AI classification only for hot-worthy skills
  * - Keyword-based for all other repos (never skip)
- * - Supports reclassification when repos grow to AI threshold
+ * - Supports reclassification when skills become hot-worthy
  *
- * Expected to reduce AI API calls by ~85%
+ * Expected to keep AI spend focused on the most valuable skills
  */
 
 import type {
@@ -15,8 +15,9 @@ import type {
   ClassificationResult,
   OpenRouterResponse,
   ClassificationMethod,
+  SkillTier,
 } from './shared/types';
-import { KNOWN_ORGS } from './shared/types';
+import { TIER_CONFIG } from './shared/types';
 import { CATEGORIES, getCategorySlugs } from './shared/classification/categories';
 import {
   getOpenRouterFreePauseUntil,
@@ -61,11 +62,12 @@ interface ExtendedClassificationResult extends ClassificationResult {
 // Extended message type with metadata for admission decision
 interface ClassificationMessageWithMeta extends ClassificationMessage {
   stars?: number;
+  tier?: SkillTier | null;
   topics?: string[];
   description?: string;
   tags?: string[]; // Tags from SKILL.md frontmatter for classification hints
   frontmatterCategories?: string[]; // Direct categories from frontmatter
-  isReclassification?: boolean; // Flag for reclassification (stars grew to AI threshold)
+  isReclassification?: boolean; // Flag for reclassification when a skill becomes AI-eligible
 }
 
 interface ClassificationSkillStorageLocation {
@@ -75,6 +77,7 @@ interface ClassificationSkillStorageLocation {
   repo_name: string | null;
   skill_path: string | null;
   readme: string | null;
+  tier?: SkillTier | null;
 }
 
 interface ClassificationSkillStorageRow extends ClassificationSkillStorageLocation {
@@ -101,7 +104,7 @@ async function loadClassificationSkillStorageLocations(
 
   const placeholders = skillIds.map(() => '?').join(',');
   const result = await env.DB.prepare(`
-    SELECT id, slug, source_type, repo_owner, repo_name, skill_path, readme
+    SELECT id, slug, source_type, repo_owner, repo_name, skill_path, readme, tier
     FROM skills
     WHERE id IN (${placeholders})
   `)
@@ -118,6 +121,7 @@ async function loadClassificationSkillStorageLocations(
         repo_name: row.repo_name,
         skill_path: row.skill_path,
         readme: row.readme,
+        tier: row.tier,
       } satisfies ClassificationSkillStorageLocation,
     ])
   );
@@ -149,7 +153,7 @@ export async function loadSkillMdForClassification(
   const skill = preloadedSkill !== undefined
     ? preloadedSkill
     : await env.DB.prepare(`
-      SELECT slug, source_type, repo_owner, repo_name, skill_path, readme
+      SELECT slug, source_type, repo_owner, repo_name, skill_path, readme, tier
       FROM skills
       WHERE id = ?
       LIMIT 1
@@ -180,26 +184,28 @@ export async function loadSkillMdForClassification(
 }
 
 /**
- * Determine the classification method based on repo metadata
- * Simplified logic: only stars and known orgs matter
- * Never skip classification - all skills get at least keyword classification
+ * Restrict AI classification to hot-worthy skills so we keep spend focused.
+ * We prefer the stored tier when available, and fall back to the hot star threshold
+ * for newly indexed skills that have not been tiered yet.
  */
-function determineClassificationMethod(
-  repoOwner: string,
-  stars: number
+export function determineClassificationMethod(
+  stars: number,
+  tier?: SkillTier | null
 ): ClassificationMethod {
-  // High-quality repos always get AI classification
-  if (stars >= 100) {
-    return 'ai';
-  }
-
-  // Known organizations always get AI classification
-  if (KNOWN_ORGS.includes(repoOwner.toLowerCase() as typeof KNOWN_ORGS[number])) {
+  if (tier === 'hot' || stars >= TIER_CONFIG.hot.minStars) {
     return 'ai';
   }
 
   // All other repos get keyword classification (never skip)
   return 'keyword';
+}
+
+function normalizeSkillTier(tier: string | null | undefined): SkillTier | null {
+  if (tier === 'hot' || tier === 'warm' || tier === 'cool' || tier === 'cold' || tier === 'archived') {
+    return tier;
+  }
+
+  return null;
 }
 
 /**
@@ -254,8 +260,14 @@ function buildClassificationPrompt(skillMdContent: string, tags?: string[]): str
 
 IMPORTANT RULES:
 1. You MUST always provide at least 1 category - never return an empty categories array
-2. If the skill doesn't fit well into existing categories, you may suggest ONE new secondary category
-3. Suggested categories should be specific and useful for developers (not too broad or too niche)
+2. Prefer the category that best describes the skill's main job for the user, not just the tooling or framework it mentions
+3. Prefer specific task categories over broad buckets like automation, cli, templates, writing, or agents when a more precise category fits
+4. Only include a secondary or tertiary category when the skill clearly has another major capability, not just a minor implementation detail
+5. Use design for UI/UX direction, visual critiques, layout, typography, color, branding, wireframes, prototypes, Figma, or design-system planning
+6. Use ui-components for implementation-focused component generation, styling, or framework-specific frontend code
+7. Use embeddings only for real vector retrieval, similarity search, reranking, vector databases, or RAG workflows; never for visual semantics, semantic HTML, or UX search flows
+8. If the skill doesn't fit well into existing categories, you may suggest ONE new secondary category
+9. Suggested categories should be specific and useful for developers (not too broad or too niche)
 
 Available categories:
 ${categoriesDescription}
@@ -391,23 +403,21 @@ function parseClassificationResult(content: string): ExtendedClassificationResul
 }
 
 /**
- * Get free models list from environment variable
- * Returns empty array if not configured
+ * Get ordered free model candidates for classification.
+ * The primary AI model is included first when it is itself a free model.
  */
-function getFreeModels(env: ClassificationEnv): string[] {
-  if (env.FREE_MODELS) {
-    return env.FREE_MODELS.split(',').map((m) => m.trim()).filter(Boolean);
-  }
-  return [];
-}
-
-/**
- * Pick a random model from the list, excluding the specified model
- */
-function pickRandomModel(models: string[], exclude: string): string | null {
-  const available = models.filter((m) => m !== exclude);
-  if (available.length === 0) return null;
-  return available[Math.floor(Math.random() * available.length)];
+export function getFreeModelCandidates(env: ClassificationEnv): string[] {
+  const configured = (env.FREE_MODELS || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .filter(isOpenRouterFreeModel);
+  const primary = env.AI_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
+  return Array.from(new Set(
+    isOpenRouterFreeModel(primary)
+      ? [primary, ...configured]
+      : configured
+  ));
 }
 
 /**
@@ -524,9 +534,9 @@ export function classifyByKeywords(content: string, tags?: string[]): Classifica
 
 /**
  * Classify skill using AI with multi-model fallback strategy:
- * 1. Try primary model on OpenRouter (AI_MODEL env var, defaults to openrouter/free)
- * 2. Retry primary model once
- * 3. Try random fallback model from FREE_MODELS pool
+ * 1. Try ordered OpenRouter free-model candidates (primary free model first)
+ * 2. Retry the first free candidate once for transient errors
+ * 3. Try the configured non-free primary model (if any)
  * 4. Try paid OpenRouter fallback for higher-priority classification throughput
  * 5. Try DeepSeek as final AI fallback
  * 6. Fall back to keyword classification
@@ -537,82 +547,80 @@ async function classifyWithAI(
   tags?: string[]
 ): Promise<ExtendedClassificationResult> {
   const prompt = buildClassificationPrompt(skillMdContent, tags);
-  const freeModels = getFreeModels(env);
+  const freeModels = getFreeModelCandidates(env);
   const primaryModel = env.AI_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
+  const paidPrimaryModel = !isOpenRouterFreeModel(primaryModel) ? primaryModel : null;
   const paidModel = env.CLASSIFICATION_PAID_MODEL?.trim() || DEFAULT_CLASSIFICATION_PAID_MODEL;
   const now = Date.now();
   const freePausedUntil = await getOpenRouterFreePauseUntil(env.KV, now);
-  const primaryIsFree = isOpenRouterFreeModel(primaryModel);
-  const canAttemptPrimary = Boolean(env.OPENROUTER_API_KEY) && (!primaryIsFree || !freePausedUntil);
   let freeRateLimited = false;
 
-  // 1. Try OpenRouter primary path when available.
-  if (canAttemptPrimary && env.OPENROUTER_API_KEY) {
-    // 1a. Primary model - first attempt
-    try {
-      console.log(`[OpenRouter] Trying primary model: ${primaryModel}`);
-      return await callOpenRouter(prompt, primaryModel, env.OPENROUTER_API_KEY);
-    } catch (error) {
-      console.error(`[OpenRouter] Primary model failed:`, error);
-      if (isOpenRouterFreePauseError(error)) {
-        await pauseOpenRouterFreeModels(env.KV, {
-          now,
-          retryAfterMs: error.retryAfterMs,
-        });
-        freeRateLimited = true;
-      }
-    }
+  // 1. Try OpenRouter free models first when available.
+  if (env.OPENROUTER_API_KEY && freeModels.length > 0 && !freePausedUntil) {
+    const freeAttempts = freeModels.flatMap((model, index) => (
+      index === 0
+        ? [{ model, retry: false }, { model, retry: true }]
+        : [{ model, retry: false }]
+    ));
 
-    // 1b. Primary model - retry
-    if (!freeRateLimited) {
+    for (const attempt of freeAttempts) {
       try {
-        console.log(`[OpenRouter] Retrying primary model: ${primaryModel}`);
-        return await callOpenRouter(prompt, primaryModel, env.OPENROUTER_API_KEY);
+        console.log(
+          attempt.retry
+            ? `[OpenRouter] Retrying free classification model: ${attempt.model}`
+            : `[OpenRouter] Trying free classification model: ${attempt.model}`
+        );
+        return await callOpenRouter(prompt, attempt.model, env.OPENROUTER_API_KEY);
       } catch (error) {
-        console.error(`[OpenRouter] Primary model retry failed:`, error);
+        console.error(
+          attempt.retry
+            ? `[OpenRouter] Free model retry failed:`
+            : `[OpenRouter] Free model failed:`,
+          error
+        );
         if (isOpenRouterFreePauseError(error)) {
           await pauseOpenRouterFreeModels(env.KV, {
             now,
             retryAfterMs: error.retryAfterMs,
           });
           freeRateLimited = true;
-        }
-      }
-    }
-
-    // 1c. Random fallback model from pool (if configured)
-    const fallbackModel = primaryIsFree ? pickRandomModel(freeModels, primaryModel) : null;
-    if (!freeRateLimited && fallbackModel && env.OPENROUTER_API_KEY) {
-      try {
-        console.log(`[OpenRouter] Trying fallback model: ${fallbackModel}`);
-        return await callOpenRouter(prompt, fallbackModel, env.OPENROUTER_API_KEY);
-      } catch (error) {
-        console.error(`[OpenRouter] Fallback model failed:`, error);
-        if (isOpenRouterFreePauseError(error)) {
-          await pauseOpenRouterFreeModels(env.KV, {
-            now,
-            retryAfterMs: error.retryAfterMs,
-          });
+          break;
         }
       }
     }
   } else if (!env.OPENROUTER_API_KEY) {
     console.log('[OpenRouter] No API key configured');
-  } else if (freePausedUntil) {
+  } else if (freeModels.length > 0 && freePausedUntil) {
     console.log(`[OpenRouter] Free classification models paused until ${new Date(freePausedUntil).toISOString()}`);
   }
 
-  // 2. Paid OpenRouter fallback for higher-priority classification.
+  // 2. Configured non-free primary model, if any.
   if (env.OPENROUTER_API_KEY) {
-    try {
-      console.log(`[OpenRouter] Trying paid fallback model: ${paidModel}`);
-      return await callOpenRouter(prompt, paidModel, env.OPENROUTER_API_KEY);
-    } catch (error) {
-      console.error(`[OpenRouter] Paid fallback model failed:`, error);
+    if (paidPrimaryModel) {
+      try {
+        console.log(`[OpenRouter] Trying non-free primary model: ${paidPrimaryModel}`);
+        return await callOpenRouter(prompt, paidPrimaryModel, env.OPENROUTER_API_KEY);
+      } catch (error) {
+        console.error(`[OpenRouter] Non-free primary model failed:`, error);
+      }
     }
   }
 
-  // 3. DeepSeek fallback
+  // 3. Paid OpenRouter fallback for higher-priority classification.
+  if (env.OPENROUTER_API_KEY) {
+    if (paidPrimaryModel === paidModel) {
+      console.log(`[OpenRouter] Paid fallback model already attempted: ${paidModel}`);
+    } else {
+      try {
+        console.log(`[OpenRouter] Trying paid fallback model: ${paidModel}`);
+        return await callOpenRouter(prompt, paidModel, env.OPENROUTER_API_KEY);
+      } catch (error) {
+        console.error(`[OpenRouter] Paid fallback model failed:`, error);
+      }
+    }
+  }
+
+  // 4. DeepSeek fallback
   if (env.DEEPSEEK_API_KEY) {
     try {
       console.log(`[DeepSeek] Trying ${DEEPSEEK_MODEL} as fallback`);
@@ -622,8 +630,12 @@ async function classifyWithAI(
     }
   }
 
-  // 4. Final fallback to keyword classification
-  console.log('[Fallback] All AI providers failed, using keyword classification');
+  // 5. Final fallback to keyword classification
+  if (freeRateLimited) {
+    console.log('[Fallback] Free classification models are rate limited, using keyword classification');
+  } else {
+    console.log('[Fallback] All AI providers failed, using keyword classification');
+  }
   return classifyByKeywords(skillMdContent, tags);
 }
 
@@ -786,10 +798,10 @@ async function processMessage(
     }
   }
 
-  // Determine classification method based on repo metadata
-  // For reclassification, always use AI
-  const method = isReclassification ? 'ai' : determineClassificationMethod(repoOwner, stars);
-  log.log(`Method for ${skillId}: ${method} (stars: ${stars}${isReclassification ? ', reclassification' : ''})`);
+  // Determine classification method based on hot-worthiness.
+  const resolvedTier = normalizeSkillTier(message.tier) ?? normalizeSkillTier(preloadedSkill?.tier);
+  const method = determineClassificationMethod(stars, resolvedTier);
+  log.log(`Method for ${skillId}: ${method} (stars: ${stars}, tier: ${resolvedTier ?? 'unknown'}${isReclassification ? ', reclassification' : ''})`);
 
   // Get SKILL.md content
   log.log(`Fetching SKILL.md from R2: ${skillMdPath}`);

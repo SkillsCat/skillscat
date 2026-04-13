@@ -738,7 +738,7 @@ binding = "KV"
 id = "<your-production-kv-namespace-id>"
 
 [env.production.vars]
-AI_MODEL = "openrouter/free"
+AI_MODEL = "minimax/minimax-m2.5:free"
 CLASSIFICATION_PAID_MODEL = "openai/gpt-5.4-nano"
 `.trim(),
   'wrangler.security-analysis.toml': `

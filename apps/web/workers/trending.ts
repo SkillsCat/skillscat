@@ -40,7 +40,6 @@ import { getGitHubRequestAuthFromEnv, hasGitHubAuthConfigured } from '../src/lib
 
 const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
-const AI_CLASSIFICATION_THRESHOLD = 100; // Stars threshold for AI classification
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 const SKILL_REFRESH_SELECT_COLUMNS = getSkillRefreshSelectColumns();
 const DAILY_METRICS_RETENTION_DAYS = 95;
@@ -563,10 +562,10 @@ async function updateSkillsByTier(
 /**
  * Detect skills that need AI reclassification
  * Triggers when:
- * - Stars grew from < 100 to >= 100
+ * - A skill becomes hot-worthy
  * - Current classification_method is 'keyword' (not 'ai' or 'direct')
  */
-async function detectReclassificationNeeded(
+export async function detectReclassificationNeeded(
   env: TrendingEnv,
   updatedSkillIds: string[]
 ): Promise<number> {
@@ -574,22 +573,23 @@ async function detectReclassificationNeeded(
     return 0;
   }
 
-  // Find skills that crossed the AI threshold and need reclassification
+  // Find skills that are worth AI classification and still only have keyword classification.
   const placeholders = updatedSkillIds.map(() => '?').join(',');
   const skills = await env.DB.prepare(`
-    SELECT id, repo_owner, repo_name, skill_path, stars, classification_method
+    SELECT id, repo_owner, repo_name, skill_path, stars, tier, classification_method
     FROM skills
     WHERE id IN (${placeholders})
-      AND stars >= ?
       AND classification_method = 'keyword'
+      AND (tier = 'hot' OR stars >= ?)
   `)
-    .bind(...updatedSkillIds, AI_CLASSIFICATION_THRESHOLD)
+    .bind(...updatedSkillIds, TIER_CONFIG.hot.minStars)
     .all<{
       id: string;
       repo_owner: string;
       repo_name: string;
       skill_path: string | null;
       stars: number;
+      tier: SkillTier;
       classification_method: string;
     }>();
 
@@ -608,18 +608,19 @@ async function detectReclassificationNeeded(
       'SKILL.md'
     );
 
-    const message: ClassificationMessage & { stars: number; isReclassification: boolean } = {
+    const message: ClassificationMessage & { stars: number; tier: SkillTier; isReclassification: boolean } = {
       type: 'classify',
       skillId: skill.id,
       repoOwner: skill.repo_owner,
       repoName: skill.repo_name,
       skillMdPath,
       stars: skill.stars,
+      tier: skill.tier,
       isReclassification: true,
     };
 
     await env.CLASSIFICATION_QUEUE.send(message);
-    console.log(`Queued reclassification for ${skill.id} (stars: ${skill.stars})`);
+    console.log(`Queued reclassification for ${skill.id} (stars: ${skill.stars}, tier: ${skill.tier})`);
   }
 
   return skills.results.length;

@@ -3,9 +3,9 @@
 # 消费 classification 队列，使用 AI 对 skill 进行分类
 #
 # AI 分类 Fallback 策略:
-# 1. 默认使用 openrouter/free
-# 2. 失败后在同一模型上重试一次
-# 3. 从免费模型池中随机选择另一个模型重试
+# 1. 优先使用指定的免费模型（默认 minimax/minimax-m2.5:free）
+# 2. 失败后在首个免费模型上重试一次
+# 3. 按顺序尝试 FREE_MODELS 里的其他免费模型
 # 4. 免费额度受限时切到付费兜底模型 openai/gpt-5.4-nano
 # 5. 使用 DeepSeek 官方 API (deepseek-chat) 作为兜底
 # 6. 最终降级到关键词分类
@@ -54,10 +54,10 @@ binding = "CLASSIFICATION_ANALYTICS"
 dataset = "skillscat_classification_batches"
 
 [vars]
-AI_MODEL = "openrouter/free"
+AI_MODEL = "minimax/minimax-m2.5:free"
 CLASSIFICATION_PAID_MODEL = "openai/gpt-5.4-nano"
-# 可选: 额外免费模型池（仍然只应填免费模型）
-# FREE_MODELS = "google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free"
+# 可选: 额外免费模型池（仍然只应填免费模型，按顺序尝试）
+# FREE_MODELS = "openrouter/free,google/gemma-3-1b-it:free"
 
 [env.production]
 name = "skillscat-classification-production"
@@ -87,5 +87,5 @@ binding = "CLASSIFICATION_ANALYTICS"
 dataset = "skillscat_classification_batches"
 
 [env.production.vars]
-AI_MODEL = "openrouter/free"
+AI_MODEL = "minimax/minimax-m2.5:free"
 CLASSIFICATION_PAID_MODEL = "openai/gpt-5.4-nano"

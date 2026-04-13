@@ -32,13 +32,13 @@ INDEXNOW_KEY=
 # 查看可用免费模型: https://openrouter.ai/models?q=:free
 OPENROUTER_API_KEY=
 
-# 可选: 主模型（默认 openrouter/free，会自动路由到可用免费模型）
-AI_MODEL=openrouter/free
+# 可选: 主模型（推荐直接指定更稳定的免费模型）
+AI_MODEL=minimax/minimax-m2.5:free
 # 可选: classification 的付费兜底模型
 # CLASSIFICATION_PAID_MODEL=openai/gpt-5.4-nano
 
-# 可选: 免费模型池，逗号分隔 (用于 fallback)
-# FREE_MODELS=google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free
+# 可选: 免费模型池，逗号分隔 (按顺序 fallback)
+# FREE_MODELS=openrouter/free,google/gemma-3-1b-it:free
 
 # ========== DeepSeek API (兜底策略，可选) ==========
 # 获取 API Key: https://platform.deepseek.com/api_keys

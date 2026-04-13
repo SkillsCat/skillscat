@@ -16,9 +16,60 @@ vi.mock('../src/lib/server/ranking/search-precompute', () => ({
   markSearchDirty: vi.fn(async () => {}),
 }));
 
-import classificationWorker, { classifyByKeywords, loadSkillMdForClassification } from '../workers/classification';
+import classificationWorker, {
+  classifyByKeywords,
+  determineClassificationMethod,
+  getFreeModelCandidates,
+  loadSkillMdForClassification,
+} from '../workers/classification';
+
+describe('classification model helpers', () => {
+  it('keeps free-model candidates ordered, filtered, and deduplicated', () => {
+    expect(getFreeModelCandidates({
+      DB: {} as never,
+      KV: {} as never,
+      R2: {} as never,
+      AI_MODEL: 'minimax/minimax-m2.5:free',
+      FREE_MODELS: 'openrouter/free,minimax/minimax-m2.5:free,openai/gpt-5.4-nano',
+    })).toEqual([
+      'minimax/minimax-m2.5:free',
+      'openrouter/free',
+    ]);
+
+    expect(getFreeModelCandidates({
+      DB: {} as never,
+      KV: {} as never,
+      R2: {} as never,
+      AI_MODEL: 'openai/gpt-5.4-nano',
+      FREE_MODELS: 'minimax/minimax-m2.5:free,openrouter/free',
+    })).toEqual([
+      'minimax/minimax-m2.5:free',
+      'openrouter/free',
+    ]);
+  });
+
+  it('uses AI classification only for hot-worthy skills', () => {
+    expect(determineClassificationMethod(3, 'hot')).toBe('ai');
+    expect(determineClassificationMethod(1200, null)).toBe('ai');
+    expect(determineClassificationMethod(999, null)).toBe('keyword');
+    expect(determineClassificationMethod(3, 'warm')).toBe('keyword');
+  });
+});
 
 describe('classifyByKeywords', () => {
+  it('prefers design over embeddings for UI/UX direction skills', () => {
+    const result = classifyByKeywords(
+      `
+      This skill reviews UI/UX direction for product teams.
+      It critiques layout, typography, spacing, color palette, user flow, and Figma prototypes.
+      It can also suggest semantic HTML improvements and better search results UX.
+      `
+    );
+
+    expect(result.categories[0]).toBe('design');
+    expect(result.categories).not.toContain('embeddings');
+  });
+
   it('keeps weak secondary keyword matches out of the assigned categories', () => {
     const result = classifyByKeywords(
       `
@@ -116,6 +167,256 @@ describe('loadSkillMdForClassification', () => {
 });
 
 describe('classification queue preloading', () => {
+  it('uses AI classification for hot-worthy repos when a free OpenRouter model is configured', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: '{"categories":["code-review"],"confidence":0.92,"reasoning":"Reviews PRs and code quality"}',
+        },
+      }],
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const updatedMethods: string[] = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => {
+          if (sql.includes('FROM skills') && sql.includes('WHERE id IN')) {
+            return {
+              bind: (...args: unknown[]) => {
+                expect(args).toEqual(['skill-ai']);
+                return {
+                  all: async () => ({
+                    results: [{
+                      id: 'skill-ai',
+                      slug: 'owner/skill-ai',
+                      source_type: 'github',
+                      repo_owner: 'owner',
+                      repo_name: 'repo',
+                      skill_path: null,
+                      readme: null,
+                      tier: 'hot',
+                    }],
+                  }),
+                };
+              },
+            };
+          }
+
+          if (sql === 'SELECT category_slug FROM skill_categories WHERE skill_id = ?') {
+            return {
+              bind: () => ({
+                all: async () => ({ results: [] }),
+              }),
+            };
+          }
+
+          if (sql === 'DELETE FROM skill_categories WHERE skill_id = ?') {
+            return {
+              bind: () => ({
+                run: async () => ({ success: true }),
+              }),
+            };
+          }
+
+          if (sql.includes('INSERT OR IGNORE INTO skill_categories')) {
+            return {
+              bind: () => ({
+                run: async () => ({ success: true }),
+              }),
+            };
+          }
+
+          if (sql === 'UPDATE skills SET classification_method = ?, updated_at = ? WHERE id = ?') {
+            return {
+              bind: (method: string) => ({
+                run: async () => {
+                  updatedMethods.push(method);
+                  return { success: true };
+                },
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      },
+      KV: {
+        get: vi.fn(async () => null),
+        put: vi.fn(async () => {}),
+      },
+      R2: {
+        get: vi.fn(async (key: string) => {
+          if (key === 'skills/github/owner/repo/SKILL.md') {
+            return {
+              async text() {
+                return 'This skill reviews pull requests, writes review comments, and audits code quality.';
+              },
+            } as R2ObjectBody;
+          }
+
+          return null;
+        }),
+      },
+      OPENROUTER_API_KEY: 'or-key',
+      AI_MODEL: 'minimax/minimax-m2.5:free',
+      CLASSIFICATION_PAID_MODEL: 'openai/gpt-5.4-nano',
+    } as never;
+
+    try {
+      await classificationWorker.queue({
+        messages: [{
+          id: 'msg-ai',
+          body: {
+            type: 'classify',
+            skillId: 'skill-ai',
+            repoOwner: 'owner',
+            repoName: 'repo',
+            skillMdPath: 'skills/github/owner/repo/SKILL.md',
+            stars: 1200,
+          },
+          ack: vi.fn(),
+          retry: vi.fn(),
+        }],
+      } as never, env, {} as never);
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(updatedMethods).toEqual(['ai']);
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      model: string;
+      messages: Array<{ content: string }>;
+    };
+    expect(requestBody).toMatchObject({
+      model: 'minimax/minimax-m2.5:free',
+    });
+    expect(requestBody.messages[0]?.content).toContain('Use design for UI/UX direction');
+    expect(requestBody.messages[0]?.content).toContain('Use embeddings only for real vector retrieval');
+  });
+
+  it('keeps low-priority repos on keyword classification even when free OpenRouter models are available', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const updatedMethods: string[] = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => {
+          if (sql.includes('FROM skills') && sql.includes('WHERE id IN')) {
+            return {
+              bind: (...args: unknown[]) => {
+                expect(args).toEqual(['skill-keyword-free']);
+                return {
+                  all: async () => ({
+                    results: [{
+                      id: 'skill-keyword-free',
+                      slug: 'owner/skill-keyword-free',
+                      source_type: 'github',
+                      repo_owner: 'owner',
+                      repo_name: 'repo',
+                      skill_path: null,
+                      readme: null,
+                      tier: 'cold',
+                    }],
+                  }),
+                };
+              },
+            };
+          }
+
+          if (sql === 'SELECT category_slug FROM skill_categories WHERE skill_id = ?') {
+            return {
+              bind: () => ({
+                all: async () => ({ results: [] }),
+              }),
+            };
+          }
+
+          if (sql === 'DELETE FROM skill_categories WHERE skill_id = ?') {
+            return {
+              bind: () => ({
+                run: async () => ({ success: true }),
+              }),
+            };
+          }
+
+          if (sql.includes('INSERT OR IGNORE INTO skill_categories')) {
+            return {
+              bind: () => ({
+                run: async () => ({ success: true }),
+              }),
+            };
+          }
+
+          if (sql === 'UPDATE skills SET classification_method = ?, updated_at = ? WHERE id = ?') {
+            return {
+              bind: (method: string) => ({
+                run: async () => {
+                  updatedMethods.push(method);
+                  return { success: true };
+                },
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      },
+      KV: {
+        get: vi.fn(async () => null),
+        put: vi.fn(async () => {}),
+      },
+      R2: {
+        get: vi.fn(async (key: string) => {
+          if (key === 'skills/github/owner/repo/SKILL.md') {
+            return {
+              async text() {
+                return 'This skill reviews pull requests, writes review comments, and audits code quality.';
+              },
+            } as R2ObjectBody;
+          }
+
+          return null;
+        }),
+      },
+      OPENROUTER_API_KEY: 'or-key',
+      AI_MODEL: 'minimax/minimax-m2.5:free',
+      CLASSIFICATION_PAID_MODEL: 'openai/gpt-5.4-nano',
+    } as never;
+
+    try {
+      await classificationWorker.queue({
+        messages: [{
+          id: 'msg-keyword-free',
+          body: {
+            type: 'classify',
+            skillId: 'skill-keyword-free',
+            repoOwner: 'owner',
+            repoName: 'repo',
+            skillMdPath: 'skills/github/owner/repo/SKILL.md',
+            stars: 3,
+          },
+          ack: vi.fn(),
+          retry: vi.fn(),
+        }],
+      } as never, env, {} as never);
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(updatedMethods).toEqual(['keyword']);
+  });
+
   it('writes one analytics datapoint per processed batch', async () => {
     const writeDataPoint = vi.fn();
     const env = {

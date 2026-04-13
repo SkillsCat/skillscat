@@ -116,6 +116,7 @@
     'analytics': Analytics01Icon,
     'scraping': Search01Icon,
     'math': Calculator01Icon,
+    design: PaintBrush01Icon,
     'ui-components': PaintBrush01Icon,
     'accessibility': AccessIcon,
     'animation': SparklesIcon,

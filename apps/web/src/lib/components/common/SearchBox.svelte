@@ -201,6 +201,7 @@
     'api': Link01Icon,
     'database': Database01Icon,
     'data-processing': DatabaseExportIcon,
+    design: PaintBrush01Icon,
     'ui-components': PaintBrush01Icon,
     'accessibility': AccessIcon,
     'devops': Settings01Icon,

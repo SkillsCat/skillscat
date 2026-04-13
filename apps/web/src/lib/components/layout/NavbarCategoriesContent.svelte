@@ -68,6 +68,7 @@
     'database': Database01Icon,
     'auth': LockPasswordIcon,
     'caching': Loading01Icon,
+    design: PaintBrush01Icon,
     'ui-components': PaintBrush01Icon,
     'accessibility': AccessIcon,
     'animation': SparklesIcon,
