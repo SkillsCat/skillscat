@@ -4,9 +4,11 @@ import { describe, expect, it } from 'vitest';
 import {
   chooseCanonicalSkillCandidate,
   computeBundleManifestHash,
+  computeExactBundleFingerprint,
   computeSkillMdHashes,
   computeStandaloneSkillBundleHashes,
   convertPrivateSkillToPublicGithub,
+  findSkillsByExactHashGroup,
   findSkillsByHashGroup,
 } from '../src/lib/server/skill/dedup';
 
@@ -115,6 +117,24 @@ describe('skill dedup helpers', () => {
     expect(leftBundle).toBe(rightBundle);
   });
 
+  it('treats formatting-only SKILL.md changes as distinct exact snapshots', async () => {
+    const compact = '# Agent\n\nUse the tool.\n';
+    const spaced = '  # Agent\r\n\r\nUse the tool.\r\n';
+    const compactHashes = await computeSkillMdHashes(compact);
+    const spacedHashes = await computeSkillMdHashes(spaced);
+
+    const leftExact = await computeExactBundleFingerprint([
+      { path: 'SKILL.md', sha: compactHashes.fullHash, size: compact.length, type: 'text' },
+      { path: 'templates/prompt.txt', sha: 'prompt-sha', size: 12, type: 'text' },
+    ]);
+    const rightExact = await computeExactBundleFingerprint([
+      { path: 'skill.md', sha: spacedHashes.fullHash, size: spaced.length, type: 'text' },
+      { path: 'templates/prompt.txt', sha: 'prompt-sha', size: 12, type: 'text' },
+    ]);
+
+    expect(leftExact).not.toBe(rightExact);
+  });
+
   it('treats different companion files as distinct bundles even when SKILL.md matches', async () => {
     const hashes = await computeStandaloneSkillBundleHashes('# Agent\n\nUse the tool.\n');
 
@@ -175,6 +195,55 @@ describe('skill dedup helpers', () => {
         AND hash_type = 'bundle_manifest'
     `).get()).toEqual({
       hash_value: bundleManifestHash,
+    });
+  });
+
+  it('matches legacy rows without bundle_exact and backfills the missing exact hash', async () => {
+    const sqlite = createHashDb();
+    const db = new SqliteD1Database(sqlite) as never;
+    const skillMd = '# Agent\n\nUse the tool.\n';
+    const hashes = await computeStandaloneSkillBundleHashes(skillMd);
+
+    sqlite.exec(`
+      INSERT INTO skills (
+        id, slug, repo_owner, repo_name, skill_path, source_type, visibility,
+        stars, created_at, file_structure, readme
+      ) VALUES (
+        'legacy-exact',
+        'demo/repo/claude',
+        'demo',
+        'repo',
+        '.claude',
+        'github',
+        'public',
+        10,
+        1710000000000,
+        '{"files":[{"path":"SKILL.md","sha":"${hashes.fullHash}","size":23,"type":"text"}]}',
+        '# Agent\\n\\nUse the tool.\\n'
+      );
+
+      INSERT INTO content_hashes (id, skill_id, hash_type, hash_value, created_at) VALUES
+        ('hash-full', 'legacy-exact', 'full', '${hashes.fullHash}', 1710000000000);
+    `);
+
+    const matches = await findSkillsByExactHashGroup(
+      db,
+      hashes.fullHash,
+      hashes.bundleExactHash!,
+      {
+        visibility: 'public',
+        sourceType: 'github',
+      }
+    );
+
+    expect(matches.map((match) => match.id)).toEqual(['legacy-exact']);
+    expect(sqlite.prepare(`
+      SELECT hash_value
+      FROM content_hashes
+      WHERE skill_id = 'legacy-exact'
+        AND hash_type = 'bundle_exact'
+    `).get()).toEqual({
+      hash_value: hashes.bundleExactHash,
     });
   });
 

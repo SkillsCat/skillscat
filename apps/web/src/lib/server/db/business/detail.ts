@@ -25,6 +25,16 @@ interface SkillDetailRow {
   file_structure: string | null;
   visibility: SkillDetail['visibility'] | null;
   source_type: SkillDetail['sourceType'] | null;
+  source_id: string | null;
+  current_snapshot_id: string | null;
+  current_version_id: string | null;
+  origin_skill_id: string | null;
+  origin_slug: string | null;
+  origin_repo_owner: string | null;
+  origin_repo_name: string | null;
+  origin_skill_path: string | null;
+  origin_commit_sha: string | null;
+  origin_relation_type: SkillDetail['originRelationType'] | null;
   tier: string | null;
   owner_id: string | null;
   org_id: string | null;
@@ -241,6 +251,16 @@ export async function getSkillBySlug(
     // 新增字段
     visibility: skillData.visibility || 'public',
     sourceType: skillData.source_type || 'github',
+    sourceId: skillData.source_id,
+    currentSnapshotId: skillData.current_snapshot_id,
+    currentVersionId: skillData.current_version_id,
+    originSkillId: skillData.origin_skill_id,
+    originSlug: skillData.origin_slug,
+    originRepoOwner: skillData.origin_repo_owner,
+    originRepoName: skillData.origin_repo_name,
+    originSkillPath: skillData.origin_skill_path,
+    originCommitSha: skillData.origin_commit_sha,
+    originRelationType: skillData.origin_relation_type,
     tier: skillData.tier,
     ownerId: skillData.owner_id,
     ownerName: skillData.ownerName,

@@ -39,12 +39,12 @@ import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '../src/lib/server/cache
 import { markRecommendDirty } from '../src/lib/server/ranking/recommend-precompute';
 import { deleteSkillArtifactsAndInvalidateCaches } from '../src/lib/server/skill/delete';
 import {
-  chooseCanonicalSkillCandidate,
+  compareCanonicalSkillCandidates,
   computeBundleManifestHash,
+  computeExactBundleFingerprint,
   computeSkillMdHashes,
   convertPrivateSkillToPublicGithub,
-  findSkillsByHashGroup,
-  findPublicGithubCanonicalCandidates,
+  findSkillsByExactHashGroup,
   storeSkillHashes,
   type CanonicalSkillCandidate,
 } from '../src/lib/server/skill/dedup';
@@ -478,8 +478,8 @@ export function resolveSkillMetadata(
  * This prevents duplicate skills when curating content that users have already published privately
  */
 async function checkAndConvertPrivateSkill(
-  normalizedHash: string,
-  bundleManifestHash: string,
+  fullHash: string,
+  exactBundleFingerprint: string,
   repo: GitHubRepo,
   skillMetadata: ResolvedSkillMetadata,
   persistenceMetadata: SkillPersistenceMetadata,
@@ -488,7 +488,7 @@ async function checkAndConvertPrivateSkill(
   skillPath: string | null,
   env: IndexingEnv
 ): Promise<{ converted: boolean; skillId?: string; slug?: string }> {
-  const [existingPrivate] = await findSkillsByHashGroup(env.DB, normalizedHash, bundleManifestHash, {
+  const [existingPrivate] = await findSkillsByExactHashGroup(env.DB, fullHash, exactBundleFingerprint, {
     visibility: 'private',
     limit: 1,
   });
@@ -594,7 +594,41 @@ function extractLastLinkUrl(linkHeader: string | null): string | null {
 }
 
 /**
- * Get the newest and oldest commit dates for SKILL.md in the repository.
+ * GitHub's commit payload exposes both authored time and committed time.
+ * For canonical/original skill comparison we care about when the SKILL.md
+ * content first came into existence, so we prefer author.date there.
+ * For activity freshness we keep using committer.date.
+ */
+interface GitHubPathCommit {
+  sha?: string;
+  commit?: {
+    author?: {
+      date?: string | null;
+    } | null;
+    committer?: {
+      date?: string | null;
+    } | null;
+  } | null;
+}
+
+function parseGitHubCommitDate(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function getGitHubPathCommitCreatedAt(commit: GitHubPathCommit | null | undefined): number | null {
+  return parseGitHubCommitDate(commit?.commit?.author?.date)
+    ?? parseGitHubCommitDate(commit?.commit?.committer?.date);
+}
+
+function getGitHubPathCommitUpdatedAt(commit: GitHubPathCommit | null | undefined): number | null {
+  return parseGitHubCommitDate(commit?.commit?.committer?.date)
+    ?? parseGitHubCommitDate(commit?.commit?.author?.date);
+}
+
+/**
+ * Get the newest activity time and the earliest authored time for SKILL.md.
  */
 async function getSkillCommitDates(
   owner: string,
@@ -618,22 +652,15 @@ async function getSkillCommitDates(
     throw new Error(`Failed to fetch commit history for ${owner}/${name}/${skillMdPath}: ${newestResponse.status}`);
   }
 
-  const newestCommits = await newestResponse.json() as Array<{
-    sha: string;
-    commit: {
-      committer: {
-        date: string;
-      };
-    };
-  }>;
+  const newestCommits = await newestResponse.json() as GitHubPathCommit[];
 
   if (!newestCommits || newestCommits.length === 0) {
     log.log(`No commits found for path: ${skillMdPath}`);
     return { lastCommitAt: null, firstCommitAt: null };
   }
 
-  const lastCommitAt = new Date(newestCommits[0].commit.committer.date).getTime();
-  let firstCommitAt = lastCommitAt;
+  const lastCommitAt = getGitHubPathCommitUpdatedAt(newestCommits[0]);
+  let firstCommitAt = getGitHubPathCommitCreatedAt(newestCommits[0]) ?? lastCommitAt;
 
   const lastPageUrl = extractLastLinkUrl(newestResponse.headers.get('link'));
   if (lastPageUrl) {
@@ -644,17 +671,10 @@ async function getSkillCommitDates(
     });
 
     if (oldestResponse.ok) {
-      const oldestCommits = await oldestResponse.json() as Array<{
-        sha: string;
-        commit: {
-          committer: {
-            date: string;
-          };
-        };
-      }>;
+      const oldestCommits = await oldestResponse.json() as GitHubPathCommit[];
 
       if (oldestCommits.length > 0) {
-        firstCommitAt = new Date(oldestCommits[oldestCommits.length - 1].commit.committer.date).getTime();
+        firstCommitAt = getGitHubPathCommitCreatedAt(oldestCommits[oldestCommits.length - 1]) ?? firstCommitAt;
       }
     }
   }
@@ -759,6 +779,105 @@ export interface ExistingSkillSnapshot {
   indexedAt: number | null;
 }
 
+interface ExistingSourceState {
+  id: string;
+  visibleSkillId: string | null;
+  currentSnapshotId: string | null;
+  currentCommitSha: string | null;
+  latestVersionId: string | null;
+  latestVersionCommitSha: string | null;
+  lineageRootSnapshotId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface SkillSourceRecord {
+  id: string;
+  visibleSkillId: string | null;
+  currentSnapshotId: string | null;
+  currentCommitSha: string | null;
+  latestVersionId: string | null;
+  lineageRootSnapshotId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface SnapshotCanonicalState {
+  id: string;
+  bundleExactFingerprint: string;
+  bundleSemanticFingerprint: string | null;
+  skillMdBlobSha: string | null;
+  skillMdNormalizedSha256: string | null;
+  canonicalSourceId: string | null;
+  canonicalSkillId: string | null;
+  canonicalSlug: string | null;
+  canonicalRepoOwner: string | null;
+  canonicalRepoName: string | null;
+  canonicalSkillPath: string | null;
+  canonicalVersionId: string | null;
+  canonicalCommitSha: string | null;
+  canonicalCommitAt: number | null;
+  canonicalSourceLineageRootSnapshotId: string | null;
+  canonicalSourceCurrentSnapshotId: string | null;
+  canonicalSourceVisibleSkillId: string | null;
+  candidateSkillId: string | null;
+  candidateSlug: string | null;
+  candidateRepoOwner: string | null;
+  candidateRepoName: string | null;
+  candidateSkillPath: string | null;
+  candidateSourceType: string | null;
+  candidateVisibility: string | null;
+  candidateStars: number | null;
+  candidateLastCommitAt: number | null;
+  candidateSkillMdFirstCommitAt: number | null;
+  candidateRepoCreatedAt: number | null;
+  candidateCreatedAt: number | null;
+  candidateIndexedAt: number | null;
+}
+
+interface SkillSnapshotRecord {
+  id: string;
+  bundleExactFingerprint: string;
+  bundleSemanticFingerprint: string | null;
+  skillMdBlobSha: string | null;
+  skillMdNormalizedSha256: string | null;
+  canonicalSourceId: string | null;
+  canonicalSkillId: string | null;
+  canonicalSlug: string | null;
+  canonicalRepoOwner: string | null;
+  canonicalRepoName: string | null;
+  canonicalSkillPath: string | null;
+  canonicalVersionId: string | null;
+  canonicalCommitSha: string | null;
+  canonicalCommitAt: number | null;
+}
+
+interface SkillVersionRecord {
+  id: string;
+  sourceId: string;
+  snapshotId: string;
+  previousVersionId: string | null;
+  commitSha: string;
+  relationType: string;
+}
+
+interface SkillOriginMetadata {
+  originSkillId: string | null;
+  originSlug: string | null;
+  originRepoOwner: string | null;
+  originRepoName: string | null;
+  originSkillPath: string | null;
+  originCommitSha: string | null;
+  originRelationType: 'modified_from' | 'historical_copy_of' | 'canonical' | null;
+}
+
+interface SnapshotFingerprintInput {
+  bundleExactFingerprint: string;
+  bundleSemanticFingerprint: string;
+  skillMdBlobSha: string | null;
+  skillMdNormalizedSha256: string;
+}
+
 export async function getExistingSkillSnapshot(
   owner: string,
   name: string,
@@ -792,6 +911,682 @@ export async function getExistingSkillSnapshot(
     .first<ExistingSkillSnapshot>();
 
   return result || null;
+}
+
+async function getExistingSourceState(
+  owner: string,
+  name: string,
+  skillPath: string | null,
+  env: IndexingEnv
+): Promise<ExistingSourceState | null> {
+  const normalizedPath = skillPath || '';
+
+  return (await env.DB.prepare(`
+    SELECT
+      ss.id,
+      ss.visible_skill_id AS visibleSkillId,
+      ss.current_snapshot_id AS currentSnapshotId,
+      ss.current_commit_sha AS currentCommitSha,
+      ss.latest_version_id AS latestVersionId,
+      lv.commit_sha AS latestVersionCommitSha,
+      ss.lineage_root_snapshot_id AS lineageRootSnapshotId,
+      ss.created_at AS createdAt,
+      ss.updated_at AS updatedAt
+    FROM skill_sources ss
+    LEFT JOIN skill_versions lv ON lv.id = ss.latest_version_id
+    WHERE ss.repo_owner = ?
+      AND ss.repo_name = ?
+      AND ss.skill_path = ?
+    LIMIT 1
+  `)
+    .bind(owner, name, normalizedPath)
+    .first<ExistingSourceState>()) || null;
+}
+
+export function getStoredSourceCommitSha(source: {
+  currentCommitSha: string | null;
+  latestVersionCommitSha?: string | null;
+} | null): string | null {
+  if (!source) return null;
+  return source.currentCommitSha
+    ?? ('latestVersionCommitSha' in source ? source.latestVersionCommitSha : null)
+    ?? null;
+}
+
+async function loadSnapshotCanonicalState(
+  db: D1Database,
+  field: 'id' | 'bundle_exact_fingerprint',
+  value: string
+): Promise<SnapshotCanonicalState | null> {
+  const fieldSql = field === 'id' ? 'ss.id' : 'ss.bundle_exact_fingerprint';
+
+  return (await db.prepare(`
+    SELECT
+      ss.id,
+      ss.bundle_exact_fingerprint AS bundleExactFingerprint,
+      ss.bundle_semantic_fingerprint AS bundleSemanticFingerprint,
+      ss.skill_md_blob_sha AS skillMdBlobSha,
+      ss.skill_md_normalized_sha256 AS skillMdNormalizedSha256,
+      ss.canonical_source_id AS canonicalSourceId,
+      ss.canonical_skill_id AS canonicalSkillId,
+      ss.canonical_slug AS canonicalSlug,
+      ss.canonical_repo_owner AS canonicalRepoOwner,
+      ss.canonical_repo_name AS canonicalRepoName,
+      ss.canonical_skill_path AS canonicalSkillPath,
+      ss.canonical_version_id AS canonicalVersionId,
+      ss.canonical_commit_sha AS canonicalCommitSha,
+      ss.canonical_commit_at AS canonicalCommitAt,
+      cs.lineage_root_snapshot_id AS canonicalSourceLineageRootSnapshotId,
+      cs.current_snapshot_id AS canonicalSourceCurrentSnapshotId,
+      cs.visible_skill_id AS canonicalSourceVisibleSkillId,
+      s.id AS candidateSkillId,
+      s.slug AS candidateSlug,
+      s.repo_owner AS candidateRepoOwner,
+      s.repo_name AS candidateRepoName,
+      s.skill_path AS candidateSkillPath,
+      s.source_type AS candidateSourceType,
+      s.visibility AS candidateVisibility,
+      s.stars AS candidateStars,
+      s.last_commit_at AS candidateLastCommitAt,
+      s.skill_md_first_commit_at AS candidateSkillMdFirstCommitAt,
+      s.repo_created_at AS candidateRepoCreatedAt,
+      s.created_at AS candidateCreatedAt,
+      s.indexed_at AS candidateIndexedAt
+    FROM skill_snapshots ss
+    LEFT JOIN skill_sources cs ON cs.id = ss.canonical_source_id
+    LEFT JOIN skills s ON s.id = ss.canonical_skill_id
+    WHERE ${fieldSql} = ?
+    LIMIT 1
+  `)
+    .bind(value)
+    .first<SnapshotCanonicalState>()) || null;
+}
+
+async function getSnapshotCanonicalStateByExactFingerprint(
+  exactFingerprint: string,
+  db: D1Database
+): Promise<SnapshotCanonicalState | null> {
+  return loadSnapshotCanonicalState(db, 'bundle_exact_fingerprint', exactFingerprint);
+}
+
+async function getSnapshotCanonicalStateById(
+  snapshotId: string,
+  db: D1Database
+): Promise<SnapshotCanonicalState | null> {
+  return loadSnapshotCanonicalState(db, 'id', snapshotId);
+}
+
+function buildSourceCandidateSlug(
+  owner: string,
+  repo: string,
+  skillPath: string | null,
+  existingSlug?: string | null
+): string {
+  if (existingSlug) return existingSlug;
+  return generateSlug(owner, repo, skillPath || undefined);
+}
+
+function buildCanonicalCandidateForSource(params: {
+  sourceId: string;
+  slug: string;
+  repo: GitHubRepo;
+  skillPath: string | null;
+  persistenceMetadata: SkillPersistenceMetadata;
+  sourceCreatedAt: number;
+  sourceIndexedAt: number;
+}): CanonicalSkillCandidate {
+  return {
+    id: params.sourceId,
+    slug: params.slug,
+    repoOwner: params.repo.owner.login,
+    repoName: params.repo.name,
+    skillPath: params.skillPath,
+    sourceType: 'github',
+    visibility: 'public',
+    stars: params.repo.stargazers_count,
+    lastCommitAt: params.persistenceMetadata.lastCommitAt,
+    skillMdFirstCommitAt: params.persistenceMetadata.skillMdFirstCommitAt,
+    repoCreatedAt: params.persistenceMetadata.repoCreatedAt,
+    createdAt: params.sourceCreatedAt,
+    indexedAt: params.sourceIndexedAt,
+  };
+}
+
+function buildCanonicalCandidateFromSnapshotState(
+  snapshot: SnapshotCanonicalState | null
+): CanonicalSkillCandidate | null {
+  if (!snapshot?.canonicalSourceId) {
+    return null;
+  }
+
+  return {
+    id: snapshot.canonicalSourceId,
+    slug: snapshot.candidateSlug
+      || snapshot.canonicalSlug
+      || buildSourceCandidateSlug(
+        snapshot.canonicalRepoOwner || '',
+        snapshot.canonicalRepoName || '',
+        snapshot.canonicalSkillPath
+      ),
+    repoOwner: snapshot.candidateRepoOwner || snapshot.canonicalRepoOwner,
+    repoName: snapshot.candidateRepoName || snapshot.canonicalRepoName,
+    skillPath: snapshot.candidateSkillPath ?? snapshot.canonicalSkillPath,
+    sourceType: snapshot.candidateSourceType || 'github',
+    visibility: snapshot.candidateVisibility || 'public',
+    stars: snapshot.candidateStars || 0,
+    lastCommitAt: snapshot.candidateLastCommitAt,
+    skillMdFirstCommitAt: snapshot.candidateSkillMdFirstCommitAt ?? snapshot.canonicalCommitAt,
+    repoCreatedAt: snapshot.candidateRepoCreatedAt,
+    createdAt: snapshot.candidateCreatedAt ?? Date.now(),
+    indexedAt: snapshot.candidateIndexedAt,
+  };
+}
+
+export function determineSkillVersionRelationType(params: {
+  sourceId: string;
+  currentSnapshotId: string;
+  lineageRootSnapshotId: string | null;
+  canonicalSourceId: string | null;
+}): 'canonical' | 'modified_from' | 'historical_copy_of' {
+  if (params.lineageRootSnapshotId && params.lineageRootSnapshotId !== params.currentSnapshotId) {
+    return 'modified_from';
+  }
+
+  if (params.canonicalSourceId && params.canonicalSourceId !== params.sourceId) {
+    return 'historical_copy_of';
+  }
+
+  return 'canonical';
+}
+
+export function resolveVisibleSkillOriginMetadata(params: {
+  sourceId: string;
+  currentSnapshotId: string;
+  lineageRootSnapshotId: string | null;
+  lineageRootSnapshot: Pick<
+    SnapshotCanonicalState,
+    | 'canonicalSourceId'
+    | 'canonicalSkillId'
+    | 'canonicalSlug'
+    | 'canonicalRepoOwner'
+    | 'canonicalRepoName'
+    | 'canonicalSkillPath'
+    | 'canonicalCommitSha'
+  > | null;
+}): SkillOriginMetadata {
+  const rootSnapshot = params.lineageRootSnapshot;
+  if (!params.lineageRootSnapshotId || !rootSnapshot?.canonicalSourceId) {
+    return {
+      originSkillId: null,
+      originSlug: null,
+      originRepoOwner: null,
+      originRepoName: null,
+      originSkillPath: null,
+      originCommitSha: null,
+      originRelationType: null,
+    };
+  }
+
+  if (rootSnapshot.canonicalSourceId === params.sourceId) {
+    return {
+      originSkillId: null,
+      originSlug: null,
+      originRepoOwner: null,
+      originRepoName: null,
+      originSkillPath: null,
+      originCommitSha: null,
+      originRelationType: null,
+    };
+  }
+
+  return {
+    originSkillId: rootSnapshot.canonicalSkillId,
+    originSlug: rootSnapshot.canonicalSlug,
+    originRepoOwner: rootSnapshot.canonicalRepoOwner,
+    originRepoName: rootSnapshot.canonicalRepoName,
+    originSkillPath: rootSnapshot.canonicalSkillPath,
+    originCommitSha: rootSnapshot.canonicalCommitSha,
+    originRelationType: params.lineageRootSnapshotId === params.currentSnapshotId
+      ? 'historical_copy_of'
+      : 'modified_from',
+  };
+}
+
+async function getOrCreateSkillSource(
+  owner: string,
+  repo: string,
+  skillPath: string | null,
+  env: IndexingEnv,
+  seed?: {
+    visibleSkillId?: string | null;
+    currentCommitSha?: string | null;
+  }
+): Promise<SkillSourceRecord> {
+  const normalizedPath = skillPath || '';
+  const existing = await getExistingSourceState(owner, repo, skillPath, env);
+  if (existing) {
+    return {
+      id: existing.id,
+      visibleSkillId: existing.visibleSkillId,
+      currentSnapshotId: existing.currentSnapshotId,
+      currentCommitSha: existing.currentCommitSha,
+      latestVersionId: existing.latestVersionId,
+      lineageRootSnapshotId: existing.lineageRootSnapshotId,
+      createdAt: existing.createdAt,
+      updatedAt: existing.updatedAt,
+    };
+  }
+
+  const sourceId = generateId();
+  const now = Date.now();
+
+  try {
+    await env.DB.prepare(`
+      INSERT INTO skill_sources (
+        id,
+        repo_owner,
+        repo_name,
+        skill_path,
+        visible_skill_id,
+        current_commit_sha,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+      .bind(
+        sourceId,
+        owner,
+        repo,
+        normalizedPath,
+        seed?.visibleSkillId ?? null,
+        seed?.currentCommitSha ?? null,
+        now,
+        now
+      )
+      .run();
+  } catch (error) {
+    const message = String(error);
+    if (!message.includes('skill_sources_repo_path_unique')) {
+      throw error;
+    }
+  }
+
+  const created = await getExistingSourceState(owner, repo, skillPath, env);
+  if (!created) {
+    throw new Error(`Failed to create skill source for ${owner}/${repo}${normalizedPath ? `/${normalizedPath}` : ''}`);
+  }
+
+  return {
+    id: created.id,
+    visibleSkillId: created.visibleSkillId,
+    currentSnapshotId: created.currentSnapshotId,
+    currentCommitSha: created.currentCommitSha,
+    latestVersionId: created.latestVersionId,
+    lineageRootSnapshotId: created.lineageRootSnapshotId,
+    createdAt: created.createdAt,
+    updatedAt: created.updatedAt,
+  };
+}
+
+async function getOrCreateSkillSnapshot(
+  fingerprint: SnapshotFingerprintInput,
+  db: D1Database
+): Promise<SkillSnapshotRecord> {
+  const existing = await getSnapshotCanonicalStateByExactFingerprint(
+    fingerprint.bundleExactFingerprint,
+    db
+  );
+
+  if (existing) {
+    await db.prepare(`
+      UPDATE skill_snapshots
+      SET
+        bundle_semantic_fingerprint = COALESCE(bundle_semantic_fingerprint, ?),
+        skill_md_blob_sha = COALESCE(skill_md_blob_sha, ?),
+        skill_md_normalized_sha256 = COALESCE(skill_md_normalized_sha256, ?),
+        updated_at = ?
+      WHERE id = ?
+    `)
+      .bind(
+        fingerprint.bundleSemanticFingerprint,
+        fingerprint.skillMdBlobSha,
+        fingerprint.skillMdNormalizedSha256,
+        Date.now(),
+        existing.id
+      )
+      .run();
+
+    return {
+      id: existing.id,
+      bundleExactFingerprint: existing.bundleExactFingerprint,
+      bundleSemanticFingerprint: existing.bundleSemanticFingerprint,
+      skillMdBlobSha: existing.skillMdBlobSha,
+      skillMdNormalizedSha256: existing.skillMdNormalizedSha256,
+      canonicalSourceId: existing.canonicalSourceId,
+      canonicalSkillId: existing.canonicalSkillId,
+      canonicalSlug: existing.canonicalSlug,
+      canonicalRepoOwner: existing.canonicalRepoOwner,
+      canonicalRepoName: existing.canonicalRepoName,
+      canonicalSkillPath: existing.canonicalSkillPath,
+      canonicalVersionId: existing.canonicalVersionId,
+      canonicalCommitSha: existing.canonicalCommitSha,
+      canonicalCommitAt: existing.canonicalCommitAt,
+    };
+  }
+
+  const snapshotId = generateId();
+  const now = Date.now();
+  await db.prepare(`
+    INSERT INTO skill_snapshots (
+      id,
+      bundle_exact_fingerprint,
+      bundle_semantic_fingerprint,
+      skill_md_blob_sha,
+      skill_md_normalized_sha256,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
+    .bind(
+      snapshotId,
+      fingerprint.bundleExactFingerprint,
+      fingerprint.bundleSemanticFingerprint,
+      fingerprint.skillMdBlobSha,
+      fingerprint.skillMdNormalizedSha256,
+      now,
+      now
+    )
+    .run();
+
+  return {
+    id: snapshotId,
+    bundleExactFingerprint: fingerprint.bundleExactFingerprint,
+    bundleSemanticFingerprint: fingerprint.bundleSemanticFingerprint,
+    skillMdBlobSha: fingerprint.skillMdBlobSha,
+    skillMdNormalizedSha256: fingerprint.skillMdNormalizedSha256,
+    canonicalSourceId: null,
+    canonicalSkillId: null,
+    canonicalSlug: null,
+    canonicalRepoOwner: null,
+    canonicalRepoName: null,
+    canonicalSkillPath: null,
+    canonicalVersionId: null,
+    canonicalCommitSha: null,
+    canonicalCommitAt: null,
+  };
+}
+
+async function getSourceLineageRootSnapshotId(
+  sourceId: string,
+  db: D1Database
+): Promise<string | null> {
+  const result = await db.prepare(`
+    SELECT lineage_root_snapshot_id AS lineageRootSnapshotId
+    FROM skill_sources
+    WHERE id = ?
+    LIMIT 1
+  `)
+    .bind(sourceId)
+    .first<{ lineageRootSnapshotId: string | null }>();
+
+  return result?.lineageRootSnapshotId ?? null;
+}
+
+async function syncSkillVersion(
+  params: {
+    db: D1Database;
+    source: SkillSourceRecord;
+    snapshotId: string;
+    commitSha: string;
+    commitAt: number | null;
+    versionStartedAt: number | null;
+    relationType: 'canonical' | 'modified_from' | 'historical_copy_of';
+  }
+): Promise<SkillVersionRecord> {
+  const now = Date.now();
+
+  if (params.source.currentSnapshotId === params.snapshotId && params.source.latestVersionId) {
+    await params.db.prepare(`
+      UPDATE skill_versions
+      SET
+        relation_type = ?,
+        indexed_at = ?,
+        is_provisional = 1
+      WHERE id = ?
+    `)
+      .bind(params.relationType, now, params.source.latestVersionId)
+      .run();
+
+    return {
+      id: params.source.latestVersionId,
+      sourceId: params.source.id,
+      snapshotId: params.snapshotId,
+      previousVersionId: params.source.latestVersionId,
+      commitSha: params.commitSha,
+      relationType: params.relationType,
+    };
+  }
+
+  const existing = await params.db.prepare(`
+    SELECT
+      id,
+      previous_version_id AS previousVersionId
+    FROM skill_versions
+    WHERE source_id = ?
+      AND commit_sha = ?
+    LIMIT 1
+  `)
+    .bind(params.source.id, params.commitSha)
+    .first<{ id: string; previousVersionId: string | null }>();
+
+  if (existing) {
+    await params.db.prepare(`
+      UPDATE skill_versions
+      SET
+        snapshot_id = ?,
+        previous_version_id = COALESCE(previous_version_id, ?),
+        commit_at = COALESCE(?, commit_at),
+        version_started_at = COALESCE(?, version_started_at),
+        indexed_at = ?,
+        relation_type = ?,
+        is_provisional = 1
+      WHERE id = ?
+    `)
+      .bind(
+        params.snapshotId,
+        params.source.latestVersionId,
+        params.commitAt,
+        params.versionStartedAt,
+        now,
+        params.relationType,
+        existing.id
+      )
+      .run();
+
+    return {
+      id: existing.id,
+      sourceId: params.source.id,
+      snapshotId: params.snapshotId,
+      previousVersionId: existing.previousVersionId,
+      commitSha: params.commitSha,
+      relationType: params.relationType,
+    };
+  }
+
+  const versionId = generateId();
+  await params.db.prepare(`
+    INSERT INTO skill_versions (
+      id,
+      source_id,
+      snapshot_id,
+      previous_version_id,
+      commit_sha,
+      commit_at,
+      version_started_at,
+      indexed_at,
+      relation_type,
+      is_provisional,
+      created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+  `)
+    .bind(
+      versionId,
+      params.source.id,
+      params.snapshotId,
+      params.source.latestVersionId,
+      params.commitSha,
+      params.commitAt,
+      params.versionStartedAt,
+      now,
+      params.relationType,
+      now
+    )
+    .run();
+
+  return {
+    id: versionId,
+    sourceId: params.source.id,
+    snapshotId: params.snapshotId,
+    previousVersionId: params.source.latestVersionId,
+    commitSha: params.commitSha,
+    relationType: params.relationType,
+  };
+}
+
+async function updateSkillSourceState(
+  db: D1Database,
+  input: {
+    sourceId: string;
+    visibleSkillId: string | null;
+    currentSnapshotId: string;
+    currentCommitSha: string;
+    latestVersionId: string;
+    lineageRootSnapshotId: string | null;
+  }
+): Promise<void> {
+  await db.prepare(`
+    UPDATE skill_sources
+    SET
+      visible_skill_id = ?,
+      current_snapshot_id = ?,
+      current_commit_sha = ?,
+      latest_version_id = ?,
+      lineage_root_snapshot_id = ?,
+      updated_at = ?
+    WHERE id = ?
+  `)
+    .bind(
+      input.visibleSkillId,
+      input.currentSnapshotId,
+      input.currentCommitSha,
+      input.latestVersionId,
+      input.lineageRootSnapshotId,
+      Date.now(),
+      input.sourceId
+    )
+    .run();
+}
+
+async function clearSkillSourceVisibleSkillId(
+  db: D1Database,
+  sourceId: string
+): Promise<void> {
+  await db.prepare(`
+    UPDATE skill_sources
+    SET
+      visible_skill_id = NULL,
+      updated_at = ?
+    WHERE id = ?
+  `)
+    .bind(Date.now(), sourceId)
+    .run();
+}
+
+async function updateSnapshotCanonicalState(
+  db: D1Database,
+  input: {
+    snapshotId: string;
+    canonicalSourceId: string;
+    canonicalSkillId: string | null;
+    canonicalSlug: string | null;
+    canonicalRepoOwner: string;
+    canonicalRepoName: string;
+    canonicalSkillPath: string | null;
+    canonicalVersionId: string;
+    canonicalCommitSha: string;
+    canonicalCommitAt: number | null;
+  }
+): Promise<void> {
+  await db.prepare(`
+    UPDATE skill_snapshots
+    SET
+      canonical_source_id = ?,
+      canonical_skill_id = ?,
+      canonical_slug = ?,
+      canonical_repo_owner = ?,
+      canonical_repo_name = ?,
+      canonical_skill_path = ?,
+      canonical_version_id = ?,
+      canonical_commit_sha = ?,
+      canonical_commit_at = ?,
+      updated_at = ?
+    WHERE id = ?
+  `)
+    .bind(
+      input.canonicalSourceId,
+      input.canonicalSkillId,
+      input.canonicalSlug,
+      input.canonicalRepoOwner,
+      input.canonicalRepoName,
+      input.canonicalSkillPath || '',
+      input.canonicalVersionId,
+      input.canonicalCommitSha,
+      input.canonicalCommitAt,
+      Date.now(),
+      input.snapshotId
+    )
+    .run();
+}
+
+async function updateVisibleSkillLineageMetadata(
+  db: D1Database,
+  input: {
+    skillId: string;
+    sourceId: string;
+    currentSnapshotId: string;
+    currentVersionId: string;
+    origin: SkillOriginMetadata;
+  }
+): Promise<void> {
+  await db.prepare(`
+    UPDATE skills
+    SET
+      source_id = ?,
+      current_snapshot_id = ?,
+      current_version_id = ?,
+      origin_skill_id = ?,
+      origin_slug = ?,
+      origin_repo_owner = ?,
+      origin_repo_name = ?,
+      origin_skill_path = ?,
+      origin_commit_sha = ?,
+      origin_relation_type = ?
+    WHERE id = ?
+  `)
+    .bind(
+      input.sourceId,
+      input.currentSnapshotId,
+      input.currentVersionId,
+      input.origin.originSkillId,
+      input.origin.originSlug,
+      input.origin.originRepoOwner,
+      input.origin.originRepoName,
+      input.origin.originSkillPath,
+      input.origin.originCommitSha,
+      input.origin.originRelationType,
+      input.skillId
+    )
+    .run();
 }
 
 /**
@@ -1041,6 +1836,30 @@ interface SkillPersistenceMetadata {
   repoCreatedAt: number | null;
 }
 
+function preferEarlierTimestamp(existing: number | null, incoming: number | null): number | null {
+  if (typeof existing !== 'number') return incoming;
+  if (typeof incoming !== 'number') return existing;
+  return Math.min(existing, incoming);
+}
+
+export function mergeSkillPersistenceMetadata(
+  existing: Pick<ExistingSkillSnapshot, 'lastCommitAt' | 'skillMdFirstCommitAt' | 'repoCreatedAt'> | null,
+  incoming: SkillPersistenceMetadata
+): SkillPersistenceMetadata {
+  return {
+    contentHash: incoming.contentHash,
+    lastCommitAt: incoming.lastCommitAt ?? existing?.lastCommitAt ?? null,
+    skillMdFirstCommitAt: preferEarlierTimestamp(
+      existing?.skillMdFirstCommitAt ?? null,
+      incoming.skillMdFirstCommitAt
+    ),
+    repoCreatedAt: preferEarlierTimestamp(
+      existing?.repoCreatedAt ?? null,
+      incoming.repoCreatedAt
+    ),
+  };
+}
+
 async function upsertAuthor(
   repo: GitHubRepo,
   env: IndexingEnv
@@ -1250,98 +2069,6 @@ async function updateSkillMetricsOnly(
     .first<{ id: string }>();
 
   return result?.id || null;
-}
-
-async function reconcileCanonicalDuplicateGroup(
-  currentSkill: CanonicalSkillCandidate,
-  normalizedHash: string,
-  bundleManifestHash: string,
-  env: IndexingEnv
-): Promise<{ kept: boolean; canonicalId: string | null; removedIds: string[] }> {
-  const existingCandidates = await findPublicGithubCanonicalCandidates(
-    env.DB,
-    normalizedHash,
-    bundleManifestHash,
-    currentSkill.id
-  );
-  const allCandidates = [currentSkill, ...existingCandidates];
-  const canonical = chooseCanonicalSkillCandidate(allCandidates);
-
-  if (!canonical) {
-    return { kept: true, canonicalId: currentSkill.id, removedIds: [] };
-  }
-
-  const losers = allCandidates.filter((candidate) => candidate.id !== canonical.id);
-  for (const loser of losers) {
-    await deleteSkillArtifactsAndInvalidateCaches({
-      db: env.DB,
-      r2: env.R2,
-      indexNow: {
-        env,
-      },
-      skill: {
-        id: loser.id,
-        slug: loser.slug,
-        sourceType: loser.sourceType,
-        repoOwner: loser.repoOwner,
-        repoName: loser.repoName,
-        skillPath: loser.skillPath,
-      },
-    });
-    log.log(`Deleted duplicate skill ${loser.slug} in favor of ${canonical.slug}`);
-  }
-
-  return {
-    kept: canonical.id === currentSkill.id,
-    canonicalId: canonical.id,
-    removedIds: losers.map((candidate) => candidate.id),
-  };
-}
-
-function buildCanonicalCandidateFromExistingSnapshot(
-  snapshot: ExistingSkillSnapshot,
-  overrides?: Partial<Pick<CanonicalSkillCandidate, 'stars' | 'lastCommitAt' | 'skillMdFirstCommitAt' | 'repoCreatedAt' | 'indexedAt'>>
-): CanonicalSkillCandidate {
-  return {
-    id: snapshot.id,
-    slug: snapshot.slug,
-    repoOwner: snapshot.repoOwner,
-    repoName: snapshot.repoName,
-    skillPath: snapshot.skillPath,
-    sourceType: snapshot.sourceType,
-    visibility: snapshot.visibility,
-    stars: overrides?.stars ?? snapshot.stars,
-    lastCommitAt: overrides?.lastCommitAt ?? snapshot.lastCommitAt,
-    skillMdFirstCommitAt: overrides?.skillMdFirstCommitAt ?? snapshot.skillMdFirstCommitAt,
-    repoCreatedAt: overrides?.repoCreatedAt ?? snapshot.repoCreatedAt,
-    createdAt: snapshot.createdAt,
-    indexedAt: overrides?.indexedAt ?? snapshot.indexedAt,
-  };
-}
-
-function buildCanonicalCandidateForNewGithubSkill(params: {
-  skillId: string;
-  slug: string;
-  repo: GitHubRepo;
-  skillPath: string | null;
-  persistenceMetadata: SkillPersistenceMetadata;
-  now: number;
-}): CanonicalSkillCandidate {
-  return {
-    id: params.skillId,
-    slug: params.slug,
-    repoOwner: params.repo.owner.login,
-    repoName: params.repo.name,
-    skillPath: params.skillPath,
-    sourceType: 'github',
-    visibility: 'public',
-    stars: params.repo.stargazers_count,
-    lastCommitAt: params.persistenceMetadata.lastCommitAt,
-    skillMdFirstCommitAt: params.persistenceMetadata.skillMdFirstCommitAt,
-    repoCreatedAt: params.persistenceMetadata.repoCreatedAt,
-    createdAt: params.now,
-    indexedAt: params.now,
-  };
 }
 
 export async function syncRepoMetricsForGithubSkills(
@@ -1640,23 +2367,30 @@ async function processMessage(
       }
     }
 
-    // Step 3: Load the stored skill state once and derive update decisions from it.
+    // Step 3: Load the stored source/skill state once and derive update decisions from it.
+    const existingSource = await getExistingSourceState(
+      canonicalRepoOwner,
+      canonicalRepoName,
+      skillPath || null,
+      env
+    );
     const existingSkill = await getExistingSkillSnapshot(
       canonicalRepoOwner,
       canonicalRepoName,
       skillPath || null,
       env
     );
+    const storedCommitSha = getStoredSourceCommitSha(existingSource) || existingSkill?.commitSha || null;
     const shouldFetchContent = forceReindex
-      || !existingSkill
-      || existingSkill.commitSha !== latestCommit.sha;
+      || !storedCommitSha
+      || storedCommitSha !== latestCommit.sha;
 
     if (forceReindex) {
       log.log(`Force reindex requested for ${canonicalRepoOwner}/${canonicalRepoName}`);
-    } else if (!existingSkill) {
+    } else if (!storedCommitSha) {
       log.log(`No stored commit SHA for ${canonicalRepoOwner}/${canonicalRepoName}, needs full index`);
-    } else if (existingSkill.commitSha !== latestCommit.sha) {
-      log.log(`Commit SHA changed: ${existingSkill.commitSha} -> ${latestCommit.sha}`);
+    } else if (storedCommitSha !== latestCommit.sha) {
+      log.log(`Commit SHA changed: ${storedCommitSha} -> ${latestCommit.sha}`);
     } else {
       log.log(`Commit SHA unchanged: ${latestCommit.sha}, skipping content fetch`);
     }
@@ -1669,26 +2403,30 @@ async function processMessage(
       repo.forks_count
     );
 
-    // If skill exists and no content update needed, just update stars/forks
-    if (existingSkill && !shouldFetchContent) {
-      const updatedId = await updateSkillMetricsOnly(
-        existingSkill.id,
-        repo,
-        env
-      );
-      if (updatedId) {
-        if (!await wasRepoMetricsSynced(env, repoMetricsSyncKey)) {
-          await syncRepoMetricsForGithubSkills(
-            env.DB,
-            canonicalRepoOwner,
-            canonicalRepoName,
-            repo.stargazers_count,
-            repo.forks_count
-          );
-          await markRepoMetricsSynced(env, repoMetricsSyncKey);
+    // If content is unchanged, we only need the cheap repo-metric sync path.
+    if (!shouldFetchContent) {
+      if (existingSkill) {
+        const updatedId = await updateSkillMetricsOnly(
+          existingSkill.id,
+          repo,
+          env
+        );
+        if (updatedId) {
+          log.log(`Updated stars/forks only for skill: ${updatedId}`);
         }
-        log.log(`Updated stars/forks only for skill: ${updatedId}`);
       }
+
+      if (!await wasRepoMetricsSynced(env, repoMetricsSyncKey)) {
+        await syncRepoMetricsForGithubSkills(
+          env.DB,
+          canonicalRepoOwner,
+          canonicalRepoName,
+          repo.stargazers_count,
+          repo.forks_count
+        );
+        await markRepoMetricsSynced(env, repoMetricsSyncKey);
+      }
+
       shouldMarkProcessed = true;
       return;
     }
@@ -1808,6 +2546,7 @@ async function processMessage(
 
     const skillMetadata = resolveSkillMetadata(repo, parsedSkillMd);
     const { fullHash, normalizedHash } = await computeSkillMdHashes(skillMdContent);
+    const exactBundleFingerprint = await computeExactBundleFingerprint(directoryFiles);
     const bundleManifestHash = await computeBundleManifestHash(directoryFiles, normalizedHash);
     const { lastCommitAt, firstCommitAt } = await getOrCreateBatchPromise(
       batchContext.skillCommitDatesByPath,
@@ -1825,6 +2564,7 @@ async function processMessage(
       skillMdFirstCommitAt: firstCommitAt,
       repoCreatedAt: repo.created_at ? new Date(repo.created_at).getTime() : null,
     };
+    const mergedPersistenceMetadata = mergeSkillPersistenceMetadata(existingSkill, persistenceMetadata);
     const fileStructure: FileStructure = {
       commitSha: latestCommit.sha,
       indexedAt: new Date().toISOString(),
@@ -1833,17 +2573,131 @@ async function processMessage(
     };
     const securityContentFingerprint = await buildSecurityContentFingerprint(directoryFiles);
 
-    // Step 7: Create or update skill record.
-    let skillId: string;
-    let currentCanonicalCandidate: CanonicalSkillCandidate | null = null;
-    let shouldRunCanonicalDedup = true;
+    const source = await getOrCreateSkillSource(
+      canonicalRepoOwner,
+      canonicalRepoName,
+      skillPath || null,
+      env,
+      {
+        visibleSkillId: existingSkill?.id ?? null,
+        currentCommitSha: storedCommitSha,
+      }
+    );
+    const snapshot = await getOrCreateSkillSnapshot({
+      bundleExactFingerprint: exactBundleFingerprint,
+      bundleSemanticFingerprint: bundleManifestHash,
+      skillMdBlobSha: skillMd.sha || null,
+      skillMdNormalizedSha256: normalizedHash,
+    }, env.DB);
+    const snapshotState = await getSnapshotCanonicalStateByExactFingerprint(
+      exactBundleFingerprint,
+      env.DB
+    );
+    if (!snapshotState) {
+      throw new Error(`Failed to reload skill snapshot ${exactBundleFingerprint}`);
+    }
+
+    const currentCanonicalCandidate = buildCanonicalCandidateForSource({
+      sourceId: source.id,
+      slug: buildSourceCandidateSlug(
+        canonicalRepoOwner,
+        canonicalRepoName,
+        skillPath || null,
+        existingSkill?.slug
+      ),
+      repo,
+      skillPath: skillPath || null,
+      persistenceMetadata: mergedPersistenceMetadata,
+      sourceCreatedAt: source.createdAt,
+      sourceIndexedAt: Date.now(),
+    });
+    const existingCanonicalCandidate = buildCanonicalCandidateFromSnapshotState(snapshotState);
+    const currentOwnsSnapshot = !existingCanonicalCandidate
+      || existingCanonicalCandidate.id === source.id
+      || compareCanonicalSkillCandidates(currentCanonicalCandidate, existingCanonicalCandidate) < 0;
+
+    let lineageRootSnapshotId = source.lineageRootSnapshotId;
+    if (!lineageRootSnapshotId) {
+      if (snapshotState.canonicalSourceId && snapshotState.canonicalSourceId !== source.id) {
+        lineageRootSnapshotId = snapshotState.canonicalSourceLineageRootSnapshotId
+          || await getSourceLineageRootSnapshotId(snapshotState.canonicalSourceId, env.DB)
+          || snapshot.id;
+      } else {
+        lineageRootSnapshotId = snapshot.id;
+      }
+    }
+
+    const versionRelationType = determineSkillVersionRelationType({
+      sourceId: source.id,
+      currentSnapshotId: snapshot.id,
+      lineageRootSnapshotId,
+      canonicalSourceId: currentOwnsSnapshot ? source.id : snapshotState.canonicalSourceId,
+    });
+    const versionRecord = await syncSkillVersion({
+      db: env.DB,
+      source,
+      snapshotId: snapshot.id,
+      commitSha: latestCommit.sha,
+      commitAt: mergedPersistenceMetadata.lastCommitAt ?? mergedPersistenceMetadata.skillMdFirstCommitAt,
+      versionStartedAt: mergedPersistenceMetadata.lastCommitAt ?? mergedPersistenceMetadata.skillMdFirstCommitAt,
+      relationType: versionRelationType,
+    });
+
+    if (!await wasRepoMetricsSynced(env, repoMetricsSyncKey)) {
+      await syncRepoMetricsForGithubSkills(
+        env.DB,
+        canonicalRepoOwner,
+        canonicalRepoName,
+        repo.stargazers_count,
+        repo.forks_count
+      );
+      await markRepoMetricsSynced(env, repoMetricsSyncKey);
+    }
+
+    if (!currentOwnsSnapshot) {
+      await updateSkillSourceState(env.DB, {
+        sourceId: source.id,
+        visibleSkillId: null,
+        currentSnapshotId: snapshot.id,
+        currentCommitSha: latestCommit.sha,
+        latestVersionId: versionRecord.id,
+        lineageRootSnapshotId,
+      });
+
+      if (existingSkill) {
+        await deleteSkillArtifactsAndInvalidateCaches({
+          db: env.DB,
+          r2: env.R2,
+          indexNow: {
+            env,
+          },
+          skill: {
+            id: existingSkill.id,
+            slug: existingSkill.slug,
+            sourceType: existingSkill.sourceType,
+            repoOwner: existingSkill.repoOwner,
+            repoName: existingSkill.repoName,
+            skillPath: existingSkill.skillPath,
+          },
+        });
+        log.log(`Removed duplicate visible skill ${existingSkill.slug}; kept snapshot history on source ${source.id}`);
+      } else {
+        log.log(`Recorded duplicate-only source history for ${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`);
+      }
+
+      shouldMarkProcessed = true;
+      return;
+    }
+
+    let skillId: string | null = existingSkill?.id ?? null;
+    let skillSlug: string | null = existingSkill?.slug ?? null;
 
     if (existingSkill) {
       const updatedId = await updateSkill(
         existingSkill.id,
         repo,
         skillMetadata,
-        persistenceMetadata,
+        mergedPersistenceMetadata,
         latestCommit.sha,
         fileStructure,
         env
@@ -1853,18 +2707,12 @@ async function processMessage(
         return;
       }
       skillId = updatedId;
-      currentCanonicalCandidate = buildCanonicalCandidateFromExistingSnapshot(existingSkill, {
-        stars: repo.stargazers_count,
-        lastCommitAt: persistenceMetadata.lastCommitAt,
-        skillMdFirstCommitAt: persistenceMetadata.skillMdFirstCommitAt,
-        repoCreatedAt: persistenceMetadata.repoCreatedAt,
-        indexedAt: Date.now(),
-      });
-      log.log(`Updated skill: ${skillId}`);
+      skillSlug = existingSkill.slug;
+      log.log(`Updated canonical skill: ${skillId}`);
     } else {
       const curationResult = await checkAndConvertPrivateSkill(
-        normalizedHash,
-        bundleManifestHash,
+        fullHash,
+        exactBundleFingerprint,
         repo,
         skillMetadata,
         persistenceMetadata,
@@ -1873,11 +2721,12 @@ async function processMessage(
         skillPath || null,
         env
       );
+
       if (curationResult.converted && curationResult.skillId) {
         skillId = curationResult.skillId;
-        shouldRunCanonicalDedup = false;
-        log.log(`Curation: Converted private skill to public: ${curationResult.slug} (${skillId})`);
-        await invalidatePublicDiscoveryCaches(`curation publish ${curationResult.slug || skillId}`);
+        skillSlug = curationResult.slug || null;
+        log.log(`Curation: Converted private skill to public canonical skill: ${skillSlug || skillId}`);
+        await invalidatePublicDiscoveryCaches(`curation publish ${skillSlug || skillId}`);
       } else {
         const authorId = await upsertAuthor(repo, env);
         log.log(`Author upserted: ${authorId}`);
@@ -1892,58 +2741,120 @@ async function processMessage(
           frontmatter
         );
         skillId = createResult.id;
-        currentCanonicalCandidate = createResult.existingSnapshot
-          ? buildCanonicalCandidateFromExistingSnapshot(createResult.existingSnapshot, {
-            stars: repo.stargazers_count,
-            lastCommitAt: persistenceMetadata.lastCommitAt,
-            skillMdFirstCommitAt: persistenceMetadata.skillMdFirstCommitAt,
-            repoCreatedAt: persistenceMetadata.repoCreatedAt,
-            indexedAt: Date.now(),
-          })
-          : buildCanonicalCandidateForNewGithubSkill({
-            skillId: createResult.id,
-            slug: createResult.slug,
+        skillSlug = createResult.slug;
+
+        if (createResult.existingSnapshot) {
+          const createMergedPersistenceMetadata = mergeSkillPersistenceMetadata(
+            createResult.existingSnapshot,
+            persistenceMetadata
+          );
+          const updatedId = await updateSkill(
+            createResult.id,
             repo,
-            skillPath: skillPath || null,
-            persistenceMetadata,
-            now: createResult.createdAt,
-          });
-        log.log(`Created skill: ${skillId}`);
-        await invalidatePublicDiscoveryCaches(`github publish ${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`);
+            skillMetadata,
+            createMergedPersistenceMetadata,
+            latestCommit.sha,
+            fileStructure,
+            env
+          );
+          if (!updatedId) {
+            log.error(`Failed to update raced skill after create fallback: ${canonicalRepoOwner}/${canonicalRepoName}`);
+            return;
+          }
+          skillId = updatedId;
+          skillSlug = createResult.existingSnapshot.slug;
+        } else {
+          await invalidatePublicDiscoveryCaches(`github publish ${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`);
+        }
+
+        log.log(`Created canonical skill: ${skillId}`);
       }
     }
 
-    if (!await wasRepoMetricsSynced(env, repoMetricsSyncKey)) {
-      await syncRepoMetricsForGithubSkills(
-        env.DB,
-        canonicalRepoOwner,
-        canonicalRepoName,
-        repo.stargazers_count,
-        repo.forks_count
-      );
-      await markRepoMetricsSynced(env, repoMetricsSyncKey);
+    if (!skillId) {
+      throw new Error(`Visible canonical skill missing for ${canonicalRepoOwner}/${canonicalRepoName}`);
+    }
+
+    const lineageRootSnapshot = lineageRootSnapshotId === snapshot.id
+      ? {
+        canonicalSourceId: source.id,
+        canonicalSkillId: skillId,
+        canonicalSlug: skillSlug,
+        canonicalRepoOwner: canonicalRepoOwner,
+        canonicalRepoName: canonicalRepoName,
+        canonicalSkillPath: skillPath || '',
+        canonicalCommitSha: latestCommit.sha,
+      }
+      : await getSnapshotCanonicalStateById(lineageRootSnapshotId, env.DB);
+    const originMetadata = resolveVisibleSkillOriginMetadata({
+      sourceId: source.id,
+      currentSnapshotId: snapshot.id,
+      lineageRootSnapshotId,
+      lineageRootSnapshot,
+    });
+
+    await updateVisibleSkillLineageMetadata(env.DB, {
+      skillId,
+      sourceId: source.id,
+      currentSnapshotId: snapshot.id,
+      currentVersionId: versionRecord.id,
+      origin: originMetadata,
+    });
+    await updateSkillSourceState(env.DB, {
+      sourceId: source.id,
+      visibleSkillId: skillId,
+      currentSnapshotId: snapshot.id,
+      currentCommitSha: latestCommit.sha,
+      latestVersionId: versionRecord.id,
+      lineageRootSnapshotId,
+    });
+    await updateSnapshotCanonicalState(env.DB, {
+      snapshotId: snapshot.id,
+      canonicalSourceId: source.id,
+      canonicalSkillId: skillId,
+      canonicalSlug: skillSlug,
+      canonicalRepoOwner: canonicalRepoOwner,
+      canonicalRepoName: canonicalRepoName,
+      canonicalSkillPath: skillPath || '',
+      canonicalVersionId: versionRecord.id,
+      canonicalCommitSha: latestCommit.sha,
+      canonicalCommitAt: mergedPersistenceMetadata.skillMdFirstCommitAt,
+    });
+
+    if (
+      snapshotState.canonicalSourceId
+      && snapshotState.canonicalSourceId !== source.id
+      && snapshotState.candidateSkillId
+      && snapshotState.candidateSlug
+      && snapshotState.canonicalSourceCurrentSnapshotId === snapshot.id
+      && snapshotState.canonicalSourceVisibleSkillId === snapshotState.candidateSkillId
+    ) {
+      await deleteSkillArtifactsAndInvalidateCaches({
+        db: env.DB,
+        r2: env.R2,
+        indexNow: {
+          env,
+        },
+        skill: {
+          id: snapshotState.candidateSkillId,
+          slug: snapshotState.candidateSlug,
+          sourceType: snapshotState.candidateSourceType || 'github',
+          repoOwner: snapshotState.candidateRepoOwner,
+          repoName: snapshotState.candidateRepoName,
+          skillPath: snapshotState.candidateSkillPath,
+        },
+      });
+      await clearSkillSourceVisibleSkillId(env.DB, snapshotState.canonicalSourceId);
+      log.log(`Replaced canonical duplicate source ${snapshotState.canonicalSourceId} with ${source.id}`);
     }
 
     await storeSkillHashes(env.DB, skillId, {
       fullHash,
       normalizedHash,
+      bundleExactHash: exactBundleFingerprint,
       bundleManifestHash,
     });
     log.log(`Stored skill hashes for ${skillId}`);
-
-    if (shouldRunCanonicalDedup && currentCanonicalCandidate) {
-      const dedupResult = await reconcileCanonicalDuplicateGroup(
-        currentCanonicalCandidate,
-        normalizedHash,
-        bundleManifestHash,
-        env
-      );
-      if (!dedupResult.kept) {
-        log.log(`Discarded duplicate candidate ${skillId}; canonical skill is ${dedupResult.canonicalId}`);
-        shouldMarkProcessed = true;
-        return;
-      }
-    }
 
     // Save tags from frontmatter (including keywords alias)
     let tags: string[] = [];

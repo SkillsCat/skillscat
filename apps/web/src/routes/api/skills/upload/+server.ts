@@ -13,7 +13,7 @@ import { buildUploadSkillR2Key } from '$lib/skill-path';
 import { decodeBase64Utf8 } from '$lib/server/text/codec';
 import {
   computeStandaloneSkillBundleHashes,
-  findSkillsByHashGroup,
+  findSkillsByExactHashGroup,
   storeSkillHashes,
 } from '$lib/server/skill/dedup';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '$lib/server/skill/title';
@@ -252,10 +252,10 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
   }
 
   const hashes = await computeStandaloneSkillBundleHashes(skillMdContent);
-  const [existingPublicByHash] = await findSkillsByHashGroup(
+  const [existingPublicByHash] = await findSkillsByExactHashGroup(
     db,
-    hashes.normalizedHash,
-    hashes.bundleManifestHash!,
+    hashes.fullHash,
+    hashes.bundleExactHash!,
     {
       visibility: 'public',
       limit: 1,
@@ -378,10 +378,10 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   // Compute content hash
   const hashes = await computeStandaloneSkillBundleHashes(skillMdContent);
   const contentHash = hashes.fullHash;
-  const [existingPublicByHash] = await findSkillsByHashGroup(
+  const [existingPublicByHash] = await findSkillsByExactHashGroup(
     db,
-    hashes.normalizedHash,
-    hashes.bundleManifestHash!,
+    hashes.fullHash,
+    hashes.bundleExactHash!,
     {
       visibility: 'public',
       limit: 1,

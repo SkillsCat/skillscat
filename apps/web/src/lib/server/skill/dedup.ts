@@ -11,6 +11,7 @@ export interface BundleManifestFile {
 }
 
 export interface StoredSkillHashes extends SkillMdHashes {
+  bundleExactHash?: string | null;
   bundleManifestHash?: string | null;
 }
 
@@ -95,18 +96,20 @@ export async function computeSkillMdHashes(content: string): Promise<SkillMdHash
 export async function computeStandaloneSkillBundleHashes(content: string): Promise<StoredSkillHashes> {
   const { fullHash, normalizedHash } = await computeSkillMdHashes(content);
   const size = new TextEncoder().encode(content).byteLength;
+  const bundleFiles = [
+    {
+      path: 'SKILL.md',
+      sha: fullHash,
+      size,
+      type: 'text',
+    },
+  ];
 
   return {
     fullHash,
     normalizedHash,
-    bundleManifestHash: await computeBundleManifestHash([
-      {
-        path: 'SKILL.md',
-        sha: fullHash,
-        size,
-        type: 'text',
-      },
-    ], normalizedHash),
+    bundleExactHash: await computeExactBundleFingerprint(bundleFiles),
+    bundleManifestHash: await computeBundleManifestHash(bundleFiles, normalizedHash),
   };
 }
 
@@ -120,9 +123,12 @@ function normalizeBundlePath(path: string): string {
   return normalized.toLowerCase() === 'skill.md' ? 'SKILL.md' : normalized;
 }
 
-export async function computeBundleManifestHash(
+async function computeBundleFingerprint(
   files: BundleManifestFile[],
-  skillMdNormalizedHash: string
+  getContentId: (file: BundleManifestFile, normalizedPath: string) => string,
+  options?: {
+    zeroSkillMdSize?: boolean;
+  }
 ): Promise<string> {
   const normalizedEntries = files
     .map((file) => {
@@ -132,17 +138,33 @@ export async function computeBundleManifestHash(
       return {
         path: normalizedPath,
         type: file.type || 'unknown',
-        // SKILL.md should dedupe on normalized content, so raw byte size must not
-        // cause formatting-only copies to diverge into separate bundle signatures.
-        size: isSkillMd ? 0 : Number(file.size || 0),
-        contentId: isSkillMd
-          ? `normalized:${skillMdNormalizedHash}`
-          : `sha:${file.sha || ''}`,
+        size: options?.zeroSkillMdSize && isSkillMd ? 0 : Number(file.size || 0),
+        contentId: getContentId(file, normalizedPath),
       };
     })
     .sort((left, right) => left.path.localeCompare(right.path));
 
   return computeSha256Hex(JSON.stringify(normalizedEntries));
+}
+
+export async function computeBundleManifestHash(
+  files: BundleManifestFile[],
+  skillMdNormalizedHash: string
+): Promise<string> {
+  return computeBundleFingerprint(
+    files,
+    (file, normalizedPath) => normalizedPath === 'SKILL.md'
+      ? `normalized:${skillMdNormalizedHash}`
+      : `sha:${file.sha || ''}`,
+    { zeroSkillMdSize: true }
+  );
+}
+
+export async function computeExactBundleFingerprint(files: BundleManifestFile[]): Promise<string> {
+  return computeBundleFingerprint(
+    files,
+    (file) => `sha:${file.sha || ''}`
+  );
 }
 
 export async function storeSkillHashes(
@@ -154,6 +176,7 @@ export async function storeSkillHashes(
   const records: Array<{ hashType: string; hashValue: string | null | undefined }> = [
     { hashType: 'full', hashValue: hashes.fullHash },
     { hashType: 'normalized', hashValue: hashes.normalizedHash },
+    { hashType: 'bundle_exact', hashValue: hashes.bundleExactHash },
     { hashType: 'bundle_manifest', hashValue: hashes.bundleManifestHash },
   ];
 
@@ -284,6 +307,33 @@ async function computeLegacyBundleManifestHash(
   return null;
 }
 
+async function computeLegacyExactBundleHash(
+  candidate: Pick<LegacyHashGroupSkillMatch, 'fileStructure' | 'readme'>,
+  fullHash: string
+): Promise<string | null> {
+  if (candidate.fileStructure) {
+    try {
+      const parsed = JSON.parse(candidate.fileStructure) as {
+        files?: BundleManifestFile[];
+      };
+      if (Array.isArray(parsed.files) && parsed.files.length > 0) {
+        return computeExactBundleFingerprint(parsed.files);
+      }
+    } catch {
+      // fall through to the readme-based fallback
+    }
+  }
+
+  if (candidate.readme) {
+    const standaloneHashes = await computeStandaloneSkillBundleHashes(candidate.readme);
+    if (standaloneHashes.fullHash === fullHash && standaloneHashes.bundleExactHash) {
+      return standaloneHashes.bundleExactHash;
+    }
+  }
+
+  return null;
+}
+
 async function findLegacyBundleMatches(
   db: D1Database,
   normalizedHash: string,
@@ -348,6 +398,93 @@ async function findLegacyBundleMatches(
     }
 
     await upsertSkillHash(db, candidate.id, 'bundle_manifest', legacyBundleManifestHash);
+    existingSkillIds.add(candidate.id);
+    matches.push({
+      id: candidate.id,
+      slug: candidate.slug,
+      repoOwner: candidate.repoOwner,
+      repoName: candidate.repoName,
+      skillPath: candidate.skillPath,
+      sourceType: candidate.sourceType,
+      visibility: candidate.visibility,
+      ownerId: candidate.ownerId,
+      orgId: candidate.orgId,
+      stars: candidate.stars,
+      lastCommitAt: candidate.lastCommitAt,
+      skillMdFirstCommitAt: candidate.skillMdFirstCommitAt,
+      repoCreatedAt: candidate.repoCreatedAt,
+      createdAt: candidate.createdAt,
+      indexedAt: candidate.indexedAt,
+    });
+  }
+
+  return matches;
+}
+
+async function findLegacyExactBundleMatches(
+  db: D1Database,
+  fullHash: string,
+  bundleExactHash: string,
+  options: FindSkillsByHashGroupOptions,
+  existingSkillIds: Set<string>
+): Promise<HashGroupSkillMatch[]> {
+  const conditions: string[] = [];
+  const bindValues: Array<string | number> = [fullHash];
+  applySkillMatchFilters(conditions, bindValues, options);
+
+  const whereSql = conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '';
+  const legacyScanLimit = Math.max(
+    typeof options.limit === 'number' ? options.limit : 100,
+    existingSkillIds.size + 20
+  );
+
+  const result = await db.prepare(`
+    SELECT
+      s.id,
+      s.slug,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.skill_path as skillPath,
+      s.source_type as sourceType,
+      s.visibility as visibility,
+      s.owner_id as ownerId,
+      s.org_id as orgId,
+      s.stars as stars,
+      s.last_commit_at as lastCommitAt,
+      s.skill_md_first_commit_at as skillMdFirstCommitAt,
+      s.repo_created_at as repoCreatedAt,
+      s.created_at as createdAt,
+      s.indexed_at as indexedAt,
+      s.file_structure as fileStructure,
+      s.readme as readme
+    FROM content_hashes fh INDEXED BY content_hashes_lookup_idx
+    INNER JOIN skills s ON s.id = fh.skill_id
+    LEFT JOIN content_hashes beh
+      ON beh.skill_id = s.id
+     AND beh.hash_type = 'bundle_exact'
+    WHERE fh.hash_type = 'full'
+      AND fh.hash_value = ?
+      AND beh.skill_id IS NULL
+      ${whereSql}
+    ORDER BY s.created_at ASC
+    LIMIT ?
+  `)
+    .bind(...bindValues, legacyScanLimit)
+    .all<LegacyHashGroupSkillMatch>();
+
+  const matches: HashGroupSkillMatch[] = [];
+
+  for (const candidate of result.results || []) {
+    if (existingSkillIds.has(candidate.id)) {
+      continue;
+    }
+
+    const legacyBundleExactHash = await computeLegacyExactBundleHash(candidate, fullHash);
+    if (!legacyBundleExactHash || legacyBundleExactHash !== bundleExactHash) {
+      continue;
+    }
+
+    await upsertSkillHash(db, candidate.id, 'bundle_exact', legacyBundleExactHash);
     existingSkillIds.add(candidate.id);
     matches.push({
       id: candidate.id,
@@ -440,6 +577,78 @@ export async function findSkillsByHashGroup(
     db,
     normalizedHash,
     bundleManifestHash,
+    options,
+    matchesById
+  );
+
+  const combined = [...exactMatches, ...legacyMatches]
+    .sort((left, right) => left.createdAt - right.createdAt);
+
+  if (typeof options.limit === 'number') {
+    return combined.slice(0, options.limit);
+  }
+
+  return combined;
+}
+
+export async function findSkillsByExactHashGroup(
+  db: D1Database,
+  fullHash: string,
+  bundleExactHash: string,
+  options: FindSkillsByHashGroupOptions = {}
+): Promise<HashGroupSkillMatch[]> {
+  const conditions: string[] = [];
+  const bindValues: Array<string | number> = [bundleExactHash];
+  applySkillMatchFilters(conditions, bindValues, options);
+
+  const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limitSql = typeof options.limit === 'number' ? 'LIMIT ?' : '';
+  if (typeof options.limit === 'number') {
+    bindValues.push(options.limit);
+  }
+
+  const result = await db.prepare(`
+    WITH exact_matches AS (
+      SELECT skill_id
+      FROM content_hashes INDEXED BY content_hashes_lookup_idx
+      WHERE hash_type = 'bundle_exact'
+        AND hash_value = ?
+    )
+    SELECT
+      s.id,
+      s.slug,
+      s.repo_owner as repoOwner,
+      s.repo_name as repoName,
+      s.skill_path as skillPath,
+      s.source_type as sourceType,
+      s.visibility as visibility,
+      s.owner_id as ownerId,
+      s.org_id as orgId,
+      s.stars as stars,
+      s.last_commit_at as lastCommitAt,
+      s.skill_md_first_commit_at as skillMdFirstCommitAt,
+      s.repo_created_at as repoCreatedAt,
+      s.created_at as createdAt,
+      s.indexed_at as indexedAt
+    FROM exact_matches m
+    INNER JOIN skills s ON s.id = m.skill_id
+    ${whereSql}
+    ORDER BY s.created_at ASC
+    ${limitSql}
+  `)
+    .bind(...bindValues)
+    .all<HashGroupSkillMatch>();
+
+  const exactMatches = result.results || [];
+  if (typeof options.limit === 'number' && exactMatches.length >= options.limit) {
+    return exactMatches;
+  }
+
+  const matchesById = new Set(exactMatches.map((match) => match.id));
+  const legacyMatches = await findLegacyExactBundleMatches(
+    db,
+    fullHash,
+    bundleExactHash,
     options,
     matchesById
   );

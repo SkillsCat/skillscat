@@ -116,6 +116,16 @@ export const skills = sqliteTable('skills', {
   orgId: text('org_id').references(() => organizations.id, { onDelete: 'set null' }),
   sourceType: text('source_type').notNull().default('github'), // 'github', 'upload'
   contentHash: text('content_hash'), // SHA-256 hash for duplicate detection
+  sourceId: text('source_id'),
+  currentSnapshotId: text('current_snapshot_id'),
+  currentVersionId: text('current_version_id'),
+  originSkillId: text('origin_skill_id'),
+  originSlug: text('origin_slug'),
+  originRepoOwner: text('origin_repo_owner'),
+  originRepoName: text('origin_repo_name'),
+  originSkillPath: text('origin_skill_path'),
+  originCommitSha: text('origin_commit_sha'),
+  originRelationType: text('origin_relation_type'),
   verifiedRepoUrl: text('verified_repo_url'), // For private-to-public conversion
   // Cost optimization: tiered update system
   tier: text('tier').notNull().default('cold'), // 'hot', 'warm', 'cool', 'cold', 'archived'
@@ -159,6 +169,11 @@ export const skills = sqliteTable('skills', {
   index('skills_org_stars_created_idx').on(table.orgId, table.stars, table.createdAt),
   index('skills_org_visibility_stars_created_idx').on(table.orgId, table.visibility, table.stars, table.createdAt),
   index('skills_content_hash_idx').on(table.contentHash),
+  index('skills_source_idx').on(table.sourceId),
+  index('skills_current_snapshot_idx').on(table.currentSnapshotId),
+  index('skills_current_version_idx').on(table.currentVersionId),
+  index('skills_origin_skill_idx').on(table.originSkillId),
+  index('skills_origin_slug_idx').on(table.originSlug),
   // Cost optimization indexes
   index('skills_tier_idx').on(table.tier),
   index('skills_next_update_idx').on(table.nextUpdateAt),
@@ -263,6 +278,74 @@ export const skills = sqliteTable('skills', {
     table.repoName,
     sql`COALESCE(${table.skillPath}, '')`
   )
+]);
+
+export const skillSources = sqliteTable('skill_sources', {
+  id: text('id').primaryKey(),
+  repoOwner: text('repo_owner').notNull(),
+  repoName: text('repo_name').notNull(),
+  skillPath: text('skill_path').notNull().default(''),
+  visibleSkillId: text('visible_skill_id'),
+  currentSnapshotId: text('current_snapshot_id'),
+  currentCommitSha: text('current_commit_sha'),
+  latestVersionId: text('latest_version_id'),
+  lineageRootSnapshotId: text('lineage_root_snapshot_id'),
+  historyState: text('history_state').notNull().default('pending'),
+  historyCursor: text('history_cursor'),
+  nextHistoryBackfillAt: integer('next_history_backfill_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  uniqueIndex('skill_sources_repo_path_unique').on(table.repoOwner, table.repoName, table.skillPath),
+  index('skill_sources_visible_skill_idx').on(table.visibleSkillId),
+  index('skill_sources_current_snapshot_idx').on(table.currentSnapshotId),
+  index('skill_sources_latest_version_idx').on(table.latestVersionId),
+  index('skill_sources_lineage_root_snapshot_idx').on(table.lineageRootSnapshotId),
+  index('skill_sources_history_backfill_idx').on(table.nextHistoryBackfillAt, table.id)
+]);
+
+export const skillSnapshots = sqliteTable('skill_snapshots', {
+  id: text('id').primaryKey(),
+  bundleExactFingerprint: text('bundle_exact_fingerprint').notNull().unique(),
+  bundleSemanticFingerprint: text('bundle_semantic_fingerprint'),
+  skillMdBlobSha: text('skill_md_blob_sha'),
+  skillMdNormalizedSha256: text('skill_md_normalized_sha256'),
+  canonicalSourceId: text('canonical_source_id'),
+  canonicalSkillId: text('canonical_skill_id'),
+  canonicalSlug: text('canonical_slug'),
+  canonicalRepoOwner: text('canonical_repo_owner'),
+  canonicalRepoName: text('canonical_repo_name'),
+  canonicalSkillPath: text('canonical_skill_path'),
+  canonicalVersionId: text('canonical_version_id'),
+  canonicalCommitSha: text('canonical_commit_sha'),
+  canonicalCommitAt: integer('canonical_commit_at', { mode: 'timestamp_ms' }),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  index('skill_snapshots_semantic_fingerprint_idx').on(table.bundleSemanticFingerprint),
+  index('skill_snapshots_blob_sha_idx').on(table.skillMdBlobSha),
+  index('skill_snapshots_canonical_source_idx').on(table.canonicalSourceId),
+  index('skill_snapshots_canonical_skill_idx').on(table.canonicalSkillId),
+  index('skill_snapshots_canonical_commit_idx').on(table.canonicalCommitAt)
+]);
+
+export const skillVersions = sqliteTable('skill_versions', {
+  id: text('id').primaryKey(),
+  sourceId: text('source_id').notNull(),
+  snapshotId: text('snapshot_id').notNull(),
+  previousVersionId: text('previous_version_id'),
+  commitSha: text('commit_sha').notNull(),
+  commitAt: integer('commit_at', { mode: 'timestamp_ms' }),
+  versionStartedAt: integer('version_started_at', { mode: 'timestamp_ms' }),
+  indexedAt: integer('indexed_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`),
+  relationType: text('relation_type').notNull().default('canonical'),
+  isProvisional: integer('is_provisional', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
+}, (table) => [
+  uniqueIndex('skill_versions_source_commit_unique').on(table.sourceId, table.commitSha),
+  index('skill_versions_source_idx').on(table.sourceId, table.createdAt),
+  index('skill_versions_snapshot_idx').on(table.snapshotId, table.versionStartedAt),
+  index('skill_versions_previous_idx').on(table.previousVersionId)
 ]);
 
 // ========== Recommend Precompute State (one row per skill) ==========
@@ -711,6 +794,12 @@ export type OrgMember = typeof orgMembers.$inferSelect;
 export type NewOrgMember = typeof orgMembers.$inferInsert;
 export type Skill = typeof skills.$inferSelect;
 export type NewSkill = typeof skills.$inferInsert;
+export type SkillSource = typeof skillSources.$inferSelect;
+export type NewSkillSource = typeof skillSources.$inferInsert;
+export type SkillSnapshot = typeof skillSnapshots.$inferSelect;
+export type NewSkillSnapshot = typeof skillSnapshots.$inferInsert;
+export type SkillVersion = typeof skillVersions.$inferSelect;
+export type NewSkillVersion = typeof skillVersions.$inferInsert;
 export type SkillSecurityState = typeof skillSecurityState.$inferSelect;
 export type NewSkillSecurityState = typeof skillSecurityState.$inferInsert;
 export type SkillSecurityScan = typeof skillSecurityScans.$inferSelect;

@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import {
   computeStandaloneSkillBundleHashes,
-  findSkillsByHashGroup,
+  findSkillsByExactHashGroup,
 } from '$lib/server/skill/dedup';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '$lib/server/skill/title';
 
@@ -273,10 +273,10 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   }
 
   const hashes = await computeStandaloneSkillBundleHashes(skillMdContent);
-  const [existingPublicByHash] = await findSkillsByHashGroup(
+  const [existingPublicByHash] = await findSkillsByExactHashGroup(
     db,
-    hashes.normalizedHash,
-    hashes.bundleManifestHash!,
+    hashes.fullHash,
+    hashes.bundleExactHash!,
     {
       visibility: 'public',
       limit: 1,

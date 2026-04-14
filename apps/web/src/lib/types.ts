@@ -56,6 +56,16 @@ export interface SkillDetail extends SkillCardData {
   visibility: 'public' | 'private' | 'unlisted';
   sourceType: 'github' | 'upload';
   tier?: string | null;
+  sourceId?: string | null;
+  currentSnapshotId?: string | null;
+  currentVersionId?: string | null;
+  originSkillId?: string | null;
+  originSlug?: string | null;
+  originRepoOwner?: string | null;
+  originRepoName?: string | null;
+  originSkillPath?: string | null;
+  originCommitSha?: string | null;
+  originRelationType?: 'modified_from' | 'historical_copy_of' | 'canonical' | null;
   ownerId?: string | null;
   ownerName?: string | null;
   ownerAvatar?: string | null;

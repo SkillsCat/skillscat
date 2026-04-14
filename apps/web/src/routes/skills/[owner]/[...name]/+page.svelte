@@ -60,6 +60,19 @@
   const copy = $derived(getSkillPageCopy(i18n.locale()));
   const session = useSession();
   const securitySummary = $derived(data.skill?.security ?? null);
+  const shouldShowDerivedFromCallout = $derived(
+    Boolean(data.skill?.originSlug && data.skill.originRelationType === 'modified_from')
+  );
+  const originSkillHref = $derived(
+    data.skill?.originSlug ? `/skills/${encodeSkillSlugForPath(data.skill.originSlug)}` : '#'
+  );
+  const originRepoLabel = $derived.by(() => {
+    if (!data.skill) return '';
+    if (data.skill.originRepoOwner && data.skill.originRepoName) {
+      return `${data.skill.originRepoOwner}/${data.skill.originRepoName}`;
+    }
+    return data.skill.originSlug || '';
+  });
 
   const securityRiskOrder: Record<SecurityRiskLevel, number> = {
     low: 1,
@@ -1481,6 +1494,25 @@
 
           <!-- Description (full width) -->
           <p class="skill-description-full">{data.skill.description || copy.noDescription}</p>
+
+          {#if shouldShowDerivedFromCallout}
+            <div class="mt-5 rounded-2xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100">
+              <div class="font-semibold">{copy.derivedFromTitle}</div>
+              <div class="mt-1">
+                {i18n.t(copy.derivedFromDescription, { repo: originRepoLabel })}
+              </div>
+              <a
+                href={originSkillHref}
+                class="mt-2 inline-flex items-center gap-1 font-medium text-amber-800 underline decoration-amber-400/70 underline-offset-3 transition-colors hover:text-amber-950 dark:text-amber-300 dark:hover:text-amber-100"
+              >
+                {copy.derivedFromAction}
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M14 5h5m0 0v5m0-5L10 14" />
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 9v10h10" />
+                </svg>
+              </a>
+            </div>
+          {/if}
 
           <!-- Meta row with badges -->
           <div class="skill-meta">

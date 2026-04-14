@@ -3,9 +3,14 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  determineSkillVersionRelationType,
   extractStoredFileShas,
   getExistingSkillSnapshot,
+  getGitHubPathCommitCreatedAt,
+  getStoredSourceCommitSha,
+  mergeSkillPersistenceMetadata,
   queueDiscoveredSkillPaths,
+  resolveVisibleSkillOriginMetadata,
 } from '../workers/indexing';
 import type { IndexingMessage } from '../workers/shared/types';
 
@@ -152,6 +157,148 @@ describe('indexing worker snapshot lookup', () => {
       ['SKILL.md', 'blob-skill'],
       ['README.md', 'blob-readme'],
     ]);
+  });
+});
+
+describe('indexing worker commit timestamp selection', () => {
+  it('prefers author date when deriving the first SKILL.md commit timestamp', () => {
+    expect(getGitHubPathCommitCreatedAt({
+      commit: {
+        author: { date: '2024-01-02T03:04:05Z' },
+        committer: { date: '2024-02-03T04:05:06Z' },
+      },
+    })).toBe(Date.parse('2024-01-02T03:04:05Z'));
+  });
+
+  it('falls back to committer date when author date is missing', () => {
+    expect(getGitHubPathCommitCreatedAt({
+      commit: {
+        author: null,
+        committer: { date: '2024-02-03T04:05:06Z' },
+      },
+    })).toBe(Date.parse('2024-02-03T04:05:06Z'));
+  });
+});
+
+describe('indexing worker persistence metadata merge', () => {
+  it('keeps the earliest known creation timestamps for an existing skill', () => {
+    expect(mergeSkillPersistenceMetadata({
+      lastCommitAt: 1_710_000_000_000,
+      skillMdFirstCommitAt: 1_700_000_000_000,
+      repoCreatedAt: 1_690_000_000_000,
+    }, {
+      contentHash: 'hash-next',
+      lastCommitAt: null,
+      skillMdFirstCommitAt: 1_720_000_000_000,
+      repoCreatedAt: 1_695_000_000_000,
+    })).toEqual({
+      contentHash: 'hash-next',
+      lastCommitAt: 1_710_000_000_000,
+      skillMdFirstCommitAt: 1_700_000_000_000,
+      repoCreatedAt: 1_690_000_000_000,
+    });
+  });
+
+  it('accepts newly discovered earlier timestamps from a reindex', () => {
+    expect(mergeSkillPersistenceMetadata({
+      lastCommitAt: 1_710_000_000_000,
+      skillMdFirstCommitAt: 1_700_000_000_000,
+      repoCreatedAt: 1_690_000_000_000,
+    }, {
+      contentHash: 'hash-next',
+      lastCommitAt: 1_715_000_000_000,
+      skillMdFirstCommitAt: 1_680_000_000_000,
+      repoCreatedAt: 1_685_000_000_000,
+    })).toEqual({
+      contentHash: 'hash-next',
+      lastCommitAt: 1_715_000_000_000,
+      skillMdFirstCommitAt: 1_680_000_000_000,
+      repoCreatedAt: 1_685_000_000_000,
+    });
+  });
+});
+
+describe('indexing worker lineage helpers', () => {
+  it('prefers the source current commit sha over the last version commit sha', () => {
+    expect(getStoredSourceCommitSha({
+      currentCommitSha: 'sha-current',
+      latestVersionCommitSha: 'sha-old-version',
+    })).toBe('sha-current');
+  });
+
+  it('marks a source as modified when its current snapshot differs from the lineage root', () => {
+    expect(determineSkillVersionRelationType({
+      sourceId: 'source-copy',
+      currentSnapshotId: 'snapshot-modified',
+      lineageRootSnapshotId: 'snapshot-origin',
+      canonicalSourceId: 'source-copy',
+    })).toBe('modified_from');
+  });
+
+  it('marks an unchanged copied snapshot as a historical copy', () => {
+    expect(determineSkillVersionRelationType({
+      sourceId: 'source-copy',
+      currentSnapshotId: 'snapshot-origin',
+      lineageRootSnapshotId: 'snapshot-origin',
+      canonicalSourceId: 'source-original',
+    })).toBe('historical_copy_of');
+  });
+
+  it('returns canonical when the source still owns its root snapshot', () => {
+    expect(determineSkillVersionRelationType({
+      sourceId: 'source-original',
+      currentSnapshotId: 'snapshot-origin',
+      lineageRootSnapshotId: 'snapshot-origin',
+      canonicalSourceId: 'source-original',
+    })).toBe('canonical');
+  });
+
+  it('only surfaces origin metadata when the visible skill truly derives from another source', () => {
+    expect(resolveVisibleSkillOriginMetadata({
+      sourceId: 'source-copy',
+      currentSnapshotId: 'snapshot-modified',
+      lineageRootSnapshotId: 'snapshot-origin',
+      lineageRootSnapshot: {
+        canonicalSourceId: 'source-original',
+        canonicalSkillId: 'skill-original',
+        canonicalSlug: 'origin/toolbox/claude',
+        canonicalRepoOwner: 'origin',
+        canonicalRepoName: 'toolbox',
+        canonicalSkillPath: '.claude',
+        canonicalCommitSha: 'sha-origin',
+      },
+    })).toEqual({
+      originSkillId: 'skill-original',
+      originSlug: 'origin/toolbox/claude',
+      originRepoOwner: 'origin',
+      originRepoName: 'toolbox',
+      originSkillPath: '.claude',
+      originCommitSha: 'sha-origin',
+      originRelationType: 'modified_from',
+    });
+
+    expect(resolveVisibleSkillOriginMetadata({
+      sourceId: 'source-original',
+      currentSnapshotId: 'snapshot-origin',
+      lineageRootSnapshotId: 'snapshot-origin',
+      lineageRootSnapshot: {
+        canonicalSourceId: 'source-original',
+        canonicalSkillId: 'skill-original',
+        canonicalSlug: 'origin/toolbox/claude',
+        canonicalRepoOwner: 'origin',
+        canonicalRepoName: 'toolbox',
+        canonicalSkillPath: '.claude',
+        canonicalCommitSha: 'sha-origin',
+      },
+    })).toEqual({
+      originSkillId: null,
+      originSlug: null,
+      originRepoOwner: null,
+      originRepoName: null,
+      originSkillPath: null,
+      originCommitSha: null,
+      originRelationType: null,
+    });
   });
 });
 

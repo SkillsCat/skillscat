@@ -38,9 +38,10 @@ import { parseSkillSlug } from '$lib/skill-path';
 import { resolveOpenClawOwnerContext } from '$lib/server/openclaw/identity';
 import {
   computeBundleManifestHash,
+  computeExactBundleFingerprint,
   computeSha256Hex,
   computeSkillMdHashes,
-  findSkillsByHashGroup,
+  findSkillsByExactHashGroup,
   storeSkillHashes,
 } from '$lib/server/skill/dedup';
 
@@ -173,7 +174,7 @@ async function collectUploadedFiles(formData: FormData): Promise<Array<{ path: s
 async function computeOpenClawSkillHashes(
   files: Array<{ path: string; content: string; size: number }>,
   skillMdContent: string
-): Promise<{ fullHash: string; normalizedHash: string; bundleManifestHash: string }> {
+): Promise<{ fullHash: string; normalizedHash: string; bundleExactHash: string; bundleManifestHash: string }> {
   const { fullHash, normalizedHash } = await computeSkillMdHashes(skillMdContent);
   const bundleFiles = await Promise.all(files.map(async (file) => ({
     path: file.path,
@@ -185,6 +186,7 @@ async function computeOpenClawSkillHashes(
   return {
     fullHash,
     normalizedHash,
+    bundleExactHash: await computeExactBundleFingerprint(bundleFiles),
     bundleManifestHash: await computeBundleManifestHash(bundleFiles, normalizedHash),
   };
 }
@@ -374,10 +376,10 @@ export const POST: RequestHandler = async ({ request, platform, locals }) => {
     .bind(nativeSlug)
     .first<ExistingSkillRow>();
 
-  const [existingPublicByHash] = await findSkillsByHashGroup(
+  const [existingPublicByHash] = await findSkillsByExactHashGroup(
     db,
-    hashes.normalizedHash,
-    hashes.bundleManifestHash,
+    hashes.fullHash,
+    hashes.bundleExactHash,
     {
       visibility: 'public',
       excludeSkillId: existing?.id,
