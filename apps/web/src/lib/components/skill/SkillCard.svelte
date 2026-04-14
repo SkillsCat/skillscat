@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { StarIcon, Clock01Icon } from '@hugeicons/core-free-icons';
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
@@ -6,6 +7,7 @@
   import Avatar from '$lib/components/common/Avatar.svelte';
   import { buildSkillPath } from '$lib/skill-path';
   import { cleanSkillCardDescription } from '$lib/text/skill-card-description';
+  import { isElementTextTruncated } from './text-truncation';
 
   interface Props {
     skill: {
@@ -23,11 +25,16 @@
   }
 
   let { skill, hideAvatar = false }: Props = $props();
+  let titleEl: HTMLHeadingElement | null = $state(null);
+  let titleTruncated = $state(false);
+  let resizeObserver: ResizeObserver | null = null;
+  let measureFrame = 0;
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
   let primaryCategoryLabel = $derived(getPrimaryCategoryLabel());
   let relativeTimeLabel = $derived(formatRelativeTime(skill.updatedAt));
   let displayDescription = $derived(cleanSkillCardDescription(skill.description));
+  const titleTooltip = $derived(titleTruncated ? skill.name : undefined);
 
   function formatNumber(num: number): string {
     return i18n.formatCompactNumber(num);
@@ -53,6 +60,42 @@
     if (!category) return null;
     return getLocalizedCategoryBySlug(category, i18n.locale())?.name || category;
   }
+
+  function updateTitleTruncation() {
+    titleTruncated = isElementTextTruncated(titleEl);
+  }
+
+  function scheduleTitleTruncationMeasure() {
+    if (typeof window === 'undefined') return;
+
+    if (measureFrame) cancelAnimationFrame(measureFrame);
+    measureFrame = requestAnimationFrame(() => {
+      measureFrame = 0;
+      updateTitleTruncation();
+    });
+  }
+
+  onMount(() => {
+    if (typeof ResizeObserver !== 'undefined' && titleEl) {
+      resizeObserver = new ResizeObserver(() => {
+        scheduleTitleTruncationMeasure();
+      });
+      resizeObserver.observe(titleEl);
+    }
+
+    scheduleTitleTruncationMeasure();
+
+    return () => {
+      if (measureFrame) cancelAnimationFrame(measureFrame);
+      resizeObserver?.disconnect();
+      resizeObserver = null;
+    };
+  });
+
+  $effect(() => {
+    skill.name;
+    scheduleTitleTruncationMeasure();
+  });
 </script>
 
 <a
@@ -76,7 +119,11 @@
     <!-- Content -->
     <div class="flex-1 min-w-0">
       <!-- Title -->
-      <h3 class="skill-title">
+      <h3
+        bind:this={titleEl}
+        class="skill-title"
+        title={titleTooltip}
+      >
         {skill.name}
       </h3>
 

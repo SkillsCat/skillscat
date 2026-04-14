@@ -5,6 +5,7 @@
   import { StarIcon } from '@hugeicons/core-free-icons';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import { buildSkillPath } from '$lib/skill-path';
+  import { isElementTextTruncated } from './text-truncation';
 
   interface Props {
     skill: {
@@ -52,14 +53,9 @@
     return messages.common.relativeToday;
   }
 
-  function isTextTruncated(el: HTMLElement | null): boolean {
-    if (!el) return false;
-    return el.scrollWidth > el.clientWidth + 1;
-  }
-
   function updateTextTruncation() {
-    titleTruncated = isTextTruncated(titleEl);
-    authorTruncated = isTextTruncated(authorEl);
+    titleTruncated = isElementTextTruncated(titleEl);
+    authorTruncated = isElementTextTruncated(authorEl);
   }
 
   function scheduleTextTruncationMeasure() {
