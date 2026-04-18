@@ -84,9 +84,6 @@
     "overrides": {
       "@esbuild-kit/core-utils>esbuild": "^0.25.12",
       "cookie": "^0.7.2"
-    },
-    "patchedDependencies": {
-      "@sveltejs/kit@2.53.0": "patches/@sveltejs__kit@2.53.0.patch"
     }
   }
 }
