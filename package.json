@@ -22,6 +22,7 @@
     "db:generate": "pnpm --filter @skillscat/web db:generate",
     "db:migrate": "pnpm --filter @skillscat/web db:migrate",
     "db:migrate:prod": "pnpm --filter @skillscat/web db:migrate:prod",
+    "category:backfill": "node scripts/category-backfill.mjs",
     "indexnow:backfill": "node scripts/indexnow-backfill.mjs",
     "security:backfill": "node scripts/security-backfill.mjs",
     "deploy": "node scripts/web-release.mjs deploy --bump patch",

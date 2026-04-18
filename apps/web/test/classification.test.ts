@@ -70,6 +70,19 @@ describe('classifyByKeywords', () => {
     expect(result.categories).not.toContain('embeddings');
   });
 
+  it('prefers design over ui-components for design-direction frontend skills', () => {
+    const result = classifyByKeywords(
+      `
+      This skill creates distinctive frontend interfaces with strong UI/UX direction.
+      It focuses on visual design, typography, brand identity, color palettes, design systems,
+      mockups, art direction, and interface critique before generating React and HTML/CSS components.
+      `
+    );
+
+    expect(result.categories[0]).toBe('design');
+    expect(result.categories).not.toContain('productivity');
+  });
+
   it('keeps weak secondary keyword matches out of the assigned categories', () => {
     const result = classifyByKeywords(
       `
@@ -300,6 +313,140 @@ describe('classification queue preloading', () => {
     });
     expect(requestBody.messages[0]?.content).toContain('Use design for UI/UX direction');
     expect(requestBody.messages[0]?.content).toContain('Use embeddings only for real vector retrieval');
+  });
+
+  it('folds AI-suggested design variants back into the canonical design category', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            categories: ['ui-components', 'code-generation'],
+            confidence: 0.91,
+            reasoning: 'Design-heavy frontend skill',
+            suggestedCategory: {
+              slug: 'creative-design',
+              name: 'Creative Design',
+              description: 'Creative direction and visual styling for interfaces',
+            },
+          }),
+        },
+      }],
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const insertedCategories: string[] = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => {
+          if (sql.includes('FROM skills') && sql.includes('WHERE id IN')) {
+            return {
+              bind: (...args: unknown[]) => {
+                expect(args).toEqual(['skill-ai-alias']);
+                return {
+                  all: async () => ({
+                    results: [{
+                      id: 'skill-ai-alias',
+                      slug: 'owner/skill-ai-alias',
+                      source_type: 'github',
+                      repo_owner: 'owner',
+                      repo_name: 'repo',
+                      skill_path: null,
+                      readme: null,
+                      tier: 'hot',
+                    }],
+                  }),
+                };
+              },
+            };
+          }
+
+          if (sql === 'SELECT category_slug FROM skill_categories WHERE skill_id = ?') {
+            return {
+              bind: () => ({
+                all: async () => ({ results: [] }),
+              }),
+            };
+          }
+
+          if (sql === 'DELETE FROM skill_categories WHERE skill_id = ?') {
+            return {
+              bind: () => ({
+                run: async () => ({ success: true }),
+              }),
+            };
+          }
+
+          if (sql.includes('INSERT OR IGNORE INTO skill_categories')) {
+            return {
+              bind: (_skillId: string, categorySlug: string) => ({
+                run: async () => {
+                  insertedCategories.push(categorySlug);
+                  return { success: true };
+                },
+              }),
+            };
+          }
+
+          if (sql === 'UPDATE skills SET classification_method = ?, updated_at = ? WHERE id = ?') {
+            return {
+              bind: () => ({
+                run: async () => ({ success: true }),
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      },
+      KV: {
+        get: vi.fn(async () => null),
+        put: vi.fn(async () => {}),
+      },
+      R2: {
+        get: vi.fn(async (key: string) => {
+          if (key === 'skills/github/owner/repo/SKILL.md') {
+            return {
+              async text() {
+                return 'This skill defines creative frontend direction, typography, branding, and visual design while generating components.';
+              },
+            } as R2ObjectBody;
+          }
+
+          return null;
+        }),
+      },
+      OPENROUTER_API_KEY: 'or-key',
+      AI_MODEL: 'minimax/minimax-m2.5:free',
+      CLASSIFICATION_PAID_MODEL: 'openai/gpt-5.4-nano',
+    } as never;
+
+    try {
+      await classificationWorker.queue({
+        messages: [{
+          id: 'msg-ai-alias',
+          body: {
+            type: 'classify',
+            skillId: 'skill-ai-alias',
+            repoOwner: 'owner',
+            repoName: 'repo',
+            skillMdPath: 'skills/github/owner/repo/SKILL.md',
+            stars: 1200,
+          },
+          ack: vi.fn(),
+          retry: vi.fn(),
+        }],
+      } as never, env, {} as never);
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+
+    expect(insertedCategories).toEqual(['ui-components', 'design', 'code-generation']);
   });
 
   it('keeps low-priority repos on keyword classification even when free OpenRouter models are available', async () => {
@@ -614,6 +761,80 @@ describe('classification queue preloading', () => {
     expect(acked).toBe(1);
     expect(retried).toBe(0);
     expect(sqls.some((sql) => sql.includes('FROM skills') && sql.includes('WHERE id IN'))).toBe(false);
+  });
+
+  it('treats canonicalized frontmatter aliases as direct category matches', async () => {
+    const insertedCategories: string[] = [];
+    const updatedMethods: string[] = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => {
+          if (sql === 'SELECT category_slug FROM skill_categories WHERE skill_id = ?') {
+            return {
+              bind: () => ({
+                all: async () => ({ results: [] }),
+              }),
+            };
+          }
+
+          if (sql === 'DELETE FROM skill_categories WHERE skill_id = ?') {
+            return {
+              bind: () => ({
+                run: async () => ({ success: true }),
+              }),
+            };
+          }
+
+          if (sql.includes('INSERT OR IGNORE INTO skill_categories')) {
+            return {
+              bind: (_skillId: string, categorySlug: string) => ({
+                run: async () => {
+                  insertedCategories.push(categorySlug);
+                  return { success: true };
+                },
+              }),
+            };
+          }
+
+          if (sql === 'UPDATE skills SET classification_method = ?, updated_at = ? WHERE id = ?') {
+            return {
+              bind: (method: string) => ({
+                run: async () => {
+                  updatedMethods.push(method);
+                  return { success: true };
+                },
+              }),
+            };
+          }
+
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      },
+      KV: {
+        get: vi.fn(async () => null),
+        put: vi.fn(async () => {}),
+      },
+      R2: { get: vi.fn(async () => null) },
+    } as never;
+
+    await classificationWorker.queue({
+      messages: [{
+        id: 'msg-direct-alias',
+        body: {
+          type: 'classify',
+          skillId: 'skill-direct-alias',
+          repoOwner: 'owner',
+          repoName: 'repo',
+          skillMdPath: 'skills/github/owner/repo/SKILL.md',
+          frontmatterCategories: ['UI/UX', 'design-systems', 'responsive-design'],
+        },
+        ack: vi.fn(),
+        retry: vi.fn(),
+      }],
+    } as never, env, {} as never);
+
+    expect(updatedMethods).toEqual(['direct']);
+    expect(insertedCategories).toEqual(['design', 'responsive']);
   });
 
   it('falls back to per-message processing when preload fails', async () => {

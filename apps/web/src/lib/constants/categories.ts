@@ -107,7 +107,47 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
         slug: 'design',
         name: 'Design',
         description: 'UI/UX direction, visual design, and design systems',
-        keywords: ['design', 'ui/ux', 'ux', 'figma', 'wireframe', 'prototype', 'layout', 'typography', 'spacing', 'color', 'palette', 'brand', 'branding', 'visual hierarchy', 'interaction', 'design system', 'user flow']
+        keywords: [
+          'design',
+          'ui/ux',
+          'ux',
+          'ui design',
+          'ux design',
+          'user experience',
+          'product design',
+          'visual design',
+          'figma',
+          'wireframe',
+          'wireframing',
+          'prototype',
+          'prototyping',
+          'mockup',
+          'mock-up',
+          'layout',
+          'typography',
+          'iconography',
+          'spacing',
+          'color',
+          'colour',
+          'palette',
+          'theme',
+          'theming',
+          'brand',
+          'branding',
+          'brand identity',
+          'style guide',
+          'visual hierarchy',
+          'visual polish',
+          'interaction',
+          'design system',
+          'design token',
+          'design tokens',
+          'user flow',
+          'art direction',
+          'interface critique',
+          'design critique',
+          'design review'
+        ]
       },
       {
         slug: 'ui-components',
@@ -119,7 +159,7 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
         slug: 'accessibility',
         name: 'Accessibility',
         description: 'Accessibility testing and improvements',
-        keywords: ['a11y', 'accessibility', 'aria', 'wcag', 'screen reader']
+        keywords: ['a11y', 'accessibility', 'accessible', 'aria', 'wcag', 'screen reader', 'keyboard navigation', 'focus trap', 'focus order', 'color contrast', 'alt text', 'assistive technology']
       },
       {
         slug: 'animation',
@@ -131,7 +171,7 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
         slug: 'responsive',
         name: 'Responsive',
         description: 'Responsive design and mobile-first',
-        keywords: ['responsive', 'mobile', 'breakpoint', 'media query', 'adaptive']
+        keywords: ['responsive', 'responsive design', 'mobile', 'mobile-first', 'breakpoint', 'breakpoints', 'media query', 'adaptive', 'viewport', 'tablet', 'screen size', 'fluid layout', 'cross-device']
       }
     ]
   },
@@ -221,13 +261,13 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
         slug: 'comments',
         name: 'Comments',
         description: 'Code comments and annotations',
-        keywords: ['comment', 'annotation', 'docstring', 'explain']
+        keywords: ['comment', 'comments', 'annotation', 'annotate', 'annotated', 'docstring', 'inline comment', 'code comment', 'explain', 'explanation']
       },
       {
         slug: 'i18n',
         name: 'i18n',
         description: 'Localization and translation',
-        keywords: ['i18n', 'l10n', 'translate', 'locale', 'language', 'internationalization']
+        keywords: ['i18n', 'l10n', 'translate', 'translation', 'locale', 'language', 'internationalization', 'localization', 'multilingual']
       }
     ]
   },
@@ -247,7 +287,7 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
         slug: 'analytics',
         name: 'Analytics',
         description: 'Data analysis and visualization',
-        keywords: ['analytics', 'chart', 'graph', 'visualization', 'dashboard', 'report']
+        keywords: ['analytics', 'chart', 'graph', 'visualization', 'data visualization', 'dashboard', 'report']
       },
       {
         slug: 'scraping',
@@ -323,7 +363,7 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
         slug: 'templates',
         name: 'Templates',
         description: 'Project and code templates',
-        keywords: ['template', 'starter', 'boilerplate', 'scaffold', 'cookiecutter']
+        keywords: ['template', 'templates', 'starter', 'starter kit', 'boilerplate', 'scaffold', 'cookiecutter', 'blueprint', 'skeleton']
       }
     ]
   },
@@ -369,13 +409,13 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
         slug: 'finance',
         name: 'Finance',
         description: 'Personal finance, budgeting, financial tools',
-        keywords: ['finance', 'budget', 'money', 'investment', 'expense', 'accounting', 'tax', 'banking']
+        keywords: ['finance', 'financial', 'budget', 'budgeting', 'money', 'investment', 'expense', 'accounting', 'bookkeeping', 'tax', 'banking', 'forecast', 'valuation', 'financial analysis', 'financial model']
       },
       {
         slug: 'web3-crypto',
         name: 'Web3 & Crypto',
         description: 'Blockchain, cryptocurrency, Web3 development',
-        keywords: ['web3', 'crypto', 'blockchain', 'ethereum', 'solidity', 'nft', 'defi', 'wallet', 'smart contract']
+        keywords: ['web3', 'crypto', 'cryptocurrency', 'blockchain', 'ethereum', 'solidity', 'nft', 'defi', 'wallet', 'smart contract', 'onchain', 'evm', 'foundry', 'hardhat', 'ethers', 'viem', 'solana']
       },
       {
         slug: 'legal',
@@ -393,7 +433,7 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
         slug: 'game-dev',
         name: 'Game Dev',
         description: 'Game development and game engine tools',
-        keywords: ['game', 'gaming', 'unity', 'unreal', 'godot', 'gamedev', 'sprite', 'physics', 'level design']
+        keywords: ['game', 'gaming', 'game development', 'unity', 'unreal', 'godot', 'gamedev', 'gameplay', 'sprite', 'shader', 'physics', 'level design']
       }
     ]
   }

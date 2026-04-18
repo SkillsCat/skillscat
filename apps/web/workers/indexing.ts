@@ -67,6 +67,7 @@ import {
   buildGithubSkillR2Keys,
   buildGithubSkillR2Prefix,
 } from '../src/lib/skill-path';
+import { canonicalizeCategorySlug } from './shared/classification/categories';
 
 const log = createLogger('Indexing');
 
@@ -409,12 +410,12 @@ export function parseSkillFrontmatter(content: string): ParsedSkillMd {
   }
 
   // Parse category (single, root level)
-  const categoryMatch = yamlContent.match(/^category:\s*(.+)$/m);
-  if (categoryMatch) frontmatter.category = categoryMatch[1].trim();
+  const categoryValue = extractYamlRootField(yamlContent, 'category');
+  if (categoryValue) frontmatter.category = stripYamlInlineComment(categoryValue.trim());
 
   // Parse categories (multiple, root level)
-  const categoriesMatch = yamlContent.match(/^categories:\s*(.+)$/m);
-  if (categoriesMatch) frontmatter.categories = categoriesMatch[1].trim();
+  const categoriesValue = extractYamlRootField(yamlContent, 'categories');
+  if (categoriesValue) frontmatter.categories = stripYamlInlineComment(categoriesValue.trim());
 
   // Parse keywords (alias for tags, root level; supports inline and list formats)
   const keywordsValue = extractYamlRootField(yamlContent, 'keywords');
@@ -430,17 +431,17 @@ export function parseSkillFrontmatter(content: string): ParsedSkillMd {
   }
 
   // Parse metadata.category (nested)
-  const metaCategoryMatch = yamlContent.match(/metadata:[\s\S]*?category:\s*(.+)$/m);
-  if (metaCategoryMatch && !frontmatter.category) {
+  const metadataCategoryValue = extractYamlNestedField(yamlContent, 'metadata', 'category');
+  if (metadataCategoryValue && !frontmatter.category) {
     frontmatter.metadata = frontmatter.metadata || {};
-    frontmatter.metadata.category = metaCategoryMatch[1].trim();
+    frontmatter.metadata.category = stripYamlInlineComment(metadataCategoryValue.trim());
   }
 
   // Parse metadata.categories (nested)
-  const metaCategoriesMatch = yamlContent.match(/metadata:[\s\S]*?categories:\s*(.+)$/m);
-  if (metaCategoriesMatch && !frontmatter.categories) {
+  const metadataCategoriesValue = extractYamlNestedField(yamlContent, 'metadata', 'categories');
+  if (metadataCategoriesValue && !frontmatter.categories) {
     frontmatter.metadata = frontmatter.metadata || {};
-    frontmatter.metadata.categories = metaCategoriesMatch[1].trim();
+    frontmatter.metadata.categories = stripYamlInlineComment(metadataCategoriesValue.trim());
   }
 
   return { frontmatter, body };
@@ -2126,29 +2127,35 @@ async function saveSkillTags(
  * Extract categories from frontmatter for direct classification
  * Checks category, categories, metadata.category, metadata.categories
  */
-function extractFrontmatterCategories(frontmatter: SkillFrontmatter | null): string[] {
+function normalizeFrontmatterCategories(rawValue: string): string[] {
+  return normalizeTags(rawValue)
+    .map((value) => canonicalizeCategorySlug(value) ?? value)
+    .filter(Boolean);
+}
+
+export function extractFrontmatterCategories(frontmatter: SkillFrontmatter | null): string[] {
   if (!frontmatter) return [];
 
   const categories: string[] = [];
 
   // Check root level category (single)
   if (frontmatter.category) {
-    categories.push(...frontmatter.category.split(',').map(c => c.trim().toLowerCase()));
+    categories.push(...normalizeFrontmatterCategories(frontmatter.category));
   }
 
   // Check root level categories (multiple)
   if (frontmatter.categories) {
-    categories.push(...frontmatter.categories.split(',').map(c => c.trim().toLowerCase()));
+    categories.push(...normalizeFrontmatterCategories(frontmatter.categories));
   }
 
   // Check metadata.category as fallback
   if (frontmatter.metadata?.category && categories.length === 0) {
-    categories.push(...frontmatter.metadata.category.split(',').map(c => c.trim().toLowerCase()));
+    categories.push(...normalizeFrontmatterCategories(frontmatter.metadata.category));
   }
 
   // Check metadata.categories as fallback
   if (frontmatter.metadata?.categories && categories.length === 0) {
-    categories.push(...frontmatter.metadata.categories.split(',').map(c => c.trim().toLowerCase()));
+    categories.push(...normalizeFrontmatterCategories(frontmatter.metadata.categories));
   }
 
   // Deduplicate and return

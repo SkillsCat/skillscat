@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { decodeBase64Utf8, looksLikeGarbledUnicode, looksLikeUtf8Mojibake, repairUtf8Mojibake } from '../src/lib/server/text/codec';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '../src/lib/server/skill/title';
-import { parseSkillFrontmatter, resolveSkillMetadata } from '../workers/indexing';
+import { extractFrontmatterCategories, parseSkillFrontmatter, resolveSkillMetadata } from '../workers/indexing';
 
 describe('text-codec', () => {
   it('decodes base64 UTF-8 payloads without corrupting CJK or emoji', () => {
@@ -93,5 +93,26 @@ describe('resolveSkillMetadata', () => {
       name: 'openai的playwright',
       description: 'desc',
     });
+  });
+
+  it('extracts root-level category lists and canonicalizes design aliases', () => {
+    const parsed = parseSkillFrontmatter(`---
+categories:
+  - UI/UX
+  - design-systems
+---
+# Ignored title`);
+
+    expect(extractFrontmatterCategories(parsed.frontmatter)).toEqual(['design']);
+  });
+
+  it('supports metadata category arrays for direct classification hints', () => {
+    const parsed = parseSkillFrontmatter(`---
+metadata:
+  categories: [responsive-design, comments]
+---
+# Ignored title`);
+
+    expect(extractFrontmatterCategories(parsed.frontmatter)).toEqual(['responsive', 'comments']);
   });
 });

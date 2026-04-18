@@ -86,7 +86,47 @@ export const CATEGORIES: Category[] = [
     name: 'Design',
     description: 'UI/UX direction, visual design, and design systems',
     emoji: '🎯',
-    keywords: ['design', 'ui/ux', 'ux', 'figma', 'wireframe', 'prototype', 'layout', 'typography', 'spacing', 'color', 'palette', 'brand', 'branding', 'visual hierarchy', 'interaction', 'design system', 'user flow']
+    keywords: [
+      'design',
+      'ui/ux',
+      'ux',
+      'ui design',
+      'ux design',
+      'user experience',
+      'product design',
+      'visual design',
+      'figma',
+      'wireframe',
+      'wireframing',
+      'prototype',
+      'prototyping',
+      'mockup',
+      'mock-up',
+      'layout',
+      'typography',
+      'iconography',
+      'spacing',
+      'color',
+      'colour',
+      'palette',
+      'theme',
+      'theming',
+      'brand',
+      'branding',
+      'brand identity',
+      'style guide',
+      'visual hierarchy',
+      'visual polish',
+      'interaction',
+      'design system',
+      'design token',
+      'design tokens',
+      'user flow',
+      'art direction',
+      'interface critique',
+      'design critique',
+      'design review'
+    ]
   },
   {
     slug: 'ui-components',
@@ -100,7 +140,7 @@ export const CATEGORIES: Category[] = [
     name: 'Accessibility',
     description: 'Accessibility testing and improvements',
     emoji: '♿',
-    keywords: ['a11y', 'accessibility', 'aria', 'wcag', 'screen reader']
+    keywords: ['a11y', 'accessibility', 'accessible', 'aria', 'wcag', 'screen reader', 'keyboard navigation', 'focus trap', 'focus order', 'color contrast', 'alt text', 'assistive technology']
   },
   {
     slug: 'animation',
@@ -114,7 +154,7 @@ export const CATEGORIES: Category[] = [
     name: 'Responsive',
     description: 'Responsive design and mobile-first',
     emoji: '📱',
-    keywords: ['responsive', 'mobile', 'breakpoint', 'media query', 'adaptive']
+    keywords: ['responsive', 'responsive design', 'mobile', 'mobile-first', 'breakpoint', 'breakpoints', 'media query', 'adaptive', 'viewport', 'tablet', 'screen size', 'fluid layout', 'cross-device']
   },
 
   // ===== DevOps & Infra =====
@@ -197,14 +237,14 @@ export const CATEGORIES: Category[] = [
     name: 'Comments',
     description: 'Code comments and annotations',
     emoji: '💬',
-    keywords: ['comment', 'annotation', 'docstring', 'explain']
+    keywords: ['comment', 'comments', 'annotation', 'annotate', 'annotated', 'docstring', 'inline comment', 'code comment', 'explain', 'explanation']
   },
   {
     slug: 'i18n',
     name: 'i18n',
     description: 'Localization and translation',
     emoji: '🌍',
-    keywords: ['i18n', 'l10n', 'translate', 'locale', 'language', 'internationalization']
+    keywords: ['i18n', 'l10n', 'translate', 'translation', 'locale', 'language', 'internationalization', 'localization', 'multilingual']
   },
 
   // ===== Data =====
@@ -220,7 +260,7 @@ export const CATEGORIES: Category[] = [
     name: 'Analytics',
     description: 'Data analysis and visualization',
     emoji: '📉',
-    keywords: ['analytics', 'chart', 'graph', 'visualization', 'dashboard', 'report']
+    keywords: ['analytics', 'chart', 'graph', 'visualization', 'data visualization', 'dashboard', 'report']
   },
   {
     slug: 'scraping',
@@ -294,7 +334,7 @@ export const CATEGORIES: Category[] = [
     name: 'Templates',
     description: 'Project and code templates',
     emoji: '📋',
-    keywords: ['template', 'starter', 'boilerplate', 'scaffold', 'cookiecutter']
+    keywords: ['template', 'templates', 'starter', 'starter kit', 'boilerplate', 'scaffold', 'cookiecutter', 'blueprint', 'skeleton']
   },
 
   // ===== Content =====
@@ -333,14 +373,14 @@ export const CATEGORIES: Category[] = [
     name: 'Finance',
     description: 'Personal finance, budgeting, financial tools',
     emoji: '💰',
-    keywords: ['finance', 'budget', 'money', 'investment', 'expense', 'accounting', 'tax', 'banking']
+    keywords: ['finance', 'financial', 'budget', 'budgeting', 'money', 'investment', 'expense', 'accounting', 'bookkeeping', 'tax', 'banking', 'forecast', 'valuation', 'financial analysis', 'financial model']
   },
   {
     slug: 'web3-crypto',
     name: 'Web3 & Crypto',
     description: 'Blockchain, cryptocurrency, Web3 development',
     emoji: '🪙',
-    keywords: ['web3', 'crypto', 'blockchain', 'ethereum', 'solidity', 'nft', 'defi', 'wallet', 'smart contract']
+    keywords: ['web3', 'crypto', 'cryptocurrency', 'blockchain', 'ethereum', 'solidity', 'nft', 'defi', 'wallet', 'smart contract', 'onchain', 'evm', 'foundry', 'hardhat', 'ethers', 'viem', 'solana']
   },
   {
     slug: 'legal',
@@ -361,9 +401,58 @@ export const CATEGORIES: Category[] = [
     name: 'Game Dev',
     description: 'Game development and game engine tools',
     emoji: '🎮',
-    keywords: ['game', 'gaming', 'unity', 'unreal', 'godot', 'gamedev', 'sprite', 'physics', 'level design']
+    keywords: ['game', 'gaming', 'game development', 'unity', 'unreal', 'godot', 'gamedev', 'gameplay', 'sprite', 'shader', 'physics', 'level design']
   }
 ];
+
+const CATEGORY_SLUG_SET = new Set(CATEGORIES.map((category) => category.slug));
+
+const CATEGORY_ALIAS_MAP: Record<string, string> = {
+  'a11y': 'accessibility',
+  'accounting': 'finance',
+  'api-dev': 'api',
+  'agent-dev': 'agents',
+  'agent-development': 'agents',
+  'agent-skill-development': 'agents',
+  'blockchain': 'web3-crypto',
+  'brand-design': 'design',
+  'brand-guidelines': 'design',
+  'browser-automation': 'automation',
+  'code-gen': 'code-generation',
+  'commenting': 'comments',
+  'comments': 'comments',
+  'creative-design': 'design',
+  'crypto': 'web3-crypto',
+  'data-visualization': 'analytics',
+  'data-viz': 'analytics',
+  'design-system': 'design',
+  'design-systems': 'design',
+  'design-to-code': 'design',
+  'docs': 'documentation',
+  'docs-gen': 'documentation',
+  'financial-analysis': 'finance',
+  'financial-modeling': 'finance',
+  'financial-reporting': 'finance',
+  'frontend-design': 'design',
+  'game-design': 'game-dev',
+  'gamedev': 'game-dev',
+  'git-vcs': 'git',
+  'l10n': 'i18n',
+  'localization': 'i18n',
+  'mobile-first': 'responsive',
+  'processing': 'data-processing',
+  'product-design': 'design',
+  'responsive-design': 'responsive',
+  'translation': 'i18n',
+  'cli-tools': 'cli',
+  'ui-design': 'design',
+  'ui-design-system': 'design',
+  'ui-ux': 'design',
+  'ux-design': 'design',
+  'visual-design': 'design',
+  'web-design': 'design',
+  'web3': 'web3-crypto',
+};
 
 export function getCategorySlugs(): string[] {
   return CATEGORIES.map((c) => c.slug);
@@ -371,4 +460,44 @@ export function getCategorySlugs(): string[] {
 
 export function getCategoryBySlug(slug: string): Category | undefined {
   return CATEGORIES.find((c) => c.slug === slug);
+}
+
+export function normalizeCategoryHint(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^[-*]\s+/, '')
+    .replace(/^[\[\(\{'"`]+/, '')
+    .replace(/[\]\)\}'"`]+$/, '')
+    .replace(/&/g, '-')
+    .replace(/[\\/]+/g, '-')
+    .replace(/[_\s]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+export function canonicalizeCategorySlug(value: string): string | null {
+  const normalized = normalizeCategoryHint(value);
+  if (!normalized) {
+    return null;
+  }
+
+  if (CATEGORY_SLUG_SET.has(normalized)) {
+    return normalized;
+  }
+
+  return CATEGORY_ALIAS_MAP[normalized] ?? null;
+}
+
+export function canonicalizeCategorySlugs(values: Iterable<string>): string[] {
+  const normalized = new Set<string>();
+
+  for (const value of values) {
+    const canonical = canonicalizeCategorySlug(value);
+    if (canonical) {
+      normalized.add(canonical);
+    }
+  }
+
+  return [...normalized];
 }

@@ -18,7 +18,12 @@ import type {
   SkillTier,
 } from './shared/types';
 import { TIER_CONFIG } from './shared/types';
-import { CATEGORIES, getCategorySlugs } from './shared/classification/categories';
+import {
+  CATEGORIES,
+  canonicalizeCategorySlug,
+  canonicalizeCategorySlugs,
+  getCategorySlugs,
+} from './shared/classification/categories';
 import {
   getOpenRouterFreePauseUntil,
   isOpenRouterFreeModel,
@@ -49,6 +54,66 @@ const KEYWORD_MIN_SECONDARY_SCORE = 3;
 const KEYWORD_SECONDARY_SCORE_RATIO = 0.5;
 const KEYWORD_MIN_TERTIARY_SCORE = 5;
 const KEYWORD_TERTIARY_SCORE_RATIO = 0.85;
+const DESIGN_DIRECTION_SIGNAL_BOOST = 3;
+const DESIGN_STRONG_SIGNAL_THRESHOLD = 2;
+const DESIGN_DIRECTION_BONUS = 4;
+const SPARSE_SIGNAL_BOOST = 2;
+const SPARSE_SIGNAL_THRESHOLD = 2;
+
+const DESIGN_DIRECTION_SIGNALS = [
+  'ui/ux',
+  'ui design',
+  'ux design',
+  'user experience',
+  'product design',
+  'visual design',
+  'figma',
+  'wireframe',
+  'prototype',
+  'mockup',
+  'mock-up',
+  'typography',
+  'palette',
+  'brand',
+  'branding',
+  'brand identity',
+  'style guide',
+  'visual hierarchy',
+  'visual polish',
+  'design system',
+  'design token',
+  'design tokens',
+  'user flow',
+  'art direction',
+  'design critique',
+  'design review',
+  'interface critique',
+];
+
+const UI_IMPLEMENTATION_SIGNALS = [
+  'component',
+  'component library',
+  'html',
+  'css',
+  'tailwind',
+  'shadcn',
+  'react',
+  'vue',
+  'svelte',
+  'jsx',
+  'tsx',
+];
+
+const SPARSE_CATEGORY_SIGNAL_TERMS: Partial<Record<(typeof CATEGORIES)[number]['slug'], string[]>> = {
+  accessibility: ['a11y', 'accessibility', 'aria', 'wcag', 'keyboard navigation', 'screen reader'],
+  comments: ['comment', 'comments', 'annotation', 'annotate', 'docstring', 'inline comment', 'code comment'],
+  finance: ['finance', 'financial', 'accounting', 'bookkeeping', 'budget', 'valuation', 'forecast'],
+  'game-dev': ['game development', 'gamedev', 'unity', 'unreal', 'godot', 'gameplay', 'shader'],
+  i18n: ['i18n', 'l10n', 'localization', 'translation', 'multilingual'],
+  responsive: ['responsive', 'responsive design', 'mobile-first', 'breakpoint', 'media query', 'viewport', 'tablet'],
+  templates: ['template', 'templates', 'starter kit', 'blueprint', 'skeleton'],
+  'web3-crypto': ['web3', 'crypto', 'blockchain', 'solidity', 'smart contract', 'onchain', 'wallet'],
+};
 
 // Extended classification result with optional suggested category
 interface ExtendedClassificationResult extends ClassificationResult {
@@ -220,10 +285,7 @@ function tryDirectCategoryMatch(
     return null;
   }
 
-  const validSlugs = getCategorySlugs();
-  const validCategories = frontmatterCategories
-    .filter(cat => validSlugs.includes(cat.toLowerCase()))
-    .slice(0, 3);
+  const validCategories = canonicalizeCategorySlugs(frontmatterCategories).slice(0, 3);
 
   if (validCategories.length === 0) {
     return null; // No valid categories, fall back to AI/keyword
@@ -246,6 +308,27 @@ function countKeywordMatches(contentLower: string, keyword: string): number {
   return [...contentLower.matchAll(pattern)].length;
 }
 
+function countSignalMatches(
+  contentLower: string,
+  keywords: string[],
+  normalizedTags: string[]
+): number {
+  let score = 0;
+
+  for (const keyword of keywords) {
+    const matches = countKeywordMatches(contentLower, keyword);
+    if (matches > 0) {
+      score += Math.min(matches, KEYWORD_SCORE_CAP_PER_KEYWORD);
+    }
+
+    if (normalizedTags.includes(keyword.toLowerCase())) {
+      score += 1;
+    }
+  }
+
+  return score;
+}
+
 function buildClassificationPrompt(skillMdContent: string, tags?: string[]): string {
   const categoriesDescription = CATEGORIES.map(
     (c) => `- ${c.slug}: ${c.name} - ${c.description} (keywords: ${c.keywords.join(', ')})`
@@ -266,8 +349,9 @@ IMPORTANT RULES:
 5. Use design for UI/UX direction, visual critiques, layout, typography, color, branding, wireframes, prototypes, Figma, or design-system planning
 6. Use ui-components for implementation-focused component generation, styling, or framework-specific frontend code
 7. Use embeddings only for real vector retrieval, similarity search, reranking, vector databases, or RAG workflows; never for visual semantics, semantic HTML, or UX search flows
-8. If the skill doesn't fit well into existing categories, you may suggest ONE new secondary category
-9. Suggested categories should be specific and useful for developers (not too broad or too niche)
+8. Do NOT suggest a new category when an existing canonical category already fits. For example: brand-design, creative-design, design-systems, design-to-code, visual-design, frontend-design, and ui-ux should all map to design; data-visualization should map to analytics; financial-analysis/modeling/reporting/accounting should map to finance
+9. If the skill still doesn't fit well into existing categories after applying those canonical mappings, you may suggest ONE new secondary category
+10. Suggested categories should be specific and useful for developers (not too broad or too niche)
 
 Available categories:
 ${categoriesDescription}
@@ -357,11 +441,8 @@ function parseClassificationResult(content: string): ExtendedClassificationResul
   }
 
   const result = JSON.parse(jsonMatch[0]);
-  const validSlugs = getCategorySlugs();
-
-  const categories = (result.categories || [])
-    .filter((slug: string) => validSlugs.includes(slug))
-    .slice(0, 3);
+  const validSlugs = new Set(getCategorySlugs());
+  const categories = canonicalizeCategorySlugs(result.categories || []).slice(0, 3);
 
   // Ensure at least one category
   if (categories.length === 0) {
@@ -380,17 +461,30 @@ function parseClassificationResult(content: string): ExtendedClassificationResul
       // Validate slug format (kebab-case)
       /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(suggested.slug) &&
       // Ensure it doesn't conflict with existing categories
-      !validSlugs.includes(suggested.slug) &&
+      !validSlugs.has(suggested.slug) &&
       // Reasonable length limits
       suggested.slug.length <= 50 &&
       suggested.name.length <= 30 &&
       suggested.description.length <= 200
     ) {
-      suggestedCategory = {
-        slug: suggested.slug,
-        name: suggested.name,
-        description: suggested.description
-      };
+      const canonicalSuggestedSlug = canonicalizeCategorySlug(suggested.slug);
+
+      if (canonicalSuggestedSlug) {
+        if (!categories.includes(canonicalSuggestedSlug)) {
+          if (categories.length === 0) {
+            categories.push(canonicalSuggestedSlug);
+          } else {
+            categories.splice(1, 0, canonicalSuggestedSlug);
+            categories.splice(3);
+          }
+        }
+      } else {
+        suggestedCategory = {
+          slug: suggested.slug,
+          name: suggested.name,
+          description: suggested.description
+        };
+      }
     }
   }
 
@@ -468,6 +562,11 @@ async function callDeepSeek(
 export function classifyByKeywords(content: string, tags?: string[]): ClassificationResult {
   const contentLower = content.toLowerCase();
   const normalizedTags = (tags || []).map((tag) => tag.toLowerCase().trim()).filter(Boolean);
+  const canonicalTagSlugs = new Set(
+    normalizedTags
+      .map((tag) => canonicalizeCategorySlug(tag))
+      .filter((slug): slug is string => typeof slug === 'string' && slug.length > 0)
+  );
   const scores: Record<string, number> = {};
 
   for (const category of CATEGORIES) {
@@ -485,12 +584,33 @@ export function classifyByKeywords(content: string, tags?: string[]): Classifica
     }
 
     // Also check if any tag directly matches the category slug
-    if (normalizedTags.includes(category.slug.toLowerCase())) {
+    if (canonicalTagSlugs.has(category.slug)) {
       score += KEYWORD_SLUG_TAG_MATCH_BOOST;
     }
 
     if (score > 0) {
       scores[category.slug] = score;
+    }
+  }
+
+  const designDirectionScore = countSignalMatches(contentLower, DESIGN_DIRECTION_SIGNALS, normalizedTags);
+  const uiImplementationScore = countSignalMatches(contentLower, UI_IMPLEMENTATION_SIGNALS, normalizedTags);
+
+  if (designDirectionScore > 0) {
+    scores.design = (scores.design || 0) + (designDirectionScore * DESIGN_DIRECTION_SIGNAL_BOOST);
+
+    if (
+      designDirectionScore >= DESIGN_STRONG_SIGNAL_THRESHOLD &&
+      uiImplementationScore <= designDirectionScore
+    ) {
+      scores.design += DESIGN_DIRECTION_BONUS;
+    }
+  }
+
+  for (const [slug, signalTerms] of Object.entries(SPARSE_CATEGORY_SIGNAL_TERMS)) {
+    const signalScore = countSignalMatches(contentLower, signalTerms || [], normalizedTags);
+    if (signalScore >= SPARSE_SIGNAL_THRESHOLD) {
+      scores[slug] = (scores[slug] || 0) + (signalScore * SPARSE_SIGNAL_BOOST);
     }
   }
 
