@@ -155,7 +155,46 @@ async function maybeRecordRestRateLimitFromResponse(
   options: GitHubRequestOptions
 ): Promise<void> {
   if (!options.rateLimitKV) return;
+  const writePolicy = options.rateLimitWritePolicy ?? 'always';
+  if (
+    writePolicy === 'off'
+    || (writePolicy === 'rate_limit_only' && !isGitHubRateLimitResponse(response))
+  ) {
+    return;
+  }
+
   const metadata = getGitHubResponseMetadata(response);
+  const isSuccessfulRateLimitResponse = options.endpointId === 'rate_limit' && response.ok;
+
+  if (isSuccessfulRateLimitResponse) {
+    const isJson = (response.headers.get('content-type') || '').toLowerCase().includes('application/json');
+    if (isJson) {
+      try {
+        const body = await response.clone().json() as unknown;
+        const recorded = await recordRateLimitFromRateLimitBody(body, {
+          kv: options.rateLimitKV,
+          keyPrefix: options.rateLimitKeyPrefix,
+          endpointId: options.endpointId,
+          tokenId: metadata?.tokenId,
+        });
+
+        if (recorded.rest || recorded.graphql) {
+          if (!recorded.rest) {
+            await recordRateLimitFromHeaders(response.headers, 'rest', {
+              kv: options.rateLimitKV,
+              keyPrefix: options.rateLimitKeyPrefix,
+              endpointId: options.endpointId,
+              tokenId: metadata?.tokenId,
+            });
+          }
+
+          return;
+        }
+      } catch {
+        // Fall through to headers-based snapshot persistence.
+      }
+    }
+  }
 
   await recordRateLimitFromHeaders(response.headers, 'rest', {
     kv: options.rateLimitKV,
@@ -164,7 +203,7 @@ async function maybeRecordRestRateLimitFromResponse(
     tokenId: metadata?.tokenId,
   });
 
-  if (options.endpointId !== 'rate_limit' || !response.ok) return;
+  if (!isSuccessfulRateLimitResponse) return;
 
   const isJson = (response.headers.get('content-type') || '').toLowerCase().includes('application/json');
   if (!isJson) return;

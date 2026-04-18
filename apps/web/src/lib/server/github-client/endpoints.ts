@@ -362,6 +362,7 @@ async function fallbackRepoGet(ctx: GitHubRestFallbackContext): Promise<Response
     userAgent: ctx.options.userAgent,
     apiVersion: ctx.options.apiVersion,
     rateLimitKV: ctx.options.rateLimitKV,
+    rateLimitWritePolicy: ctx.options.rateLimitWritePolicy,
     rateLimitKeyPrefix: ctx.options.rateLimitKeyPrefix,
   });
 
@@ -396,6 +397,7 @@ async function fallbackUserGet(ctx: GitHubRestFallbackContext): Promise<Response
     userAgent: ctx.options.userAgent,
     apiVersion: ctx.options.apiVersion,
     rateLimitKV: ctx.options.rateLimitKV,
+    rateLimitWritePolicy: ctx.options.rateLimitWritePolicy,
     rateLimitKeyPrefix: ctx.options.rateLimitKeyPrefix,
   });
   if (!data.repositoryOwner || data.repositoryOwner.databaseId == null) return jsonResponse({ message: 'Not Found' }, 404);
@@ -417,6 +419,7 @@ async function fallbackOrgGet(ctx: GitHubRestFallbackContext): Promise<Response 
     userAgent: ctx.options.userAgent,
     apiVersion: ctx.options.apiVersion,
     rateLimitKV: ctx.options.rateLimitKV,
+    rateLimitWritePolicy: ctx.options.rateLimitWritePolicy,
     rateLimitKeyPrefix: ctx.options.rateLimitKeyPrefix,
   });
   if (!data.organization || data.organization.databaseId == null) return jsonResponse({ message: 'Not Found' }, 404);
@@ -502,6 +505,7 @@ async function fetchRepositoryObject(
       userAgent: options.userAgent,
       apiVersion: options.apiVersion,
       rateLimitKV: options.rateLimitKV,
+      rateLimitWritePolicy: options.rateLimitWritePolicy,
       rateLimitKeyPrefix: options.rateLimitKeyPrefix,
     }
   );
@@ -598,6 +602,7 @@ async function fallbackCommitGet(ctx: GitHubRestFallbackContext): Promise<Respon
     userAgent: ctx.options.userAgent,
     apiVersion: ctx.options.apiVersion,
     rateLimitKV: ctx.options.rateLimitKV,
+    rateLimitWritePolicy: ctx.options.rateLimitWritePolicy,
     rateLimitKeyPrefix: ctx.options.rateLimitKeyPrefix,
   });
 
@@ -660,6 +665,7 @@ async function fallbackCommitsList(ctx: GitHubRestFallbackContext): Promise<Resp
     userAgent: ctx.options.userAgent,
     apiVersion: ctx.options.apiVersion,
     rateLimitKV: ctx.options.rateLimitKV,
+    rateLimitWritePolicy: ctx.options.rateLimitWritePolicy,
     rateLimitKeyPrefix: ctx.options.rateLimitKeyPrefix,
   });
 

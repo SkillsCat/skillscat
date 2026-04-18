@@ -38,6 +38,7 @@ const RATE_LIMIT_SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
 
 const RUN_LOCK_KEY = 'github-discovery:run-lock';
 const CODE_SEARCH_CURSOR_KEY = 'github-events:code-search:last-head';
+const EVENT_REPLAY_STATE_KEY = 'github-events:event-replay-state';
 
 interface SearchDiscoveryResult {
   scanned: number;
@@ -84,6 +85,11 @@ interface DiscoveryRunLockPayload {
   token: string;
   acquiredAtEpochMs: number;
   expiresAtEpochMs: number;
+}
+
+interface EventReplayStatePayload {
+  baseLastEventId: string | null;
+  processedPushEventIds: string[];
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
@@ -247,7 +253,9 @@ async function fetchGitHubEvents(
   const response = await listPublicEvents({
     page,
     perPage,
-    ...getGitHubRequestAuthFromEnv(env),
+    // Budget snapshots are refreshed explicitly via /rate_limit.
+    // Keep discovery requests themselves write-free for KV cost control.
+    ...getGitHubRequestAuthFromEnv(env, { rateLimitMode: 'read_only' }),
     userAgent: 'SkillsCat-Worker/1.0',
   });
   if (!response.ok) {
@@ -298,23 +306,69 @@ async function setLastProcessedEventId(env: GithubEventsEnv, eventId: string): P
   });
 }
 
-/**
- * 检查事件是否已处理
- */
-async function isEventProcessed(env: GithubEventsEnv, eventId: string): Promise<boolean> {
-  const key = `github-events:processed:${eventId}`;
-  const value = await env.KV.get(key);
-  return value !== null;
+async function persistProcessedEventCursor(
+  env: GithubEventsEnv,
+  lastEventId: string | null,
+  newestEventId: string | null
+): Promise<void> {
+  if (!newestEventId || newestEventId === lastEventId) {
+    return;
+  }
+
+  await setLastProcessedEventId(env, newestEventId);
 }
 
-/**
- * 标记事件为已处理
- */
-async function markEventProcessed(env: GithubEventsEnv, eventId: string): Promise<void> {
-  const key = `github-events:processed:${eventId}`;
-  await env.KV.put(key, '1', {
-    expirationTtl: 86400 * 7,
+async function readEventReplayState(
+  env: GithubEventsEnv,
+  lastEventId: string | null
+): Promise<Set<string>> {
+  const raw = await env.KV.get(EVENT_REPLAY_STATE_KEY);
+  if (!raw) {
+    return new Set();
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<EventReplayStatePayload>;
+    const baseLastEventId = parsed.baseLastEventId === null || typeof parsed.baseLastEventId === 'string'
+      ? parsed.baseLastEventId
+      : null;
+    const processedPushEventIds = Array.isArray(parsed.processedPushEventIds)
+      ? parsed.processedPushEventIds.filter((value): value is string => typeof value === 'string' && value.length > 0)
+      : [];
+
+    if (baseLastEventId !== lastEventId || processedPushEventIds.length === 0) {
+      await env.KV.delete(EVENT_REPLAY_STATE_KEY);
+      return new Set();
+    }
+
+    return new Set(processedPushEventIds);
+  } catch {
+    await env.KV.delete(EVENT_REPLAY_STATE_KEY);
+    return new Set();
+  }
+}
+
+async function persistEventReplayState(
+  env: GithubEventsEnv,
+  lastEventId: string | null,
+  processedPushEventIds: Set<string>
+): Promise<void> {
+  if (processedPushEventIds.size === 0) {
+    return;
+  }
+
+  const payload: EventReplayStatePayload = {
+    baseLastEventId: lastEventId,
+    processedPushEventIds: [...processedPushEventIds],
+  };
+
+  await env.KV.put(EVENT_REPLAY_STATE_KEY, JSON.stringify(payload), {
+    expirationTtl: 24 * 60 * 60,
   });
+}
+
+async function clearEventReplayState(env: GithubEventsEnv): Promise<void> {
+  await env.KV.delete(EVENT_REPLAY_STATE_KEY);
 }
 
 function getRepoQueuedKey(owner: string, name: string, skillPath?: string): string {
@@ -471,14 +525,24 @@ async function processEvents(
     };
   }
 
+  let lastEventId: string | null = null;
+  let replayedPushEventIds = new Set<string>();
+  let hadReplayState = false;
+
   try {
-    const lastEventId = await getLastProcessedEventId(env);
+    lastEventId = await getLastProcessedEventId(env);
+    replayedPushEventIds = await readEventReplayState(env, lastEventId);
+    hadReplayState = replayedPushEventIds.size > 0;
     let newestEventId: string | null = null;
     let reachedLastProcessed = false;
 
     for (let page = 1; page <= allowedPages; page++) {
       const fetchResult = await fetchGitHubEvents(env, page, config.perPage);
       if (fetchResult.rateLimited) {
+        if (hadReplayState) {
+          await clearEventReplayState(env);
+        }
+        await persistProcessedEventCursor(env, lastEventId, newestEventId);
         return {
           processed,
           queued,
@@ -509,14 +573,15 @@ async function processEvents(
           break;
         }
 
-        if (await isEventProcessed(env, event.id)) {
+        if (replayedPushEventIds.has(event.id)) {
           continue;
         }
 
         processed++;
 
         if (event.type !== 'PushEvent') {
-          await markEventProcessed(env, event.id);
+          // Non-push events do not enqueue any work, so we can safely rely on the
+          // last processed cursor without persisting per-event dedupe state.
           continue;
         }
 
@@ -524,13 +589,13 @@ async function processEvents(
         if (message) {
           const repoQueuedIdentity = buildRepoQueuedDedupIdentity(message.repoOwner, message.repoName);
           if (queuedRepoKeysInRun.has(repoQueuedIdentity)) {
-            await markEventProcessed(env, event.id);
+            replayedPushEventIds.add(event.id);
             continue;
           }
 
           if (await wasRepoQueuedRecently(env, message.repoOwner, message.repoName)) {
             queuedRepoKeysInRun.add(repoQueuedIdentity);
-            await markEventProcessed(env, event.id);
+            replayedPushEventIds.add(event.id);
             continue;
           }
 
@@ -541,7 +606,7 @@ async function processEvents(
           console.log(`Queued repo for indexing: ${message.repoOwner}/${message.repoName}`);
         }
 
-        await markEventProcessed(env, event.id);
+        replayedPushEventIds.add(event.id);
       }
 
       if (reachedLastProcessed || events.length < config.perPage) {
@@ -549,10 +614,18 @@ async function processEvents(
       }
     }
 
-    if (newestEventId) {
-      await setLastProcessedEventId(env, newestEventId);
+    if (hadReplayState) {
+      await clearEventReplayState(env);
     }
+    await persistProcessedEventCursor(env, lastEventId, newestEventId);
   } catch (error) {
+    try {
+      if (replayedPushEventIds.size > 0) {
+        await persistEventReplayState(env, lastEventId, replayedPushEventIds);
+      }
+    } catch (replayStateError) {
+      console.error('Failed to persist GitHub event replay state:', replayStateError);
+    }
     console.error('Error processing GitHub events:', error);
     throw error;
   }
@@ -641,7 +714,9 @@ async function processCodeSearchDiscovery(
       perPage: config.perPage,
       sort: 'indexed',
       order: 'desc',
-      ...getGitHubRequestAuthFromEnv(env),
+      // Budget snapshots are refreshed explicitly via /rate_limit.
+      // Keep discovery requests themselves write-free for KV cost control.
+      ...getGitHubRequestAuthFromEnv(env, { rateLimitMode: 'read_only' }),
       userAgent: 'SkillsCat-Worker/1.0',
     });
 
@@ -737,7 +812,7 @@ async function processCodeSearchDiscovery(
     }
   }
 
-  if (nextHeadCursor) {
+  if (nextHeadCursor && nextHeadCursor !== previousHeadCursor) {
     await setCodeSearchHeadCursor(env, nextHeadCursor);
   }
 

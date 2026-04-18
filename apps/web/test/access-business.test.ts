@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildImmediateRefreshNextUpdateAt,
+  queueArchivedSkillResurrectionCheck,
   resolveNextUpdateAtAfterAccess,
   shouldMarkSkillNeedsUpdate,
 } from '../src/lib/server/db/business/access';
@@ -36,5 +37,18 @@ describe('access business refresh markers', () => {
       lastAccessedAt: null,
       occurredAt: Date.parse('2026-04-11T00:00:00.000Z'),
     })).toBeNull();
+  });
+
+  it('does not rewrite an existing resurrection check marker in KV fallback mode', async () => {
+    const put = async () => {
+      throw new Error('should not write duplicate resurrection marker');
+    };
+
+    await expect(queueArchivedSkillResurrectionCheck({
+      KV: {
+        get: async () => '1',
+        put,
+      },
+    } as never, 'skill-archived')).resolves.toBeUndefined();
   });
 });

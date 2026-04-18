@@ -9,6 +9,7 @@ export interface IndexingMessage {
   submittedBy?: string;
   submittedAt?: string;
   forceReindex?: boolean;
+  queuedAsPending?: boolean;
   discoverySource?: 'github-events' | 'github-code-search';
   discoveryFingerprint?: string;
 }

@@ -7,6 +7,7 @@ import {
   rawGitHubRequest,
 } from './core';
 import { recordRateLimitFromHeaders } from './rate-limit-kv';
+import type { GitHubRateLimitWritePolicy } from './request';
 
 export const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql';
 
@@ -60,9 +61,21 @@ export interface GitHubGraphqlRequestOptions {
   maxRetries?: number;
   maxDelayMs?: number;
   rateLimitKV?: KVNamespace;
+  rateLimitWritePolicy?: GitHubRateLimitWritePolicy;
   rateLimitKeyPrefix?: string;
   endpointId?: string;
   allowPartialData?: boolean;
+}
+
+function shouldWriteGraphqlRateLimitSnapshot(
+  writePolicy: GitHubRateLimitWritePolicy | undefined,
+  response: Response,
+  envelope: GraphQLResponseEnvelope<unknown> | null
+): boolean {
+  const policy = writePolicy ?? 'always';
+  if (policy === 'off') return false;
+  if (policy === 'always') return true;
+  return isGitHubRateLimitResponse(response) || (envelope ? envelopeLooksRateLimited(envelope) : false);
 }
 
 function graphQLErrorLooksRateLimited(error: GraphQLErrorItem): boolean {
@@ -107,23 +120,13 @@ export async function githubGraphqlRequest<TData, TVariables = Record<string, un
     retryRateLimit: false,
     cache: 'off',
     graphqlFallback: 'off',
+    endpointId: options.endpointId ?? 'graphql',
+    rateLimitKV: options.rateLimitKV,
+    rateLimitWritePolicy: options.rateLimitWritePolicy,
+    rateLimitKeyPrefix: options.rateLimitKeyPrefix,
   });
 
   const metadata = getGitHubResponseMetadata(response);
-  await recordRateLimitFromHeaders(response.headers, 'graphql', {
-    kv: options.rateLimitKV,
-    keyPrefix: options.rateLimitKeyPrefix,
-    endpointId: options.endpointId ?? 'graphql',
-    tokenId: metadata?.tokenId,
-  });
-
-  if (isGitHubRateLimitResponse(response)) {
-    throw new GitHubRateLimitError('GitHub GraphQL API rate limit reached', {
-      status: 429,
-      source: 'graphql',
-      retryAfterSeconds: parseRetryAfterSeconds(response.headers),
-    });
-  }
 
   let envelope: GraphQLResponseEnvelope<TData> | null = null;
   const isJson = (response.headers.get('content-type') || '').toLowerCase().includes('application/json');
@@ -133,6 +136,23 @@ export async function githubGraphqlRequest<TData, TVariables = Record<string, un
     } catch {
       envelope = null;
     }
+  }
+
+  if (shouldWriteGraphqlRateLimitSnapshot(options.rateLimitWritePolicy, response, envelope)) {
+    await recordRateLimitFromHeaders(response.headers, 'graphql', {
+      kv: options.rateLimitKV,
+      keyPrefix: options.rateLimitKeyPrefix,
+      endpointId: options.endpointId ?? 'graphql',
+      tokenId: metadata?.tokenId,
+    });
+  }
+
+  if (isGitHubRateLimitResponse(response)) {
+    throw new GitHubRateLimitError('GitHub GraphQL API rate limit reached', {
+      status: 429,
+      source: 'graphql',
+      retryAfterSeconds: parseRetryAfterSeconds(response.headers),
+    });
   }
 
   if (!response.ok) {

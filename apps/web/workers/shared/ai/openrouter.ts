@@ -74,6 +74,11 @@ export async function pauseOpenRouterFreeModels(
   const pauseUntil = now + pauseMs;
 
   if (kv) {
+    const currentPauseUntil = await getOpenRouterFreePauseUntil(kv, now);
+    if (currentPauseUntil && currentPauseUntil >= pauseUntil) {
+      return currentPauseUntil;
+    }
+
     const ttlSeconds = Math.max(60, Math.ceil(pauseMs / 1000));
     await kv.put(OPENROUTER_FREE_PAUSE_KEY, String(pauseUntil), {
       expirationTtl: ttlSeconds,
@@ -82,4 +87,3 @@ export async function pauseOpenRouterFreeModels(
 
   return pauseUntil;
 }
-

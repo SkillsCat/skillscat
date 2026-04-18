@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  default as indexingWorker,
   determineSkillVersionRelationType,
   extractStoredFileShas,
   getExistingSkillSnapshot,
@@ -45,16 +46,20 @@ class SqliteD1Database {
 
 class MemoryKv {
   private readonly store = new Map<string, string>();
+  putCalls = 0;
+  deleteCalls = 0;
 
   async get(key: string) {
     return this.store.get(key) ?? null;
   }
 
   async put(key: string, value: string) {
+    this.putCalls += 1;
     this.store.set(key, value);
   }
 
   async delete(key: string) {
+    this.deleteCalls += 1;
     this.store.delete(key);
   }
 }
@@ -334,8 +339,14 @@ describe('queueDiscoveredSkillPaths', () => {
     expect(queuedFirst).toBe(2);
     expect(queuedSecond).toBe(0);
     expect(send).toHaveBeenCalledTimes(2);
-    expect(send).toHaveBeenNthCalledWith(1, expect.objectContaining({ skillPath: 'agents/cursor' }));
-    expect(send).toHaveBeenNthCalledWith(2, expect.objectContaining({ skillPath: 'agents/opencode' }));
+    expect(send).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      skillPath: 'agents/cursor',
+      queuedAsPending: true,
+    }));
+    expect(send).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      skillPath: 'agents/opencode',
+      queuedAsPending: true,
+    }));
   });
 
   it('clears the pending marker when enqueue fails so the path can be retried', async () => {
@@ -373,5 +384,120 @@ describe('queueDiscoveredSkillPaths', () => {
     ).resolves.toBe(1);
 
     expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips pending KV markers for force reindex discovered paths', async () => {
+    const kv = new MemoryKv();
+    const send = vi.fn(async () => undefined);
+
+    const queued = await queueDiscoveredSkillPaths(
+      {
+        ...createIndexingMessage(),
+        forceReindex: true,
+      },
+      'backrunner',
+      'skillscat',
+      'sha-123',
+      ['agents/cursor'],
+      {
+        KV: kv,
+        INDEXING_QUEUE: { send },
+      } as never
+    );
+
+    expect(queued).toBe(1);
+    expect(kv.putCalls).toBe(0);
+    expect(kv.deleteCalls).toBe(0);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      skillPath: 'agents/cursor',
+      forceReindex: true,
+      queuedAsPending: false,
+    }));
+  });
+
+  it('lets a pending-backed duplicate clean up its marker after a non-pending message processed first', async () => {
+    const kv = new MemoryKv();
+    const processedKey = 'indexing:processed:backrunner/skillscat:agents/cursor:sha-123';
+    const pendingKey = 'indexing:pending:backrunner/skillscat:agents/cursor:sha-123';
+    await kv.put(processedKey, '1');
+    await kv.put(pendingKey, '1');
+    kv.putCalls = 0;
+    kv.deleteCalls = 0;
+
+    const repoResponse = {
+      fork: false,
+      owner: { login: 'backrunner' },
+      name: 'skillscat',
+      stargazers_count: 10,
+      forks_count: 1,
+      default_branch: 'main',
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const rawUrl = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+
+      if (rawUrl === 'https://api.github.com/repos/backrunner/skillscat') {
+        return new Response(JSON.stringify(repoResponse), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      if (rawUrl === 'https://api.github.com/repos/backrunner/skillscat/commits/main') {
+        return new Response(JSON.stringify({ sha: 'sha-123' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected GitHub request: ${rawUrl}`);
+    });
+
+    const ackFirst = vi.fn();
+    const ackSecond = vi.fn();
+    const retryFirst = vi.fn();
+    const retrySecond = vi.fn();
+
+    await indexingWorker.queue({
+      messages: [
+        {
+          id: 'msg-non-pending',
+          body: {
+            type: 'check_skill',
+            repoOwner: 'backrunner',
+            repoName: 'skillscat',
+            skillPath: 'agents/cursor',
+          },
+          ack: ackFirst,
+          retry: retryFirst,
+        },
+        {
+          id: 'msg-pending',
+          body: {
+            type: 'check_skill',
+            repoOwner: 'backrunner',
+            repoName: 'skillscat',
+            skillPath: 'agents/cursor',
+            queuedAsPending: true,
+          },
+          ack: ackSecond,
+          retry: retrySecond,
+        },
+      ],
+    } as never, {
+      KV: kv,
+      GITHUB_TOKEN: 'token-a',
+    } as never, {} as never);
+
+    expect(ackFirst).toHaveBeenCalledTimes(1);
+    expect(ackSecond).toHaveBeenCalledTimes(1);
+    expect(retryFirst).not.toHaveBeenCalled();
+    expect(retrySecond).not.toHaveBeenCalled();
+    await expect(kv.get(pendingKey)).resolves.toBeNull();
+    expect(kv.deleteCalls).toBe(1);
   });
 });

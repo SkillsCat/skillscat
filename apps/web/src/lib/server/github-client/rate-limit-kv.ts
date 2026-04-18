@@ -38,6 +38,7 @@ interface RateLimitApiBody {
 }
 
 const DEFAULT_RATE_LIMIT_KEY_PREFIX = 'github-rate-limit';
+const SNAPSHOT_NOOP_WRITE_WINDOW_MS = 60_000;
 
 function getBucketKey(bucket: GitHubRateLimitBucket, keyPrefix: string, tokenId?: string): string {
   return tokenId
@@ -81,6 +82,52 @@ function computeSnapshotTtlSeconds(resetAtEpochSec: number): number {
   return Math.max(60, untilReset + 600);
 }
 
+function snapshotsEquivalent(
+  left: GitHubRateLimitSnapshot,
+  right: GitHubRateLimitSnapshot
+): boolean {
+  return left.bucket === right.bucket
+    && left.limit === right.limit
+    && left.remaining === right.remaining
+    && left.used === right.used
+    && left.resetAtEpochSec === right.resetAtEpochSec
+    && left.source === right.source
+    && left.endpointId === right.endpointId
+    && left.tokenId === right.tokenId;
+}
+
+async function persistSnapshotIfNeeded(
+  snapshot: GitHubRateLimitSnapshot,
+  options: GitHubRateLimitStorageOptions & { tokenId?: string }
+): Promise<GitHubRateLimitSnapshot> {
+  const kv = options.kv;
+  if (!kv) {
+    return snapshot;
+  }
+
+  const existing = await readRateLimitSnapshot(snapshot.bucket, {
+    kv,
+    keyPrefix: options.keyPrefix,
+    tokenId: options.tokenId,
+  });
+
+  if (
+    existing
+    && snapshotsEquivalent(existing, snapshot)
+    && snapshot.updatedAtEpochMs - existing.updatedAtEpochMs < SNAPSHOT_NOOP_WRITE_WINDOW_MS
+  ) {
+    return existing;
+  }
+
+  await kv.put(
+    getBucketKey(snapshot.bucket, options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX, options.tokenId),
+    JSON.stringify(snapshot),
+    { expirationTtl: computeSnapshotTtlSeconds(snapshot.resetAtEpochSec) }
+  );
+
+  return snapshot;
+}
+
 export function getRateLimitKvKey(
   bucket: GitHubRateLimitBucket,
   keyPrefix: string = DEFAULT_RATE_LIMIT_KEY_PREFIX,
@@ -122,13 +169,7 @@ export async function recordRateLimitFromHeaders(
     tokenId: options.tokenId,
   };
 
-  await kv.put(
-    getBucketKey(bucket, options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX, options.tokenId),
-    JSON.stringify(snapshot),
-    { expirationTtl: computeSnapshotTtlSeconds(snapshot.resetAtEpochSec) }
-  );
-
-  return snapshot;
+  return persistSnapshotIfNeeded(snapshot, options);
 }
 
 export async function recordRateLimitFromRateLimitBody(
@@ -159,8 +200,10 @@ export async function recordRateLimitFromRateLimitBody(
       endpointId: options.endpointId,
       tokenId: options.tokenId,
     };
-    await kv.put(getBucketKey('rest', keyPrefix, options.tokenId), JSON.stringify(rest), {
-      expirationTtl: computeSnapshotTtlSeconds(rest.resetAtEpochSec),
+    rest = await persistSnapshotIfNeeded(rest, {
+      kv,
+      keyPrefix,
+      tokenId: options.tokenId,
     });
   }
 
@@ -174,8 +217,10 @@ export async function recordRateLimitFromRateLimitBody(
       endpointId: options.endpointId,
       tokenId: options.tokenId,
     };
-    await kv.put(getBucketKey('graphql', keyPrefix, options.tokenId), JSON.stringify(graphql), {
-      expirationTtl: computeSnapshotTtlSeconds(graphql.resetAtEpochSec),
+    graphql = await persistSnapshotIfNeeded(graphql, {
+      kv,
+      keyPrefix,
+      tokenId: options.tokenId,
     });
   }
 

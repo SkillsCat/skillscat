@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { runSecurityHeuristics } from '../src/lib/server/security';
 import { tryClaimSkillSecurityAnalysis } from '../src/lib/server/security/state';
@@ -617,5 +617,24 @@ describe('security analysis worker helpers', () => {
       retryAfterMs: 30_000,
       message: 'rate limited',
     }))).toBe(true);
+  });
+
+  it('keeps an existing longer OpenRouter free pause without rewriting KV', async () => {
+    const store = new Map<string, string>([['openrouter:free:paused_until', '90000']]);
+    const put = vi.fn(async (key: string, value: string) => {
+      store.set(key, value);
+    });
+    const kv = {
+      get: async (key: string) => store.get(key) ?? null,
+      put,
+    };
+
+    const pauseUntil = await pauseOpenRouterFreeModels(kv as never, {
+      now: 10_000,
+      retryAfterMs: 15_000,
+    });
+
+    expect(pauseUntil).toBe(90_000);
+    expect(put).not.toHaveBeenCalled();
   });
 });

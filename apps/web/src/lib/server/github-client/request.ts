@@ -1,5 +1,7 @@
 import { sendGitHubRequestThroughGateway } from './gateway';
 
+export type GitHubRateLimitWritePolicy = 'always' | 'rate_limit_only' | 'off';
+
 export interface GitHubRequestOptions extends Omit<RequestInit, 'headers' | 'cache'> {
   token?: string | string[];
   headers?: HeadersInit;
@@ -14,6 +16,7 @@ export interface GitHubRequestOptions extends Omit<RequestInit, 'headers' | 'cac
   cacheTtlSeconds?: number;
   viewerScoped?: boolean;
   rateLimitKV?: KVNamespace;
+  rateLimitWritePolicy?: GitHubRateLimitWritePolicy;
   rateLimitKeyPrefix?: string;
 }
 

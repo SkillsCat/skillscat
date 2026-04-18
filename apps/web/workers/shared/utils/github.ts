@@ -1,4 +1,7 @@
-import { githubRequest } from '../../../src/lib/server/github-client/request';
+import {
+  githubRequest,
+  type GitHubRateLimitWritePolicy,
+} from '../../../src/lib/server/github-client/request';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
@@ -12,6 +15,7 @@ export interface GitHubFetchOptions {
   maxRetries?: number;
   notFoundAsNull?: boolean;
   rateLimitKV?: KVNamespace;
+  rateLimitWritePolicy?: GitHubRateLimitWritePolicy;
   rateLimitKeyPrefix?: string;
 }
 
@@ -29,6 +33,7 @@ export async function githubFetch<T>(
     maxRetries,
     notFoundAsNull = true,
     rateLimitKV,
+    rateLimitWritePolicy,
     rateLimitKeyPrefix,
   } = options;
 
@@ -41,6 +46,7 @@ export async function githubFetch<T>(
     body,
     maxRetries,
     rateLimitKV,
+    rateLimitWritePolicy,
     rateLimitKeyPrefix,
   });
 

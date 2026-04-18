@@ -1,4 +1,4 @@
-import type { GitHubRequestOptions } from './request';
+import type { GitHubRequestOptions, GitHubRateLimitWritePolicy } from './request';
 import { recordRateLimitFromHeaders, type GitHubRateLimitBucket } from './rate-limit-kv';
 import { orderGitHubTokenCandidates, resolveGitHubTokenCandidates } from './token-pool';
 
@@ -150,6 +150,16 @@ function getGitHubRateLimitBucket(url: string): GitHubRateLimitBucket | null {
   return parsed.pathname === '/graphql' ? 'graphql' : 'rest';
 }
 
+function shouldWriteRateLimitSnapshot(
+  writePolicy: GitHubRateLimitWritePolicy | undefined,
+  isRateLimitedResponse: boolean
+): boolean {
+  const policy = writePolicy ?? 'always';
+  if (policy === 'off') return false;
+  if (policy === 'rate_limit_only') return isRateLimitedResponse;
+  return true;
+}
+
 /**
  * Low-level GitHub request with retries and header injection only.
  * No cache / fallback logic here.
@@ -173,6 +183,7 @@ export async function rawGitHubRequest(
     cacheTtlSeconds: _cacheTtlSeconds,
     viewerScoped: _viewerScoped,
     rateLimitKV,
+    rateLimitWritePolicy,
     rateLimitKeyPrefix,
     ...requestInit
   } = options;
@@ -259,7 +270,7 @@ export async function rawGitHubRequest(
     if (shouldRotateToNextToken) {
       lastRateLimitedResponse = response;
 
-      if (rateLimitKV) {
+      if (rateLimitKV && shouldWriteRateLimitSnapshot(rateLimitWritePolicy, true)) {
         await recordRateLimitFromHeaders(response.headers, rateLimitBucket, {
           kv: rateLimitKV,
           keyPrefix: rateLimitKeyPrefix,

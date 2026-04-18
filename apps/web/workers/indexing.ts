@@ -2169,6 +2169,25 @@ function getMessageDedupKey(message: IndexingMessage): string {
   return `${owner}/${repo}:${path}`;
 }
 
+function shouldProcessDuplicateBatchMessage(
+  currentMessage: IndexingMessage,
+  existingState: { queuedAsPending: boolean } | undefined
+): boolean {
+  if (!existingState || currentMessage.forceReindex) {
+    return true;
+  }
+
+  // Allow a pending-backed discovery message to run even when a non-pending
+  // duplicate for the same candidate already appeared earlier in the batch.
+  // This lets the pending-backed path clean up its KV marker or take over if
+  // the earlier representative fails.
+  if (currentMessage.queuedAsPending && !existingState.queuedAsPending) {
+    return true;
+  }
+
+  return false;
+}
+
 function buildProcessedCandidateKey(
   owner: string,
   repo: string,
@@ -2240,20 +2259,23 @@ export async function queueDiscoveredSkillPaths(
   env: IndexingEnv
 ): Promise<number> {
   let queued = 0;
+  const shouldUsePendingMarker = !message.forceReindex;
 
   for (const discoveredSkillPath of skillPaths) {
     if (!discoveredSkillPath) continue;
 
     const processedKey = buildProcessedCandidateKey(owner, repo, discoveredSkillPath, headSha);
     const pendingKey = buildPendingCandidateKey(owner, repo, discoveredSkillPath, headSha);
-    if (!message.forceReindex && (
+    if (shouldUsePendingMarker && (
       await wasCandidateProcessed(env, processedKey)
       || await wasCandidatePending(env, pendingKey)
     )) {
       continue;
     }
 
-    await markCandidatePending(env, pendingKey);
+    if (shouldUsePendingMarker) {
+      await markCandidatePending(env, pendingKey);
+    }
 
     try {
       await env.INDEXING_QUEUE.send({
@@ -2264,12 +2286,15 @@ export async function queueDiscoveredSkillPaths(
         submittedBy: message.submittedBy,
         submittedAt: message.submittedAt,
         forceReindex: message.forceReindex,
+        queuedAsPending: shouldUsePendingMarker,
         discoverySource: message.discoverySource,
         discoveryFingerprint: message.discoveryFingerprint,
       });
       queued++;
     } catch (error) {
-      await clearCandidatePending(env, pendingKey);
+      if (shouldUsePendingMarker) {
+        await clearCandidatePending(env, pendingKey);
+      }
       throw error;
     }
   }
@@ -2339,6 +2364,9 @@ async function processMessage(
     latestCommit.sha
   );
   if (!forceReindex && await wasCandidateProcessed(env, processedCandidateKey)) {
+    if (message.queuedAsPending) {
+      await clearCandidatePending(env, pendingCandidateKey);
+    }
     log.log(`Skipping exact candidate already processed: ${processedCandidateKey}`);
     return;
   }
@@ -2965,7 +2993,9 @@ async function processMessage(
     shouldMarkProcessed = true;
   } finally {
     if (shouldMarkProcessed && !forceReindex) {
-      await clearCandidatePending(env, pendingCandidateKey);
+      if (message.queuedAsPending) {
+        await clearCandidatePending(env, pendingCandidateKey);
+      }
       await markCandidateProcessed(env, processedCandidateKey);
     }
   }
@@ -2978,18 +3008,22 @@ export default {
     _ctx: ExecutionContext
   ): Promise<void> {
     log.log(`Processing batch of ${batch.messages.length} messages`);
-    const seenInBatch = new Set<string>();
+    const seenInBatch = new Map<string, { queuedAsPending: boolean }>();
     const batchContext = createIndexingBatchContext();
 
     for (const message of batch.messages) {
       const dedupKey = getMessageDedupKey(message.body);
+      const seenState = seenInBatch.get(dedupKey);
 
-      if (seenInBatch.has(dedupKey) && !message.body.forceReindex) {
+      if (!shouldProcessDuplicateBatchMessage(message.body, seenState)) {
         log.log(`Skipping duplicate message in batch: ${dedupKey}`);
         message.ack();
         continue;
       }
-      seenInBatch.add(dedupKey);
+
+      seenInBatch.set(dedupKey, {
+        queuedAsPending: Boolean(seenState?.queuedAsPending || message.body.queuedAsPending),
+      });
 
       try {
         if (!message.body.forceReindex) {

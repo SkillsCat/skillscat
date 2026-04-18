@@ -181,7 +181,12 @@ export async function queueArchivedSkillResurrectionCheck(env: DbEnv, skillId: s
   // Fallback: Mark for resurrection check in KV
   // This will be picked up by the resurrection worker on next run
   if (env.KV) {
-    await env.KV.put(`needs_resurrection_check:${skillId}`, '1', {
+    const key = `needs_resurrection_check:${skillId}`;
+    if (await env.KV.get(key)) {
+      return;
+    }
+
+    await env.KV.put(key, '1', {
       expirationTtl: 24 * 60 * 60, // 24 hour TTL
     });
   }
