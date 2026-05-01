@@ -182,6 +182,10 @@
     resetDialogState();
     onClose?.();
   }
+
+  function handleSubmitAnother() {
+    resetDialogState();
+  }
 </script>
 
 <Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
@@ -243,7 +247,10 @@
                   {/if}
 
                   <div class="success-action">
-                    <Button variant="cute" onclick={handleDone}>
+                    <Button variant="cute" onclick={handleSubmitAnother}>
+                      {messages.submitDialog.submitAnother}
+                    </Button>
+                    <Button variant="cute-secondary" onclick={handleDone}>
                       {messages.common.done}
                     </Button>
                   </div>
@@ -514,22 +521,29 @@
     line-height: 1.6;
     margin: 0;
     width: 100%;
-    max-width: 360px;
-    text-align: left;
+    max-width: 24rem;
+    text-align: center;
+    text-wrap: balance;
     white-space: pre-line;
   }
 
   .results-summary {
     margin-top: 1rem;
+    width: 100%;
   }
 
   .results-note {
     font-size: 0.875rem;
     color: var(--muted-foreground);
     margin: 0;
+    text-align: center;
   }
 
   .success-action {
     margin-top: 2rem;
+    display: flex;
+    justify-content: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
   }
 </style>
