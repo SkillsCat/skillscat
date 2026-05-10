@@ -115,4 +115,16 @@ metadata:
 
     expect(extractFrontmatterCategories(parsed.frontmatter)).toEqual(['responsive', 'comments']);
   });
+
+  it('canonicalizes information-gathering aliases to the research category', () => {
+    const parsed = parseSkillFrontmatter(`---
+categories:
+  - information-synthesis
+  - market-research
+  - research-strategy
+---
+# Ignored title`);
+
+    expect(extractFrontmatterCategories(parsed.frontmatter)).toEqual(['research']);
+  });
 });

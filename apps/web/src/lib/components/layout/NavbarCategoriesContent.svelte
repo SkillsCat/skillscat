@@ -102,6 +102,7 @@
     'social': Share01Icon,
     'seo': Search01Icon,
     'finance': MoneyBag01Icon,
+    'research': Search01Icon,
     'web3-crypto': BitcoinIcon,
     'legal': JusticeScale01Icon,
     'academic': MortarboardIcon,

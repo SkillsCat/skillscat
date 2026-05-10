@@ -412,6 +412,32 @@ export const CATEGORY_SECTIONS: CategorySection[] = [
         keywords: ['finance', 'financial', 'budget', 'budgeting', 'money', 'investment', 'expense', 'accounting', 'bookkeeping', 'tax', 'banking', 'forecast', 'valuation', 'financial analysis', 'financial model']
       },
       {
+        slug: 'research',
+        name: 'Research',
+        description: 'Research, information gathering, and multi-source synthesis',
+        keywords: [
+          'research',
+          'information gathering',
+          'information synthesis',
+          'source gathering',
+          'source collection',
+          'web research',
+          'enterprise search',
+          'market research',
+          'market intelligence',
+          'competitive intelligence',
+          'sales intelligence',
+          'account research',
+          'company research',
+          'competitor research',
+          'user research',
+          'source management',
+          'source attribution',
+          'news digest',
+          'news monitoring'
+        ]
+      },
+      {
         slug: 'web3-crypto',
         name: 'Web3 & Crypto',
         description: 'Blockchain, cryptocurrency, Web3 development',

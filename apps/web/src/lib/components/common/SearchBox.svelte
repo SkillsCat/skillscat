@@ -208,7 +208,8 @@
     'monitoring': Activity01Icon,
     'file-operations': Folder01Icon,
     'automation': WorkflowSquare01Icon,
-    'productivity': SparklesIcon
+    'productivity': SparklesIcon,
+    'research': Search01Icon
   };
 
   // Filter category suggestions based on input

@@ -110,6 +110,26 @@ const SPARSE_CATEGORY_SIGNAL_TERMS: Partial<Record<(typeof CATEGORIES)[number]['
   finance: ['finance', 'financial', 'accounting', 'bookkeeping', 'budget', 'valuation', 'forecast'],
   'game-dev': ['game development', 'gamedev', 'unity', 'unreal', 'godot', 'gameplay', 'shader'],
   i18n: ['i18n', 'l10n', 'localization', 'translation', 'multilingual'],
+  research: [
+    'information gathering',
+    'information synthesis',
+    'source gathering',
+    'source collection',
+    'web research',
+    'enterprise search',
+    'market research',
+    'market intelligence',
+    'competitive intelligence',
+    'sales intelligence',
+    'account research',
+    'company research',
+    'competitor research',
+    'user research',
+    'source management',
+    'source attribution',
+    'news digest',
+    'news monitoring',
+  ],
   responsive: ['responsive', 'responsive design', 'mobile-first', 'breakpoint', 'media query', 'viewport', 'tablet'],
   templates: ['template', 'templates', 'starter kit', 'blueprint', 'skeleton'],
   'web3-crypto': ['web3', 'crypto', 'blockchain', 'solidity', 'smart contract', 'onchain', 'wallet'],
@@ -349,7 +369,7 @@ IMPORTANT RULES:
 5. Use design for UI/UX direction, visual critiques, layout, typography, color, branding, wireframes, prototypes, Figma, or design-system planning
 6. Use ui-components for implementation-focused component generation, styling, or framework-specific frontend code
 7. Use embeddings only for real vector retrieval, similarity search, reranking, vector databases, or RAG workflows; never for visual semantics, semantic HTML, or UX search flows
-8. Do NOT suggest a new category when an existing canonical category already fits. For example: brand-design, creative-design, design-systems, design-to-code, visual-design, frontend-design, and ui-ux should all map to design; data-visualization should map to analytics; financial-analysis/modeling/reporting/accounting should map to finance
+8. Do NOT suggest a new category when an existing canonical category already fits. For example: brand-design, creative-design, design-systems, design-to-code, visual-design, frontend-design, and ui-ux should all map to design; data-visualization should map to analytics; financial-analysis/modeling/reporting/accounting should map to finance; market-research, market-intelligence, sales-intelligence, account-research, competitive-intelligence, information-synthesis, enterprise-search, and source-management should map to research, while academic should stay focused on scholarly writing, citations, and literature work
 9. If the skill still doesn't fit well into existing categories after applying those canonical mappings, you may suggest ONE new secondary category
 10. Suggested categories should be specific and useful for developers (not too broad or too niche)
 

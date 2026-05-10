@@ -109,6 +109,19 @@ describe('classifyByKeywords', () => {
     expect(result.categories).toContain('auth');
     expect(result.categories).toContain('security');
   });
+
+  it('classifies practical research and information gathering workflows', () => {
+    const result = classifyByKeywords(
+      `
+      This skill performs market research and competitive intelligence.
+      It runs knowledge retrieval across sources, synthesizes findings with source attribution,
+      and creates a news digest for sales intelligence and account research.
+      `
+    );
+
+    expect(result.categories[0]).toBe('research');
+    expect(result.categories).not.toContain('academic');
+  });
 });
 
 describe('loadSkillMdForClassification', () => {

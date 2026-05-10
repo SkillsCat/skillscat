@@ -48,7 +48,12 @@
     DocumentCodeIcon,
     LayoutIcon,
     CheckListIcon,
-    CubeIcon
+    CubeIcon,
+    MoneyBag01Icon,
+    BitcoinIcon,
+    JusticeScale01Icon,
+    MortarboardIcon,
+    GameboyIcon
   } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
 
@@ -122,7 +127,14 @@
     'writing': Edit01Icon,
     'email': Mail01Icon,
     'social': Share01Icon,
-    'seo': Search01Icon
+    'seo': Search01Icon,
+    // Lifestyle
+    'finance': MoneyBag01Icon,
+    'research': Search01Icon,
+    'web3-crypto': BitcoinIcon,
+    'legal': JusticeScale01Icon,
+    'academic': MortarboardIcon,
+    'game-dev': GameboyIcon
   };
 
   $effect(() => {
