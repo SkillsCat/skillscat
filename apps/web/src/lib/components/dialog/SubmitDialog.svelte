@@ -57,7 +57,6 @@
   let successMessage = $state<string | null>(null);
   let existingSkillSlug = $state<string | null>(null);
   let wasOpen = $state(false);
-  const hasMultilineSuccessMessage = $derived((successMessage || '').includes('\n'));
 
   // Result state for multi-skill submission
   let submitResults = $state<SubmitResult[]>([]);
@@ -235,16 +234,6 @@
                       {messages.submitDialog.successSingleDescription}
                     {/if}
                   </Dialog.Description>
-
-                  {#if existingCount > 0 && !hasMultilineSuccessMessage}
-                    <div class="results-summary">
-                      <p class="results-note">
-                        {existingCount === 1
-                          ? i18n.t(messages.submitDialog.existingSummary, { count: existingCount })
-                          : i18n.t(messages.submitDialog.existingSummaryPlural, { count: existingCount })}
-                      </p>
-                    </div>
-                  {/if}
 
                   <div class="success-action">
                     <Button variant="cute" onclick={handleSubmitAnother}>
@@ -525,18 +514,6 @@
     text-align: center;
     text-wrap: balance;
     white-space: pre-line;
-  }
-
-  .results-summary {
-    margin-top: 1rem;
-    width: 100%;
-  }
-
-  .results-note {
-    font-size: 0.875rem;
-    color: var(--muted-foreground);
-    margin: 0;
-    text-align: center;
   }
 
   .success-action {
