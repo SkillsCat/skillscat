@@ -5,20 +5,32 @@
  * repo star count, which overwhelms list rankings. We keep stars linear for
  * normal repos, then compress the marginal gain above a threshold so stars
  * still matter, but do not dominate every slot.
+ *
+ * Top-rated stays star-led. The precomputed trending score is only a mild
+ * growth/time decay signal, so stale star leaders can gradually lose ground
+ * without turning top-rated into another trending list.
  */
 
 export const STAR_NONLINEAR_THRESHOLD = 1000;
 export const STAR_NONLINEAR_LOG_TAIL_WIDTH = 1000;
 export const TOP_RATED_INSTALL_BASE_REQUIREMENT = 2;
 export const TOP_RATED_INSTALL_REQUIREMENT_LOG_MULTIPLIER = 6;
-export const TOP_RATED_STAR_FACTOR_FLOOR = 0.08;
-export const TOP_RATED_INSTALL_BONUS_SCALE = 18;
-export const TOP_RATED_INSTALL_BONUS_CAP = 220;
+export const TOP_RATED_STAR_FACTOR_FLOOR = 0.96;
+export const TOP_RATED_INSTALL_BONUS_SCALE = 3;
+export const TOP_RATED_INSTALL_BONUS_CAP = 24;
+export const TOP_RATED_MOMENTUM_BASE_REQUIREMENT = 30;
+export const TOP_RATED_MOMENTUM_REQUIREMENT_LOG_MULTIPLIER = 6;
+export const TOP_RATED_MOMENTUM_FACTOR_FLOOR = 0.78;
 const LN10 = 2.302585092994046;
 
 function clampStars(stars: number): number {
   if (!Number.isFinite(stars)) return 0;
   return Math.max(0, stars);
+}
+
+function clampSignal(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, value);
 }
 
 /**
@@ -47,18 +59,41 @@ export function getTopRatedInstallRequirement(stars: number): number {
 }
 
 /**
+ * Momentum requirement for top-rated ranking.
+ *
+ * Larger star bases need proportionally stronger growth/activity evidence to
+ * keep all of their star weight. The input momentum is the stored trending
+ * score, which already carries the star growth curve and activity-time decay.
+ */
+export function getTopRatedMomentumRequirement(stars: number): number {
+  return TOP_RATED_MOMENTUM_BASE_REQUIREMENT
+    + Math.log2(clampStars(stars) + 1) * TOP_RATED_MOMENTUM_REQUIREMENT_LOG_MULTIPLIER;
+}
+
+/**
  * Top-rated score:
  * - stars are compressed non-linearly
- * - star contribution is gated by a star-dependent install requirement
- * - installs also provide a capped direct bonus
+ * - star contribution is the dominant signal
+ * - installs provide only a small confidence/tie-break signal
+ * - precomputed growth/time momentum only applies a bounded stale-project decay
  *
  * `engagement90d` is the 90-day rolling count of `download + install` events,
  * used to stabilize top-rated ranking and keep semantics aligned with existing
  * 7d/30d counters.
+ *
+ * `momentumScore` is the precomputed trending score. It is derived offline from
+ * star snapshots, star velocity, recent activity age, and 7-day downloads. This
+ * keeps top-rated objective and low-jitter without making recent installs the
+ * main ranking axis.
  */
-export function getTopRatedSortScore(stars: number, engagement90d: number): number {
+export function getTopRatedSortScore(
+  stars: number,
+  engagement90d: number,
+  momentumScore: number = 0
+): number {
   const weightedStars = getNonlinearStarScore(stars);
-  const safeInstalls = Number.isFinite(engagement90d) ? Math.max(0, engagement90d) : 0;
+  const safeInstalls = clampSignal(engagement90d);
+  const safeMomentum = clampSignal(momentumScore);
 
   const requiredInstalls = getTopRatedInstallRequirement(stars);
   const readinessDenom = Math.log2(requiredInstalls + 1);
@@ -66,14 +101,20 @@ export function getTopRatedSortScore(stars: number, engagement90d: number): numb
     ? Math.min(1, Math.log2(safeInstalls + 1) / readinessDenom)
     : 1;
 
-  const starFactor = TOP_RATED_STAR_FACTOR_FLOOR
+  const engagementFactor = TOP_RATED_STAR_FACTOR_FLOOR
     + (1 - TOP_RATED_STAR_FACTOR_FLOOR) * readiness;
+  const momentumRequirement = getTopRatedMomentumRequirement(stars);
+  const momentumReadiness = momentumRequirement > 0
+    ? Math.min(1, safeMomentum / momentumRequirement)
+    : 1;
+  const momentumFactor = TOP_RATED_MOMENTUM_FACTOR_FLOOR
+    + (1 - TOP_RATED_MOMENTUM_FACTOR_FLOOR) * momentumReadiness;
   const installBonus = Math.min(
     TOP_RATED_INSTALL_BONUS_CAP,
     Math.log2(safeInstalls + 1) * TOP_RATED_INSTALL_BONUS_SCALE
   );
 
-  return weightedStars * starFactor + installBonus;
+  return weightedStars * engagementFactor * momentumFactor + installBonus;
 }
 
 /**
@@ -104,12 +145,18 @@ export function buildRecentActivitySortSql(lastCommitAtExpr: string, updatedAtEx
  * SQL expression version of getTopRatedSortScore().
  * Inputs must be trusted SQL fragments.
  */
-export function buildTopRatedSortScoreSql(starsExpr: string, engagement90dExpr: string): string {
+export function buildTopRatedSortScoreSql(
+  starsExpr: string,
+  engagement90dExpr: string,
+  momentumScoreExpr: string = 'trending_score'
+): string {
   const weightedStars = buildNonlinearStarScoreSql(starsExpr);
   const nullableStars = `(CASE WHEN ${starsExpr} IS NULL THEN 0 ELSE ${starsExpr} END)`;
   const rawStars = `(CASE WHEN ${nullableStars} < 0 THEN 0 ELSE ${nullableStars} END)`;
   const nullableInstalls = `(CASE WHEN ${engagement90dExpr} IS NULL THEN 0 ELSE ${engagement90dExpr} END)`;
   const installs = `(CASE WHEN ${nullableInstalls} < 0 THEN 0 ELSE ${nullableInstalls} END)`;
+  const nullableMomentum = `(CASE WHEN ${momentumScoreExpr} IS NULL THEN 0 ELSE ${momentumScoreExpr} END)`;
+  const momentum = `(CASE WHEN ${nullableMomentum} < 0 THEN 0 ELSE ${nullableMomentum} END)`;
   const requiredInstalls = `(${TOP_RATED_INSTALL_BASE_REQUIREMENT}
     + (LOG((${rawStars}) + 1) / LOG(2.0)) * ${TOP_RATED_INSTALL_REQUIREMENT_LOG_MULTIPLIER})`;
   const readinessRatio = `((LOG((${installs}) + 1) / LOG(2.0)) / (LOG((${requiredInstalls}) + 1) / LOG(2.0)))`;
@@ -118,13 +165,22 @@ export function buildTopRatedSortScoreSql(starsExpr: string, engagement90dExpr: 
     WHEN ${readinessRatio} < 1.0 THEN ${readinessRatio}
     ELSE 1.0
   END)`;
-  const starFactor = `(${TOP_RATED_STAR_FACTOR_FLOOR}
+  const engagementFactor = `(${TOP_RATED_STAR_FACTOR_FLOOR}
     + (1.0 - ${TOP_RATED_STAR_FACTOR_FLOOR}) * ${readiness})`;
+  const momentumRequirement = `(${TOP_RATED_MOMENTUM_BASE_REQUIREMENT}
+    + (LOG((${rawStars}) + 1) / LOG(2.0)) * ${TOP_RATED_MOMENTUM_REQUIREMENT_LOG_MULTIPLIER})`;
+  const momentumRatio = `((${momentum}) / (${momentumRequirement}))`;
+  const momentumReadiness = `(CASE
+    WHEN ${momentumRequirement} <= 0 THEN 1.0
+    WHEN ${momentumRatio} < 1.0 THEN ${momentumRatio}
+    ELSE 1.0
+  END)`;
+  const momentumFactor = `(${TOP_RATED_MOMENTUM_FACTOR_FLOOR}
+    + (1.0 - ${TOP_RATED_MOMENTUM_FACTOR_FLOOR}) * ${momentumReadiness})`;
   const installBonusRaw = `((LOG((${installs}) + 1) / LOG(2.0)) * ${TOP_RATED_INSTALL_BONUS_SCALE})`;
   const installBonus = `(CASE
     WHEN ${installBonusRaw} < ${TOP_RATED_INSTALL_BONUS_CAP} THEN ${installBonusRaw}
     ELSE ${TOP_RATED_INSTALL_BONUS_CAP}
   END)`;
-
-  return `((${weightedStars}) * (${starFactor}) + (${installBonus}))`;
+  return `((${weightedStars}) * (${engagementFactor}) * (${momentumFactor}) + (${installBonus}))`;
 }

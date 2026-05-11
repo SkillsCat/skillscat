@@ -5,6 +5,9 @@ import { getCached } from '$lib/server/cache';
 import { setPublicPageCache } from '$lib/server/cache/page';
 
 const ITEMS_PER_PAGE = 24;
+const TOP_PAGE_CACHE_TTL_SECONDS = 300;
+const TOP_PAGE_STALE_WHILE_REVALIDATE_SECONDS = 900;
+
 function parsePage(raw: string | null): number {
   const parsed = Number.parseInt(raw || '1', 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return 1;
@@ -16,8 +19,8 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
     setHeaders,
     request,
     isAuthenticated: Boolean(locals.user),
-    sMaxAge: 60,
-    staleWhileRevalidate: 180,
+    sMaxAge: TOP_PAGE_CACHE_TTL_SECONDS,
+    staleWhileRevalidate: TOP_PAGE_STALE_WHILE_REVALIDATE_SECONDS,
     varyByLanguageHeader: false,
   });
 
@@ -30,7 +33,7 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
   const { data } = await getCached(
     `page:top:v1:${page}`,
     () => getTopSkillsPaginated(env, page, ITEMS_PER_PAGE),
-    60
+    TOP_PAGE_CACHE_TTL_SECONDS
   );
   const { skills, total } = data;
   const totalPages = Math.ceil(total / ITEMS_PER_PAGE);

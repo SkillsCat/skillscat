@@ -261,7 +261,7 @@ export function computeSearchScore(input: SearchScoreInput, now: number = Date.n
   const activityAnchor = toNonNegative(input.lastCommitAt) || toNonNegative(input.updatedAt) || now;
   const daysSinceActivity = Math.max(0, (now - activityAnchor) / 86_400_000);
 
-  const topRatedSignal = getTopRatedSortScore(stars, download90d);
+  const topRatedSignal = getTopRatedSortScore(stars, download90d, trendingScore);
 
   const topRatedComponent = Math.log2(topRatedSignal + 1) * 18;
   const trendingComponent = Math.log2(trendingScore + 1) * 16;

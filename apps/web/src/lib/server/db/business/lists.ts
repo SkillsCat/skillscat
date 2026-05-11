@@ -442,13 +442,13 @@ export async function getRecentSkillsPaginated(
 }
 
 /**
- * 获取 top skills (stars-dominant weighted ranking)
+ * 获取 top skills (momentum-adjusted weighted ranking)
  */
 export async function getTopSkills(
   env: DbEnv,
   limit: number = 12
 ): Promise<SkillCardData[]> {
-  const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
+  const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d', 'trending_score');
   const recentActivitySortSql = buildRecentActivitySortSql('last_commit_at', 'updated_at');
   // 先尝试从 R2 缓存读取
   const cached = await getCachedList(env.R2, 'top', env.CACHE_VERSION, {
@@ -478,8 +478,8 @@ export async function getTopSkills(
         COALESCE(last_commit_at, updated_at) as updatedAt
       FROM skills INDEXED BY skills_top_public_rank_expr_idx
       WHERE visibility = 'public'
-      ORDER BY ${topRatedSortScoreSql} DESC, download_count_90d DESC, download_count_30d DESC,
-               stars DESC, trending_score DESC,
+      ORDER BY ${topRatedSortScoreSql} DESC, stars DESC,
+               download_count_90d DESC, download_count_30d DESC, trending_score DESC,
                ${recentActivitySortSql} DESC
       LIMIT ?
     )
@@ -505,7 +505,7 @@ export async function getTopSkillsPaginated(
 
   const offset = (page - 1) * limit;
   const queryLimit = offset === 0 ? limit + 1 : limit;
-  const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
+  const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d', 'trending_score');
   const recentActivitySortSql = buildRecentActivitySortSql('last_commit_at', 'updated_at');
 
   const result = await env.DB.prepare(`
@@ -523,8 +523,8 @@ export async function getTopSkillsPaginated(
         COALESCE(last_commit_at, updated_at) as updatedAt
       FROM skills INDEXED BY skills_top_public_rank_expr_idx
       WHERE visibility = 'public'
-      ORDER BY ${topRatedSortScoreSql} DESC, download_count_90d DESC, download_count_30d DESC,
-               stars DESC, trending_score DESC,
+      ORDER BY ${topRatedSortScoreSql} DESC, stars DESC,
+               download_count_90d DESC, download_count_30d DESC, trending_score DESC,
                ${recentActivitySortSql} DESC
       LIMIT ? OFFSET ?
     )

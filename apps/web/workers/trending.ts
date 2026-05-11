@@ -826,7 +826,7 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
 
 async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   const now = Date.now();
-  const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d');
+  const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d', 'trending_score');
   const recentActivitySortSql = buildRecentActivitySortSql('last_commit_at', 'updated_at');
 
   const trending = await env.DB.prepare(`
@@ -861,8 +861,8 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
              COALESCE(last_commit_at, updated_at) as updatedAt
       FROM skills INDEXED BY skills_top_public_rank_expr_idx
       WHERE visibility = 'public'
-      ORDER BY ${topRatedSortScoreSql} DESC, download_count_90d DESC, download_count_30d DESC,
-               stars DESC, trending_score DESC,
+      ORDER BY ${topRatedSortScoreSql} DESC, stars DESC,
+               download_count_90d DESC, download_count_30d DESC, trending_score DESC,
                ${recentActivitySortSql} DESC
       LIMIT 100
     )

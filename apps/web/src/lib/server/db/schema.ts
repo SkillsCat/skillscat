@@ -2,7 +2,7 @@ import { sqliteTable, text, integer, real, primaryKey, index, uniqueIndex } from
 import { sql } from 'drizzle-orm';
 import { buildRecentActivitySortSql, buildTopRatedSortScoreSql } from '../ranking';
 
-const TOP_RATED_SORT_SCORE_SQL = buildTopRatedSortScoreSql('stars', 'download_count_90d');
+const TOP_RATED_SORT_SCORE_SQL = buildTopRatedSortScoreSql('stars', 'download_count_90d', 'trending_score');
 const TOP_RATED_RECENT_ACTIVITY_SQL = buildRecentActivitySortSql('last_commit_at', 'updated_at');
 
 // ========== Better Auth Tables ==========
@@ -189,9 +189,9 @@ export const skills = sqliteTable('skills', {
   index('skills_top_public_rank_expr_idx')
     .on(
       sql.raw(`${TOP_RATED_SORT_SCORE_SQL} DESC`),
+      sql.raw(`stars DESC`),
       sql.raw(`download_count_90d DESC`),
       sql.raw(`download_count_30d DESC`),
-      sql.raw(`stars DESC`),
       sql.raw(`trending_score DESC`),
       sql.raw(`${TOP_RATED_RECENT_ACTIVITY_SQL} DESC`)
     )
