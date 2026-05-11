@@ -1,7 +1,6 @@
 import type { SkillDetail } from '$lib/types';
 import { buildSkillSecuritySummary } from '$lib/server/skill/security-summary';
 import { loadSkillReadmeFromR2 } from '$lib/server/db/business/readme';
-import { parseFileTree } from '$lib/server/db/shared/skills';
 import { collectTiming, timedTask } from '$lib/server/db/shared/timing';
 import type { DbEnv, TimingCollector } from '$lib/server/db/shared/types';
 
@@ -22,7 +21,7 @@ interface SkillDetailRow {
   created_at: number | null;
   indexed_at: number;
   readme: string | null;
-  file_structure: string | null;
+  fileTreeJson: unknown;
   visibility: SkillDetail['visibility'] | null;
   source_type: SkillDetail['sourceType'] | null;
   source_id: string | null;
@@ -58,6 +57,23 @@ interface SkillDetailRow {
   aiDimensionsJson: string | null;
 }
 
+function parseFileTreeJson(fileTreeJson: unknown): SkillDetail['fileStructure'] {
+  if (Array.isArray(fileTreeJson)) {
+    return fileTreeJson as SkillDetail['fileStructure'];
+  }
+
+  if (typeof fileTreeJson !== 'string' || !fileTreeJson) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(fileTreeJson) as unknown;
+    return Array.isArray(parsed) ? parsed as SkillDetail['fileStructure'] : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * 获取 skill 详情
  */
@@ -75,7 +91,43 @@ export async function getSkillBySlug(
     'sd_row',
     () => env.DB!.prepare(`
       SELECT
-        s.*,
+        s.id,
+        s.name,
+        s.slug,
+        s.description,
+        s.repo_owner,
+        s.repo_name,
+        s.github_url,
+        s.skill_path,
+        s.stars,
+        s.forks,
+        s.trending_score,
+        s.last_commit_at,
+        s.updated_at,
+        s.created_at,
+        s.indexed_at,
+        s.readme,
+        CASE
+          WHEN s.file_structure IS NOT NULL AND json_valid(s.file_structure)
+          THEN json_extract(s.file_structure, '$.fileTree')
+          ELSE NULL
+        END as fileTreeJson,
+        s.visibility,
+        s.source_type,
+        s.source_id,
+        s.current_snapshot_id,
+        s.current_version_id,
+        s.origin_skill_id,
+        s.origin_slug,
+        s.origin_repo_owner,
+        s.origin_repo_name,
+        s.origin_skill_path,
+        s.origin_commit_sha,
+        s.origin_relation_type,
+        s.tier,
+        s.owner_id,
+        s.org_id,
+        s.classification_method,
         (
           SELECT json_group_array(sc.category_slug)
           FROM skill_categories sc
@@ -114,6 +166,7 @@ export async function getSkillBySlug(
       LEFT JOIN skill_security_scans scan
         ON scan.id = COALESCE(ss.current_premium_scan_id, ss.current_free_scan_id)
       WHERE s.slug = ?
+      LIMIT 1
     `)
       .bind(slug)
       .first<SkillDetailRow>(),
@@ -211,7 +264,7 @@ export async function getSkillBySlug(
 
   // 解析文件结构 (直接使用预构建的 fileTree)
   const fileTreeParseStart = performance.now();
-  const fileStructure = parseFileTree(skillData.file_structure);
+  const fileStructure = parseFileTreeJson(skillData.fileTreeJson);
   collectTiming(timingCollector, 'sd_filetree', fileTreeParseStart, 'file tree parse');
   const security = buildSkillSecuritySummary({
     aiRiskLevel: skillData.currentRiskLevel,

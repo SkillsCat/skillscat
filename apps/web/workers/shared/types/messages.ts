@@ -17,6 +17,7 @@ export interface IndexingMessage {
 export interface ClassificationMessage {
   type: 'classify';
   skillId: string;
+  skillSlug?: string;
   repoOwner: string;
   repoName: string;
   skillMdPath: string;

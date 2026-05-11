@@ -412,35 +412,34 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       : null;
 
     if (skill.visibility === 'public' && cachedRecommendSkills !== null && waitUntil && encodedSlug) {
-      const recommendRefreshState = await timed(
-        'recommend_state',
-        () => readRecommendRefreshState(env.DB, skill.id),
-        'db'
-      );
+      serverTimings.push({ name: 'recommend_state', dur: 0, desc: 'deferred' });
+      waitUntil(
+        (async () => {
+          const recommendRefreshState = await readRecommendRefreshState(env.DB, skill.id);
 
-      if (
-        !hasNonEmptyRecommendSkills(cachedRecommendSkills)
-        || shouldRefreshPrecomputedRecommend(recommendRefreshState, recommendAlgoVersion)
-      ) {
-        serverTimings.push({ name: 'recommend_refresh_scheduled', dur: 0, desc: 'stale-hit' });
-        waitUntil(
-          fetch(`/api/skills/${encodedSlug}/recommend`, {
+          if (
+            hasNonEmptyRecommendSkills(cachedRecommendSkills)
+            && !shouldRefreshPrecomputedRecommend(recommendRefreshState, recommendAlgoVersion)
+          ) {
+            return;
+          }
+
+          await fetch(`/api/skills/${encodedSlug}/recommend`, {
             headers: { accept: 'application/json' },
+          });
+        })()
+          .catch((recommendRefreshError) => {
+            console.warn('Failed background refresh trigger for recommend skills:', recommendRefreshError);
           })
-            .then(() => undefined)
-            .catch((recommendRefreshError) => {
-              console.warn('Failed background refresh trigger for recommend skills:', recommendRefreshError);
-            })
-        );
-      }
+      );
     }
 
     setPublicPageCache({
       setHeaders,
       request,
       isAuthenticated: shouldDeferUserState ? false : Boolean(locals.user),
-      sMaxAge: 120,
-      staleWhileRevalidate: 600,
+      sMaxAge: 300,
+      staleWhileRevalidate: 1800,
       varyByLanguageHeader: false,
       varyByCookie: !shouldDeferUserState,
     });

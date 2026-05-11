@@ -35,9 +35,14 @@ import {
 import { githubRequest } from '../src/lib/server/github-client/request';
 import { getGitHubRequestAuthFromEnv } from '../src/lib/server/github-client/env';
 import { invalidateCache } from '../src/lib/server/cache';
-import { PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS } from '../src/lib/server/cache/keys';
+import {
+  getSkillPageCacheInvalidationKeys,
+  getSkillSourceCacheKey,
+  PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
+} from '../src/lib/server/cache/keys';
 import { markRecommendDirty } from '../src/lib/server/ranking/recommend-precompute';
 import { deleteSkillArtifactsAndInvalidateCaches } from '../src/lib/server/skill/delete';
+import { getSkillDetailCacheKeys } from '../src/lib/server/skill/detail';
 import {
   compareCanonicalSkillCandidates,
   computeBundleManifestHash,
@@ -89,6 +94,39 @@ async function invalidatePublicDiscoveryCaches(reason: string): Promise<void> {
     );
   } catch (error) {
     log.error(`Failed to invalidate public discovery caches after ${reason}`, error);
+  }
+}
+
+async function loadSkillSlugById(db: IndexingEnv['DB'], skillId: string): Promise<string | null> {
+  const row = await db.prepare('SELECT slug FROM skills WHERE id = ? LIMIT 1')
+    .bind(skillId)
+    .first<{ slug: string }>();
+  return row?.slug || null;
+}
+
+async function invalidateSkillCaches(
+  skillId: string,
+  slug: string | null,
+  env: IndexingEnv,
+  reason: string
+): Promise<void> {
+  const resolvedSlug = slug || await loadSkillSlugById(env.DB, skillId);
+  if (!resolvedSlug) {
+    return;
+  }
+
+  try {
+    const cacheKeys = new Set<string>([
+      ...getSkillDetailCacheKeys(resolvedSlug),
+      `api:skill-files:${resolvedSlug}`,
+      `skill:${skillId}`,
+      getSkillSourceCacheKey(resolvedSlug),
+      ...getSkillPageCacheInvalidationKeys(resolvedSlug),
+    ]);
+
+    await Promise.all([...cacheKeys].map((cacheKey) => invalidateCache(cacheKey)));
+  } catch (error) {
+    log.error(`Failed to invalidate skill caches after ${reason}`, error);
   }
 }
 
@@ -2930,6 +2968,12 @@ async function processMessage(
     }
 
     await updateSkillMetadata(skillId, latestCommit.sha, fileStructure, lastCommitAt, env);
+    await invalidateSkillCaches(
+      skillId,
+      skillSlug,
+      env,
+      `github content update ${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`
+    );
 
     if (isIndexNowEnabled(env)) {
       try {
@@ -2957,6 +3001,7 @@ async function processMessage(
     const classificationMessage: ClassificationMessage & { tags?: string[] } = {
       type: 'classify',
       skillId,
+      ...(skillSlug ? { skillSlug } : {}),
       repoOwner: canonicalRepoOwner,
       repoName: canonicalRepoName,
       skillMdPath: r2Path,

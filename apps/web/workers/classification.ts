@@ -34,10 +34,16 @@ import {
 } from './shared/ai/openrouter';
 import { createLogger } from './shared/utils';
 import { buildGithubSkillR2Keys, buildUploadSkillR2Key } from '../src/lib/skill-path';
+import { invalidateCache } from '../src/lib/server/cache';
 import { invalidateCategoryCaches } from '../src/lib/server/cache/categories';
+import {
+  getSkillPageCacheInvalidationKeys,
+  getSkillSourceCacheKey,
+} from '../src/lib/server/cache/keys';
 import { syncCategoryPublicStats } from '../src/lib/server/db/business/stats';
 import { markRecommendDirty } from '../src/lib/server/ranking/recommend-precompute';
 import { markSearchDirty } from '../src/lib/server/ranking/search-precompute';
+import { getSkillDetailCacheKeys } from '../src/lib/server/skill/detail';
 
 const log = createLogger('Classification');
 
@@ -103,6 +109,37 @@ const UI_IMPLEMENTATION_SIGNALS = [
   'jsx',
   'tsx',
 ];
+
+async function invalidateSkillCaches(
+  skillId: string,
+  env: ClassificationEnv,
+  knownSlug?: string | null
+): Promise<void> {
+  let slug = knownSlug || null;
+  if (!slug) {
+    try {
+      slug = (await env.DB.prepare('SELECT slug FROM skills WHERE id = ? LIMIT 1')
+        .bind(skillId)
+        .first<{ slug: string }>())?.slug || null;
+    } catch {
+      return;
+    }
+  }
+
+  if (!slug) {
+    return;
+  }
+
+  const cacheKeys = new Set<string>([
+    ...getSkillDetailCacheKeys(slug),
+    `api:skill-files:${slug}`,
+    `skill:${skillId}`,
+    getSkillSourceCacheKey(slug),
+    ...getSkillPageCacheInvalidationKeys(slug),
+  ]);
+
+  await Promise.all([...cacheKeys].map((cacheKey) => invalidateCache(cacheKey)));
+}
 
 const SPARSE_CATEGORY_SIGNAL_TERMS: Partial<Record<(typeof CATEGORIES)[number]['slug'], string[]>> = {
   accessibility: ['a11y', 'accessibility', 'aria', 'wcag', 'keyboard navigation', 'screen reader'],
@@ -783,7 +820,8 @@ async function saveClassification(
   skillId: string,
   result: ExtendedClassificationResult,
   method: ClassificationMethod,
-  env: ClassificationEnv
+  env: ClassificationEnv,
+  knownSlug?: string | null
 ): Promise<void> {
   const now = Date.now();
   const previousCategories = await env.DB.prepare('SELECT category_slug FROM skill_categories WHERE skill_id = ?')
@@ -868,6 +906,12 @@ async function saveClassification(
     log.error('Failed to invalidate category caches after classification:', error);
   }
 
+  try {
+    await invalidateSkillCaches(skillId, env, knownSlug);
+  } catch (error) {
+    log.error(`Failed to invalidate skill caches after classification for ${skillId}:`, error);
+  }
+
   await markRecommendDirty(env.DB, skillId, now);
   await markSearchDirty(env.DB, skillId, now);
 }
@@ -909,7 +953,8 @@ async function processMessage(
   env: ClassificationEnv,
   preloadedSkill: ClassificationSkillStorageLocation | null | undefined = undefined
 ): Promise<ClassificationMethod | null> {
-  const { skillId, repoOwner, repoName, skillMdPath, stars = 0, tags = [], frontmatterCategories, isReclassification } = message;
+  const { skillId, skillSlug, repoOwner, repoName, skillMdPath, stars = 0, tags = [], frontmatterCategories, isReclassification } = message;
+  const knownSlug = skillSlug || preloadedSkill?.slug || null;
 
   log.log(`Processing skill: ${skillId} (${repoOwner}/${repoName})${isReclassification ? ' [RECLASSIFICATION]' : ''}`, JSON.stringify(message));
   if (tags.length > 0) {
@@ -928,7 +973,7 @@ async function processMessage(
 
       // Save classification and return early
       try {
-        await saveClassification(skillId, directMatch, 'direct', env);
+        await saveClassification(skillId, directMatch, 'direct', env, knownSlug);
         log.log(`Successfully saved direct classification for skill: ${skillId}, categories: ${directMatch.categories.join(', ')}`);
       } catch (saveError) {
         log.error(`Failed to save direct classification for ${skillId}:`, saveError);
@@ -969,7 +1014,7 @@ async function processMessage(
   );
 
   try {
-    await saveClassification(skillId, result, method, env);
+    await saveClassification(skillId, result, method, env, knownSlug);
     log.log(`Successfully saved classification for skill: ${skillId}, categories: ${result.categories.join(', ')}`);
   } catch (saveError) {
     log.error(`Failed to save classification for ${skillId}:`, saveError);
