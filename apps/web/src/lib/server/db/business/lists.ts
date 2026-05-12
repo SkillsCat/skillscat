@@ -4,6 +4,7 @@ import { LIST_CACHE_MAX_AGE_MS } from '$lib/server/db/shared/constants';
 import { buildListCacheKeys } from '$lib/server/db/shared/cache';
 import { addCategoriesToSkills, hydrateCachedSkills, normalizeCachedSkill } from '$lib/server/db/shared/skills';
 import type { CachedSkillCardRaw, DbEnv, SkillListRow } from '$lib/server/db/shared/types';
+import { getStats } from '$lib/server/db/business/stats';
 
 interface CategoryListSnapshotRow {
   publicSkillCount: number;
@@ -123,6 +124,62 @@ async function countSkillsByCategory(
     .first<{ total: number }>();
 
   return countResult?.total || 0;
+}
+
+function skillCardsToRows(skills: SkillCardData[]): SkillListRow[] {
+  return skills.map((skill) => ({
+    id: skill.id,
+    name: skill.name,
+    slug: skill.slug,
+    description: skill.description,
+    repoOwner: skill.repoOwner,
+    repoName: skill.repoName,
+    stars: skill.stars,
+    forks: skill.forks,
+    trendingScore: skill.trendingScore,
+    updatedAt: skill.updatedAt,
+    authorAvatar: skill.authorAvatar ?? null,
+  }));
+}
+
+async function getPublicSkillTotal(env: DbEnv): Promise<number> {
+  const stats = await getStats(env);
+  return stats.totalSkills;
+}
+
+async function getCachedFirstPage(
+  env: DbEnv,
+  cacheKey: string,
+  page: number,
+  limit: number
+): Promise<{ skills: SkillCardData[]; total: number } | null> {
+  if (page !== 1 || limit <= 0) return null;
+
+  const cached = await getCachedList(env.R2, cacheKey, env.CACHE_VERSION, {
+    maxAgeMs: LIST_CACHE_MAX_AGE_MS,
+  });
+
+  if (!cached?.data || cached.data.length === 0) return null;
+
+  if (!env.DB) {
+    const pageSkills = cached.data.slice(0, limit);
+    return {
+      skills: pageSkills,
+      total: Math.max(pageSkills.length, cached.data.length),
+    };
+  }
+
+  const total = await getPublicSkillTotal(env);
+  const canServeFullPage = cached.data.length >= limit || cached.data.length >= total;
+  if (!canServeFullPage) return null;
+
+  const pageSkills = cached.data.slice(0, limit);
+  const skills = await addCategoriesToSkills(env.DB, skillCardsToRows(pageSkills));
+
+  return {
+    skills,
+    total: Math.max(total, pageSkills.length),
+  };
 }
 
 async function loadCategorySkillsLive(
@@ -288,10 +345,12 @@ export async function getTrendingSkillsPaginated(
   page: number = 1,
   limit: number = 24
 ): Promise<{ skills: SkillCardData[]; total: number }> {
-  if (!env.DB) return { skills: [], total: 0 };
-
   const offset = (page - 1) * limit;
   const queryLimit = offset === 0 ? limit + 1 : limit;
+  const cachedFirstPage = await getCachedFirstPage(env, 'trending', page, limit);
+  if (cachedFirstPage) return cachedFirstPage;
+
+  if (!env.DB) return { skills: [], total: 0 };
 
   const result = await env.DB.prepare(`
     SELECT
@@ -322,9 +381,7 @@ export async function getTrendingSkillsPaginated(
   if (offset === 0 && !hasMoreOnFirstPage) {
     total = pageRows.length;
   } else {
-    const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
-      .first<{ total: number }>();
-    total = countResult?.total || 0;
+    total = await getPublicSkillTotal(env);
   }
 
   const skills = await addCategoriesToSkills(env.DB, pageRows);
@@ -391,10 +448,12 @@ export async function getRecentSkillsPaginated(
   page: number = 1,
   limit: number = 24
 ): Promise<{ skills: SkillCardData[]; total: number }> {
-  if (!env.DB) return { skills: [], total: 0 };
-
   const offset = (page - 1) * limit;
   const queryLimit = offset === 0 ? limit + 1 : limit;
+  const cachedFirstPage = await getCachedFirstPage(env, 'recent', page, limit);
+  if (cachedFirstPage) return cachedFirstPage;
+
+  if (!env.DB) return { skills: [], total: 0 };
 
   const result = await env.DB.prepare(`
     SELECT
@@ -428,9 +487,7 @@ export async function getRecentSkillsPaginated(
   if (offset === 0 && !hasMoreOnFirstPage) {
     total = pageRows.length;
   } else {
-    const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
-      .first<{ total: number }>();
-    total = countResult?.total || 0;
+    total = await getPublicSkillTotal(env);
   }
 
   const skills = await addCategoriesToSkills(env.DB, pageRows);
@@ -501,10 +558,13 @@ export async function getTopSkillsPaginated(
   page: number = 1,
   limit: number = 24
 ): Promise<{ skills: SkillCardData[]; total: number }> {
-  if (!env.DB) return { skills: [], total: 0 };
-
   const offset = (page - 1) * limit;
   const queryLimit = offset === 0 ? limit + 1 : limit;
+  const cachedFirstPage = await getCachedFirstPage(env, 'top', page, limit);
+  if (cachedFirstPage) return cachedFirstPage;
+
+  if (!env.DB) return { skills: [], total: 0 };
+
   const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d', 'trending_score');
   const recentActivitySortSql = buildRecentActivitySortSql('last_commit_at', 'updated_at');
 
@@ -542,13 +602,7 @@ export async function getTopSkillsPaginated(
   if (offset === 0 && !hasMoreOnFirstPage) {
     total = pageRows.length;
   } else {
-    const countResult = await env.DB.prepare(`
-      SELECT COUNT(*) as total
-      FROM skills
-      WHERE visibility = 'public'
-    `)
-      .first<{ total: number }>();
-    total = countResult?.total || 0;
+    total = await getPublicSkillTotal(env);
   }
 
   const skills = await addCategoriesToSkills(env.DB, pageRows);

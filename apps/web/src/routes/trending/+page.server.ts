@@ -24,6 +24,7 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
   const env = {
     DB: platform?.env?.DB,
     R2: platform?.env?.R2,
+    CACHE_VERSION: platform?.env?.CACHE_VERSION,
   };
 
   const page = parsePage(url.searchParams.get('page'));

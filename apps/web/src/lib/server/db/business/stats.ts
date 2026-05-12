@@ -1,4 +1,5 @@
-import { PREDEFINED_CATEGORY_SLUGS } from '$lib/server/db/shared/constants';
+import { LIST_CACHE_MAX_AGE_MS, PREDEFINED_CATEGORY_SLUGS } from '$lib/server/db/shared/constants';
+import { buildListCacheKeys } from '$lib/server/db/shared/cache';
 import type { DbEnv } from '$lib/server/db/shared/types';
 
 interface CategoryCountRow {
@@ -38,8 +39,19 @@ export interface DynamicCategoryStat {
   skillCount: number;
 }
 
+export interface PublicStats {
+  totalSkills: number;
+}
+
+interface PublicStatsCachePayload {
+  data?: PublicStats;
+  generatedAt?: number;
+}
+
 let pendingPredefinedCategoryStatsSync: Promise<void> | null = null;
 const CATEGORY_PUBLIC_TOP_SKILL_IDS_LIMIT = 96;
+const PUBLIC_STATS_CACHE_KEY = 'stats/public';
+const PUBLIC_STATS_CACHE_MAX_AGE_MS = LIST_CACHE_MAX_AGE_MS;
 const categoryPublicStatsColumnSupportCache = new WeakMap<object, CategoryPublicStatsColumnSupport>();
 
 function normalizeCategorySlugs(categorySlugs: Iterable<string>): string[] {
@@ -213,6 +225,74 @@ function buildCategoryStatsRecordFromAggregates(
   return stats;
 }
 
+export async function readCachedPublicStats(
+  r2: R2Bucket | undefined,
+  cacheVersion?: string,
+  maxAgeMs: number = PUBLIC_STATS_CACHE_MAX_AGE_MS
+): Promise<PublicStats | null> {
+  if (!r2) return null;
+
+  try {
+    const cacheKeys = buildListCacheKeys(PUBLIC_STATS_CACHE_KEY, cacheVersion);
+    const primaryKey = cacheKeys[0];
+
+    for (const cacheKey of cacheKeys) {
+      const object = await r2.get(cacheKey);
+      if (!object) continue;
+
+      const text = await object.text();
+      const parsed = JSON.parse(text) as PublicStatsCachePayload;
+      const totalSkills = Number(parsed.data?.totalSkills);
+      const generatedAt = Number(parsed.generatedAt);
+
+      if (!Number.isFinite(totalSkills) || totalSkills < 0) continue;
+      if (!Number.isFinite(generatedAt) || generatedAt <= 0) continue;
+
+      if (maxAgeMs > 0 && Date.now() - generatedAt > maxAgeMs) {
+        void r2.delete(cacheKey);
+        continue;
+      }
+
+      if (cacheKey !== primaryKey) {
+        void r2.put(primaryKey, text, {
+          httpMetadata: { contentType: 'application/json' },
+        });
+      }
+
+      return { totalSkills };
+    }
+  } catch (error) {
+    console.error('Failed to read cached public stats:', error);
+  }
+
+  return null;
+}
+
+export async function writeCachedPublicStats(
+  r2: R2Bucket | undefined,
+  stats: PublicStats,
+  cacheVersion?: string,
+  generatedAt: number = Date.now()
+): Promise<void> {
+  if (!r2) return;
+
+  const payload = JSON.stringify({ data: stats, generatedAt });
+  await Promise.all(
+    buildListCacheKeys(PUBLIC_STATS_CACHE_KEY, cacheVersion).map((cacheKey) =>
+      r2.put(cacheKey, payload, { httpMetadata: { contentType: 'application/json' } })
+    )
+  );
+}
+
+export async function loadPublicStatsLive(db: D1Database): Promise<PublicStats> {
+  const result = await db.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
+    .first<{ total: number }>();
+
+  return {
+    totalSkills: result?.total || 0,
+  };
+}
+
 async function ensurePredefinedCategoryStats(db: D1Database): Promise<void> {
   if (PREDEFINED_CATEGORY_SLUGS.length === 0) return;
 
@@ -243,14 +323,17 @@ async function ensurePredefinedCategoryStats(db: D1Database): Promise<void> {
  * 获取统计数据
  */
 export async function getStats(env: DbEnv): Promise<{ totalSkills: number }> {
+  const cached = await readCachedPublicStats(env.R2, env.CACHE_VERSION);
+  if (cached) return cached;
+
   if (!env.DB) return { totalSkills: 0 };
 
-  const result = await env.DB.prepare("SELECT COUNT(*) as total FROM skills WHERE visibility = 'public'")
-    .first<{ total: number }>();
-
-  return {
-    totalSkills: result?.total || 0,
-  };
+  const stats = await loadPublicStatsLive(env.DB);
+  void writeCachedPublicStats(env.R2, stats, env.CACHE_VERSION)
+    .catch((error) => {
+      console.error('Failed to write cached public stats:', error);
+    });
+  return stats;
 }
 
 /**

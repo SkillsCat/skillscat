@@ -24,7 +24,11 @@ import type {
 import { TIER_CONFIG } from './shared/types';
 import { getSkillRefreshSelectColumns, resolveRefreshRepoMetrics } from './shared/trending/refresh';
 import { buildGithubSkillR2Key } from '../src/lib/skill-path';
-import { syncCategoryPublicStats } from '../src/lib/server/db/business/stats';
+import {
+  loadPublicStatsLive,
+  syncCategoryPublicStats,
+  writeCachedPublicStats,
+} from '../src/lib/server/db/business/stats';
 import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
 import { buildRecentActivitySortSql, getNonlinearStarScore, buildTopRatedSortScoreSql } from '../src/lib/server/ranking';
 import { markSearchDirtyBatch } from '../src/lib/server/ranking/search-precompute';
@@ -850,6 +854,9 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
       env.R2.put(path, trendingPayload, { httpMetadata: { contentType: 'application/json' } })
     )
   );
+
+  const publicStats = await loadPublicStatsLive(env.DB);
+  await writeCachedPublicStats(env.R2, publicStats, env.CACHE_VERSION, now);
 
   const top = await env.DB.prepare(`
     WITH ranked AS (
