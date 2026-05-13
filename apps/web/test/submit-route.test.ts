@@ -98,6 +98,57 @@ afterEach(() => {
 });
 
 describe('submit route', () => {
+  it('supports repository-only submit checks without scanning skill files', async () => {
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          description: 'Useful tools',
+          stargazers_count: 42,
+          default_branch: 'main',
+          fork: false,
+        });
+      }
+
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+
+    const { GET } = await import('../src/routes/api/submit/+server');
+    const response = await GET({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: undefined,
+          GITHUB_TOKEN: 'test-token',
+        },
+      },
+      request: new Request('https://skills.cat/api/submit?url=https://github.com/forker/toolbox&repoOnly=1'),
+      url: new URL('https://skills.cat/api/submit?url=https://github.com/forker/toolbox&repoOnly=1'),
+    } as never);
+
+    const payload = await response.json() as {
+      valid: boolean;
+      owner: string;
+      repo: string;
+      repoName: string;
+      description: string;
+      stars: number;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      valid: true,
+      owner: 'forker',
+      repo: 'toolbox',
+      repoName: 'toolbox',
+      description: 'Useful tools',
+      stars: 42,
+    });
+    expect(githubRequest).toHaveBeenCalledTimes(1);
+  });
+
   it('returns localized fork errors for submit precheck', async () => {
     const githubRequest = vi.fn(async (url: string) => {
       if (url === 'https://api.github.com/repos/forker/toolbox') {

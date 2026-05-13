@@ -1524,6 +1524,10 @@ function buildSubmitCheckCacheKey(repoUrl: string): string {
   return `submit:check:${encodeURIComponent(repoUrl.trim())}`;
 }
 
+function buildSubmitRepoCheckCacheKey(repoUrl: string): string {
+  return `submit:repo-check:${encodeURIComponent(repoUrl.trim())}`;
+}
+
 interface SubmitCheckPayload {
   valid: boolean;
   code?: string;
@@ -1625,7 +1629,10 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
         descriptor: { key: 'repositoryUrlRequired' },
       });
     }
-    const cacheKey = buildSubmitCheckCacheKey(repoUrl);
+    const repositoryOnly = url.searchParams.get('repoOnly') === '1';
+    const cacheKey = repositoryOnly
+      ? buildSubmitRepoCheckCacheKey(repoUrl)
+      : buildSubmitCheckCacheKey(repoUrl);
     const { data } = await getCached(
       cacheKey,
       async () => {
@@ -1651,6 +1658,17 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
             valid: false,
             code: 'repository_not_found',
             errorDescriptor: { key: 'repositoryNotFound' },
+          } satisfies SubmitCheckPayload;
+        }
+
+        if (repositoryOnly) {
+          return {
+            valid: true,
+            owner,
+            repo,
+            repoName: repoData.name,
+            description: repoData.description,
+            stars: repoData.stars,
           } satisfies SubmitCheckPayload;
         }
 

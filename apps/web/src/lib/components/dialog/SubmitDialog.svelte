@@ -7,7 +7,11 @@
   import { fade, fly } from 'svelte/transition';
   import Button from '$lib/components/ui/Button.svelte';
   import Input from '$lib/components/ui/Input.svelte';
-  import { isValidGitHubRepoUrlForSubmit } from '$lib/github-url';
+  import {
+    isValidGitHubRepoUrlForSubmit,
+    normalizeGitHubRepoShorthandForSubmit,
+    normalizeGitHubSubmitInput,
+  } from '$lib/github-url';
   import { useI18n } from '$lib/i18n/runtime';
   import { buildSkillPath } from '$lib/skill-path';
 
@@ -57,6 +61,9 @@
   let successMessage = $state<string | null>(null);
   let existingSkillSlug = $state<string | null>(null);
   let wasOpen = $state(false);
+  let verifiedShorthandInput = $state('');
+  let verifiedShorthandUrl = $state<string | null>(null);
+  let shorthandCheckId = 0;
 
   // Result state for multi-skill submission
   let submitResults = $state<SubmitResult[]>([]);
@@ -74,8 +81,14 @@
     existingCount = 0;
   }
 
+  function resetShorthandCheckState() {
+    verifiedShorthandInput = '';
+    verifiedShorthandUrl = null;
+  }
+
   function resetDialogState() {
     githubUrl = '';
+    resetShorthandCheckState();
     resetSubmitState();
   }
 
@@ -86,16 +99,98 @@
     wasOpen = isOpen;
   });
 
-  // Validate GitHub URL
+  // Validate GitHub URL or verified owner/repo shorthand.
   const isValidUrl = $derived.by(() => {
     return isValidGitHubRepoUrlForSubmit(githubUrl.trim());
   });
-  const canSubmit = $derived(isValidUrl && !isSubmitting);
+  const shorthandGithubUrl = $derived.by(() => {
+    if (isValidUrl) return null;
+
+    return normalizeGitHubRepoShorthandForSubmit(githubUrl.trim());
+  });
+  const normalizedSubmitUrl = $derived.by(() => normalizeGitHubSubmitInput(githubUrl));
+  const canSubmit = $derived.by(() => {
+    if (isSubmitting || !normalizedSubmitUrl) return false;
+    if (isValidUrl) return true;
+
+    return verifiedShorthandInput === githubUrl.trim()
+      && verifiedShorthandUrl === normalizedSubmitUrl;
+  });
+
+  async function readSubmitCheckResponse(response: Response): Promise<SubmitCheckResponse> {
+    const contentType = response.headers.get('content-type') || '';
+
+    return (contentType.includes('application/json')
+      ? await response.json()
+      : { error: await response.text(), valid: false }) as SubmitCheckResponse;
+  }
+
+  async function verifyShorthandRepository(
+    input: string,
+    normalizedGithubUrl: string,
+    checkId: number,
+    signal: AbortSignal
+  ) {
+    try {
+      const checkParams = new URLSearchParams({
+        url: normalizedGithubUrl,
+        repoOnly: '1',
+      });
+      const response = await fetch(`/api/submit?${checkParams.toString()}`, {
+        headers: {
+          'X-Skillscat-Locale': i18n.locale(),
+        },
+        signal,
+      });
+      const data = await readSubmitCheckResponse(response);
+
+      if (
+        !signal.aborted
+        && checkId === shorthandCheckId
+        && githubUrl.trim() === input
+        && response.ok
+        && data.valid === true
+      ) {
+        verifiedShorthandInput = input;
+        verifiedShorthandUrl = normalizedGithubUrl;
+      }
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (checkId === shorthandCheckId) {
+        resetShorthandCheckState();
+      }
+    }
+  }
+
+  $effect(() => {
+    const input = githubUrl.trim();
+    const normalizedGithubUrl = shorthandGithubUrl;
+
+    if (!isOpen || isSubmitting || !normalizedGithubUrl) {
+      shorthandCheckId += 1;
+      resetShorthandCheckState();
+      return;
+    }
+
+    shorthandCheckId += 1;
+    resetShorthandCheckState();
+
+    const checkId = shorthandCheckId;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      void verifyShorthandRepository(input, normalizedGithubUrl, checkId, controller.signal);
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  });
 
   async function handleSubmit() {
-    if (!isValidUrl || isSubmitting) return;
+    if (!canSubmit || !normalizedSubmitUrl || isSubmitting) return;
 
-    const normalizedGithubUrl = githubUrl.trim();
+    const normalizedGithubUrl = normalizedSubmitUrl;
     isSubmitting = true;
     resetSubmitState();
 
@@ -107,10 +202,7 @@
         },
       });
 
-      const checkContentType = checkResponse.headers.get('content-type') || '';
-      const checkData = (checkContentType.includes('application/json')
-        ? await checkResponse.json()
-        : { error: await checkResponse.text(), valid: false }) as SubmitCheckResponse;
+      const checkData = await readSubmitCheckResponse(checkResponse);
 
       if (!checkResponse.ok || checkData.valid === false) {
         existingSkillSlug = checkData.existingSlug || null;
@@ -254,7 +346,7 @@
                     <label for="github-url" class="form-label">{messages.submitDialog.githubUrl}</label>
                     <Input
                       id="github-url"
-                      type="url"
+                      type="text"
                       placeholder={messages.submitDialog.githubUrlPlaceholder}
                       bind:value={githubUrl}
                       disabled={isSubmitting}
