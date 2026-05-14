@@ -20,22 +20,22 @@
     "tags:normalize": "node scripts/normalize-skill-tags.mjs"
   },
   "dependencies": {
-    "@cf-wasm/resvg": "^0.3.3",
+    "@cf-wasm/resvg": "^0.3.4",
     "@hugeicons/core-free-icons": "^3.3.0",
     "@hugeicons/svelte": "^1.1.2",
-    "better-auth": "^1.6.5",
-    "bits-ui": "^2.18.0",
+    "better-auth": "^1.6.11",
+    "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
     "marked": "^17.0.6",
     "shiki": "^3.23.0",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260418.1",
+    "@cloudflare/workers-types": "^4.20260511.1",
     "@sveltejs/adapter-cloudflare": "^7.2.8",
-    "@sveltejs/kit": "^2.57.1",
-    "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "@sveltejs/kit": "^2.59.1",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@unocss/preset-icons": "^66.6.8",
     "@unocss/preset-wind": "^66.6.8",
     "@unocss/reset": "^66.6.8",
@@ -43,12 +43,12 @@
     "@unocss/transformer-directives": "^66.6.8",
     "drizzle-kit": "^0.31.10",
     "esbuild": "^0.27.7",
-    "svelte": "^5.55.4",
-    "svelte-check": "^4.4.6",
+    "svelte": "^5.55.5",
+    "svelte-check": "^4.4.8",
     "typescript": "^5.9.3",
     "unocss": "^66.6.8",
-    "vite": "^8.0.8",
+    "vite": "^8.0.13",
     "vitest": "^3.2.4",
-    "wrangler": "^4.83.0"
+    "wrangler": "^4.91.0"
   }
 }
