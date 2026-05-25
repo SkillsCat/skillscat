@@ -51,6 +51,7 @@
     showHistory?: boolean;
     suggestionCategory?: string;
     autofocus?: boolean;
+    isLoading?: boolean;
   }
 
   interface SkillSuggestion {
@@ -89,13 +90,15 @@
     suggestionMode = 'categories',
     showHistory = true,
     suggestionCategory = '',
-    autofocus = false
+    autofocus = false,
+    isLoading = false
   }: Props = $props();
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
   const effectivePlaceholder = $derived(placeholder || messages.nav.searchSkills);
 
   let isFocused = $state(false);
+  let isFetchingSuggestions = $state(false);
   let searchFormEl: HTMLFormElement;
   let inputElement: HTMLInputElement;
   let skillSuggestions = $state<SkillSuggestion[]>([]);
@@ -232,20 +235,32 @@
       : categorySuggestions().length > 0
   ));
 
-  const hasDropdownItems = $derived(() => (
-    hasSuggestionItems() || visibleQueryHistory().length > 0
+  const showSuggestionLoading = $derived(() => (
+    suggestionMode === 'skills'
+      && isFetchingSuggestions
+      && isFocused
+      && showSuggestions
+      && value.trim().length >= 2
   ));
+
+  const hasDropdownItems = $derived(() => (
+    hasSuggestionItems() || visibleQueryHistory().length > 0 || showSuggestionLoading()
+  ));
+
+  const showInputLoading = $derived(() => isLoading || isFetchingSuggestions);
 
   // Fetch skill suggestions from the database-backed search API.
   $effect(() => {
     if (suggestionMode !== 'skills') {
       skillSuggestions = [];
+      isFetchingSuggestions = false;
       return;
     }
 
     const query = value.trim();
     if (!query || query.length < 2 || !isFocused || !showSuggestions) {
       skillSuggestions = [];
+      isFetchingSuggestions = false;
       return;
     }
 
@@ -255,6 +270,7 @@
     const cached = suggestionCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       skillSuggestions = cached.skills;
+      isFetchingSuggestions = false;
       return;
     }
 
@@ -264,6 +280,8 @@
 
     const controller = new AbortController();
     let disposed = false;
+    skillSuggestions = [];
+    isFetchingSuggestions = true;
 
     const timer = setTimeout(async () => {
       try {
@@ -278,7 +296,12 @@
         const response = await fetch(`/api/search?${params.toString()}`, {
           signal: controller.signal
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+          if (!disposed) {
+            skillSuggestions = [];
+          }
+          return;
+        }
 
         const payload = await response.json() as {
           data?: {
@@ -314,11 +337,16 @@
         if ((error as DOMException).name !== 'AbortError') {
           skillSuggestions = [];
         }
+      } finally {
+        if (!disposed) {
+          isFetchingSuggestions = false;
+        }
       }
     }, SUGGESTION_FETCH_DEBOUNCE_MS);
 
     return () => {
       disposed = true;
+      isFetchingSuggestions = false;
       clearTimeout(timer);
       controller.abort();
     };
@@ -346,7 +374,12 @@
     isFocused = false;
     addQueryToHistory(category.name);
     value = category.name;
-    onSelectCategory?.(category);
+
+    if (onSelectCategory) {
+      onSelectCategory(category);
+      return;
+    }
+
     onSearch?.(category.name);
   }
 
@@ -467,16 +500,22 @@
       autocomplete="off"
     />
 
-    {#if value}
-      <button
-        type="button"
-        onclick={clearSearch}
-        class="clear-btn"
-        aria-label={messages.searchBox.clearSearch}
-      >
-        <HugeiconsIcon icon={Cancel01Icon} size={16} strokeWidth={2.5} />
-      </button>
-    {/if}
+    <div class="input-actions">
+      {#if showInputLoading()}
+        <span class="loading-indicator" aria-label={messages.common.loading} role="status">
+          <span class="loading-spinner"></span>
+        </span>
+      {:else if value}
+        <button
+          type="button"
+          onclick={clearSearch}
+          class="clear-btn"
+          aria-label={messages.searchBox.clearSearch}
+        >
+          <HugeiconsIcon icon={Cancel01Icon} size={16} strokeWidth={2.5} />
+        </button>
+      {/if}
+    </div>
   </div>
 
   <!-- Suggestions Dropdown -->
@@ -514,6 +553,13 @@
         {/if}
 
         {#if suggestionMode === 'skills'}
+          {#if showSuggestionLoading() && skillSuggestions.length === 0}
+            <div class="suggestion-loading" role="status" aria-live="polite">
+              <span class="loading-spinner"></span>
+              <span>{messages.common.loading}</span>
+            </div>
+          {/if}
+
           {#each skillSuggestions as skill (skill.id)}
             <button
               type="button"
@@ -627,7 +673,7 @@
 
   .search-input {
     width: 100%;
-    padding: 0.625rem 2.5rem 0.625rem 2.75rem;
+    padding: 0.625rem 2.75rem 0.625rem 2.75rem;
     font-size: 0.875rem;
     font-family: var(--font-sans);
     color: var(--foreground);
@@ -660,12 +706,20 @@
     color: var(--muted-foreground);
   }
 
-  .clear-btn {
+  .input-actions {
     position: absolute;
     right: 0.5rem;
     top: 50%;
     transform: translateY(-50%);
     z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  .clear-btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -678,6 +732,24 @@
     cursor: pointer;
     border-radius: 9999px;
     transition: all 0.15s ease;
+  }
+
+  .loading-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    color: var(--primary);
+  }
+
+  .loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 9999px;
+    animation: search-spin 0.75s linear infinite;
   }
 
   .clear-btn:hover {
@@ -776,6 +848,20 @@
     background: var(--border);
   }
 
+  .suggestion-loading {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.75rem;
+    font-size: 0.8125rem;
+    color: var(--fg-muted);
+  }
+
+  .suggestion-loading .loading-spinner {
+    width: 14px;
+    height: 14px;
+  }
+
   .suggestion-item {
     width: 100%;
     display: flex;
@@ -868,6 +954,12 @@
 
   .suggestion-item:hover .suggestion-name {
     color: var(--primary);
+  }
+
+  @keyframes search-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
 </style>

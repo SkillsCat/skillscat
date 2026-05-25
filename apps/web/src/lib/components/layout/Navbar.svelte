@@ -9,7 +9,7 @@
   import { buildSkillPath } from '$lib/skill-path';
   import { useI18n } from '$lib/i18n/runtime';
   import type { CurrentUser } from '$lib/types';
-  import { page } from '$app/stores';
+  import { navigating, page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { slide } from 'svelte/transition';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
@@ -46,6 +46,7 @@
 
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
+  const isSearchNavigating = $derived($navigating?.to?.url.pathname === '/search');
 
   // Close mobile menu on navigation
   $effect(() => {
@@ -125,6 +126,7 @@
           onSearch={handleSearch}
           onSelectSkill={handleSkillSuggestionSelect}
           placeholder={messages.nav.searchSkills}
+          isLoading={isSearchNavigating}
         />
       </div>
 
@@ -196,6 +198,7 @@
             onSearch={handleSearch}
             onSelectSkill={handleSkillSuggestionSelect}
             placeholder={messages.nav.searchSkills}
+            isLoading={isSearchNavigating}
           />
         </div>
 

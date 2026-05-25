@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Search01Icon } from '@hugeicons/core-free-icons';
 
@@ -16,6 +17,7 @@
     onSelectSkill?: (skill: SkillSuggestion) => void;
     class?: string;
     autofocus?: boolean;
+    isLoading?: boolean;
   }
 
   let {
@@ -25,6 +27,7 @@
     onSelectSkill,
     class: className = '',
     autofocus = false,
+    isLoading = false,
   }: Props = $props();
 
   let SearchBoxComponent = $state<SearchBoxComponentType | null>(null);
@@ -72,7 +75,7 @@
       return;
     }
 
-    window.location.href = `/search?q=${encodeURIComponent(query)}`;
+    void goto(`/search?q=${encodeURIComponent(query)}`);
   }
 
   onMount(() => {
@@ -122,6 +125,7 @@
     class={className}
     {onSearch}
     {onSelectSkill}
+    {isLoading}
     suggestionMode="skills"
     autofocus={shouldAutofocusOnUpgrade}
   />
@@ -141,6 +145,12 @@
         onfocus={() => void loadSearchBox({ autofocus: true })}
         onpointerdown={() => void loadSearchBox({ autofocus: true })}
       />
+
+      {#if isLoading}
+        <span class="deferred-search-loading" aria-hidden="true">
+          <span class="deferred-search-spinner"></span>
+        </span>
+      {/if}
     </div>
   </form>
 {/if}
@@ -179,7 +189,7 @@
 
   .deferred-search-input {
     width: 100%;
-    padding: 0.625rem 1rem 0.625rem 2.75rem;
+    padding: 0.625rem 2.75rem 0.625rem 2.75rem;
     font-size: 0.875rem;
     font-family: var(--font-sans);
     color: var(--foreground);
@@ -210,5 +220,31 @@
 
   .deferred-search-input::placeholder {
     color: var(--muted-foreground);
+  }
+
+  .deferred-search-loading {
+    position: absolute;
+    right: 0.75rem;
+    top: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transform: translateY(-50%);
+    color: var(--primary);
+  }
+
+  .deferred-search-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 9999px;
+    animation: deferred-search-spin 0.75s linear infinite;
+  }
+
+  @keyframes deferred-search-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

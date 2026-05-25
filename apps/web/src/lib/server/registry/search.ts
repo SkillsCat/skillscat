@@ -18,6 +18,7 @@ const TOKEN_SPLIT_REGEX = /[^\p{L}\p{N}]+/u;
 let hasSkillSearchTermsTable: boolean | null = null;
 
 export interface RegistrySkillItem {
+  id: string;
   name: string;
   description: string;
   owner: string;
@@ -28,6 +29,7 @@ export interface RegistrySkillItem {
   platform: 'github' | 'gitlab';
   visibility: 'public' | 'private' | 'unlisted';
   slug: string;
+  authorAvatar?: string;
 }
 
 export interface RegistrySearchResult {
@@ -403,8 +405,10 @@ async function fetchSearchResults(
         s.github_url as githubUrl,
         s.stars,
         COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-        s.visibility
+        s.visibility,
+        a.avatar_url as authorAvatar
       FROM skills s
+      LEFT JOIN authors a ON s.repo_owner = a.username
       WHERE s.id IN (${idPlaceholders})
     `)
       .bind(...pageIds)
@@ -419,6 +423,7 @@ async function fetchSearchResults(
         stars: number;
         updatedAt: number;
         visibility: string;
+        authorAvatar: string | null;
       }>();
 
     const categoryMap = new Map<string, string[]>();
@@ -453,6 +458,7 @@ async function fetchSearchResults(
       .map((id) => skillMap.get(id))
       .filter((row): row is NonNullable<typeof row> => Boolean(row))
       .map((row) => ({
+        id: row.id,
         name: row.name,
         description: row.description || '',
         owner: row.owner || '',
@@ -462,7 +468,8 @@ async function fetchSearchResults(
         categories: categoryMap.get(row.id) || [],
         platform: detectRegistrySkillPlatform(row.githubUrl),
         visibility: (row.visibility || 'public') as 'public' | 'private' | 'unlisted',
-        slug: row.slug
+        slug: row.slug,
+        authorAvatar: row.authorAvatar || undefined,
       }));
 
     return { skills, total };
@@ -543,8 +550,10 @@ async function fetchSearchResults(
       s.github_url as githubUrl,
       s.stars,
       COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-      s.visibility
+      s.visibility,
+      a.avatar_url as authorAvatar
     FROM skills s
+    LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.id IN (${idPlaceholders})
   `)
     .bind(...pageIds)
@@ -559,6 +568,7 @@ async function fetchSearchResults(
       stars: number;
       updatedAt: number;
       visibility: string;
+      authorAvatar: string | null;
     }>();
 
   const categoryMap = new Map<string, string[]>();
@@ -593,6 +603,7 @@ async function fetchSearchResults(
     .map((id) => skillMap.get(id))
     .filter((row): row is NonNullable<typeof row> => Boolean(row))
     .map((row) => ({
+      id: row.id,
       name: row.name,
       description: row.description || '',
       owner: row.owner || '',
@@ -602,7 +613,8 @@ async function fetchSearchResults(
       categories: categoryMap.get(row.id) || [],
       platform: detectRegistrySkillPlatform(row.githubUrl),
       visibility: (row.visibility || 'public') as 'public' | 'private' | 'unlisted',
-      slug: row.slug
+      slug: row.slug,
+      authorAvatar: row.authorAvatar || undefined,
     }));
 
   return { skills, total };
