@@ -47,7 +47,8 @@ const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 const SKILL_REFRESH_SELECT_COLUMNS = getSkillRefreshSelectColumns();
 const DAILY_METRICS_RETENTION_DAYS = 95;
-const CATEGORY_STATS_SYNC_SKILL_BATCH_SIZE = 250;
+const D1_SAFE_IN_CLAUSE_BATCH_SIZE = 90;
+const CATEGORY_STATS_SYNC_SKILL_BATCH_SIZE = D1_SAFE_IN_CLAUSE_BATCH_SIZE;
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw || '', 10);
@@ -578,33 +579,49 @@ export async function detectReclassificationNeeded(
   }
 
   // Find skills that are worth AI classification and still only have keyword classification.
-  const placeholders = updatedSkillIds.map(() => '?').join(',');
-  const skills = await env.DB.prepare(`
-    SELECT id, repo_owner, repo_name, skill_path, stars, tier, classification_method
-    FROM skills
-    WHERE id IN (${placeholders})
-      AND classification_method = 'keyword'
-      AND (tier = 'hot' OR stars >= ?)
-  `)
-    .bind(...updatedSkillIds, TIER_CONFIG.hot.minStars)
-    .all<{
-      id: string;
-      repo_owner: string;
-      repo_name: string;
-      skill_path: string | null;
-      stars: number;
-      tier: SkillTier;
-      classification_method: string;
-    }>();
+  const uniqueSkillIds = Array.from(new Set(updatedSkillIds.filter(Boolean)));
+  const skills: Array<{
+    id: string;
+    repo_owner: string;
+    repo_name: string;
+    skill_path: string | null;
+    stars: number;
+    tier: SkillTier;
+    classification_method: string;
+  }> = [];
 
-  if (skills.results.length === 0) {
+  for (let i = 0; i < uniqueSkillIds.length; i += D1_SAFE_IN_CLAUSE_BATCH_SIZE) {
+    const chunk = uniqueSkillIds.slice(i, i + D1_SAFE_IN_CLAUSE_BATCH_SIZE);
+    const placeholders = chunk.map(() => '?').join(',');
+    const result = await env.DB.prepare(`
+      SELECT id, repo_owner, repo_name, skill_path, stars, tier, classification_method
+      FROM skills
+      WHERE id IN (${placeholders})
+        AND classification_method = 'keyword'
+        AND (tier = 'hot' OR stars >= ?)
+    `)
+      .bind(...chunk, TIER_CONFIG.hot.minStars)
+      .all<{
+        id: string;
+        repo_owner: string;
+        repo_name: string;
+        skill_path: string | null;
+        stars: number;
+        tier: SkillTier;
+        classification_method: string;
+      }>();
+
+    skills.push(...(result.results || []));
+  }
+
+  if (skills.length === 0) {
     return 0;
   }
 
-  console.log(`Found ${skills.results.length} skills needing AI reclassification`);
+  console.log(`Found ${skills.length} skills needing AI reclassification`);
 
   // Queue reclassification messages
-  for (const skill of skills.results) {
+  for (const skill of skills) {
     const skillMdPath = buildGithubSkillR2Key(
       skill.repo_owner,
       skill.repo_name,
@@ -627,7 +644,7 @@ export async function detectReclassificationNeeded(
     console.log(`Queued reclassification for ${skill.id} (stars: ${skill.stars}, tier: ${skill.tier})`);
   }
 
-  return skills.results.length;
+  return skills.length;
 }
 
 /**

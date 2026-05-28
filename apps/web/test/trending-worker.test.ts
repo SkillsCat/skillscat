@@ -290,6 +290,41 @@ describe('detectReclassificationNeeded', () => {
       },
     ]);
   });
+
+  it('chunks large reclassification scans to stay below D1 variable limits', async () => {
+    const bindCalls: unknown[][] = [];
+    const sent: unknown[] = [];
+    const updatedSkillIds = Array.from({ length: 205 }, (_, index) => `skill-${index}`);
+    const env = {
+      DB: {
+        prepare: (sql: string) => ({
+          bind: (...args: unknown[]) => {
+            if (sql.includes('SELECT id, repo_owner, repo_name, skill_path, stars, tier, classification_method')) {
+              bindCalls.push(args);
+              return {
+                all: async () => ({ results: [] }),
+              };
+            }
+
+            throw new Error(`Unexpected SQL: ${sql}`);
+          },
+        }),
+      },
+      KV: {} as never,
+      R2: {} as never,
+      CLASSIFICATION_QUEUE: {
+        send: async (message: unknown) => {
+          sent.push(message);
+        },
+      },
+    } as never;
+
+    expect(await detectReclassificationNeeded(env, updatedSkillIds)).toBe(0);
+    expect(sent).toEqual([]);
+    expect(bindCalls).toHaveLength(3);
+    expect(bindCalls.map((args) => args.length)).toEqual([91, 91, 26]);
+    expect(bindCalls.every((args) => args.length <= 100)).toBe(true);
+  });
 });
 
 describe('syncUpdatedSkillCategoryStats', () => {
@@ -321,6 +356,32 @@ describe('syncUpdatedSkillCategoryStats', () => {
     ]);
     expect(syncCategoryPublicStatsMock).toHaveBeenCalledTimes(1);
     expect(syncCategoryPublicStatsMock).toHaveBeenCalledWith(db, ['agents', 'automation']);
+  });
+
+  it('chunks large category scans to stay below D1 variable limits', async () => {
+    const bindCalls: unknown[][] = [];
+    const db = {
+      prepare: (sql: string) => ({
+        bind: (...args: unknown[]) => {
+          if (sql.includes('SELECT DISTINCT category_slug as categorySlug')) {
+            bindCalls.push(args);
+            return {
+              all: async () => ({ results: [] }),
+            };
+          }
+
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      }),
+    } as never;
+
+    const skillIds = Array.from({ length: 205 }, (_, index) => `skill-${index}`);
+
+    await expect(syncUpdatedSkillCategoryStats(db, skillIds)).resolves.toEqual([]);
+    expect(bindCalls).toHaveLength(3);
+    expect(bindCalls.map((args) => args.length)).toEqual([90, 90, 25]);
+    expect(bindCalls.every((args) => args.length <= 90)).toBe(true);
+    expect(syncCategoryPublicStatsMock).not.toHaveBeenCalled();
   });
 
   it('skips sync when no category rows are found', async () => {

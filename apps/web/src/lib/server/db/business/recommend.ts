@@ -51,12 +51,35 @@ interface RecommendCategoryPair {
 
 const EXACT_CATEGORY_OVERLAP_POOL_MAX = 2000;
 const MAX_CATEGORY_SEED_IDS = 192;
+const D1_SAFE_VARIABLE_LIMIT = 90;
+const MAX_RECOMMEND_SIGNAL_CATEGORIES = 12;
+const MAX_RECOMMEND_SIGNAL_TAGS = 32;
 const RECOMMEND_SKILL_COLUMNS_BASE = `
   s.id, s.name, s.slug, s.description,
   s.repo_owner as repoOwner, s.repo_name as repoName,
   s.stars, s.forks, s.trending_score as trendingScore,
   COALESCE(s.last_commit_at, s.updated_at) as updatedAt, s.last_commit_at as lastCommitAt`;
 const SKILL_COLUMNS_BASE = RECOMMEND_SKILL_COLUMNS_BASE;
+
+function normalizeRecommendSignalList(values: string[], limit: number): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    const item = typeof value === 'string' ? value.trim() : '';
+    if (!item || seen.has(item)) continue;
+    seen.add(item);
+    normalized.push(item);
+    if (normalized.length >= limit) break;
+  }
+
+  return normalized;
+}
+
+function getD1SafeValues<T>(values: T[], reservedVariables: number = 0): T[] {
+  const limit = Math.max(0, D1_SAFE_VARIABLE_LIMIT - reservedVariables);
+  return values.slice(0, limit);
+}
 
 function parseRecommendSeedSkillIds(value: string | null): string[] {
   if (!value) return [];
@@ -342,7 +365,7 @@ export async function getLightweightRecommendedSkills(
     categories
       .map((category) => category.trim())
       .filter((category) => category.length > 0)
-  )).slice(0, 3);
+  )).slice(0, Math.min(3, MAX_RECOMMEND_SIGNAL_CATEGORIES));
 
   const collected: RecommendSkillCandidateRow[] = [];
   const excludedIds = new Set<string>([skillId]);
@@ -364,7 +387,7 @@ export async function getLightweightRecommendedSkills(
     const discovery = await loadRecommendDiscoveryCategories(db, normalizedCategories, timingCollector);
     const seedSkillIds = discovery.seedSkillIds
       .filter((candidateId) => !excludedIds.has(candidateId))
-      .slice(0, Math.max(limit * 4, 24));
+      .slice(0, Math.min(Math.max(limit * 4, 24), D1_SAFE_VARIABLE_LIMIT));
 
     if (seedSkillIds.length > 0) {
       const seedPh = seedSkillIds.map(() => '?').join(',');
@@ -491,13 +514,16 @@ export async function getRecommendedSkills(
 
   const MIN_CANDIDATES = limit * 2;
   const MAX_SCORING_CANDIDATES = MIN_CANDIDATES + 4;
-  const hasCategories = categories.length > 0;
+  const recommendCategories = normalizeRecommendSignalList(categories, MAX_RECOMMEND_SIGNAL_CATEGORIES);
+  const hasCategories = recommendCategories.length > 0;
 
   // Step 1: Get current skill's tags
   let skillTags: string[];
   if (Array.isArray(preloadedTags)) {
-    const deduped = Array.from(new Set(preloadedTags.filter((tag): tag is string => typeof tag === 'string' && tag.length > 0)));
-    skillTags = deduped;
+    skillTags = normalizeRecommendSignalList(
+      preloadedTags.filter((tag): tag is string => typeof tag === 'string'),
+      MAX_RECOMMEND_SIGNAL_TAGS
+    );
     timingCollector?.('rel_tags', 0, 'preloaded');
   } else {
     const tagsResult = await timedTask(
@@ -508,7 +534,10 @@ export async function getRecommendedSkills(
       ).bind(skillId).all<TagRow>(),
       'current skill tags'
     );
-    skillTags = tagsResult.results.map((row) => row.tag);
+    skillTags = normalizeRecommendSignalList(
+      tagsResult.results.map((row) => row.tag),
+      MAX_RECOMMEND_SIGNAL_TAGS
+    );
   }
   const hasTags = skillTags.length > 0;
 
@@ -544,7 +573,7 @@ export async function getRecommendedSkills(
 
   // Tier 1: Category overlap
   if (hasCategories) {
-    const discovery = await loadRecommendDiscoveryCategories(db, categories, timingCollector);
+    const discovery = await loadRecommendDiscoveryCategories(db, recommendCategories, timingCollector);
     const categoryPlaceholders = discovery.orderedCategories.map(() => '?').join(',');
 
     if (!discovery.hasMissingStats && discovery.estimatedPoolSize <= EXACT_CATEGORY_OVERLAP_POOL_MAX) {
@@ -582,7 +611,8 @@ export async function getRecommendedSkills(
 
       if (discovery.seedSkillIds.length > 0) {
         const exPh = excludePlaceholders();
-        const seedPh = discovery.seedSkillIds.map(() => '?').join(',');
+        const seedSkillIds = getD1SafeValues(discovery.seedSkillIds, excludeIds.length);
+        const seedPh = seedSkillIds.map(() => '?').join(',');
         const result = await timedTask(
           timingCollector,
           'rel_t1',
@@ -595,7 +625,7 @@ export async function getRecommendedSkills(
           AND s.id IN (${seedPh})
           AND s.id NOT IN (${exPh})
         ORDER BY s.trending_score DESC
-      `).bind(...discovery.seedSkillIds, ...excludeIds).all<RecommendSkillCandidateRow>(),
+      `).bind(...seedSkillIds, ...excludeIds).all<RecommendSkillCandidateRow>(),
           'tier1 precomputed category seeds'
         );
         addCandidates(
@@ -811,7 +841,7 @@ export async function getRecommendedSkills(
   const categoryOverlapPromise = hasCategories && allIds.length > 0
     ? (async () => {
       const idPh = allIds.map(() => '?').join(',');
-      const catPh = categories.map(() => '?').join(',');
+      const catPh = recommendCategories.map(() => '?').join(',');
       const catResult = await timedTask(
         timingCollector,
         'rel_cat_ov',
@@ -820,7 +850,7 @@ export async function getRecommendedSkills(
       FROM skill_categories
       WHERE skill_id IN (${idPh}) AND category_slug IN (${catPh})
       GROUP BY skill_id
-    `).bind(...allIds, ...categories).all<OverlapCountRow>(),
+    `).bind(...allIds, ...recommendCategories).all<OverlapCountRow>(),
         'category overlap batch'
       );
       for (const row of catResult.results) {
@@ -841,7 +871,7 @@ export async function getRecommendedSkills(
     : { cat: 0.00, tag: 0.00, author: 0.20, pop: 0.35, fresh: 0.20, disc: 0.25 };
 
   const now = Date.now();
-  const totalCategories = Math.max(categories.length, 1);
+  const totalCategories = Math.max(recommendCategories.length, 1);
   const totalTags = Math.max(skillTags.length, 1);
   const tierDiscovery: Record<number, number> = { 1: 100, 2: 67, 3: 33, 4: 0 };
 

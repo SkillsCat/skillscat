@@ -344,4 +344,39 @@ describe('orderRecommendDiscoveryCategories', () => {
       'skill-trending',
     ]);
   });
+
+  it('caps large recommendation signal sets before building D1 IN clauses', async () => {
+    const bindCalls: unknown[][] = [];
+    const db = {
+      prepare: () => ({
+        bind: (...params: unknown[]) => {
+          bindCalls.push(params);
+          return {
+            all: async () => ({ results: [] }),
+          };
+        },
+      }),
+    };
+
+    const categories = Array.from({ length: 200 }, (_, index) => `category-${index}`);
+    const tags = Array.from({ length: 200 }, (_, index) => `tag-${index}`);
+
+    await expect(getRecommendedSkills(
+      {
+        DB: db as never,
+        R2: undefined,
+      },
+      'skill-current',
+      categories,
+      '',
+      10,
+      undefined,
+      false,
+      tags
+    )).resolves.toEqual([]);
+
+    expect(bindCalls.length).toBeGreaterThan(0);
+    expect(bindCalls.every((params) => params.length <= 90)).toBe(true);
+    expect(bindCalls[0]).toHaveLength(12);
+  });
 });
