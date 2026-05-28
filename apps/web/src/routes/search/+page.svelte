@@ -82,6 +82,8 @@
   const messages = $derived(i18n.messages());
 
   let searchValue = $state('');
+  let viewportColumns = $state(1);
+  const preferredPageSize = $derived(Math.ceil(50 / viewportColumns) * viewportColumns);
   const localizedMatchedCategories = $derived(
     data.matchedCategories.map((category) => localizeCategory(category, i18n.locale()))
   );
@@ -101,8 +103,11 @@
       : data.skills.length
   );
 
-  function buildSearchPath(query: string, page: number = 1): string {
+  function buildSearchPath(query: string, page: number = 1, pageSize: number = data.pagination?.itemsPerPage ?? preferredPageSize): string {
     const params = new URLSearchParams({ q: query });
+    if (pageSize !== 50) {
+      params.set('pageSize', String(pageSize));
+    }
     if (page > 1) {
       params.set('page', String(page));
     }
@@ -179,6 +184,44 @@
     searchValue = data.query;
   });
 
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQueries = [
+      window.matchMedia('(min-width: 1024px)'),
+      window.matchMedia('(min-width: 640px)'),
+    ] as const;
+
+    const updateColumns = () => {
+      viewportColumns = mediaQueries[0].matches ? 3 : mediaQueries[1].matches ? 2 : 1;
+    };
+
+    updateColumns();
+    for (const mediaQuery of mediaQueries) {
+      mediaQuery.addEventListener('change', updateColumns);
+    }
+
+    return () => {
+      for (const mediaQuery of mediaQueries) {
+        mediaQuery.removeEventListener('change', updateColumns);
+      }
+    };
+  });
+
+  $effect(() => {
+    if (!data.query || !data.pagination) return;
+    if (data.pagination.itemsPerPage === preferredPageSize) return;
+
+    const currentOffset = (data.pagination.currentPage - 1) * data.pagination.itemsPerPage;
+    const targetPage = Math.floor(currentOffset / preferredPageSize) + 1;
+
+    void goto(buildSearchPath(data.query, targetPage, preferredPageSize), {
+      replaceState: true,
+      noScroll: true,
+      keepFocus: true,
+    });
+  });
+
   const pageTitle = $derived(
     data.query
       ? `${i18n.t(messages.searchPage.titleWithQuery, { query: data.query })}${currentPage > 1 ? i18n.t(messages.common.pageSuffix, { page: currentPage }) : ''} - SkillsCat`
@@ -199,7 +242,7 @@
       return;
     }
 
-    void goto(buildSearchPath(normalized));
+    void goto(buildSearchPath(normalized, 1, preferredPageSize));
   }
 
   function handleCategorySelect(category: { slug: string }) {

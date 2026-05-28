@@ -9,6 +9,7 @@ import {
 import { setPublicPageCache } from '$lib/server/cache/page';
 
 const ITEMS_PER_PAGE = 50;
+const MAX_GRID_COLUMNS = 3;
 
 interface PaginationData {
   currentPage: number;
@@ -24,8 +25,26 @@ function parsePage(raw: string | null): number {
   return parsed;
 }
 
-function buildSearchBaseUrl(query: string): string {
-  return `/search?q=${encodeURIComponent(query)}`;
+function filledPageSizeForColumns(columns: number): number {
+  const normalizedColumns = Math.min(Math.max(Math.trunc(columns), 1), MAX_GRID_COLUMNS);
+  return Math.ceil(ITEMS_PER_PAGE / normalizedColumns) * normalizedColumns;
+}
+
+function parsePageSize(raw: string | null): number {
+  const parsed = Number.parseInt(raw || String(ITEMS_PER_PAGE), 10);
+  const allowedPageSizes = new Set(
+    Array.from({ length: MAX_GRID_COLUMNS }, (_, index) => filledPageSizeForColumns(index + 1))
+  );
+  return allowedPageSizes.has(parsed) ? parsed : ITEMS_PER_PAGE;
+}
+
+function buildSearchBaseUrl(query: string, pageSize: number): string {
+  const params = new URLSearchParams();
+  if (pageSize !== ITEMS_PER_PAGE) {
+    params.set('pageSize', String(pageSize));
+  }
+  const extraParams = params.toString();
+  return `/search?q=${encodeURIComponent(query)}${extraParams ? `&${extraParams}` : ''}`;
 }
 
 function toSkillCardData(skill: RegistrySkillItem): SkillCardData {
@@ -62,6 +81,7 @@ export const load: PageServerLoad = async ({
 
   const query = url.searchParams.get('q')?.trim() ?? '';
   const page = parsePage(url.searchParams.get('page'));
+  const pageSize = parsePageSize(url.searchParams.get('pageSize'));
 
   if (!query) {
     if (page > 1) {
@@ -94,17 +114,17 @@ export const load: PageServerLoad = async ({
     {
       query,
       category: '',
-      limit: ITEMS_PER_PAGE,
-      offset: (page - 1) * ITEMS_PER_PAGE,
+      limit: pageSize,
+      offset: (page - 1) * pageSize,
       includePrivate: false,
     }
   );
 
   const totalItems = resolved.data.total;
-  const totalPages = Math.max(1, Math.ceil(totalItems / ITEMS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
 
   if (page > totalPages) {
-    const baseUrl = buildSearchBaseUrl(query);
+    const baseUrl = buildSearchBaseUrl(query, pageSize);
     throw redirect(302, totalPages === 1 ? baseUrl : `${baseUrl}&page=${totalPages}`);
   }
 
@@ -112,8 +132,8 @@ export const load: PageServerLoad = async ({
     currentPage: page,
     totalPages,
     totalItems,
-    itemsPerPage: ITEMS_PER_PAGE,
-    baseUrl: buildSearchBaseUrl(query),
+    itemsPerPage: pageSize,
+    baseUrl: buildSearchBaseUrl(query, pageSize),
   };
 
   return {

@@ -139,4 +139,35 @@ describe('/search page', () => {
       location: '/search?q=web%20research',
     });
   });
+
+  it('uses a URL page size that fills the active search grid columns', async () => {
+    resolveRegistrySearch.mockResolvedValue({
+      data: {
+        skills: [],
+        total: 102,
+      },
+      cacheControl: 'public, max-age=900',
+      cacheStatus: 'MISS',
+    });
+
+    const { load } = await import('../src/routes/search/+page.server');
+    const result = await load(createInput('https://skills.cat/search?q=web%20research&pageSize=51&page=2') as never);
+
+    expect(resolveRegistrySearch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        query: 'web research',
+        limit: 51,
+        offset: 51,
+      })
+    );
+
+    expect(result.pagination).toEqual({
+      currentPage: 2,
+      totalPages: 2,
+      totalItems: 102,
+      itemsPerPage: 51,
+      baseUrl: '/search?q=web%20research&pageSize=51',
+    });
+  });
 });

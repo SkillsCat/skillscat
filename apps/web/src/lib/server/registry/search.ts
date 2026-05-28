@@ -290,6 +290,34 @@ async function fetchSearchResults(
     : false;
 
   if (normalizedQuery && searchTermsEnabled) {
+    try {
+      return await fetchSearchTermResults(db, input, accessiblePrivateIds);
+    } catch (error) {
+      if (!isSearchTermQueryTooComplexError(error)) {
+        throw error;
+      }
+
+      console.warn('Falling back to simple registry search:', error);
+    }
+  }
+
+  return fetchSimpleSearchResults(db, input, accessiblePrivateIds);
+}
+
+function isSearchTermQueryTooComplexError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('too many terms in compound SELECT');
+}
+
+async function fetchSearchTermResults(
+  db: D1Database,
+  input: RegistrySearchInput,
+  accessiblePrivateIds: string[]
+): Promise<RegistrySearchResult> {
+  const visibilityFilter = buildVisibilityFilter(accessiblePrivateIds, 's');
+  const queryLimit = input.offset === 0 ? input.limit + 1 : input.limit;
+  const normalizedQuery = normalizeSearchQuery(input.query);
+  const queryTokens = splitQueryTokens(normalizedQuery);
     const prefixRange = buildPrefixRange(normalizedQuery);
     const prefixParams = buildLowerPrefixParams(prefixRange);
     const tokenPlaceholders = queryTokens.map(() => '?').join(',');
@@ -473,8 +501,15 @@ async function fetchSearchResults(
       }));
 
     return { skills, total };
-  }
+}
 
+async function fetchSimpleSearchResults(
+  db: D1Database,
+  input: RegistrySearchInput,
+  accessiblePrivateIds: string[]
+): Promise<RegistrySearchResult> {
+  const visibilityFilter = buildVisibilityFilter(accessiblePrivateIds, 's');
+  const queryLimit = input.offset === 0 ? input.limit + 1 : input.limit;
   const queryLike = `%${input.query}%`;
   const queryFilterSql = input.query ? 'AND (s.name LIKE ? OR s.description LIKE ?)' : '';
   const queryFilterParams: string[] = input.query ? [queryLike, queryLike] : [];
