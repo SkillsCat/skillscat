@@ -31,6 +31,7 @@ function printUsage() {
 Usage:
   node scripts/web-release.mjs build [--dry-run]
   node scripts/web-release.mjs deploy [--bump major|minor|patch] [--no-bump] [--skip-build] [--dry-run] [--yes]
+                                      [--workers-env production|local]
                                       [--no-tag] [--tag <tag>] [--no-push-tag]
   node scripts/web-release.mjs deploy-all [--bump major|minor|patch] [--no-bump] [--skip-build] [--dry-run] [--yes]
                                           [--no-tag] [--tag <tag>] [--no-push-tag]
@@ -334,9 +335,12 @@ function printPlan(mode, versionInfo, tag, options) {
   console.log(`\nRelease plan (Web: ${mode}):`);
   console.log(`- Version: ${versionInfo.currentVersion} -> ${versionInfo.nextVersion}`);
   console.log(`- Build web: ${options.skipBuild ? 'skip' : 'run'}`);
-  console.log('- Deploy web: run');
   if (mode === 'deploy-all') {
-    console.log(`- Deploy workers: run (env: ${options.workersEnv})`);
+    console.log(`- Deploy workers: run first (env: ${options.workersEnv}, includes Durable Object state owner)`);
+    console.log('- Deploy web: run after workers');
+  } else {
+    console.log(`- Bootstrap state worker: run first (env: ${options.workersEnv})`);
+    console.log('- Deploy web: run after state worker');
   }
   console.log(`- Commit version bump: ${versionInfo.changed ? 'run' : 'skip (no version change)'}`);
   console.log(`- Push branch: ${versionInfo.changed ? 'run' : 'skip (no version change)'}`);
@@ -356,11 +360,36 @@ function runWebBuild(options) {
   });
 }
 
+function runStateBootstrap(options) {
+  const args = ['scripts/deploy-workers.mjs', '--worker', 'state', '--env', options.workersEnv];
+  args.push('--skip-wrong-env-check');
+  if (options.dryRun) {
+    args.push('--dry-run');
+  }
+  if (options.yes) {
+    args.push('--yes');
+  }
+
+  runStep('deploy:state', 'node', args, {
+    cwd: projectRoot,
+    dryRun: false
+  });
+}
+
 function runWebDeploy(options) {
-  runStep('deploy:web', 'pnpm', ['--filter', '@skillscat/web', 'run', 'deploy'], {
+  runStep('prepare:web-assets', 'pnpm', ['--filter', '@skillscat/web', 'run', 'prepare:assetsignore'], {
     cwd: projectRoot,
     dryRun: options.dryRun
   });
+  runStep(
+    'deploy:web',
+    'pnpm',
+    ['--filter', '@skillscat/web', 'exec', 'wrangler', 'deploy', '-c', 'wrangler.preview.toml', '--env', 'production'],
+    {
+      cwd: projectRoot,
+      dryRun: options.dryRun
+    }
+  );
 }
 
 function runWorkersDeploy(options) {
@@ -441,11 +470,13 @@ async function runDeploy(command, options) {
       runWebBuild(options);
     }
 
-    runWebDeploy(options);
-
     if (command === 'deploy-all') {
       runWorkersDeploy(options);
+    } else {
+      runStateBootstrap(options);
     }
+
+    runWebDeploy(options);
   } catch (error) {
     rollbackWebVersion(versionInfo);
     throw error;
