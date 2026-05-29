@@ -36,6 +36,11 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-kv-namespace-id>"
 
+[[durable_objects.bindings]]
+name = "STATE_DO"
+class_name = "SkillscatStateDurableObject"
+script_name = "skillscat-state"
+
 [[analytics_engine_datasets]]
 binding = "WORKER_ANALYTICS"
 dataset = "skillscat_resurrection_runs"
@@ -58,6 +63,11 @@ bucket_name = "skillscat-storage"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
+
+[[env.production.durable_objects.bindings]]
+name = "STATE_DO"
+class_name = "SkillscatStateDurableObject"
+script_name = "skillscat-state-production"
 
 [[env.production.analytics_engine_datasets]]
 binding = "WORKER_ANALYTICS"

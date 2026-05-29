@@ -2,7 +2,7 @@ import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getCached } from '$lib/server/cache';
 import { getPublicSkillFileCacheKey } from '$lib/server/cache/keys';
-import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
+import { getGitHubRateLimitKVFromEnv, getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import { githubRequest } from '$lib/server/github-client/request';
 import { resolveSkillSourceInfo, type SkillSourceInfo } from '$lib/server/skill/source';
 import {
@@ -140,6 +140,7 @@ async function loadSkillFilePayload(
 export const GET: RequestHandler = async ({ params, platform, request, url, locals }) => {
   const r2 = platform?.env?.R2;
   const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
+  const githubRateLimitKV = getGitHubRateLimitKVFromEnv(platform?.env);
   const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
 
   if (!r2) {
@@ -190,7 +191,7 @@ export const GET: RequestHandler = async ({ params, platform, request, url, loca
         filePath,
         r2,
         githubToken,
-        platform?.env?.KV
+        githubRateLimitKV
       ),
       PUBLIC_FILE_CACHE_TTL_SECONDS,
       { waitUntil }
@@ -204,7 +205,7 @@ export const GET: RequestHandler = async ({ params, platform, request, url, loca
     });
   }
 
-  const data = await loadSkillFilePayload(resolved.skill, filePath, r2, githubToken, platform?.env?.KV);
+  const data = await loadSkillFilePayload(resolved.skill, filePath, r2, githubToken, githubRateLimitKV);
   return json(data, {
     headers: {
       'Cache-Control': resolved.cacheControl,

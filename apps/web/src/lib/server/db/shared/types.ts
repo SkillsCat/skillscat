@@ -4,6 +4,7 @@ export interface DbEnv {
   DB?: D1Database;
   R2?: R2Bucket;
   KV?: KVNamespace;
+  STATE_DO?: DurableObjectNamespace;
   WORKER_SECRET?: string;
   RESURRECTION_WORKER_URL?: string;
   CACHE_VERSION?: string;

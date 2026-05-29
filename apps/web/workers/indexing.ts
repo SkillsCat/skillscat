@@ -35,6 +35,7 @@ import {
 import { githubRequest } from '../src/lib/server/github-client/request';
 import { getGitHubRequestAuthFromEnv } from '../src/lib/server/github-client/env';
 import { invalidateCache } from '../src/lib/server/cache';
+import { createDurableObjectKvStore } from '../src/lib/server/state/client';
 import {
   getSkillPageCacheInvalidationKeys,
   getSkillSourceCacheKey,
@@ -75,6 +76,12 @@ import {
 import { canonicalizeCategorySlug } from './shared/classification/categories';
 
 const log = createLogger('Indexing');
+
+function getIndexingStateStore(env: IndexingEnv): KVNamespace {
+  return createDurableObjectKvStore(env.STATE_DO, {
+    objectName: 'indexing-state',
+  }) ?? env.KV;
+}
 
 // ============================================
 // Configuration Constants
@@ -2255,35 +2262,35 @@ function buildRepoMetricsSyncedKey(
 }
 
 async function wasCandidateProcessed(env: IndexingEnv, key: string): Promise<boolean> {
-  return (await env.KV.get(key)) !== null;
+  return (await getIndexingStateStore(env).get(key)) !== null;
 }
 
 async function markCandidateProcessed(env: IndexingEnv, key: string): Promise<void> {
-  await env.KV.put(key, '1', {
+  await getIndexingStateStore(env).put(key, '1', {
     expirationTtl: INDEXING_PROCESSED_TTL_SECONDS,
   });
 }
 
 async function wasCandidatePending(env: IndexingEnv, key: string): Promise<boolean> {
-  return (await env.KV.get(key)) !== null;
+  return (await getIndexingStateStore(env).get(key)) !== null;
 }
 
 async function markCandidatePending(env: IndexingEnv, key: string): Promise<void> {
-  await env.KV.put(key, '1', {
+  await getIndexingStateStore(env).put(key, '1', {
     expirationTtl: INDEXING_PENDING_TTL_SECONDS,
   });
 }
 
 async function clearCandidatePending(env: IndexingEnv, key: string): Promise<void> {
-  await env.KV.delete(key);
+  await getIndexingStateStore(env).delete(key);
 }
 
 async function wasRepoMetricsSynced(env: IndexingEnv, key: string): Promise<boolean> {
-  return (await env.KV.get(key)) !== null;
+  return (await getIndexingStateStore(env).get(key)) !== null;
 }
 
 async function markRepoMetricsSynced(env: IndexingEnv, key: string): Promise<void> {
-  await env.KV.put(key, '1', {
+  await getIndexingStateStore(env).put(key, '1', {
     expirationTtl: INDEXING_PROCESSED_TTL_SECONDS,
   });
 }

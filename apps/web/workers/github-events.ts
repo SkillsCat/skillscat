@@ -6,7 +6,7 @@
  */
 
 import type { GithubEventsEnv, GitHubEvent, IndexingMessage } from './shared/types';
-import { getGitHubRequestAuthFromEnv } from '../src/lib/server/github-client/env';
+import { getGitHubRateLimitKVFromEnv, getGitHubRequestAuthFromEnv } from '../src/lib/server/github-client/env';
 import { getRateLimit, listPublicEvents, searchCode } from '../src/lib/server/github-client/rest';
 import {
   isRateLimitSnapshotStale,
@@ -18,6 +18,7 @@ import {
   resolveGitHubTokenCandidates,
   resolveGitHubTokenIds,
 } from '../src/lib/server/github-client/token-pool';
+import { createDurableObjectKvStore } from '../src/lib/server/state/client';
 
 const DEFAULT_EVENTS_PER_PAGE = 100;
 const DEFAULT_EVENTS_PAGES = 1;
@@ -33,12 +34,12 @@ const DEFAULT_REST_RESERVE = 300;
 const DEFAULT_DISCOVERY_LOCK_TTL_SECONDS = 240;
 
 const REPO_QUEUE_DEDUP_TTL_SECONDS = 5 * 60;
-const SEARCH_PROCESSED_TTL_SECONDS = 7 * 24 * 60 * 60;
 const RATE_LIMIT_SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
 
 const RUN_LOCK_KEY = 'github-discovery:run-lock';
 const CODE_SEARCH_CURSOR_KEY = 'github-events:code-search:last-head';
 const EVENT_REPLAY_STATE_KEY = 'github-events:event-replay-state';
+const REPO_QUEUE_DEDUP_WINDOW_KEY = 'github-events:repo-queued-window';
 
 interface SearchDiscoveryResult {
   scanned: number;
@@ -63,6 +64,16 @@ interface RepoIdentity {
 }
 
 type QueuedRepoSet = Set<string>;
+
+interface RepoQueuedWindowPayload {
+  entries?: Record<string, number>;
+}
+
+interface RepoQueueDedupeState {
+  recentUntilByIdentity: Map<string, number>;
+  queuedInRun: QueuedRepoSet;
+  dirty: boolean;
+}
 
 interface GitHubEventsFetchResult {
   events: GitHubEvent[];
@@ -200,6 +211,12 @@ function getDiscoveryLockTtlSeconds(env: GithubEventsEnv): number {
   return parsePositiveInt(env.GITHUB_DISCOVERY_LOCK_TTL_SECONDS, DEFAULT_DISCOVERY_LOCK_TTL_SECONDS);
 }
 
+function getGithubEventsStateStore(env: GithubEventsEnv): KVNamespace {
+  return createDurableObjectKvStore(env.STATE_DO, {
+    objectName: 'github-events',
+  }) ?? env.KV;
+}
+
 export function buildRepoQueuedDedupIdentity(owner: string, name: string, skillPath?: string): string {
   const normalizedPath = normalizeSkillPath(skillPath).toLowerCase();
   return `${owner.toLowerCase()}/${name.toLowerCase()}:${normalizedPath}`;
@@ -294,14 +311,14 @@ function extractRepoInfo(event: GitHubEvent): IndexingMessage | null {
  * 获取上次处理的事件 ID
  */
 async function getLastProcessedEventId(env: GithubEventsEnv): Promise<string | null> {
-  return env.KV.get('github-events:last-event-id');
+  return getGithubEventsStateStore(env).get('github-events:last-event-id');
 }
 
 /**
  * 保存最后处理的事件 ID
  */
 async function setLastProcessedEventId(env: GithubEventsEnv, eventId: string): Promise<void> {
-  await env.KV.put('github-events:last-event-id', eventId, {
+  await getGithubEventsStateStore(env).put('github-events:last-event-id', eventId, {
     expirationTtl: 86400 * 7,
   });
 }
@@ -322,7 +339,8 @@ async function readEventReplayState(
   env: GithubEventsEnv,
   lastEventId: string | null
 ): Promise<Set<string>> {
-  const raw = await env.KV.get(EVENT_REPLAY_STATE_KEY);
+  const store = getGithubEventsStateStore(env);
+  const raw = await store.get(EVENT_REPLAY_STATE_KEY);
   if (!raw) {
     return new Set();
   }
@@ -337,13 +355,13 @@ async function readEventReplayState(
       : [];
 
     if (baseLastEventId !== lastEventId || processedPushEventIds.length === 0) {
-      await env.KV.delete(EVENT_REPLAY_STATE_KEY);
+      await store.delete(EVENT_REPLAY_STATE_KEY);
       return new Set();
     }
 
     return new Set(processedPushEventIds);
   } catch {
-    await env.KV.delete(EVENT_REPLAY_STATE_KEY);
+    await store.delete(EVENT_REPLAY_STATE_KEY);
     return new Set();
   }
 }
@@ -362,66 +380,125 @@ async function persistEventReplayState(
     processedPushEventIds: [...processedPushEventIds],
   };
 
-  await env.KV.put(EVENT_REPLAY_STATE_KEY, JSON.stringify(payload), {
+  await getGithubEventsStateStore(env).put(EVENT_REPLAY_STATE_KEY, JSON.stringify(payload), {
     expirationTtl: 24 * 60 * 60,
   });
 }
 
 async function clearEventReplayState(env: GithubEventsEnv): Promise<void> {
-  await env.KV.delete(EVENT_REPLAY_STATE_KEY);
+  await getGithubEventsStateStore(env).delete(EVENT_REPLAY_STATE_KEY);
 }
 
-function getRepoQueuedKey(owner: string, name: string, skillPath?: string): string {
-  return `github-events:repo-queued:${buildRepoQueuedDedupIdentity(owner, name, skillPath)}`;
-}
-
-/**
- * Check if a repository path has been queued recently.
- * This suppresses bursts of duplicate queue messages.
- */
-async function wasRepoQueuedRecently(
+async function readRepoQueueDedupeState(
   env: GithubEventsEnv,
+  nowMs: number
+): Promise<RepoQueueDedupeState> {
+  const raw = await getGithubEventsStateStore(env).get(REPO_QUEUE_DEDUP_WINDOW_KEY);
+  if (!raw) {
+    return {
+      recentUntilByIdentity: new Map(),
+      queuedInRun: new Set(),
+      dirty: false,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as RepoQueuedWindowPayload;
+    const entries = isObject(parsed.entries) ? parsed.entries : {};
+    const recentUntilByIdentity = new Map<string, number>();
+
+    for (const [identity, expiresAtEpochMs] of Object.entries(entries)) {
+      const expiresAt = Number(expiresAtEpochMs);
+      if (!identity || !Number.isFinite(expiresAt) || expiresAt <= nowMs) {
+        continue;
+      }
+      recentUntilByIdentity.set(identity, expiresAt);
+    }
+
+    return {
+      recentUntilByIdentity,
+      queuedInRun: new Set(),
+      dirty: false,
+    };
+  } catch {
+    return {
+      recentUntilByIdentity: new Map(),
+      queuedInRun: new Set(),
+      dirty: true,
+    };
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function wasRepoQueuedRecently(
+  state: RepoQueueDedupeState,
   owner: string,
   name: string,
-  skillPath?: string
-): Promise<boolean> {
-  return (await env.KV.get(getRepoQueuedKey(owner, name, skillPath))) !== null;
+  skillPath: string | undefined,
+  nowMs: number
+): boolean {
+  const identity = buildRepoQueuedDedupIdentity(owner, name, skillPath);
+  if (state.queuedInRun.has(identity)) {
+    return true;
+  }
+
+  const expiresAt = state.recentUntilByIdentity.get(identity);
+  if (!expiresAt) {
+    return false;
+  }
+
+  if (expiresAt > nowMs) {
+    return true;
+  }
+
+  state.recentUntilByIdentity.delete(identity);
+  state.dirty = true;
+  return false;
 }
 
-/**
- * Mark a repository path as recently queued.
- */
-async function markRepoQueued(
-  env: GithubEventsEnv,
+function markRepoQueued(
+  state: RepoQueueDedupeState,
   owner: string,
   name: string,
-  skillPath?: string
+  skillPath: string | undefined,
+  nowMs: number
+): void {
+  const identity = buildRepoQueuedDedupIdentity(owner, name, skillPath);
+  state.queuedInRun.add(identity);
+  state.recentUntilByIdentity.set(identity, nowMs + REPO_QUEUE_DEDUP_TTL_SECONDS * 1000);
+  state.dirty = true;
+}
+
+async function persistRepoQueueDedupeState(
+  env: GithubEventsEnv,
+  state: RepoQueueDedupeState,
+  nowMs: number
 ): Promise<void> {
-  await env.KV.put(getRepoQueuedKey(owner, name, skillPath), '1', {
-    expirationTtl: REPO_QUEUE_DEDUP_TTL_SECONDS,
-  });
-}
+  if (!state.dirty) {
+    return;
+  }
 
-function getSearchProcessedKey(fingerprint: string): string {
-  return `github-events:search-processed:${fingerprint}`;
-}
+  const entries: Record<string, number> = {};
+  for (const [identity, expiresAtEpochMs] of state.recentUntilByIdentity.entries()) {
+    if (expiresAtEpochMs > nowMs) {
+      entries[identity] = expiresAtEpochMs;
+    }
+  }
 
-async function isSearchFingerprintProcessed(env: GithubEventsEnv, fingerprint: string): Promise<boolean> {
-  return (await env.KV.get(getSearchProcessedKey(fingerprint))) !== null;
-}
-
-async function markSearchFingerprintProcessed(env: GithubEventsEnv, fingerprint: string): Promise<void> {
-  await env.KV.put(getSearchProcessedKey(fingerprint), '1', {
-    expirationTtl: SEARCH_PROCESSED_TTL_SECONDS,
+  await getGithubEventsStateStore(env).put(REPO_QUEUE_DEDUP_WINDOW_KEY, JSON.stringify({ entries }), {
+    expirationTtl: REPO_QUEUE_DEDUP_TTL_SECONDS * 2,
   });
 }
 
 async function getCodeSearchHeadCursor(env: GithubEventsEnv): Promise<string | null> {
-  return env.KV.get(CODE_SEARCH_CURSOR_KEY);
+  return getGithubEventsStateStore(env).get(CODE_SEARCH_CURSOR_KEY);
 }
 
 async function setCodeSearchHeadCursor(env: GithubEventsEnv, fingerprint: string): Promise<void> {
-  await env.KV.put(CODE_SEARCH_CURSOR_KEY, fingerprint, {
+  await getGithubEventsStateStore(env).put(CODE_SEARCH_CURSOR_KEY, fingerprint, {
     expirationTtl: 86400 * 30,
   });
 }
@@ -433,7 +510,7 @@ async function readGitHubRateLimitBudget(
 ): Promise<GitHubRateLimitSnapshot | null> {
   const tokenIds = await resolveGitHubTokenIds(getGitHubTokenInputFromEnv(env));
   return readAggregatedRateLimitSnapshot(bucket, {
-    kv: env.KV,
+    kv: getGitHubRateLimitKVFromEnv(env),
     tokenIds,
     maxAgeMs: options.maxAgeMs,
     includeStale: options.includeStale,
@@ -456,7 +533,7 @@ async function readOrRefreshRestRateLimitSnapshot(env: GithubEventsEnv): Promise
       const response = await getRateLimit({
         token: candidate.value,
         userAgent: 'SkillsCat-Worker/1.0',
-        rateLimitKV: env.KV,
+        rateLimitKV: getGitHubRateLimitKVFromEnv(env),
       });
 
       if (!response.ok) {
@@ -479,7 +556,8 @@ async function readOrRefreshRestRateLimitSnapshot(env: GithubEventsEnv): Promise
 async function processEvents(
   env: GithubEventsEnv,
   restSnapshot: GitHubRateLimitSnapshot | null,
-  queuedRepoKeysInRun: QueuedRepoSet
+  repoDedupeState: RepoQueueDedupeState,
+  nowMs: number
 ): Promise<EventsDiscoveryResult> {
   let processed = 0;
   let queued = 0;
@@ -587,21 +665,13 @@ async function processEvents(
 
         const message = extractRepoInfo(event);
         if (message) {
-          const repoQueuedIdentity = buildRepoQueuedDedupIdentity(message.repoOwner, message.repoName);
-          if (queuedRepoKeysInRun.has(repoQueuedIdentity)) {
-            replayedPushEventIds.add(event.id);
-            continue;
-          }
-
-          if (await wasRepoQueuedRecently(env, message.repoOwner, message.repoName)) {
-            queuedRepoKeysInRun.add(repoQueuedIdentity);
+          if (wasRepoQueuedRecently(repoDedupeState, message.repoOwner, message.repoName, undefined, nowMs)) {
             replayedPushEventIds.add(event.id);
             continue;
           }
 
           await env.INDEXING_QUEUE.send(message);
-          await markRepoQueued(env, message.repoOwner, message.repoName);
-          queuedRepoKeysInRun.add(repoQueuedIdentity);
+          markRepoQueued(repoDedupeState, message.repoOwner, message.repoName, undefined, nowMs);
           queued++;
           console.log(`Queued repo for indexing: ${message.repoOwner}/${message.repoName}`);
         }
@@ -640,7 +710,7 @@ async function processEvents(
 
 async function processCodeSearchDiscovery(
   env: GithubEventsEnv,
-  queuedRepoKeysInRun: QueuedRepoSet,
+  repoDedupeState: RepoQueueDedupeState,
   initialRestSnapshot?: GitHubRateLimitSnapshot | null,
   nowMs: number = Date.now()
 ): Promise<SearchDiscoveryResult> {
@@ -764,26 +834,13 @@ async function processCodeSearchDiscovery(
       }
       seenFingerprints.add(fingerprint);
 
-      if (await isSearchFingerprintProcessed(env, fingerprint)) {
-        continue;
-      }
-
       const repo = parseRepoFullName(item.repository?.full_name);
       if (!repo) {
-        await markSearchFingerprintProcessed(env, fingerprint);
         continue;
       }
 
       const skillPath = getSkillPathFromSkillMdPath(item.path);
-      const repoQueuedIdentity = buildRepoQueuedDedupIdentity(repo.owner, repo.name, skillPath);
-      if (queuedRepoKeysInRun.has(repoQueuedIdentity)) {
-        await markSearchFingerprintProcessed(env, fingerprint);
-        continue;
-      }
-
-      if (await wasRepoQueuedRecently(env, repo.owner, repo.name, skillPath)) {
-        queuedRepoKeysInRun.add(repoQueuedIdentity);
-        await markSearchFingerprintProcessed(env, fingerprint);
+      if (wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, skillPath, nowMs)) {
         continue;
       }
 
@@ -797,9 +854,7 @@ async function processCodeSearchDiscovery(
       };
 
       await env.INDEXING_QUEUE.send(message);
-      await markRepoQueued(env, repo.owner, repo.name, skillPath);
-      queuedRepoKeysInRun.add(repoQueuedIdentity);
-      await markSearchFingerprintProcessed(env, fingerprint);
+      markRepoQueued(repoDedupeState, repo.owner, repo.name, skillPath, nowMs);
       queued++;
     }
 
@@ -860,7 +915,7 @@ function parseDiscoveryRunLockPayload(
 
 async function readDiscoveryRunLock(env: GithubEventsEnv): Promise<DiscoveryRunLockPayload | null> {
   const ttlSeconds = getDiscoveryLockTtlSeconds(env);
-  const raw = await env.KV.get(RUN_LOCK_KEY);
+  const raw = await getGithubEventsStateStore(env).get(RUN_LOCK_KEY);
   return parseDiscoveryRunLockPayload(raw, ttlSeconds);
 }
 
@@ -879,7 +934,7 @@ async function acquireDiscoveryRunLock(env: GithubEventsEnv): Promise<string | n
     expiresAtEpochMs: acquiredAtEpochMs + ttlSeconds * 1000,
   };
 
-  await env.KV.put(RUN_LOCK_KEY, JSON.stringify(payload), {
+  await getGithubEventsStateStore(env).put(RUN_LOCK_KEY, JSON.stringify(payload), {
     expirationTtl: ttlSeconds,
   });
 
@@ -903,7 +958,7 @@ async function releaseDiscoveryRunLock(env: GithubEventsEnv, token: string): Pro
   if (!current || current.token !== token) {
     return;
   }
-  await env.KV.delete(RUN_LOCK_KEY);
+  await getGithubEventsStateStore(env).delete(RUN_LOCK_KEY);
 }
 
 export default {
@@ -920,9 +975,11 @@ export default {
 
     console.log('GitHub Events Worker triggered at:', new Date().toISOString());
 
+    let repoDedupeState: RepoQueueDedupeState | null = null;
+    let nowMs = Date.now();
+
     try {
-      const nowMs = Date.now();
-      const queuedRepoKeysInRun: QueuedRepoSet = new Set();
+      repoDedupeState = await readRepoQueueDedupeState(env, nowMs);
 
       if (!await hasDiscoveryRunLockOwnership(env, lockToken)) {
         console.log('GitHub Events Worker lock ownership lost before discovery start');
@@ -936,7 +993,7 @@ export default {
         return;
       }
 
-      const eventsResult = await processEvents(env, restBeforeEvents, queuedRepoKeysInRun);
+      const eventsResult = await processEvents(env, restBeforeEvents, repoDedupeState, nowMs);
       const restAfterEvents = await readGitHubRateLimitBudget(env, 'rest', {
         includeStale: true,
       });
@@ -946,7 +1003,8 @@ export default {
         return;
       }
 
-      const searchResult = await processCodeSearchDiscovery(env, queuedRepoKeysInRun, restAfterEvents, nowMs);
+      nowMs = Date.now();
+      const searchResult = await processCodeSearchDiscovery(env, repoDedupeState, restAfterEvents, nowMs);
       const restSnapshot = await readGitHubRateLimitBudget(env, 'rest', { includeStale: true });
       const graphqlSnapshot = await readGitHubRateLimitBudget(env, 'graphql', { includeStale: true });
 
@@ -954,6 +1012,9 @@ export default {
         `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, rest_remaining=${restSnapshot?.remaining ?? 'unknown'}, graphql_remaining=${graphqlSnapshot?.remaining ?? 'unknown'}`
       );
     } finally {
+      if (repoDedupeState) {
+        await persistRepoQueueDedupeState(env, repoDedupeState, Date.now());
+      }
       await releaseDiscoveryRunLock(env, lockToken);
     }
   },

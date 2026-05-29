@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
+import { getGitHubRateLimitKVFromEnv, getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import {
   buildClawHubCompatFingerprint,
   decodeClawHubCompatSlug,
@@ -102,7 +102,7 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
         skill,
         r2,
         githubToken,
-        githubRateLimitKV: platform?.env?.KV,
+        githubRateLimitKV: getGitHubRateLimitKVFromEnv(platform?.env),
       });
       const fingerprint = await buildClawHubCompatFingerprint(files);
       const latestVersion = versionState.latestVersion || buildOpenClawLatestVersion({

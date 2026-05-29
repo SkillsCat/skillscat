@@ -1,11 +1,13 @@
 /**
- * Rate limiting utility using Cloudflare KV
+ * Rate limiting utility using Cloudflare KV or Durable Objects
  *
  * Implements an adaptive fixed-window counter with configurable limits.
  * Repeated limit hits in a short window trigger stricter temporary limits.
  */
 
-interface RateLimitConfig {
+import { callStateDurableObject, hashDurableObjectName } from '$lib/server/state/client';
+
+export interface RateLimitConfig {
   /** Maximum number of requests allowed in the window */
   limit: number;
   /** Time window in seconds */
@@ -14,7 +16,7 @@ interface RateLimitConfig {
   prefix?: string;
 }
 
-interface RateLimitResult {
+export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
   resetAt: number;
@@ -30,6 +32,18 @@ export interface AdaptiveRateLimitOptions {
   penaltyTtlLevel1Seconds?: number;
   penaltyTtlLevel2Seconds?: number;
   penaltyTtlLevel3Seconds?: number;
+}
+
+function failOpenRateLimitResult(config: RateLimitConfig, now: number): RateLimitResult {
+  const baseWindowSeconds = Math.max(1, config.windowSeconds);
+  return {
+    allowed: true,
+    remaining: config.limit,
+    resetAt: now + baseWindowSeconds,
+    limit: config.limit,
+    windowSeconds: baseWindowSeconds,
+    penaltyLevel: 0,
+  };
 }
 
 const BURST_VIOLATION_WINDOW_SECONDS = 120;
@@ -190,14 +204,33 @@ export async function checkRateLimit(
   } catch (error) {
     // On error, allow the request but log
     console.error('Rate limit check failed:', error);
-    return {
-      allowed: true,
-      remaining: config.limit,
-      resetAt: now + baseWindowSeconds,
-      limit: config.limit,
-      windowSeconds: baseWindowSeconds,
-      penaltyLevel: 0,
-    };
+    return failOpenRateLimitResult(config, now);
+  }
+}
+
+export async function checkDurableRateLimit(
+  namespace: DurableObjectNamespace,
+  key: string,
+  config: RateLimitConfig,
+  options?: AdaptiveRateLimitOptions
+): Promise<RateLimitResult> {
+  const now = Math.floor(Date.now() / 1000);
+
+  try {
+    return await callStateDurableObject<RateLimitResult>(
+      namespace,
+      `rate-limit:${hashDurableObjectName(`${config.prefix || 'ratelimit'}:${key}`)}`,
+      'rate-limit/check',
+      {
+        key,
+        config,
+        options,
+        nowEpochSec: now,
+      }
+    );
+  } catch (error) {
+    console.error('Durable rate limit check failed:', error);
+    return failOpenRateLimitResult(config, now);
   }
 }
 
@@ -237,67 +270,3 @@ export function rateLimitHeaders(result: RateLimitResult): Record<string, string
     'X-RateLimit-Penalty-Level': String(result.penaltyLevel),
   };
 }
-
-// Default rate limit configs for different endpoints
-export const RATE_LIMITS = {
-  // Cache-backed registry and compat search reads.
-  search: {
-    limit: 600,
-    windowSeconds: 60,
-    prefix: 'rl:search'
-  },
-  // Cache-backed autocomplete / suggestion reads.
-  autocomplete: {
-    limit: 1200,
-    windowSeconds: 60,
-    prefix: 'rl:autocomplete'
-  },
-  // Cache-backed public skill detail reads.
-  detail: {
-    limit: 600,
-    windowSeconds: 60,
-    prefix: 'rl:detail'
-  },
-  // Cache-backed public bundle/file list reads.
-  bundle: {
-    limit: 300,
-    windowSeconds: 60,
-    prefix: 'rl:bundle'
-  },
-  // Cache-backed public repo lookups.
-  repo: {
-    limit: 300,
-    windowSeconds: 60,
-    prefix: 'rl:repo'
-  },
-  // Cache-backed public browse/list endpoints.
-  browse: {
-    limit: 600,
-    windowSeconds: 60,
-    prefix: 'rl:browse'
-  },
-  // Skill fetch: 240 requests per minute
-  skill: {
-    limit: 240,
-    windowSeconds: 60,
-    prefix: 'rl:skill'
-  },
-  // Submit: 20 requests per minute (content collection phase)
-  submit: {
-    limit: 20,
-    windowSeconds: 60,
-    prefix: 'rl:submit'
-  },
-  // Anonymous background submit from CLI: stricter throughput
-  submitAnonymousCli: {
-    limit: 6,
-    windowSeconds: 60,
-    prefix: 'rl:submit:anon-cli'
-  },
-  // Submit via API token: higher throughput with isolated token-level buckets
-  submitToken: {
-    limit: 120,
-    windowSeconds: 60,
-    prefix: 'rl:submit:token'
-  }
-} as const;

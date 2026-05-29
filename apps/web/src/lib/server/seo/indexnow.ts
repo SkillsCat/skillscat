@@ -1,5 +1,6 @@
 import { SITE_URL } from '$lib/seo/constants';
 import { buildSkillPath } from '$lib/skill-path';
+import { createDurableObjectKvStore } from '$lib/server/state/client';
 
 const DEFAULT_INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow';
 const DEFAULT_INDEXNOW_DEDUPE_TTL_SECONDS = 600;
@@ -16,6 +17,7 @@ export interface IndexNowEnvLike {
   INDEXNOW_API_URL?: string;
   INDEXNOW_DEDUPE_TTL_SECONDS?: string;
   KV?: KVNamespace;
+  STATE_DO?: DurableObjectNamespace;
 }
 
 export interface IndexNowSkillTarget {
@@ -166,6 +168,12 @@ async function filterFreshUrls(
   return { freshUrls, dedupeKeys };
 }
 
+function getIndexNowStateStore(env: IndexNowEnvLike | undefined): KVNamespace | undefined {
+  return createDurableObjectKvStore(env?.STATE_DO, {
+    objectName: 'indexnow-state',
+  }) ?? env?.KV;
+}
+
 async function markFreshUrlsSubmitted(
   kv: KVNamespace | undefined,
   dedupeKeys: string[],
@@ -265,7 +273,8 @@ export async function submitIndexNowUrls(
     };
   }
 
-  const { freshUrls, dedupeKeys } = await filterFreshUrls(env?.KV, normalized, action);
+  const stateStore = getIndexNowStateStore(env);
+  const { freshUrls, dedupeKeys } = await filterFreshUrls(stateStore, normalized, action);
   if (freshUrls.length === 0) {
     return {
       attempted: normalized.length,
@@ -305,7 +314,7 @@ export async function submitIndexNowUrls(
     }
   }
 
-  await markFreshUrlsSubmitted(env?.KV, dedupeKeys, ttlSeconds);
+  await markFreshUrlsSubmitted(stateStore, dedupeKeys, ttlSeconds);
   console.log(
     `IndexNow submission succeeded for ${source}: action=${action}, submitted=${freshUrls.length}, skipped=${normalized.length - freshUrls.length}`
   );

@@ -1,5 +1,6 @@
 import type { DbEnv } from '$lib/server/db/shared/types';
 import { shouldRecordSkillAccess } from '$lib/server/skill/access';
+import { createDurableObjectKvStore } from '$lib/server/state/client';
 
 // Tier configuration (must match workers/types.ts)
 const TIER_CONFIG = {
@@ -178,15 +179,18 @@ export async function queueArchivedSkillResurrectionCheck(env: DbEnv, skillId: s
     return;
   }
 
-  // Fallback: Mark for resurrection check in KV
+  // Fallback: Mark for resurrection check in durable state
   // This will be picked up by the resurrection worker on next run
-  if (env.KV) {
+  const stateStore = createDurableObjectKvStore(env.STATE_DO, {
+    objectName: 'access-state',
+  }) ?? env.KV;
+  if (stateStore) {
     const key = `needs_resurrection_check:${skillId}`;
-    if (await env.KV.get(key)) {
+    if (await stateStore.get(key)) {
       return;
     }
 
-    await env.KV.put(key, '1', {
+    await stateStore.put(key, '1', {
       expirationTtl: 24 * 60 * 60, // 24 hour TTL
     });
   }

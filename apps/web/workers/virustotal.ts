@@ -10,6 +10,7 @@ import {
 import {
   normalizeVirusTotalStats,
 } from '../src/lib/server/security';
+import { createDurableObjectKvStore } from '../src/lib/server/state/client';
 
 const log = createLogger('VirusTotal');
 const VT_API_BASE = 'https://www.virustotal.com/api/v3';
@@ -26,6 +27,11 @@ interface PendingVirusTotalRow extends SecuritySkillRow {
   vt_bundle_sha256: string | null;
   vt_next_attempt_at: number | null;
   open_security_report_count: number | null;
+}
+
+interface BudgetCounter {
+  bucket: string;
+  count: number;
 }
 
 function hasBytes<T extends { bytes?: Uint8Array }>(file: T): file is T & { bytes: Uint8Array } {
@@ -45,26 +51,50 @@ function formatMinuteKey(now: Date): string {
   return now.toISOString().slice(0, 16);
 }
 
-async function getBudgetCount(kv: KVNamespace, key: string): Promise<number> {
+async function getBudgetCount(kv: KVNamespace, key: string, bucket: string): Promise<number> {
   const value = await kv.get(key);
-  const parsed = Number.parseInt(value || '0', 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  if (!value) return 0;
+
+  try {
+    const parsed = JSON.parse(value) as Partial<BudgetCounter>;
+    if (parsed.bucket !== bucket) return 0;
+    const count = Number(parsed.count);
+    return Number.isFinite(count) && count >= 0 ? count : 0;
+  } catch {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }
 }
 
-async function incrementBudget(kv: KVNamespace, key: string, value: number, ttlSeconds: number): Promise<void> {
-  await kv.put(key, String(value), { expirationTtl: ttlSeconds });
+async function incrementBudget(
+  kv: KVNamespace,
+  key: string,
+  bucket: string,
+  value: number,
+  ttlSeconds: number
+): Promise<void> {
+  await kv.put(key, JSON.stringify({ bucket, count: value } satisfies BudgetCounter), { expirationTtl: ttlSeconds });
+}
+
+function getVirusTotalBudgetStore(env: VirusTotalEnv): KVNamespace {
+  return createDurableObjectKvStore(env.STATE_DO, {
+    objectName: 'virustotal-rate-limit',
+  }) ?? env.KV;
 }
 
 export async function tryConsumeBudget(env: VirusTotalEnv, amount: number = 1): Promise<boolean> {
   const now = new Date();
-  const dayKey = `vt:budget:day:${formatDayKey(now)}`;
-  const minuteKey = `vt:budget:minute:${formatMinuteKey(now)}`;
+  const dayBucket = formatDayKey(now);
+  const minuteBucket = formatMinuteKey(now);
+  const dayKey = 'vt:budget:day';
+  const minuteKey = 'vt:budget:minute';
   const dailyLimit = parsePositiveInt(env.VT_DAILY_REQUEST_BUDGET, DEFAULT_DAILY_REQUEST_BUDGET);
   const minuteLimit = parsePositiveInt(env.VT_MINUTE_REQUEST_BUDGET, DEFAULT_MINUTE_REQUEST_BUDGET);
+  const budgetStore = getVirusTotalBudgetStore(env);
 
   const [dayCount, minuteCount] = await Promise.all([
-    getBudgetCount(env.KV, dayKey),
-    getBudgetCount(env.KV, minuteKey),
+    getBudgetCount(budgetStore, dayKey, dayBucket),
+    getBudgetCount(budgetStore, minuteKey, minuteBucket),
   ]);
 
   if (dayCount + amount > dailyLimit || minuteCount + amount > minuteLimit) {
@@ -72,8 +102,8 @@ export async function tryConsumeBudget(env: VirusTotalEnv, amount: number = 1): 
   }
 
   await Promise.all([
-    incrementBudget(env.KV, dayKey, dayCount + amount, 2 * 24 * 60 * 60),
-    incrementBudget(env.KV, minuteKey, minuteCount + amount, 5 * 60),
+    incrementBudget(budgetStore, dayKey, dayBucket, dayCount + amount, 2 * 24 * 60 * 60),
+    incrementBudget(budgetStore, minuteKey, minuteBucket, minuteCount + amount, 5 * 60),
   ]);
   return true;
 }

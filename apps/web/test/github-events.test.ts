@@ -35,6 +35,13 @@ class MemoryKv {
   }
 }
 
+function readRepoQueuedWindow(kv: MemoryKv): Record<string, number> {
+  const raw = kv.store.get('github-events:repo-queued-window');
+  if (!raw) return {};
+  const parsed = JSON.parse(raw) as { entries?: Record<string, number> };
+  return parsed.entries || {};
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -148,7 +155,7 @@ describe('github-events helpers', () => {
     ]);
     expect(Array.from(kv.store.keys()).some((key) => key.startsWith('github-events:processed:'))).toBe(false);
     expect(kv.store.get('github-events:last-event-id')).toBe('evt-push');
-    expect(kv.store.get('github-events:repo-queued:acme/toolbox:')).toBe('1');
+    expect(readRepoQueuedWindow(kv)).toHaveProperty('acme/toolbox:');
     expect(kv.putKeys.filter((key) => key.startsWith('github-rate-limit:'))).toHaveLength(2);
   });
 
@@ -330,7 +337,9 @@ describe('github-events helpers', () => {
       {} as ExecutionContext
     )).rejects.toThrow('queue unavailable');
 
-    kv.store.delete('github-events:repo-queued:acme/toolbox:');
+    const repoQueuedWindow = readRepoQueuedWindow(kv);
+    delete repoQueuedWindow['acme/toolbox:'];
+    kv.store.set('github-events:repo-queued-window', JSON.stringify({ entries: repoQueuedWindow }));
     runIndex = 1;
     runSendAttempts = 0;
 

@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
+import { getGitHubRateLimitKVFromEnv, getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import {
   guessOpenClawTextContentType,
   isSupportedOpenClawTag,
@@ -76,7 +76,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       skill,
       r2,
       githubToken,
-      githubRateLimitKV: platform?.env?.KV,
+      githubRateLimitKV: getGitHubRateLimitKVFromEnv(platform?.env),
     });
     const files = await resolveOpenClawFilesForVersion({
       r2,

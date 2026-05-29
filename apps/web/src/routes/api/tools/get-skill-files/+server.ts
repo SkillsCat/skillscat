@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
+import { getGitHubRateLimitKVFromEnv, getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import { parseSkillFilesInput, resolveSkillFiles } from '$lib/server/skill/files';
 
 function corsHeaders(): Record<string, string> {
@@ -48,7 +48,7 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
       db,
       r2,
       githubToken,
-      githubRateLimitKV: platform?.env?.KV,
+      githubRateLimitKV: getGitHubRateLimitKVFromEnv(platform?.env),
       request,
       locals,
       waitUntil,
@@ -95,7 +95,7 @@ export const POST: RequestHandler = async ({ platform, request, locals }) => {
       db,
       r2,
       githubToken,
-      githubRateLimitKV: platform?.env?.KV,
+      githubRateLimitKV: getGitHubRateLimitKVFromEnv(platform?.env),
       request,
       locals,
       waitUntil,

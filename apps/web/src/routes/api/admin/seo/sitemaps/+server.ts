@@ -5,6 +5,7 @@ import {
   normalizeSitemapRefreshMinIntervalSeconds,
   refreshAllSitemapSnapshots,
 } from '$lib/server/seo/sitemap';
+import { createDurableObjectKvStore } from '$lib/server/state/client';
 
 const SITEMAP_REFRESH_STATE_KEY = 'seo:sitemaps:full-refresh:v1';
 let inflightRefresh: Promise<{
@@ -23,7 +24,9 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
   const db = platform?.env?.DB;
   const r2 = platform?.env?.R2;
-  const kv = platform?.env?.KV;
+  const stateStore = createDurableObjectKvStore(platform?.env?.STATE_DO, {
+    objectName: 'sitemap-state',
+  }) ?? platform?.env?.KV;
   const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
 
   if (!db || !r2) {
@@ -39,7 +42,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
   const minIntervalSeconds = normalizeSitemapRefreshMinIntervalSeconds(
     platform?.env?.SITEMAP_REFRESH_MIN_INTERVAL_SECONDS
   );
-  const lastRefreshRaw = kv ? await kv.get(SITEMAP_REFRESH_STATE_KEY) : null;
+  const lastRefreshRaw = stateStore ? await stateStore.get(SITEMAP_REFRESH_STATE_KEY) : null;
   const lastRefreshAt = lastRefreshRaw ? Number.parseInt(lastRefreshRaw, 10) : 0;
   const nextEligibleAt = lastRefreshAt > 0 ? lastRefreshAt + minIntervalSeconds * 1000 : 0;
   const shouldSkip = !body.force && lastRefreshAt > 0 && nextEligibleAt > now;
@@ -72,8 +75,8 @@ export const POST: RequestHandler = async ({ request, platform }) => {
   const summary = await inflightRefresh;
   const refreshedAt = Date.now();
 
-  if (kv) {
-    await kv.put(SITEMAP_REFRESH_STATE_KEY, String(refreshedAt));
+  if (stateStore) {
+    await stateStore.put(SITEMAP_REFRESH_STATE_KEY, String(refreshedAt));
   }
 
   return json({

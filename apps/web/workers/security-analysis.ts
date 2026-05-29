@@ -8,8 +8,10 @@ import type {
 } from './shared/types';
 import type { D1Database } from '@cloudflare/workers-types';
 import { createLogger, generateId } from './shared/utils';
+import { createDurableObjectKvStore } from '../src/lib/server/state/client';
 import {
   getOpenRouterFreePauseUntil,
+  getOpenRouterFreePauseStore,
   isOpenRouterFreePauseError,
   OpenRouterApiError,
   parseOpenRouterRetryAfterMs,
@@ -44,6 +46,14 @@ import {
 } from '../src/lib/server/security/state';
 
 const log = createLogger('SecurityAnalysis');
+
+function getSecurityAnalysisStateStore(
+  env: Pick<SecurityAnalysisEnv, 'KV' | 'STATE_DO'>
+): KVNamespace {
+  return createDurableObjectKvStore(env.STATE_DO, {
+    objectName: 'security-analysis-state',
+  }) ?? env.KV;
+}
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_FREE_MODEL = 'openrouter/free';
 const DEFAULT_MAX_AI_FILES = 8;
@@ -1439,8 +1449,9 @@ async function processSecurityMessage(
   const aiFiles = aiEligible ? selectFilesForAi(securityFiles, heuristic.fileScores, env) : [];
   let aiResult: AiAssessmentResult | null = null;
   let executedTier: SecurityAnalysisTier = 'free';
+  const openRouterPauseStore = getOpenRouterFreePauseStore(env);
   let freePauseUntil = aiEligible && aiFiles.length > 0
-    ? await getOpenRouterFreePauseUntil(env.KV, now)
+    ? await getOpenRouterFreePauseUntil(openRouterPauseStore, now)
     : null;
 
   if (requestedTier === 'free' && freePauseUntil) {
@@ -1490,7 +1501,7 @@ async function processSecurityMessage(
   }
 
   if (executedTier === 'free' && aiEligible && aiFiles.length > 0) {
-    freePauseUntil = freePauseUntil ?? await getOpenRouterFreePauseUntil(env.KV, now);
+    freePauseUntil = freePauseUntil ?? await getOpenRouterFreePauseUntil(openRouterPauseStore, now);
     if (freePauseUntil) {
       await deferSecurityAnalysisForOpenRouterFreePause(env.DB, {
         skillId: skill.id,
@@ -1511,7 +1522,7 @@ async function processSecurityMessage(
       aiResult = await runAiPipeline(securityFiles, aiFiles, heuristic, 'free', env);
     } catch (aiError) {
       if (isOpenRouterFreePauseError(aiError)) {
-        freePauseUntil = await pauseOpenRouterFreeModels(env.KV, {
+        freePauseUntil = await pauseOpenRouterFreeModels(openRouterPauseStore, {
           now,
           retryAfterMs: aiError.retryAfterMs,
         });
@@ -1686,17 +1697,17 @@ function getSecurityReindexBackfillKey(candidate: SecurityReindexBackfillCandida
 }
 
 async function wasSecurityReindexBackfillQueued(
-  env: Pick<SecurityAnalysisEnv, 'KV'>,
+  env: Pick<SecurityAnalysisEnv, 'KV' | 'STATE_DO'>,
   key: string
 ): Promise<boolean> {
-  return (await env.KV.get(key)) !== null;
+  return (await getSecurityAnalysisStateStore(env).get(key)) !== null;
 }
 
 async function markSecurityReindexBackfillQueued(
-  env: Pick<SecurityAnalysisEnv, 'KV'>,
+  env: Pick<SecurityAnalysisEnv, 'KV' | 'STATE_DO'>,
   key: string
 ): Promise<void> {
-  await env.KV.put(key, '1', {
+  await getSecurityAnalysisStateStore(env).put(key, '1', {
     expirationTtl: SECURITY_REINDEX_BACKFILL_TTL_SECONDS,
   });
 }

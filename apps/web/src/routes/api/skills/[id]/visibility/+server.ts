@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
+import { getGitHubRateLimitKVFromEnv, getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 import { invalidateCache } from '$lib/server/cache';
 import {
   getOrgPageSnapshotCacheKey,
@@ -161,7 +161,12 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
       const userGithubId = account ? parseInt(account.account_id, 10) : null;
       const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
 
-      const verification = await verifyGitHubRepo(repoUrl, userGithubId, githubToken, platform?.env?.KV);
+      const verification = await verifyGitHubRepo(
+        repoUrl,
+        userGithubId,
+        githubToken,
+        getGitHubRateLimitKVFromEnv(platform?.env)
+      );
       if (!verification.valid) {
         throw error(400, verification.error!);
       }

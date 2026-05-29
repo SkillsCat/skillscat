@@ -36,14 +36,20 @@ describe('virustotal worker helpers', () => {
 
     expect(allowed).toBe(true);
     expect(kv.put).toHaveBeenCalledTimes(2);
-    expect(kv.store.get('vt:budget:day:2026-03-17')).toBe('1');
-    expect(kv.store.get('vt:budget:minute:2026-03-17T10:20')).toBe('1');
+    expect(JSON.parse(kv.store.get('vt:budget:day') || '{}')).toEqual({
+      bucket: '2026-03-17',
+      count: 1,
+    });
+    expect(JSON.parse(kv.store.get('vt:budget:minute') || '{}')).toEqual({
+      bucket: '2026-03-17T10:20',
+      count: 1,
+    });
   });
 
   it('refuses VT work when the minute budget is exhausted', async () => {
     const kv = createKv({
-      'vt:budget:day:2026-03-17': '10',
-      'vt:budget:minute:2026-03-17T10:20': '4',
+      'vt:budget:day': JSON.stringify({ bucket: '2026-03-17', count: 10 }),
+      'vt:budget:minute': JSON.stringify({ bucket: '2026-03-17T10:20', count: 4 }),
     });
 
     const allowed = await tryConsumeBudget({

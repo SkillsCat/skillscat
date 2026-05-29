@@ -26,6 +26,7 @@ import {
 } from './shared/classification/categories';
 import {
   getOpenRouterFreePauseUntil,
+  getOpenRouterFreePauseStore,
   isOpenRouterFreeModel,
   isOpenRouterFreePauseError,
   OpenRouterApiError,
@@ -729,7 +730,8 @@ async function classifyWithAI(
   const paidPrimaryModel = !isOpenRouterFreeModel(primaryModel) ? primaryModel : null;
   const paidModel = env.CLASSIFICATION_PAID_MODEL?.trim() || DEFAULT_CLASSIFICATION_PAID_MODEL;
   const now = Date.now();
-  const freePausedUntil = await getOpenRouterFreePauseUntil(env.KV, now);
+  const openRouterPauseStore = getOpenRouterFreePauseStore(env);
+  const freePausedUntil = await getOpenRouterFreePauseUntil(openRouterPauseStore, now);
   let freeRateLimited = false;
 
   // 1. Try OpenRouter free models first when available.
@@ -756,7 +758,7 @@ async function classifyWithAI(
           error
         );
         if (isOpenRouterFreePauseError(error)) {
-          await pauseOpenRouterFreeModels(env.KV, {
+          await pauseOpenRouterFreeModels(openRouterPauseStore, {
             now,
             retryAfterMs: error.retryAfterMs,
           });

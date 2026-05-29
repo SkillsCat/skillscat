@@ -41,6 +41,7 @@ import {
   buildSkillMetricDate,
 } from '../src/lib/server/skill/metrics';
 import { getGitHubRequestAuthFromEnv, hasGitHubAuthConfigured } from '../src/lib/server/github-client/env';
+import { createDurableObjectKvStore } from '../src/lib/server/state/client';
 
 const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
@@ -49,6 +50,12 @@ const SKILL_REFRESH_SELECT_COLUMNS = getSkillRefreshSelectColumns();
 const DAILY_METRICS_RETENTION_DAYS = 95;
 const D1_SAFE_IN_CLAUSE_BATCH_SIZE = 90;
 const CATEGORY_STATS_SYNC_SKILL_BATCH_SIZE = D1_SAFE_IN_CLAUSE_BATCH_SIZE;
+
+function getTrendingStateStore(env: TrendingEnv): KVNamespace {
+  return createDurableObjectKvStore(env.STATE_DO, {
+    objectName: 'trending-state',
+  }) ?? env.KV;
+}
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw || '', 10);
@@ -657,7 +664,8 @@ export async function detectReclassificationNeeded(
 async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
   try {
     // Guard: only flush once per day
-    const lastFlush = await env.KV.get('dl:last_flush_actions');
+    const stateStore = getTrendingStateStore(env);
+    const lastFlush = await stateStore.get('dl:last_flush_actions');
     const today = new Date().toISOString().slice(0, 10);
     if (lastFlush === today) return 0;
 
@@ -773,7 +781,7 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
         SET download_count_7d = 0, download_count_30d = 0, download_count_90d = 0
         WHERE download_count_7d != 0 OR download_count_30d != 0 OR download_count_90d != 0
       `).run();
-      await env.KV.put('dl:last_flush_actions', today, { expirationTtl: 86400 });
+      await stateStore.put('dl:last_flush_actions', today, { expirationTtl: 86400 });
       return 0;
     }
 
@@ -837,7 +845,7 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
         .run();
     }
 
-    await env.KV.put('dl:last_flush_actions', today, { expirationTtl: 86400 });
+    await stateStore.put('dl:last_flush_actions', today, { expirationTtl: 86400 });
     return entries.length;
   } catch (err) {
     console.error('Failed to flush download counts:', err);

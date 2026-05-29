@@ -40,6 +40,11 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-kv-namespace-id>"
 
+[[durable_objects.bindings]]
+name = "STATE_DO"
+class_name = "SkillscatStateDurableObject"
+script_name = "skillscat-state"
+
 # Queue Producer - 发送到 classification 队列
 [[queues.producers]]
 binding = "CLASSIFICATION_QUEUE"
@@ -75,6 +80,11 @@ bucket_name = "skillscat-storage"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
+
+[[env.production.durable_objects.bindings]]
+name = "STATE_DO"
+class_name = "SkillscatStateDurableObject"
+script_name = "skillscat-state-production"
 
 [[env.production.queues.producers]]
 binding = "CLASSIFICATION_QUEUE"

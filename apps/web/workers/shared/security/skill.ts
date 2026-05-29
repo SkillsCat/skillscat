@@ -330,7 +330,7 @@ export async function fetchGitHubBlobBytes(
   owner: string,
   repo: string,
   sha: string,
-  env: Pick<BaseEnv, 'GITHUB_TOKEN' | 'GITHUB_TOKENS' | 'KV'>
+  env: Pick<BaseEnv, 'GITHUB_TOKEN' | 'GITHUB_TOKENS' | 'KV' | 'STATE_DO'>
 ): Promise<Uint8Array | null> {
   const response = await githubRequest(`https://api.github.com/repos/${owner}/${repo}/git/blobs/${sha}`, {
     ...getGitHubRequestAuthFromEnv(env),

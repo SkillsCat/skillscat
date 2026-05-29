@@ -29,10 +29,15 @@ database_id = "<your-database-id>"
 binding = "R2"
 bucket_name = "skillscat-storage"
 
-# KV Namespace (for rate limiting, session cache)
+# KV Namespace (for session cache and fallback state)
 [[kv_namespaces]]
 binding = "KV"
 id = "<your-kv-namespace-id>"
+
+[[durable_objects.bindings]]
+name = "STATE_DO"
+class_name = "SkillscatStateDurableObject"
+script_name = "skillscat-state"
 
 # Queues - Web 作为生产者
 [[queues.producers]]
@@ -58,6 +63,12 @@ CACHE_VERSION = "v1"
 SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
 RECOMMEND_ALGO_VERSION = "v1"
 INDEXNOW_ENABLED = "0"
+RATE_LIMIT_BURST_WINDOW_SECONDS = "120"
+RATE_LIMIT_BURST_THRESHOLD = "3"
+RATE_LIMIT_MAX_PENALTY_LEVEL = "3"
+RATE_LIMIT_PENALTY_TTL_LEVEL_1_SECONDS = "300"
+RATE_LIMIT_PENALTY_TTL_LEVEL_2_SECONDS = "900"
+RATE_LIMIT_PENALTY_TTL_LEVEL_3_SECONDS = "1800"
 
 [env.production]
 name = "skillscat-web-production"
@@ -78,6 +89,11 @@ bucket_name = "skillscat-storage"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
+
+[[env.production.durable_objects.bindings]]
+name = "STATE_DO"
+class_name = "SkillscatStateDurableObject"
+script_name = "skillscat-state-production"
 
 [[env.production.queues.producers]]
 binding = "INDEXING_QUEUE"
@@ -101,3 +117,9 @@ CACHE_VERSION = "v1"
 SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
 RECOMMEND_ALGO_VERSION = "v1"
 INDEXNOW_ENABLED = "1"
+RATE_LIMIT_BURST_WINDOW_SECONDS = "120"
+RATE_LIMIT_BURST_THRESHOLD = "3"
+RATE_LIMIT_MAX_PENALTY_LEVEL = "3"
+RATE_LIMIT_PENALTY_TTL_LEVEL_1_SECONDS = "300"
+RATE_LIMIT_PENALTY_TTL_LEVEL_2_SECONDS = "900"
+RATE_LIMIT_PENALTY_TTL_LEVEL_3_SECONDS = "1800"

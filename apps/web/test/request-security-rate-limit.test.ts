@@ -1,205 +1,184 @@
 import { describe, expect, it } from 'vitest';
 import { runRequestSecurity } from '../src/lib/server/security/request';
+import { SkillscatStateDurableObject } from '../src/lib/server/state/durable-object';
 
 class MemoryKV {
   private store = new Map<string, string>();
 
+  gets = 0;
+  puts = 0;
+
   async get(key: string): Promise<string | null> {
+    this.gets += 1;
     return this.store.get(key) ?? null;
   }
 
   async put(key: string, value: string): Promise<void> {
+    this.puts += 1;
     this.store.set(key, value);
   }
 }
 
-function createApiTokenDb(row: {
-  id: string;
-  user_id: string | null;
-  org_id: string | null;
-  name: string;
-  scopes: string;
-  expires_at: number | null;
-}) {
-  return {
-    prepare(sql: string) {
-      return {
-        bind() {
-          return {
-            async first() {
-              if (sql.includes('FROM api_tokens')) {
-                return row;
-              }
-              return null;
-            },
-            async run() {
-              return { meta: { changes: 1 } };
-            },
-          };
-        },
-      };
-    },
-  };
+class MemoryDurableObjectStorage {
+  private store = new Map<string, unknown>();
+
+  async get<T = unknown>(key: string): Promise<T | undefined> {
+    return this.store.get(key) as T | undefined;
+  }
+
+  async put<T>(key: string, value: T): Promise<void> {
+    this.store.set(key, value);
+  }
+
+  async delete(key: string): Promise<boolean> {
+    return this.store.delete(key);
+  }
 }
 
-describe('request security rate-limit identity', () => {
-  it('shares the same bucket across IPs for the same API token user', async () => {
-    const sharedKv = new MemoryKV();
-    const sharedDb = createApiTokenDb({
-      id: 'tok_1',
-      user_id: 'user_1',
-      org_id: null,
-      name: 'CLI token',
-      scopes: '["read"]',
-      expires_at: null,
-    });
+class MemoryStateNamespace {
+  private objects = new Map<string, SkillscatStateDurableObject>();
 
-    const buildEvent = (ip: string) => ({
-      url: new URL('https://skills.cat/api/tools/search-skills?q=test'),
-      request: new Request('https://skills.cat/api/tools/search-skills?q=test', {
-        method: 'GET',
-        headers: {
-          authorization: 'Bearer sk_testtoken',
-          'cf-connecting-ip': ip,
-          'user-agent': 'skillscat-cli/1.0',
-        },
-      }),
-      platform: {
-        env: {
-          DB: sharedDb,
-          KV: sharedKv,
-        },
-      },
-      route: { id: '/api/tools/search-skills' },
-    }) as never;
+  fetches = 0;
 
-    for (let index = 0; index < 600; index += 1) {
-      const response = await runRequestSecurity(buildEvent('198.51.100.10'));
-      expect(response).toBeNull();
+  idFromName(name: string): DurableObjectId {
+    return name as never;
+  }
+
+  get(id: DurableObjectId): DurableObjectStub {
+    const objectName = id as never as string;
+    let object = this.objects.get(objectName);
+    if (!object) {
+      object = new SkillscatStateDurableObject({
+        storage: new MemoryDurableObjectStorage(),
+      } as never);
+      this.objects.set(objectName, object);
     }
 
-    const blocked = await runRequestSecurity(buildEvent('198.51.100.11'));
-    expect(blocked?.status).toBe(429);
-    expect(blocked?.headers.get('x-ratelimit-limit')).toBe('600');
+    return {
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        this.fetches += 1;
+        return object.fetch(new Request(input, init));
+      },
+    } as never;
+  }
+}
+
+function createEvent(options: {
+  pathname: string;
+  routeId: string;
+  method?: string;
+  userAgent?: string;
+  ip?: string;
+  kv: MemoryKV;
+  stateDo?: MemoryStateNamespace;
+}): Parameters<typeof runRequestSecurity>[0] {
+  const url = new URL(`https://skills.cat${options.pathname}`);
+  const headers = new Headers({
+    'cf-connecting-ip': options.ip ?? '198.51.100.10',
   });
 
-  it('rate limits OpenClaw compat search without applying the native UA gate', async () => {
-    const sharedKv = new MemoryKV();
+  if (options.userAgent) {
+    headers.set('user-agent', options.userAgent);
+  }
 
-    const buildEvent = () => ({
-      url: new URL('https://skills.cat/openclaw/api/v1/search?q=test'),
-      request: new Request('https://skills.cat/openclaw/api/v1/search?q=test', {
-        method: 'GET',
-        headers: {
-          'cf-connecting-ip': '198.51.100.20',
-          'user-agent': 'curl/8.7.1',
-        },
-      }),
-      platform: {
-        env: {
-          KV: sharedKv,
-        },
+  return {
+    url,
+    request: new Request(url, {
+      method: options.method ?? 'GET',
+      headers,
+    }),
+    platform: {
+      env: {
+        KV: options.kv,
+        STATE_DO: options.stateDo,
       },
-      route: { id: '/openclaw/api/v1/search' },
-    }) as never;
+    },
+    route: { id: options.routeId },
+  } as never;
+}
 
-    for (let index = 0; index < 600; index += 1) {
-      const response = await runRequestSecurity(buildEvent());
-      expect(response).toBeNull();
+describe('request security rate limiting', () => {
+  it('rate limits private D1-heavy reads that are hard to cache', async () => {
+    const kv = new MemoryKV();
+    const stateDo = new MemoryStateNamespace();
+
+    const allowedRoutes = [
+      {
+        pathname: '/api/orgs/acme',
+        routeId: '/api/orgs/[slug]',
+      },
+      {
+        pathname: '/api/favorites',
+        routeId: '/api/favorites',
+      },
+      {
+        pathname: '/api/user/skills',
+        routeId: '/api/user/skills',
+      },
+    ];
+
+    for (const route of allowedRoutes) {
+      for (let index = 0; index < 300; index += 1) {
+        const response = await runRequestSecurity(createEvent({
+          pathname: route.pathname,
+          routeId: route.routeId,
+          kv,
+          stateDo,
+        }));
+
+        expect(response).toBeNull();
+      }
     }
 
-    const blocked = await runRequestSecurity(buildEvent());
-    expect(blocked?.status).toBe(429);
-    expect(blocked?.headers.get('x-ratelimit-limit')).toBe('600');
-  });
+    const blocked = await runRequestSecurity(createEvent({
+      pathname: '/api/orgs/acme',
+      routeId: '/api/orgs/[slug]',
+      kv,
+      stateDo,
+    }));
 
-  it('rate limits OpenClaw compat browse list with the cache-backed browse bucket', async () => {
-    const sharedKv = new MemoryKV();
-
-    const buildEvent = () => ({
-      url: new URL('https://skills.cat/openclaw/api/v1/skills?limit=25'),
-      request: new Request('https://skills.cat/openclaw/api/v1/skills?limit=25', {
-        method: 'GET',
-        headers: {
-          'cf-connecting-ip': '198.51.100.21',
-          'user-agent': 'curl/8.7.1',
-        },
-      }),
-      platform: {
-        env: {
-          KV: sharedKv,
-        },
-      },
-      route: { id: '/openclaw/api/v1/skills' },
-    }) as never;
-
-    for (let index = 0; index < 600; index += 1) {
-      const response = await runRequestSecurity(buildEvent());
-      expect(response).toBeNull();
-    }
-
-    const blocked = await runRequestSecurity(buildEvent());
-    expect(blocked?.status).toBe(429);
-    expect(blocked?.headers.get('x-ratelimit-limit')).toBe('600');
-  });
-
-  it('rate limits public skill detail reads with the cache-backed detail bucket', async () => {
-    const sharedKv = new MemoryKV();
-
-    const buildEvent = () => ({
-      url: new URL('https://skills.cat/api/skills/testowner%2Fdemo-skill'),
-      request: new Request('https://skills.cat/api/skills/testowner%2Fdemo-skill', {
-        method: 'GET',
-        headers: {
-          'cf-connecting-ip': '198.51.100.30',
-          'user-agent': 'OpenClaw/1.4.0',
-        },
-      }),
-      platform: {
-        env: {
-          KV: sharedKv,
-        },
-      },
-      route: { id: '/api/skills/[slug]' },
-    }) as never;
-
-    for (let index = 0; index < 600; index += 1) {
-      const response = await runRequestSecurity(buildEvent());
-      expect(response).toBeNull();
-    }
-
-    const blocked = await runRequestSecurity(buildEvent());
-    expect(blocked?.status).toBe(429);
-    expect(blocked?.headers.get('x-ratelimit-limit')).toBe('600');
-  });
-
-  it('rate limits public bundle reads with the cache-backed bundle bucket', async () => {
-    const sharedKv = new MemoryKV();
-
-    const buildEvent = () => ({
-      url: new URL('https://skills.cat/api/tools/get-skill-files?slug=testowner/demo-skill'),
-      request: new Request('https://skills.cat/api/tools/get-skill-files?slug=testowner/demo-skill', {
-        method: 'GET',
-        headers: {
-          'cf-connecting-ip': '198.51.100.31',
-          'user-agent': 'OpenClaw/1.4.0',
-        },
-      }),
-      platform: {
-        env: {
-          KV: sharedKv,
-        },
-      },
-      route: { id: '/api/tools/get-skill-files' },
-    }) as never;
-
-    for (let index = 0; index < 300; index += 1) {
-      const response = await runRequestSecurity(buildEvent());
-      expect(response).toBeNull();
-    }
-
-    const blocked = await runRequestSecurity(buildEvent());
     expect(blocked?.status).toBe(429);
     expect(blocked?.headers.get('x-ratelimit-limit')).toBe('300');
+    expect(stateDo.fetches).toBeGreaterThan(0);
+    expect(kv.puts).toBe(0);
+    expect(kv.gets).toBe(0);
+  });
+
+  it('does not consume KV for cache-backed registry and tool reads', async () => {
+    const kv = new MemoryKV();
+
+    const routes = [
+      {
+        pathname: '/registry/search/tool?q=test',
+        routeId: '/registry/search/tool',
+        userAgent: 'OpenClaw/1.4.0',
+      },
+      {
+        pathname: '/api/tools/search-skills?q=test',
+        routeId: '/api/tools/search-skills',
+        userAgent: 'skillscat-cli/1.0',
+      },
+      {
+        pathname: '/api/skills/testowner%2Fdemo/files',
+        routeId: '/api/skills/[slug]/files',
+        userAgent: 'OpenClaw/1.4.0',
+      },
+    ];
+
+    for (const route of routes) {
+      for (let index = 0; index < 5; index += 1) {
+        const response = await runRequestSecurity(createEvent({
+          pathname: route.pathname,
+          routeId: route.routeId,
+          userAgent: route.userAgent,
+          kv,
+        }));
+
+        expect(response).toBeNull();
+      }
+    }
+
+    expect(kv.gets).toBe(0);
+    expect(kv.puts).toBe(0);
   });
 });

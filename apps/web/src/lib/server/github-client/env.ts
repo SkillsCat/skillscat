@@ -4,6 +4,7 @@ import {
   hasGitHubTokenConfigured,
   type GitHubTokenEnv,
 } from './token-pool';
+import { createDurableObjectKvStore } from '../state/client';
 
 export type GitHubRequestEnv = GitHubTokenEnv;
 
@@ -16,13 +17,19 @@ export function hasGitHubAuthConfigured(env: GitHubRequestEnv | null | undefined
   return hasGitHubTokenConfigured(env);
 }
 
+export function getGitHubRateLimitKVFromEnv(env: GitHubRequestEnv | null | undefined): KVNamespace | undefined {
+  return createDurableObjectKvStore(env?.STATE_DO, {
+    objectName: 'github-rate-limit',
+  }) ?? env?.KV;
+}
+
 export function getGitHubRequestAuthFromEnv(
   env: GitHubRequestEnv | null | undefined,
   options: GitHubRequestAuthOptions = {}
 ): Pick<GitHubRequestOptions, 'token' | 'rateLimitKV' | 'rateLimitWritePolicy'> {
   const rateLimitMode = options.rateLimitMode
     ?? (options.includeRateLimitKV ? 'read_write' : 'rate_limit_only');
-  const rateLimitKV = rateLimitMode === 'off' ? undefined : env?.KV;
+  const rateLimitKV = rateLimitMode === 'off' ? undefined : getGitHubRateLimitKVFromEnv(env);
 
   return {
     token: getGitHubTokenInputFromEnv(env),

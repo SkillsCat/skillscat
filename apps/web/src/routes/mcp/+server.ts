@@ -5,7 +5,7 @@ import {
   handleMcpRequest,
   isSupportedMcpProtocolVersion,
 } from '$lib/server/agent/mcp';
-import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
+import { getGitHubRateLimitKVFromEnv, getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
 
 function responseHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return {
@@ -94,7 +94,7 @@ export const POST: RequestHandler = async ({ platform, request, locals }) => {
       db: platform?.env?.DB,
       r2: platform?.env?.R2,
       githubToken: getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined,
-      githubRateLimitKV: platform?.env?.KV,
+      githubRateLimitKV: getGitHubRateLimitKVFromEnv(platform?.env),
       request,
       locals,
       waitUntil: platform?.context?.waitUntil?.bind(platform.context),

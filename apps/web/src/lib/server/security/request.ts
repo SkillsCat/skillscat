@@ -1,64 +1,19 @@
 import type { RequestEvent } from '@sveltejs/kit';
 import {
-  RATE_LIMITS,
+  checkDurableRateLimit,
   checkRateLimit,
   getRateLimitKey,
   rateLimitHeaders,
   type AdaptiveRateLimitOptions,
+  type RateLimitConfig,
 } from '$lib/server/security/ratelimit';
 import { validateApiToken } from '$lib/server/auth/api';
 
-interface RateLimitConfig {
-  limit: number;
-  windowSeconds: number;
-  prefix: string;
-}
-
-const DEFAULT_API_READ_LIMIT: RateLimitConfig = {
+const PRIVATE_READ_LIMIT: RateLimitConfig = {
   limit: 300,
   windowSeconds: 60,
-  prefix: 'rl:api:read',
+  prefix: 'rl:api:private-read',
 };
-
-const DEFAULT_API_WRITE_LIMIT: RateLimitConfig = {
-  limit: 90,
-  windowSeconds: 60,
-  prefix: 'rl:api:write',
-};
-
-const AUTH_FLOW_LIMIT: RateLimitConfig = {
-  limit: 30,
-  windowSeconds: 60,
-  prefix: 'rl:api:auth',
-};
-
-const TRANSFER_LIMIT: RateLimitConfig = {
-  limit: 80,
-  windowSeconds: 60,
-  prefix: 'rl:api:transfer',
-};
-
-const HEAVY_TRANSFER_LIMIT: RateLimitConfig = {
-  limit: 30,
-  windowSeconds: 60,
-  prefix: 'rl:api:transfer:heavy',
-};
-
-const UPLOAD_LIMIT: RateLimitConfig = {
-  limit: 40,
-  windowSeconds: 3600,
-  prefix: 'rl:api:upload',
-};
-
-const AUTH_ROUTE_IDS = new Set([
-  '/api/device/authorize',
-  '/api/device/code',
-  '/api/device/token',
-  '/api/device/refresh',
-  '/registry/auth/authorize',
-  '/registry/auth/init',
-  '/registry/auth/token',
-]);
 
 const CSRF_EXEMPT_PATHS = [
   /^\/api\/auth\//,
@@ -81,30 +36,6 @@ const UA_PROTECTED_ROUTE_IDS = new Set([
   '/api/tools/get-skill-files',
   '/registry/skill/[owner]/[...name]',
   '/registry/search/tool',
-]);
-
-const CACHEABLE_SEARCH_ROUTE_IDS = new Set([
-  '/api/search',
-  '/registry/search',
-  '/registry/search/tool',
-  '/api/tools/search-skills',
-  '/openclaw/api/v1/search',
-]);
-
-const CACHEABLE_REPO_ROUTE_IDS = new Set([
-  '/registry/repo/[owner]/[repo]',
-  '/api/tools/resolve-repo-skills',
-]);
-
-const CACHEABLE_DETAIL_ROUTE_IDS = new Set([
-  '/api/skills/[slug]',
-  '/api/skills/[owner]/[...name]',
-  '/registry/skill/[owner]/[...name]',
-]);
-
-const CACHEABLE_BUNDLE_ROUTE_IDS = new Set([
-  '/api/skills/[slug]/files',
-  '/api/tools/get-skill-files',
 ]);
 
 const BLOCKED_AUTOMATION_UA = [
@@ -262,21 +193,6 @@ function hasTokenAuthHeader(request: Request): boolean {
   return getBearerToken(request) !== null;
 }
 
-function isSkillscatCliUserAgent(ua: string): boolean {
-  return /\bskillscat-cli\/\d/i.test(ua);
-}
-
-function hasAnonymousBackgroundSubmitMarker(request: Request): boolean {
-  return request.headers.get('x-skillscat-background-submit') === '1';
-}
-
-function isAnonymousCliBackgroundSubmitRequest(request: Request): boolean {
-  if (hasTokenAuthHeader(request)) return false;
-  if (!hasAnonymousBackgroundSubmitMarker(request)) return false;
-  const ua = normalizeUserAgent(request.headers.get('user-agent'));
-  return isSkillscatCliUserAgent(ua);
-}
-
 function isMutationMethod(method: string): boolean {
   return !['GET', 'HEAD', 'OPTIONS'].includes(method);
 }
@@ -319,111 +235,23 @@ function parseOptionalPositiveInt(value: string | undefined): number | undefined
   return parsed;
 }
 
-function parseBooleanQuery(value: string | null): boolean {
-  if (!value) return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'true' || normalized === '1' || normalized === 'yes';
-}
-
-function isCacheableSearchRequest(
-  routeId: string | null,
-  pathname: string,
-  method: string,
-  url: URL
-): boolean {
-  if (!['GET', 'HEAD'].includes(method)) {
-    return false;
-  }
-
-  if (pathname === '/api/search' || routeId === '/api/search') {
-    return true;
-  }
-
-  const matchesSearchRoute = (routeId && CACHEABLE_SEARCH_ROUTE_IDS.has(routeId)) ||
-    pathname === '/registry/search' ||
-    pathname === '/registry/search/tool' ||
-    pathname === '/api/tools/search-skills' ||
-    pathname === '/openclaw/api/v1/search';
-
-  if (!matchesSearchRoute) {
-    return false;
-  }
-
-  return !parseBooleanQuery(url.searchParams.get('include_private')) &&
-    !parseBooleanQuery(url.searchParams.get('includePrivate'));
-}
-
-function isCacheableRepoRequest(
-  routeId: string | null,
-  pathname: string,
-  method: string,
-  tokenAuth: boolean,
-  sessionCookie: boolean
-): boolean {
-  if (!['GET', 'HEAD'].includes(method)) {
-    return false;
-  }
-
-  const matchesRepoRoute = (routeId && CACHEABLE_REPO_ROUTE_IDS.has(routeId)) ||
-    /^\/registry\/repo\//.test(pathname) ||
-    pathname === '/api/tools/resolve-repo-skills';
-
-  if (!matchesRepoRoute) {
-    return false;
-  }
-
-  return !tokenAuth && !sessionCookie;
-}
-
-function isCacheableDetailRequest(
-  routeId: string | null,
-  pathname: string,
-  method: string,
-  tokenAuth: boolean,
-  sessionCookie: boolean
-): boolean {
-  if (!['GET', 'HEAD'].includes(method)) {
-    return false;
-  }
-
-  const matchesDetailRoute = (routeId && CACHEABLE_DETAIL_ROUTE_IDS.has(routeId)) ||
-    /^\/registry\/skill\//.test(pathname);
-
-  if (!matchesDetailRoute) {
-    return false;
-  }
-
-  return !tokenAuth && !sessionCookie;
-}
-
-function isCacheableBundleRequest(
-  routeId: string | null,
-  pathname: string,
-  method: string,
-  tokenAuth: boolean,
-  sessionCookie: boolean
-): boolean {
-  if (!['GET', 'HEAD'].includes(method)) {
-    return false;
-  }
-
-  const matchesBundleRoute = (routeId && CACHEABLE_BUNDLE_ROUTE_IDS.has(routeId)) ||
-    /^\/api\/skills\/.+\/files$/.test(pathname) ||
-    pathname === '/api/tools/get-skill-files';
-
-  if (!matchesBundleRoute) {
-    return false;
-  }
-
-  return !tokenAuth && !sessionCookie;
-}
-
-function isCacheableBrowseRequest(routeId: string | null, pathname: string, method: string): boolean {
-  if (!['GET', 'HEAD'].includes(method)) {
-    return false;
-  }
-
-  return routeId === '/openclaw/api/v1/skills' || pathname === '/openclaw/api/v1/skills';
+function isPrivateReadRoute(routeId: string | null, pathname: string): boolean {
+  return (
+    routeId === '/api/orgs/[slug]' ||
+    /^\/api\/orgs\/[^/]+$/.test(pathname) ||
+    routeId === '/api/orgs/[slug]/members' ||
+    /^\/api\/orgs\/[^/]+\/members$/.test(pathname) ||
+    routeId === '/api/orgs/[slug]/skills' ||
+    /^\/api\/orgs\/[^/]+\/skills$/.test(pathname) ||
+    routeId === '/api/notifications' ||
+    pathname === '/api/notifications' ||
+    routeId === '/api/notifications/unread-count' ||
+    pathname === '/api/notifications/unread-count' ||
+    routeId === '/api/favorites' ||
+    pathname === '/api/favorites' ||
+    routeId === '/api/user/skills' ||
+    pathname === '/api/user/skills'
+  );
 }
 
 function getAdaptiveRateLimitOptions(env: App.Platform['env'] | undefined): AdaptiveRateLimitOptions {
@@ -437,77 +265,16 @@ function getAdaptiveRateLimitOptions(env: App.Platform['env'] | undefined): Adap
   };
 }
 
-function isSubmitRoute(routeId: string | null, pathname: string): boolean {
-  return routeId === '/api/submit' || pathname === '/api/submit';
-}
-
 function pickRateLimitConfig(
   routeId: string | null,
   pathname: string,
-  url: URL,
   method: string,
-  tokenAuth: boolean,
-  anonymousCliBackgroundSubmit: boolean,
-  sessionCookie: boolean
-): RateLimitConfig {
-  if (isCacheableSearchRequest(routeId, pathname, method, url)) {
-    if (routeId === '/api/search' || pathname === '/api/search') {
-      return RATE_LIMITS.autocomplete;
-    }
-    return RATE_LIMITS.search;
+): RateLimitConfig | null {
+  if (!['GET', 'HEAD'].includes(method)) {
+    return null;
   }
 
-  if (isCacheableBrowseRequest(routeId, pathname, method)) {
-    return RATE_LIMITS.browse;
-  }
-
-  if (isCacheableDetailRequest(routeId, pathname, method, tokenAuth, sessionCookie)) {
-    return RATE_LIMITS.detail;
-  }
-
-  if (isCacheableBundleRequest(routeId, pathname, method, tokenAuth, sessionCookie)) {
-    return RATE_LIMITS.bundle;
-  }
-
-  if (isCacheableRepoRequest(routeId, pathname, method, tokenAuth, sessionCookie)) {
-    return RATE_LIMITS.repo;
-  }
-
-  if (isSubmitRoute(routeId, pathname)) {
-    if (anonymousCliBackgroundSubmit) {
-      return RATE_LIMITS.submitAnonymousCli;
-    }
-    return tokenAuth ? RATE_LIMITS.submitToken : RATE_LIMITS.submit;
-  }
-
-  if (routeId === '/api/skills/upload' || pathname === '/api/skills/upload') {
-    return UPLOAD_LIMIT;
-  }
-
-  if (routeId && AUTH_ROUTE_IDS.has(routeId)) {
-    return AUTH_FLOW_LIMIT;
-  }
-
-  if (
-    routeId === '/mcp' ||
-    pathname === '/mcp' ||
-    routeId === '/api/skills/[slug]' ||
-    routeId === '/api/skills/[owner]/[...name]' ||
-    routeId === '/api/skills/[slug]/files' ||
-    routeId === '/api/skills/[slug]/download' ||
-    routeId === '/api/tools/get-skill-files' ||
-    routeId === '/registry/skill/[owner]/[...name]'
-  ) {
-    return HEAVY_TRANSFER_LIMIT;
-  }
-
-  if (routeNeedsUaProtection(routeId, pathname)) {
-    return TRANSFER_LIMIT;
-  }
-
-  return method === 'GET' || method === 'HEAD'
-    ? DEFAULT_API_READ_LIMIT
-    : DEFAULT_API_WRITE_LIMIT;
+  return isPrivateReadRoute(routeId, pathname) ? PRIVATE_READ_LIMIT : null;
 }
 
 async function resolveRateLimitClientKey(
@@ -570,7 +337,6 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
   const routeId = route.id ?? null;
   const cors = isCorsProtectedPath(pathname);
   const tokenAuth = hasTokenAuthHeader(request);
-  const anonymousCliBackgroundSubmit = isAnonymousCliBackgroundSubmitRequest(request);
   const sessionCookie = hasSessionCookie(request);
 
   if (
@@ -637,24 +403,23 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
     }
   }
 
+  const stateDo = platform?.env?.STATE_DO;
   const kv = platform?.env?.KV;
-  if (!kv) {
+  if (!stateDo && !kv) {
     return null;
   }
 
-  const config = pickRateLimitConfig(
-    routeId,
-    pathname,
-    url,
-    method,
-    tokenAuth,
-    anonymousCliBackgroundSubmit,
-    sessionCookie
-  );
+  const config = pickRateLimitConfig(routeId, pathname, method);
+  if (!config) {
+    return null;
+  }
+
   const clientKey = await resolveRateLimitClientKey(request, platform?.env?.DB);
   const adaptiveOptions = getAdaptiveRateLimitOptions(platform?.env);
   const key = `${routeId ?? pathname}:${clientKey}`;
-  const result = await checkRateLimit(kv, key, config, adaptiveOptions);
+  const result = stateDo
+    ? await checkDurableRateLimit(stateDo, key, config, adaptiveOptions)
+    : await checkRateLimit(kv!, key, config, adaptiveOptions);
 
   if (!result.allowed) {
     return securityJsonResponse(

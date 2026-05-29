@@ -9,7 +9,7 @@ import {
 
 export async function buildSkillBundleFiles(
   skill: SecuritySkillRow,
-  env: Pick<BaseEnv, 'R2' | 'KV' | 'GITHUB_TOKEN' | 'GITHUB_TOKENS'>
+  env: Pick<BaseEnv, 'R2' | 'KV' | 'STATE_DO' | 'GITHUB_TOKEN' | 'GITHUB_TOKENS'>
 ): Promise<SecurityFileRecord[]> {
   const directoryFiles = getSkillDirectoryFiles(skill);
   if (directoryFiles.length === 0) {

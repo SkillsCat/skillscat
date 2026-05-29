@@ -14,6 +14,7 @@ export interface GitHubTokenEnv {
   GITHUB_TOKEN?: string;
   GITHUB_TOKENS?: string;
   KV?: KVNamespace;
+  STATE_DO?: DurableObjectNamespace;
 }
 
 export type GitHubTokenInput = string | string[] | undefined | null;

@@ -1,5 +1,15 @@
+import { createDurableObjectKvStore } from '../../../src/lib/server/state/client';
+
 const OPENROUTER_FREE_PAUSE_KEY = 'openrouter:free:paused_until';
 const DEFAULT_OPENROUTER_FREE_PAUSE_MS = 15 * 60 * 1000;
+
+export function getOpenRouterFreePauseStore(
+  env: { KV?: KVNamespace; STATE_DO?: DurableObjectNamespace } | undefined
+): KVNamespace | undefined {
+  return createDurableObjectKvStore(env?.STATE_DO, {
+    objectName: 'openrouter-rate-limit',
+  }) ?? env?.KV;
+}
 
 export class OpenRouterApiError extends Error {
   status: number;

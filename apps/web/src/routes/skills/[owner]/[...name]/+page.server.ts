@@ -324,6 +324,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     DB: platform?.env?.DB,
     R2: platform?.env?.R2,
     KV: platform?.env?.KV,
+    STATE_DO: platform?.env?.STATE_DO,
   };
   const recommendAlgoVersion = normalizeRecommendAlgoVersion(
     (platform?.env as { RECOMMEND_ALGO_VERSION?: string } | undefined)?.RECOMMEND_ALGO_VERSION

@@ -31,6 +31,11 @@ database_id = "<your-database-id>"
 binding = "KV"
 id = "<your-kv-namespace-id>"
 
+[[durable_objects.bindings]]
+name = "STATE_DO"
+class_name = "SkillscatStateDurableObject"
+script_name = "skillscat-state"
+
 # R2 Storage
 [[r2_buckets]]
 binding = "R2"
@@ -70,6 +75,11 @@ database_id = "<your-production-database-id>"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
+
+[[env.production.durable_objects.bindings]]
+name = "STATE_DO"
+class_name = "SkillscatStateDurableObject"
+script_name = "skillscat-state-production"
 
 [[env.production.r2_buckets]]
 binding = "R2"
