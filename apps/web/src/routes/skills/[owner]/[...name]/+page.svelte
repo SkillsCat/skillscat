@@ -983,70 +983,6 @@
   }
 
   const highlightedCommand = $derived(highlightCommand(currentCommand));
-  function highlightAgentPromptText(value: string): string {
-    return escapeHtml(value).replace(
-      /npx skillscat login/g,
-      '<span class="agent-inline-code">npx skillscat login</span>'
-    );
-  }
-
-  function highlightAgentPrompt(prompt: string): string {
-    if (!prompt.trim()) return '';
-
-    return prompt
-      .split('\n')
-      .map((line) => {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          return '<div class="agent-spacer" aria-hidden="true"></div>';
-        }
-
-        const metaMatch = trimmed.match(/^(Skill|Slug|Repository|Skill page):\s*(.+)$/);
-        if (metaMatch) {
-          const [, label, value] = metaMatch;
-          const valueHtml = /^https?:\/\//.test(value)
-            ? `<span class="agent-link">${escapeHtml(value)}</span>`
-            : `<span class="agent-meta-value">${escapeHtml(value)}</span>`;
-
-          return `
-            <div class="agent-meta-line">
-              <span class="agent-meta-label">${escapeHtml(label)}</span>
-              <span class="agent-meta-sep">:</span>
-              ${valueHtml}
-            </div>
-          `;
-        }
-
-        if (/^(Command|Preferred command|Fallback command|Alternate SkillsCat command):$/.test(trimmed)) {
-          return `<div class="agent-section-label">${escapeHtml(trimmed)}</div>`;
-        }
-
-        if (/^https?:\/\//.test(trimmed)) {
-          return `<div class="agent-endpoint-line"><span class="agent-endpoint-pill">${escapeHtml(trimmed)}</span></div>`;
-        }
-
-        if (trimmed.startsWith('npx ')) {
-          return `<div class="agent-command-line"><code class="agent-command">${highlightCommand(trimmed)}</code></div>`;
-        }
-
-        if (
-          trimmed.startsWith('This skill is ')
-          || trimmed.startsWith('If CLI installation is not possible')
-          || trimmed.startsWith('After installing')
-        ) {
-          return `<div class="agent-note-line">${highlightAgentPromptText(trimmed)}</div>`;
-        }
-
-        if (trimmed.startsWith('Install this SkillsCat skill')) {
-          return `<div class="agent-intro-line">${escapeHtml(trimmed)}</div>`;
-        }
-
-        return `<div class="agent-body-line">${highlightAgentPromptText(trimmed)}</div>`;
-      })
-      .join('');
-  }
-
-  const highlightedAgentPrompt = $derived(highlightAgentPrompt(rawAgentPrompt));
   const canonicalSkillUrl = $derived(
     data.skill ? `${SITE_URL}/skills/${encodeSkillSlugForPath(data.skill.slug)}` : SITE_URL
   );
@@ -1274,10 +1210,8 @@
         </p>
       {:else if currentInstallOption?.type === 'agent'}
         <div class="prompt-box">
-          <div class="prompt-rich">
-            {@html highlightedAgentPrompt}
-          </div>
-          <CopyButton text={rawAgentPrompt} size="sm" />
+          <CopyButton text={rawAgentPrompt} size="sm" class="prompt-copy-button" />
+          <pre class="agent-prompt-code"><code>{rawAgentPrompt}</code></pre>
         </div>
 
         <p class="command-description">
@@ -2571,196 +2505,45 @@
   }
 
   .prompt-box {
-    position: relative;
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
+    display: flow-root;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     padding: 0.875rem 1rem;
-    overflow: hidden;
-    background:
-      radial-gradient(circle at top right, color-mix(in oklch, var(--primary) 14%, transparent), transparent 35%),
-      linear-gradient(135deg, color-mix(in oklch, var(--bg) 88%, var(--primary) 12%), var(--bg));
+    background: var(--bg);
     border-radius: var(--radius-lg);
-    border: 2px solid color-mix(in oklch, var(--border) 82%, var(--primary) 18%);
-    box-shadow: 0 12px 28px -18px color-mix(in oklch, var(--primary) 30%, transparent);
-  }
-
-  .prompt-box::before {
-    content: '';
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 3px;
-    background: linear-gradient(180deg, var(--primary), var(--accent));
+    border: 2px solid var(--border);
+    overflow: hidden;
   }
 
   :root:not(.dark) .prompt-box {
-    background:
-      radial-gradient(circle at top right, rgba(242, 107, 41, 0.12), transparent 35%),
-      linear-gradient(135deg, #fffaf7, #fafafa);
-    border-color: rgba(242, 107, 41, 0.22);
-    box-shadow: 0 12px 24px -18px rgba(242, 107, 41, 0.45);
+    background: #fafafa;
+    border-color: #e5e5e5;
   }
 
-  .prompt-rich {
-    position: relative;
-    z-index: 1;
-    flex: 1;
+  .prompt-box :global(.copy-button) {
+    float: right;
+    margin: 0 0 0.5rem 0.75rem;
+  }
+
+  .agent-prompt-code {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
     min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.55rem;
+    margin: 0;
     color: var(--fg);
     font-family: var(--font-mono);
     font-size: 0.8rem;
     line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
-  .prompt-box :global(.copy-button) {
-    position: relative;
-    z-index: 1;
-    flex-shrink: 0;
-  }
-
-  .prompt-rich :global(.agent-intro-line) {
-    font-family: var(--font-sans);
-    font-size: 0.88rem;
-    font-weight: 700;
-    line-height: 1.45;
-    color: var(--fg);
-  }
-
-  .prompt-rich :global(.agent-body-line) {
-    color: var(--fg-muted);
-  }
-
-  .prompt-rich :global(.agent-section-label) {
-    margin-top: 0.15rem;
-    font-family: var(--font-sans);
-    font-size: 0.68rem;
-    font-weight: 800;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--primary);
-  }
-
-  .prompt-rich :global(.agent-meta-line) {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    align-items: baseline;
-  }
-
-  .prompt-rich :global(.agent-meta-label) {
-    font-family: var(--font-sans);
-    font-size: 0.68rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--fg-muted);
-  }
-
-  .prompt-rich :global(.agent-meta-sep) {
-    color: var(--fg-subtle);
-  }
-
-  .prompt-rich :global(.agent-meta-value) {
-    color: var(--fg);
-    font-weight: 600;
-  }
-
-  .prompt-rich :global(.agent-link) {
-    display: inline-flex;
-    align-items: center;
-    max-width: 100%;
-    padding: 0.125rem 0.5rem;
-    color: var(--primary);
-    background: color-mix(in oklch, var(--primary) 10%, transparent);
-    border: 1px solid color-mix(in oklch, var(--primary) 18%, transparent);
-    border-radius: 9999px;
-    word-break: break-all;
-  }
-
-  .prompt-rich :global(.agent-command-line) {
-    padding: 0.7rem 0.85rem;
-    background: color-mix(in oklch, var(--bg) 72%, var(--primary) 10%);
-    border: 1px solid color-mix(in oklch, var(--border) 70%, var(--primary) 18%);
-    border-radius: calc(var(--radius-lg) - 2px);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    overflow-x: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-
-  .prompt-rich :global(.agent-command-line::-webkit-scrollbar) {
-    display: none;
-  }
-
-  .prompt-rich :global(.agent-command) {
-    display: block;
-    white-space: nowrap;
-    color: var(--fg);
-  }
-
-  .prompt-rich :global(.agent-command .cmd-npx) {
-    color: var(--accent);
-    font-weight: 600;
-  }
-
-  .prompt-rich :global(.agent-command .cmd-tool) {
-    color: var(--fg);
-    font-weight: 600;
-  }
-
-  .prompt-rich :global(.agent-command .cmd-action) {
-    color: var(--primary);
-    font-weight: 700;
-  }
-
-  .prompt-rich :global(.agent-command .cmd-repo) {
-    color: var(--fg-muted);
-  }
-
-  .prompt-rich :global(.agent-command .cmd-default) {
-    color: var(--fg);
-  }
-
-  .prompt-rich :global(.agent-note-line) {
-    padding: 0.65rem 0.75rem;
-    color: var(--fg);
-    background: color-mix(in oklch, var(--accent) 11%, transparent);
-    border: 1px solid color-mix(in oklch, var(--accent) 20%, transparent);
-    border-radius: calc(var(--radius-lg) - 4px);
-  }
-
-  .prompt-rich :global(.agent-inline-code) {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.05rem 0.35rem;
-    margin: 0 0.1rem;
-    font-size: 0.76rem;
-    font-weight: 700;
-    color: var(--primary);
-    background: color-mix(in oklch, var(--primary) 12%, transparent);
-    border-radius: 0.4rem;
-  }
-
-  .prompt-rich :global(.agent-endpoint-line) {
-    display: flex;
-  }
-
-  .prompt-rich :global(.agent-endpoint-pill) {
-    display: inline-flex;
-    max-width: 100%;
-    padding: 0.45rem 0.65rem;
-    color: var(--fg);
-    background: color-mix(in oklch, var(--bg) 74%, var(--accent) 9%);
-    border: 1px dashed color-mix(in oklch, var(--border) 72%, var(--primary) 16%);
-    border-radius: calc(var(--radius-lg) - 6px);
-    word-break: break-all;
-  }
-
-  .prompt-rich :global(.agent-spacer) {
-    height: 0.2rem;
+  .agent-prompt-code code {
+    font: inherit;
   }
 
   /* Command Description */
