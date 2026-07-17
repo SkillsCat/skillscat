@@ -152,7 +152,7 @@ const OPTIONAL_SECRETS_BY_WORKER = {
   state: [],
   'github-events': [],
   indexing: ['INDEXNOW_KEY'],
-  classification: ['OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY'],
+  classification: ['OPENROUTER_API_KEY'],
   'security-analysis': ['OPENROUTER_API_KEY'],
   metrics: [],
   trending: [],
@@ -894,8 +894,9 @@ class_name = "SkillscatStateDurableObject"
 script_name = "skillscat-state-production"
 
 [env.production.vars]
-AI_MODEL = "minimax/minimax-m2.5:free"
-CLASSIFICATION_PAID_MODEL = "openai/gpt-5.4-nano"
+AI_MODEL = "tencent/hy3:free"
+FREE_MODELS = "openrouter/free"
+CLASSIFICATION_PAID_MODEL = "tencent/hy3"
 `.trim(),
   'wrangler.security-analysis.toml': `
 [env.production]
@@ -934,8 +935,9 @@ class_name = "SkillscatStateDurableObject"
 script_name = "skillscat-state-production"
 
 [env.production.vars]
-SECURITY_FREE_MODEL = "openrouter/free"
-SECURITY_PREMIUM_MODEL = "openai/gpt-5.4-nano"
+SECURITY_FREE_MODEL = "tencent/hy3:free"
+SECURITY_FREE_MODELS = "openrouter/free"
+SECURITY_PREMIUM_MODEL = "tencent/hy3"
 SECURITY_MAX_AI_FILES = "8"
 SECURITY_MAX_AI_TEXT_BYTES = "48000"
 SECURITY_STABILITY_ROUNDS = "2"
@@ -2132,7 +2134,6 @@ async function main() {
   const needsGitHubClientSecret = requiredSecretKeys.has('GITHUB_CLIENT_SECRET');
   const needsGitHubToken = requiredSecretKeys.has('GITHUB_TOKEN');
   const needsOpenRouter = optionalSecretKeys.has('OPENROUTER_API_KEY');
-  const needsDeepSeek = optionalSecretKeys.has('DEEPSEEK_API_KEY');
   const needsVirusTotal = optionalSecretKeys.has('VIRUSTOTAL_API_KEY');
   const needsIndexNowKey = optionalSecretKeys.has('INDEXNOW_KEY');
   const includePreviewWorker = !hasWorkerSelection || selectedWorkerKeys.includes('preview');
@@ -2145,7 +2146,6 @@ async function main() {
     || needsGitHubClientSecret
     || needsGitHubToken
     || needsOpenRouter
-    || needsDeepSeek
     || needsVirusTotal
     || (isProduction && needsProductionAppUrl);
   const needsStateBootstrap = isProduction && (
@@ -2446,7 +2446,6 @@ ${colors.cyan}╔═════════════════════
     let githubClientSecret = '';
     let githubToken = '';
     let openrouterApiKey = '';
-    let deepseekApiKey = '';
     let virusTotalApiKey = '';
     let indexNowKey = '';
     let productionAppUrl = '';
@@ -2464,11 +2463,7 @@ ${colors.cyan}╔═════════════════════
         lines.push('- GitHub Token(s): https://github.com/settings/tokens (需要 public_repo 权限；支持单个 GITHUB_TOKEN 或逗号分隔 / JSON 数组格式的 GITHUB_TOKENS)');
       }
       if (needsOpenRouter) {
-        lines.push('- OpenRouter: https://openrouter.ai/keys (可选，用于 AI 分类)');
-        lines.push('  注意: 我们只使用免费模型，无需付费');
-      }
-      if (needsDeepSeek) {
-        lines.push('- DeepSeek: https://platform.deepseek.com/api_keys (可选，AI 分类兜底)');
+        lines.push('- OpenRouter: https://openrouter.ai/keys (可选，用于 HY3 AI 分类/安全分析)');
       }
       if (needsVirusTotal) {
         lines.push('- VirusTotal: https://www.virustotal.com/gui/join-us (可选，public API 需要 API Key)');
@@ -2521,9 +2516,6 @@ ${colors.cyan}╔═════════════════════
         if (needsOpenRouter) {
           openrouterApiKey = existingVars.OPENROUTER_API_KEY || '';
         }
-        if (needsDeepSeek) {
-          deepseekApiKey = existingVars.DEEPSEEK_API_KEY || '';
-        }
         if (needsVirusTotal) {
           virusTotalApiKey = existingVars.VIRUSTOTAL_API_KEY || '';
         }
@@ -2545,10 +2537,7 @@ ${colors.cyan}╔═════════════════════
             || await ask(rl, 'GitHub Personal Access Token(s) (single token, comma-separated, or JSON array)', '');
         }
         if (needsOpenRouter) {
-          openrouterApiKey = existingVars.OPENROUTER_API_KEY || await ask(rl, 'OpenRouter API Key (可选，免费模型)', '');
-        }
-        if (needsDeepSeek) {
-          deepseekApiKey = existingVars.DEEPSEEK_API_KEY || await ask(rl, 'DeepSeek API Key (可选，兜底策略)', '');
+          openrouterApiKey = existingVars.OPENROUTER_API_KEY || await ask(rl, 'OpenRouter API Key (可选，HY3 模型)', '');
         }
         if (needsVirusTotal) {
           virusTotalApiKey = existingVars.VIRUSTOTAL_API_KEY || await ask(rl, 'VirusTotal API Key (可选，public API)', '');
@@ -2647,9 +2636,6 @@ ${colors.cyan}╔═════════════════════
               if (workerOptionalSecrets.has('OPENROUTER_API_KEY') && openrouterApiKey) {
                 secrets.OPENROUTER_API_KEY = openrouterApiKey;
               }
-              if (workerOptionalSecrets.has('DEEPSEEK_API_KEY') && deepseekApiKey) {
-                secrets.DEEPSEEK_API_KEY = deepseekApiKey;
-              }
               if (workerOptionalSecrets.has('VIRUSTOTAL_API_KEY') && virusTotalApiKey) {
                 secrets.VIRUSTOTAL_API_KEY = virusTotalApiKey;
               }
@@ -2713,9 +2699,6 @@ ${colors.cyan}╔═════════════════════
         }
         if (needsOpenRouter) {
           devVars.OPENROUTER_API_KEY = openrouterApiKey || '';
-        }
-        if (needsDeepSeek) {
-          devVars.DEEPSEEK_API_KEY = deepseekApiKey || '';
         }
         if (needsVirusTotal) {
           devVars.VIRUSTOTAL_API_KEY = virusTotalApiKey || '';

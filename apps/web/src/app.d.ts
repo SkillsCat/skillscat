@@ -19,7 +19,6 @@ declare global {
         GITHUB_CLIENT_SECRET: string;
         BETTER_AUTH_SECRET: string;
         OPENROUTER_API_KEY: string;
-        DEEPSEEK_API_KEY: string;
         VIRUSTOTAL_API_KEY?: string;
         GITHUB_TOKEN?: string;
         GITHUB_TOKENS?: string;

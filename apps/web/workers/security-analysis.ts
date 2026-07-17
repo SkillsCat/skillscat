@@ -10,9 +10,13 @@ import type { D1Database } from '@cloudflare/workers-types';
 import { createLogger, generateId } from './shared/utils';
 import { createDurableObjectKvStore } from '../src/lib/server/state/client';
 import {
+  getDefaultOpenRouterFreeModels,
+  getOpenRouterJsonGenerationOptions,
   getOpenRouterFreePauseUntil,
   getOpenRouterFreePauseStore,
+  isOpenRouterFreeModel,
   isOpenRouterFreePauseError,
+  normalizeOpenRouterModelId,
   OpenRouterApiError,
   parseOpenRouterRetryAfterMs,
   pauseOpenRouterFreeModels,
@@ -55,7 +59,6 @@ function getSecurityAnalysisStateStore(
   }) ?? env.KV;
 }
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const DEFAULT_FREE_MODEL = 'openrouter/free';
 const DEFAULT_MAX_AI_FILES = 8;
 const DEFAULT_MAX_AI_TEXT_BYTES = 48_000;
 const DEFAULT_HEURISTIC_THRESHOLD = 4.5;
@@ -137,17 +140,16 @@ function parsePositiveFloat(raw: string | undefined, fallback: number): number {
 }
 
 function getFreeModelCandidates(env: SecurityAnalysisEnv): string[] {
-  const configured = (env.SECURITY_FREE_MODELS || '')
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  const primary = env.SECURITY_FREE_MODEL?.trim() || DEFAULT_FREE_MODEL;
-  return Array.from(new Set([primary, ...configured]));
+  const configured = [env.SECURITY_FREE_MODEL || '', ...(env.SECURITY_FREE_MODELS || '').split(',')]
+    .map(normalizeOpenRouterModelId)
+    .filter(Boolean)
+    .filter(isOpenRouterFreeModel);
+  return Array.from(new Set([...getDefaultOpenRouterFreeModels(), ...configured]));
 }
 
 export function getTierModelCandidates(tier: SecurityAnalysisTier, env: SecurityAnalysisEnv): string[] {
   if (tier === 'premium') {
-    const premium = env.SECURITY_PREMIUM_MODEL?.trim();
+    const premium = normalizeOpenRouterModelId(env.SECURITY_PREMIUM_MODEL?.trim() || '');
     if (premium) {
       return [premium];
     }
@@ -405,7 +407,7 @@ async function callOpenRouter(
     body: JSON.stringify({
       model,
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.2,
+      ...getOpenRouterJsonGenerationOptions(model, 'security'),
       max_tokens: 1800,
     }),
   });

@@ -48,7 +48,6 @@ export interface ClassificationEnv extends BaseEnv {
   CLASSIFICATION_PAID_MODEL?: string;
   CLASSIFICATION_ANALYTICS?: AnalyticsEngineDataset;
   FREE_MODELS?: string;
-  DEEPSEEK_API_KEY?: string;
 }
 
 export interface TrendingEnv extends BaseEnv {

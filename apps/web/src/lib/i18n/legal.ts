@@ -31,7 +31,7 @@ const GITHUB_REPO_LINK =
 const en = {
   privacy: {
     title: 'Privacy Policy',
-    lastUpdated: 'Last updated: February 14, 2026',
+    lastUpdated: 'Last updated: July 16, 2026',
     lead:
       'SkillsCat ("we", "our", or "us") is an open platform for discovering, sharing, and installing AI agent skills. This Privacy Policy explains how we collect, use, and safeguard your information when you use our website and services.',
     sections: [
@@ -79,7 +79,7 @@ const en = {
         ],
         items: [
           '<strong>Public Content:</strong> Public skills and related public profile metadata are visible to other users.',
-          '<strong>Service Providers:</strong> We use providers such as Cloudflare (hosting and infrastructure), GitHub (OAuth and repository APIs), optional OpenRouter or DeepSeek model APIs (for automated skill classification when enabled), and Google Fonts (font delivery).',
+          '<strong>Service Providers:</strong> We use providers such as Cloudflare (hosting and infrastructure), GitHub (OAuth and repository APIs), optional OpenRouter model APIs (for automated skill classification and security analysis when enabled), and Google Fonts (font delivery).',
           '<strong>Collaboration Features:</strong> If you share a private skill with another user or email address, that permission data is stored and used to grant access.',
           '<strong>Legal Requirements:</strong> When required by law or to protect our rights.',
         ],
@@ -96,7 +96,7 @@ const en = {
         items: [
           '<strong>GitHub:</strong> For OAuth authentication and repository metadata or content access.',
           '<strong>Cloudflare:</strong> For hosting, CDN, D1, KV, R2, and security services.',
-          '<strong>OpenRouter / DeepSeek (optional):</strong> For automated skill classification if these providers are configured.',
+          '<strong>OpenRouter (optional):</strong> For automated skill classification and security analysis if configured.',
           '<strong>Google Fonts:</strong> For web font delivery.',
         ],
       },
@@ -303,7 +303,7 @@ const en = {
 const zhCN = {
   privacy: {
     title: '隐私政策',
-    lastUpdated: '最后更新：2026 年 2 月 14 日',
+    lastUpdated: '最后更新：2026 年 7 月 16 日',
     lead:
       'SkillsCat（“我们”）是一个用于发现、分享和安装 AI agent skills 的开放平台。本隐私政策说明你在使用我们的网站和服务时，我们如何收集、使用并保护你的信息。',
     sections: [
@@ -349,7 +349,7 @@ const zhCN = {
         paragraphs: ['我们不会出售、交易或出租你的个人信息。在以下情形下，我们可能会共享信息：'],
         items: [
           '<strong>公开内容：</strong>公开技能及相关公开资料信息对其他用户可见。',
-          '<strong>服务提供方：</strong>我们使用 Cloudflare（托管与基础设施）、GitHub（OAuth 与仓库 API）、可选的 OpenRouter 或 DeepSeek 模型 API（用于自动分类）以及 Google Fonts（字体分发）等服务。',
+          '<strong>服务提供方：</strong>我们使用 Cloudflare（托管与基础设施）、GitHub（OAuth 与仓库 API）、可选的 OpenRouter 模型 API（用于自动分类和安全分析）以及 Google Fonts（字体分发）等服务。',
           '<strong>协作功能：</strong>如果你将私有技能分享给其他用户或邮箱地址，我们会保存并使用相应授权数据。',
           '<strong>法律要求：</strong>在法律要求或保护我们权利时，我们可能会披露必要信息。',
         ],
@@ -366,7 +366,7 @@ const zhCN = {
         items: [
           '<strong>GitHub：</strong>用于 OAuth 登录、仓库元数据和内容访问。',
           '<strong>Cloudflare：</strong>用于托管、CDN、D1、KV、R2 以及安全服务。',
-          '<strong>OpenRouter / DeepSeek（可选）：</strong>在启用时用于自动技能分类。',
+          '<strong>OpenRouter（可选）：</strong>在启用时用于自动技能分类和安全分析。',
           '<strong>Google Fonts：</strong>用于网页字体分发。',
         ],
       },
@@ -523,7 +523,7 @@ const zhCN = {
 const ja = {
   privacy: {
     title: 'プライバシーポリシー',
-    lastUpdated: '最終更新日: 2026年2月14日',
+    lastUpdated: '最終更新日: 2026年7月16日',
     lead:
       'SkillsCat（以下「当社」）は、AI agent skills を見つけ、共有し、インストールできるオープンプラットフォームです。このプライバシーポリシーでは、当社サイトおよびサービスの利用時に、どのような情報を収集、利用、保護するかを説明します。',
     sections: [
@@ -569,7 +569,7 @@ const ja = {
         paragraphs: ['当社は個人情報を第三者に販売、交換、賃貸しません。次の場合に限り情報を共有することがあります。'],
         items: [
           '<strong>公開コンテンツ:</strong> 公開スキルと関連する公開プロフィール情報は他のユーザーに表示されます。',
-          '<strong>サービス提供者:</strong> Cloudflare（ホスティングとインフラ）、GitHub（OAuth とリポジトリ API）、任意の OpenRouter / DeepSeek モデル API（自動分類用）、Google Fonts（フォント配信）などを利用します。',
+          '<strong>サービス提供者:</strong> Cloudflare（ホスティングとインフラ）、GitHub（OAuth とリポジトリ API）、任意の OpenRouter モデル API（自動分類およびセキュリティ分析用）、Google Fonts（フォント配信）などを利用します。',
           '<strong>コラボレーション機能:</strong> 非公開スキルを他ユーザーやメールアドレスと共有すると、その権限データを保存してアクセス制御に使用します。',
           '<strong>法的要件:</strong> 法令に基づく場合、または当社の権利を保護するために必要な場合。',
         ],
@@ -584,7 +584,7 @@ const ja = {
         items: [
           '<strong>GitHub:</strong> OAuth 認証、リポジトリのメタデータおよび内容取得。',
           '<strong>Cloudflare:</strong> ホスティング、CDN、D1、KV、R2、およびセキュリティサービス。',
-          '<strong>OpenRouter / DeepSeek（任意）:</strong> 設定されている場合の自動スキル分類。',
+          '<strong>OpenRouter（任意）:</strong> 設定されている場合の自動スキル分類およびセキュリティ分析。',
           '<strong>Google Fonts:</strong> Web フォント配信。',
         ],
       },
@@ -739,7 +739,7 @@ const ja = {
 const ko = {
   privacy: {
     title: '개인정보 처리방침',
-    lastUpdated: '최종 업데이트: 2026년 2월 14일',
+    lastUpdated: '최종 업데이트: 2026년 7월 16일',
     lead:
       'SkillsCat(이하 "당사")는 AI agent skills를 찾고, 공유하고, 설치할 수 있는 오픈 플랫폼입니다. 이 개인정보 처리방침은 웹사이트와 서비스를 사용할 때 당사가 정보를 어떻게 수집, 사용, 보호하는지 설명합니다.',
     sections: [
@@ -785,7 +785,7 @@ const ko = {
         paragraphs: ['당사는 개인정보를 제3자에게 판매, 거래 또는 임대하지 않습니다. 다만 다음 상황에서는 정보를 공유할 수 있습니다.'],
         items: [
           '<strong>공개 콘텐츠:</strong> 공개 스킬과 관련 공개 프로필 정보는 다른 사용자에게 보입니다.',
-          '<strong>서비스 제공업체:</strong> Cloudflare(호스팅 및 인프라), GitHub(OAuth 및 저장소 API), 선택적 OpenRouter / DeepSeek 모델 API(자동 분류용), Google Fonts(폰트 제공) 등을 사용합니다.',
+          '<strong>서비스 제공업체:</strong> Cloudflare(호스팅 및 인프라), GitHub(OAuth 및 저장소 API), 선택적 OpenRouter 모델 API(자동 분류 및 보안 분석용), Google Fonts(폰트 제공) 등을 사용합니다.',
           '<strong>협업 기능:</strong> 비공개 스킬을 다른 사용자나 이메일 주소와 공유하면 해당 권한 데이터가 저장되어 접근 제어에 사용됩니다.',
           '<strong>법적 요구:</strong> 법률에 따라 요구되거나 당사의 권리를 보호하기 위해 필요한 경우.',
         ],
@@ -800,7 +800,7 @@ const ko = {
         items: [
           '<strong>GitHub:</strong> OAuth 인증과 저장소 메타데이터 또는 콘텐츠 접근.',
           '<strong>Cloudflare:</strong> 호스팅, CDN, D1, KV, R2 및 보안 서비스.',
-          '<strong>OpenRouter / DeepSeek(선택 사항):</strong> 설정된 경우 자동 스킬 분류.',
+          '<strong>OpenRouter(선택 사항):</strong> 설정된 경우 자동 스킬 분류 및 보안 분석.',
           '<strong>Google Fonts:</strong> 웹 폰트 제공.',
         ],
       },

@@ -24,20 +24,27 @@ describe('security analysis worker helpers', () => {
       KV: {} as never,
       R2: {} as never,
       OPENROUTER_API_KEY: 'or-key',
-      SECURITY_PREMIUM_MODEL: 'openai/gpt-4.1-mini',
-      SECURITY_FREE_MODEL: 'openrouter/free',
-      SECURITY_FREE_MODELS: 'foo/free,bar/free',
-    })).toEqual(['openai/gpt-4.1-mini']);
+      SECURITY_PREMIUM_MODEL: 'tencent/hy3',
+      SECURITY_FREE_MODEL: 'hy3:free',
+      SECURITY_FREE_MODELS: 'foo/model:free,openrouter:free',
+    })).toEqual(['tencent/hy3']);
 
     expect(getTierModelCandidates('free', {
       DB: {} as never,
       KV: {} as never,
       R2: {} as never,
       OPENROUTER_API_KEY: 'or-key',
-      SECURITY_PREMIUM_MODEL: 'openai/gpt-4.1-mini',
-      SECURITY_FREE_MODEL: 'openrouter/free',
-      SECURITY_FREE_MODELS: 'foo/free,bar/free',
-    })).toEqual(['openrouter/free', 'foo/free', 'bar/free']);
+      SECURITY_PREMIUM_MODEL: 'tencent/hy3',
+      SECURITY_FREE_MODEL: 'openrouter:free',
+      SECURITY_FREE_MODELS: 'foo/model:free,openrouter:free,vendor/paid-model',
+    })).toEqual(['tencent/hy3:free', 'openrouter/free', 'foo/model:free']);
+
+    expect(getTierModelCandidates('premium', {
+      DB: {} as never,
+      KV: {} as never,
+      R2: {} as never,
+      OPENROUTER_API_KEY: 'or-key',
+    })).toEqual([]);
   });
 
   it('tells the AI model to reserve critical scores for only severe real-world harm', () => {
@@ -149,7 +156,7 @@ describe('security analysis worker helpers', () => {
       findings: [],
       rounds: 1,
       provider: 'openrouter',
-      model: 'openai/gpt-5.4-nano',
+      model: 'tencent/hy3:free',
       promptTokens: 0,
       completionTokens: 0,
       totalTokens: 0,
@@ -612,7 +619,7 @@ describe('security analysis worker helpers', () => {
     expect(await getOpenRouterFreePauseUntil(kv as never, 20_000)).toBe(40_000);
     expect(await getOpenRouterFreePauseUntil(kv as never, 50_000)).toBeNull();
     expect(isOpenRouterFreePauseError(new OpenRouterApiError({
-      model: 'openrouter/free',
+      model: 'hy3:free',
       status: 429,
       retryAfterMs: 30_000,
       message: 'rate limited',
