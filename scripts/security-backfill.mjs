@@ -29,6 +29,22 @@ const CODE_EXTENSIONS = new Set([
   'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cc', 'cpp', 'h',
   'hpp', 'php', 'lua', 'pl', 'r', 'scala'
 ]);
+const SECURITY_ANALYSIS_IGNORED_PREFIXES = [
+  '.github/',
+  '.gitlab/',
+  '.circleci/',
+  '.devcontainer/',
+];
+const SECURITY_ANALYSIS_IGNORED_FILES = new Set([
+  '.gitlab-ci.yml',
+  '.travis.yml',
+  'appveyor.yml',
+  'azure-pipelines.yml',
+  'bitbucket-pipelines.yml',
+  'circle.yml',
+  'jenkinsfile',
+  'renovate.json',
+]);
 
 function printHelp() {
   console.log(`
@@ -197,6 +213,19 @@ function extension(path) {
   return index >= 0 ? name.slice(index + 1) : '';
 }
 
+function normalizeSecurityAnalysisPath(path) {
+  return String(path || '').replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+}
+
+function isIgnoredSecurityAnalysisPath(path) {
+  const normalized = normalizeSecurityAnalysisPath(path);
+  if (!normalized) return true;
+  if (SECURITY_ANALYSIS_IGNORED_PREFIXES.some((prefix) => normalized.startsWith(prefix))) {
+    return true;
+  }
+  return SECURITY_ANALYSIS_IGNORED_FILES.has(normalized);
+}
+
 function classifySecurityFileKind(path, type) {
   if (type === 'binary') {
     return 'binary';
@@ -233,14 +262,18 @@ function toSecuritySource(row) {
     try {
       const parsed = JSON.parse(row.fileStructure);
       if (Array.isArray(parsed?.files) && parsed.files.length > 0) {
-        return parsed.files
+        const files = parsed.files
           .filter((file) => file && typeof file.path === 'string' && file.path.length > 0)
+          .filter((file) => !isIgnoredSecurityAnalysisPath(file.path))
           .map((file) => ({
             path: file.path,
             sha: typeof file.sha === 'string' ? file.sha : '',
             size: Number(file.size || 0),
             type: file.type === 'binary' ? 'binary' : 'text',
           }));
+        if (files.length > 0) {
+          return files;
+        }
       }
     } catch {
       // Fall through to the readme fallback below.

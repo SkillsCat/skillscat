@@ -7,6 +7,7 @@ import {
 } from '../../../src/lib/skill-path';
 import { githubRequest } from '../../../src/lib/server/github-client/request';
 import { getGitHubRequestAuthFromEnv } from '../../../src/lib/server/github-client/env';
+import { filterSecurityAnalysisFiles } from '../../../src/lib/server/security';
 import type { BaseEnv, DirectoryFile } from '../types';
 
 export interface SecuritySkillRow {
@@ -265,7 +266,7 @@ export async function loadSkillTextFilesFromR2(
   skill: SecuritySkillRow,
   env: Pick<BaseEnv, 'R2'>
 ): Promise<SecurityFileRecord[]> {
-  const directoryFiles = parseDirectoryFiles(skill.file_structure);
+  const directoryFiles = filterSecurityAnalysisFiles(parseDirectoryFiles(skill.file_structure));
   const textFiles = directoryFiles.filter((file) => file.type === 'text');
   const loaded: SecurityFileRecord[] = [];
 
@@ -311,7 +312,7 @@ export async function loadSkillTextFilesFromR2(
 }
 
 export function getSkillDirectoryFiles(skill: SecuritySkillRow): DirectoryFile[] {
-  const parsed = parseDirectoryFiles(skill.file_structure);
+  const parsed = filterSecurityAnalysisFiles(parseDirectoryFiles(skill.file_structure));
   if (parsed.length > 0) return parsed;
 
   if (skill.readme) {
