@@ -17,11 +17,17 @@ vi.mock('../src/lib/server/ranking/search-precompute', () => ({
 }));
 
 import classificationWorker, {
+  classifyWithAI,
   classifyByKeywords,
   determineClassificationMethod,
   getFreeModelCandidates,
   loadSkillMdForClassification,
 } from '../workers/classification';
+import {
+  getOpenRouterJsonGenerationOptions,
+  getDefaultOpenRouterFreeModel,
+  normalizeOpenRouterModelId,
+} from '../workers/shared/ai/openrouter';
 
 describe('classification model helpers', () => {
   it('keeps free-model candidates ordered, filtered, and deduplicated', () => {
@@ -29,10 +35,10 @@ describe('classification model helpers', () => {
       DB: {} as never,
       KV: {} as never,
       R2: {} as never,
-      AI_MODEL: 'minimax/minimax-m2.5:free',
-      FREE_MODELS: 'openrouter/free,minimax/minimax-m2.5:free,openai/gpt-5.4-nano',
+      AI_MODEL: 'hy3:free',
+      FREE_MODELS: 'openrouter:free,tencent/hy3:free,vendor/paid-model',
     })).toEqual([
-      'minimax/minimax-m2.5:free',
+      'tencent/hy3:free',
       'openrouter/free',
     ]);
 
@@ -40,12 +46,93 @@ describe('classification model helpers', () => {
       DB: {} as never,
       KV: {} as never,
       R2: {} as never,
-      AI_MODEL: 'openai/gpt-5.4-nano',
-      FREE_MODELS: 'minimax/minimax-m2.5:free,openrouter/free',
+      AI_MODEL: 'vendor/paid-model',
+      FREE_MODELS: 'custom/model:free,hy3:free,openrouter:free',
     })).toEqual([
-      'minimax/minimax-m2.5:free',
+      'tencent/hy3:free',
       'openrouter/free',
+      'custom/model:free',
     ]);
+  });
+
+  it('uses HY3 as the permanent default OpenRouter model', () => {
+    expect(normalizeOpenRouterModelId('hy3:free')).toBe('tencent/hy3:free');
+    expect(normalizeOpenRouterModelId('hy3')).toBe('tencent/hy3');
+    expect(normalizeOpenRouterModelId('openrouter:free')).toBe('openrouter/free');
+    expect(getDefaultOpenRouterFreeModel()).toBe('tencent/hy3:free');
+  });
+
+  it('uses HY3-compatible generation parameters', () => {
+    expect(getOpenRouterJsonGenerationOptions('tencent/hy3:free', 'classification')).toEqual({
+      temperature: 0.3,
+    });
+    expect(getOpenRouterJsonGenerationOptions('tencent/hy3:free', 'security')).toEqual({
+      temperature: 0.2,
+    });
+    expect(getOpenRouterJsonGenerationOptions('tencent/hy3', 'classification')).toEqual({
+      temperature: 0.3,
+      response_format: { type: 'json_object' },
+    });
+    expect(getOpenRouterJsonGenerationOptions('tencent/hy3', 'security')).toEqual({
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
+    });
+    expect(getOpenRouterJsonGenerationOptions('openrouter/free', 'security')).toEqual({
+      temperature: 0.2,
+    });
+  });
+
+  it('routes classification through HY3 Free, OpenRouter Free, then paid HY3', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length < 4) {
+        return new Response('temporarily unavailable', { status: 503 });
+      }
+
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: '{"categories":["automation"],"confidence":0.9,"reasoning":"Automates workflows"}',
+          },
+        }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const result = await classifyWithAI('This skill automates workflows.', {
+        DB: {} as never,
+        KV: {
+          get: vi.fn(async () => null),
+          put: vi.fn(async () => {}),
+        } as never,
+        R2: {} as never,
+        OPENROUTER_API_KEY: 'or-key',
+        AI_MODEL: 'openrouter/free',
+        FREE_MODELS: 'tencent/hy3:free,openrouter/free',
+        CLASSIFICATION_PAID_MODEL: 'hy3',
+      });
+
+      expect(result.categories).toEqual(['automation']);
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const requestBodies = fetchMock.mock.calls.map((call) => JSON.parse(
+      String((call[1] as RequestInit | undefined)?.body)
+    ) as { model: string; response_format?: { type: string } });
+    expect(requestBodies.map((body) => body.model)).toEqual([
+      'tencent/hy3:free',
+      'tencent/hy3:free',
+      'openrouter/free',
+      'tencent/hy3',
+    ]);
+    expect(requestBodies.slice(0, 3).every((body) => body.response_format === undefined)).toBe(true);
+    expect(requestBodies[3]?.response_format).toEqual({ type: 'json_object' });
   });
 
   it('uses AI classification only for hot-worthy skills', () => {
@@ -291,8 +378,7 @@ describe('classification queue preloading', () => {
         }),
       },
       OPENROUTER_API_KEY: 'or-key',
-      AI_MODEL: 'minimax/minimax-m2.5:free',
-      CLASSIFICATION_PAID_MODEL: 'openai/gpt-5.4-nano',
+      AI_MODEL: 'hy3:free',
     } as never;
 
     try {
@@ -322,7 +408,7 @@ describe('classification queue preloading', () => {
       messages: Array<{ content: string }>;
     };
     expect(requestBody).toMatchObject({
-      model: 'minimax/minimax-m2.5:free',
+      model: 'tencent/hy3:free',
     });
     expect(requestBody.messages[0]?.content).toContain('Use design for UI/UX direction');
     expect(requestBody.messages[0]?.content).toContain('Use embeddings only for real vector retrieval');
@@ -435,8 +521,7 @@ describe('classification queue preloading', () => {
         }),
       },
       OPENROUTER_API_KEY: 'or-key',
-      AI_MODEL: 'minimax/minimax-m2.5:free',
-      CLASSIFICATION_PAID_MODEL: 'openai/gpt-5.4-nano',
+      AI_MODEL: 'hy3:free',
     } as never;
 
     try {
@@ -549,8 +634,7 @@ describe('classification queue preloading', () => {
         }),
       },
       OPENROUTER_API_KEY: 'or-key',
-      AI_MODEL: 'minimax/minimax-m2.5:free',
-      CLASSIFICATION_PAID_MODEL: 'openai/gpt-5.4-nano',
+      AI_MODEL: 'hy3:free',
     } as never;
 
     try {
@@ -659,7 +743,6 @@ describe('classification queue preloading', () => {
         writeDataPoint,
       },
       AI_MODEL: 'openrouter/free',
-      CLASSIFICATION_PAID_MODEL: 'openai/gpt-5.4-nano',
     } as never;
 
     await classificationWorker.queue({
@@ -694,7 +777,7 @@ describe('classification queue preloading', () => {
 
     expect(writeDataPoint).toHaveBeenCalledTimes(1);
     expect(writeDataPoint).toHaveBeenCalledWith({
-      blobs: ['succeeded', 'openrouter/free', 'openai/gpt-5.4-nano'],
+      blobs: ['succeeded', 'tencent/hy3:free', 'tencent/hy3'],
       doubles: [2, 2, 0, 0, 1, 0, 1],
       indexes: ['classification-batch'],
     });

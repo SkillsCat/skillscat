@@ -26,30 +26,23 @@ GITHUB_TOKEN=your-github-token
 # 文档: https://www.indexnow.org/documentation
 INDEXNOW_KEY=
 
-# ========== OpenRouter API (用于 AI 分类) ==========
+# ========== OpenRouter API (用于 HY3 AI 分类/安全分析) ==========
 # 获取 API Key: https://openrouter.ai/keys
-# 注意: 推荐使用免费模型，无需付费
 # 查看可用免费模型: https://openrouter.ai/models?q=:free
 OPENROUTER_API_KEY=
 
-# 可选: 主模型（推荐直接指定更稳定的免费模型）
-AI_MODEL=minimax/minimax-m2.5:free
-# 可选: classification 的付费兜底模型
-# CLASSIFICATION_PAID_MODEL=openai/gpt-5.4-nano
+# 分类免费模型固定先尝试 HY3 Free，再尝试 OpenRouter Free
+AI_MODEL=tencent/hy3:free
+FREE_MODELS=openrouter/free
 
-# 可选: 免费模型池，逗号分隔 (按顺序 fallback)
-# FREE_MODELS=openrouter/free,google/gemma-3-1b-it:free
-
-# ========== DeepSeek API (兜底策略，可选) ==========
-# 获取 API Key: https://platform.deepseek.com/api_keys
-# 当 OpenRouter 所有模型都失败时，使用 DeepSeek 作为最后兜底
-DEEPSEEK_API_KEY=
+# 免费池都失败后使用付费 HY3
+CLASSIFICATION_PAID_MODEL=tencent/hy3
 
 # ========== Security Analysis (可选调参) ==========
-# 默认 free 模型: openrouter/free; trending / 举报升级后可切到 premium 模型
-# SECURITY_FREE_MODEL=openrouter/free
-# SECURITY_FREE_MODELS=google/gemma-3-1b-it:free,meta-llama/llama-3.2-1b-instruct:free
-# SECURITY_PREMIUM_MODEL=openai/gpt-5.4-nano
+# 免费分析依次使用 HY3 Free、OpenRouter Free；premium 显式使用付费 HY3
+SECURITY_FREE_MODEL=tencent/hy3:free
+SECURITY_FREE_MODELS=openrouter/free
+SECURITY_PREMIUM_MODEL=tencent/hy3
 # SECURITY_PREMIUM_TOP_N=50
 # SECURITY_MAX_AI_FILES=8
 # SECURITY_MAX_AI_TEXT_BYTES=48000

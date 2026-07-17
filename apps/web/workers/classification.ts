@@ -25,10 +25,15 @@ import {
   getCategorySlugs,
 } from './shared/classification/categories';
 import {
+  DEFAULT_OPENROUTER_PAID_MODEL,
+  getDefaultOpenRouterFreeModel,
+  getDefaultOpenRouterFreeModels,
+  getOpenRouterJsonGenerationOptions,
   getOpenRouterFreePauseUntil,
   getOpenRouterFreePauseStore,
   isOpenRouterFreeModel,
   isOpenRouterFreePauseError,
+  normalizeOpenRouterModelId,
   OpenRouterApiError,
   parseOpenRouterRetryAfterMs,
   pauseOpenRouterFreeModels,
@@ -49,11 +54,6 @@ import { getSkillDetailCacheKeys } from '../src/lib/server/skill/detail';
 const log = createLogger('Classification');
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-// OpenRouter free router auto-selects a currently available free model.
-const DEFAULT_OPENROUTER_MODEL = 'openrouter/free';
-const DEFAULT_CLASSIFICATION_PAID_MODEL = 'openai/gpt-5.4-nano';
-const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
-const DEEPSEEK_MODEL = 'deepseek-chat';
 const KEYWORD_SCORE_CAP_PER_KEYWORD = 3;
 const KEYWORD_SLUG_TAG_MATCH_BOOST = 6;
 const KEYWORD_TAG_MATCH_BOOST = 4;
@@ -458,7 +458,7 @@ async function callOpenRouter(
           content: prompt,
         },
       ],
-      temperature: 0.3,
+      ...getOpenRouterJsonGenerationOptions(model, 'classification'),
       max_tokens: 500,
     }),
   });
@@ -556,65 +556,22 @@ function parseClassificationResult(content: string): ExtendedClassificationResul
 
 /**
  * Get ordered free model candidates for classification.
- * The primary AI model is included first when it is itself a free model.
+ * HY3 Free and the OpenRouter free router always lead the pool; custom free
+ * candidates are appended for compatibility without changing the cost policy.
  */
 export function getFreeModelCandidates(env: ClassificationEnv): string[] {
-  const configured = (env.FREE_MODELS || '')
-    .split(',')
-    .map((entry) => entry.trim())
+  const configured = [env.AI_MODEL || '', ...(env.FREE_MODELS || '').split(',')]
+    .map(normalizeOpenRouterModelId)
     .filter(Boolean)
     .filter(isOpenRouterFreeModel);
-  const primary = env.AI_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
-  return Array.from(new Set(
-    isOpenRouterFreeModel(primary)
-      ? [primary, ...configured]
-      : configured
-  ));
+  return Array.from(new Set([...getDefaultOpenRouterFreeModels(), ...configured]));
 }
 
-/**
- * Call DeepSeek API for classification
- */
-async function callDeepSeek(
-  prompt: string,
-  apiKey: string
-): Promise<ClassificationResult> {
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      max_tokens: 500,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`DeepSeek API error: ${response.status} - ${error}`);
-  }
-
-  const data = await response.json() as Record<string, unknown>;
-
-  // Log full response for debugging if structure is unexpected
-  if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
-    console.error(`[DeepSeek] Unexpected response structure:`, JSON.stringify(data));
-    throw new Error(`DeepSeek returned unexpected response: ${JSON.stringify(data).slice(0, 500)}`);
-  }
-
-  const typedData = data as unknown as OpenRouterResponse;
-  const content = typedData.choices[0]?.message?.content;
-
-  if (!content) {
-    console.error(`[DeepSeek] No content in response:`, JSON.stringify(data));
-    throw new Error('No content in DeepSeek response');
-  }
-
-  return parseClassificationResult(content);
+function getClassificationPaidModel(env: ClassificationEnv): string {
+  const configured = normalizeOpenRouterModelId(
+    env.CLASSIFICATION_PAID_MODEL?.trim() || DEFAULT_OPENROUTER_PAID_MODEL
+  );
+  return isOpenRouterFreeModel(configured) ? DEFAULT_OPENROUTER_PAID_MODEL : configured;
 }
 
 export function classifyByKeywords(content: string, tags?: string[]): ClassificationResult {
@@ -712,23 +669,19 @@ export function classifyByKeywords(content: string, tags?: string[]): Classifica
 
 /**
  * Classify skill using AI with multi-model fallback strategy:
- * 1. Try ordered OpenRouter free-model candidates (primary free model first)
- * 2. Retry the first free candidate once for transient errors
- * 3. Try the configured non-free primary model (if any)
- * 4. Try paid OpenRouter fallback for higher-priority classification throughput
- * 5. Try DeepSeek as final AI fallback
- * 6. Fall back to keyword classification
+ * 1. Try HY3 Free and retry it once for transient errors
+ * 2. Try the OpenRouter free router
+ * 3. Try paid HY3
+ * 4. Fall back to keyword classification
  */
-async function classifyWithAI(
+export async function classifyWithAI(
   skillMdContent: string,
   env: ClassificationEnv,
   tags?: string[]
 ): Promise<ExtendedClassificationResult> {
   const prompt = buildClassificationPrompt(skillMdContent, tags);
   const freeModels = getFreeModelCandidates(env);
-  const primaryModel = env.AI_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
-  const paidPrimaryModel = !isOpenRouterFreeModel(primaryModel) ? primaryModel : null;
-  const paidModel = env.CLASSIFICATION_PAID_MODEL?.trim() || DEFAULT_CLASSIFICATION_PAID_MODEL;
+  const paidModel = getClassificationPaidModel(env);
   const now = Date.now();
   const openRouterPauseStore = getOpenRouterFreePauseStore(env);
   const freePausedUntil = await getOpenRouterFreePauseUntil(openRouterPauseStore, now);
@@ -773,43 +726,17 @@ async function classifyWithAI(
     console.log(`[OpenRouter] Free classification models paused until ${new Date(freePausedUntil).toISOString()}`);
   }
 
-  // 2. Configured non-free primary model, if any.
+  // 2. Use paid HY3 only after the ordered free pool is unavailable or exhausted.
   if (env.OPENROUTER_API_KEY) {
-    if (paidPrimaryModel) {
-      try {
-        console.log(`[OpenRouter] Trying non-free primary model: ${paidPrimaryModel}`);
-        return await callOpenRouter(prompt, paidPrimaryModel, env.OPENROUTER_API_KEY);
-      } catch (error) {
-        console.error(`[OpenRouter] Non-free primary model failed:`, error);
-      }
-    }
-  }
-
-  // 3. Paid OpenRouter fallback for higher-priority classification.
-  if (env.OPENROUTER_API_KEY) {
-    if (paidPrimaryModel === paidModel) {
-      console.log(`[OpenRouter] Paid fallback model already attempted: ${paidModel}`);
-    } else {
-      try {
-        console.log(`[OpenRouter] Trying paid fallback model: ${paidModel}`);
-        return await callOpenRouter(prompt, paidModel, env.OPENROUTER_API_KEY);
-      } catch (error) {
-        console.error(`[OpenRouter] Paid fallback model failed:`, error);
-      }
-    }
-  }
-
-  // 4. DeepSeek fallback
-  if (env.DEEPSEEK_API_KEY) {
     try {
-      console.log(`[DeepSeek] Trying ${DEEPSEEK_MODEL} as fallback`);
-      return await callDeepSeek(prompt, env.DEEPSEEK_API_KEY);
+      console.log(`[OpenRouter] Trying paid classification model: ${paidModel}`);
+      return await callOpenRouter(prompt, paidModel, env.OPENROUTER_API_KEY);
     } catch (error) {
-      console.error(`[DeepSeek] Failed:`, error);
+      console.error('[OpenRouter] Paid classification model failed:', error);
     }
   }
 
-  // 5. Final fallback to keyword classification
+  // 3. Final fallback to keyword classification
   if (freeRateLimited) {
     console.log('[Fallback] Free classification models are rate limited, using keyword classification');
   } else {
@@ -931,8 +858,8 @@ function writeClassificationBatchMetric(
     env.CLASSIFICATION_ANALYTICS.writeDataPoint({
       blobs: [
         preloadStatus,
-        env.AI_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL,
-        env.CLASSIFICATION_PAID_MODEL?.trim() || DEFAULT_CLASSIFICATION_PAID_MODEL,
+        getFreeModelCandidates(env)[0] || getDefaultOpenRouterFreeModel(),
+        getClassificationPaidModel(env),
       ],
       doubles: [
         stats.total,

@@ -3,14 +3,11 @@
 # 消费 classification 队列，使用 AI 对 skill 进行分类
 #
 # AI 分类 Fallback 策略:
-# 1. 优先使用指定的免费模型（默认 minimax/minimax-m2.5:free）
+# 1. 优先使用默认模型 tencent/hy3:free
 # 2. 失败后在首个免费模型上重试一次
-# 3. 按顺序尝试 FREE_MODELS 里的其他免费模型
-# 4. 免费额度受限时切到付费兜底模型 openai/gpt-5.4-nano
-# 5. 使用 DeepSeek 官方 API (deepseek-chat) 作为兜底
-# 6. 最终降级到关键词分类
-#
-# 注意: 推荐使用 OpenRouter 免费模型，无需付费
+# 3. 尝试 openrouter/free
+# 4. 免费池都失败后使用付费模型 tencent/hy3
+# 5. 最终降级到关键词分类
 
 name = "skillscat-classification"
 main = "workers/classification.ts"
@@ -59,10 +56,9 @@ binding = "CLASSIFICATION_ANALYTICS"
 dataset = "skillscat_classification_batches"
 
 [vars]
-AI_MODEL = "minimax/minimax-m2.5:free"
-CLASSIFICATION_PAID_MODEL = "openai/gpt-5.4-nano"
-# 可选: 额外免费模型池（仍然只应填免费模型，按顺序尝试）
-# FREE_MODELS = "openrouter/free,google/gemma-3-1b-it:free"
+AI_MODEL = "tencent/hy3:free"
+FREE_MODELS = "openrouter/free"
+CLASSIFICATION_PAID_MODEL = "tencent/hy3"
 
 [env.production]
 name = "skillscat-classification-production"
@@ -97,5 +93,6 @@ binding = "CLASSIFICATION_ANALYTICS"
 dataset = "skillscat_classification_batches"
 
 [env.production.vars]
-AI_MODEL = "minimax/minimax-m2.5:free"
-CLASSIFICATION_PAID_MODEL = "openai/gpt-5.4-nano"
+AI_MODEL = "tencent/hy3:free"
+FREE_MODELS = "openrouter/free"
+CLASSIFICATION_PAID_MODEL = "tencent/hy3"
