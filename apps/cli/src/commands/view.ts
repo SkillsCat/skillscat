@@ -2,6 +2,7 @@ import * as browser from '../utils/core/browser';
 import { getRegistryUrl } from '../utils/config/config';
 import { getValidToken } from '../utils/auth/auth';
 import { parseHttpError, parseNetworkError } from '../utils/core/errors';
+import { fetchWithTimeout } from '../utils/core/fetch';
 import { buildSkillPath, parseSlug } from '../utils/core/slug';
 import { error, info, warn } from '../utils/core/ui';
 import { verboseRequest, verboseResponse } from '../utils/core/verbose';
@@ -75,7 +76,7 @@ async function fetchSkillDocument(slug: string, output: ViewOutput): Promise<str
   verboseRequest('GET', url, headers);
 
   try {
-    const response = await fetch(url, { headers });
+    const response = await fetchWithTimeout(url, { headers });
     verboseResponse(response.status, response.statusText, Date.now() - startTime);
 
     if (!response.ok) {

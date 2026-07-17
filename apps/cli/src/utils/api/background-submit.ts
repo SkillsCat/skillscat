@@ -1,4 +1,5 @@
 import { getBaseUrl } from '../auth/auth';
+import { fetchWithTimeout, getBackgroundRequestTimeoutMs } from '../core/fetch';
 import type { RepoSource } from '../source/source';
 
 const CLI_USER_AGENT = 'skillscat-cli/0.1.0';
@@ -63,7 +64,7 @@ export function submitRepoForIndexingInBackground(source: RepoSource): void {
       payload.skillPath = normalizedSkillPath;
     }
 
-    void fetch(`${baseUrl}/api/submit`, {
+    void fetchWithTimeout(`${baseUrl}/api/submit`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -71,6 +72,7 @@ export function submitRepoForIndexingInBackground(source: RepoSource): void {
         'X-Skillscat-Background-Submit': '1',
       },
       body: JSON.stringify(payload),
+      timeoutMs: getBackgroundRequestTimeoutMs(),
     }).catch(() => {});
   } catch {
     // Intentionally fail silent.

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import pc from 'picocolors';
 import { add } from './commands/add';
 import { list } from './commands/list';
 import { search } from './commands/search';
@@ -44,6 +43,7 @@ program
   .description('Add a skill from a repository')
   .option('-g, --global', 'Install to user directory instead of project')
   .option('-a, --agent <agents...>', 'Target specific agents (e.g., claude-code, cursor, agents)')
+  .option('--global-agent <agents...>', 'Shortcut for --global --agent <agents...> (e.g., codex, claude, opencode)')
   .option('-r, --repo', 'Treat <source> as a repository instead of an exact published skill slug')
   .option('-s, --skill <skills...>', 'Install specific skills by name')
   .option('-l, --list', 'List available skills without installing')
@@ -197,11 +197,7 @@ configCommand
 
 // Error handling
 program.exitOverride((err) => {
-  if (err.code === 'commander.help') {
-    process.exit(0);
-  }
-  console.error(pc.red(`Error: ${err.message}`));
-  process.exit(1);
+  process.exit(err.code === 'commander.help' ? 0 : err.exitCode);
 });
 
 program.parse();

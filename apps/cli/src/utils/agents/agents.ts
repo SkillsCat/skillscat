@@ -53,7 +53,8 @@ export const AGENTS: Agent[] = [
     id: 'claude-code',
     name: 'Claude Code',
     projectPath: '.claude/skills/',
-    globalPath: join(homedir(), '.claude', 'skills')
+    globalPath: join(homedir(), '.claude', 'skills'),
+    aliases: ['claude', 'claudecode']
   },
   {
     id: 'clawdbot',
@@ -71,7 +72,8 @@ export const AGENTS: Agent[] = [
     id: 'codex',
     name: 'Codex',
     projectPath: '.codex/skills/',
-    globalPath: join(homedir(), '.codex', 'skills')
+    globalPath: join(homedir(), '.codex', 'skills'),
+    aliases: ['openai-codex', 'openai']
   },
   {
     id: 'cursor',
@@ -125,7 +127,8 @@ export const AGENTS: Agent[] = [
     id: 'opencode',
     name: 'OpenCode',
     projectPath: '.opencode/skill/',
-    globalPath: join(homedir(), '.config', 'opencode', 'skill')
+    globalPath: join(homedir(), '.config', 'opencode', 'skill'),
+    aliases: ['open-code']
   },
   {
     id: 'openclaw',

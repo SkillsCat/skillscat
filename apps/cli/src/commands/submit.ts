@@ -2,6 +2,7 @@ import pc from 'picocolors';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, dirname } from 'node:path';
 import { isAuthenticated, getValidToken, getBaseUrl } from '../utils/auth/auth';
+import { fetchWithTimeout } from '../utils/core/fetch';
 
 interface SubmitOptions {
   // Reserved for future options
@@ -300,7 +301,7 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
 
   try {
     const baseUrl = getBaseUrl();
-    const response = await fetch(`${baseUrl}/api/submit`, {
+    const response = await fetchWithTimeout(`${baseUrl}/api/submit`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,

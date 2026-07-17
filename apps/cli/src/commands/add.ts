@@ -8,13 +8,14 @@ import {
   fetchSkillCompanionFilesWithOptions,
   type GitHubRepoSnapshot,
 } from '../utils/source/git';
-import { fetchSkill, fetchSkillsByRepo, type RegistryRepoSkillSummary } from '../utils/api/registry';
+import { fetchSkill, fetchSkillFiles, fetchSkillsByRepo, type RegistryRepoSkillSummary } from '../utils/api/registry';
 import { submitRepoForIndexingInBackground } from '../utils/api/background-submit';
 import {
   AGENTS,
   detectPreferredAgents,
   FALLBACK_AGENT_ID,
   getAgentBasePath,
+  getAgentById,
   getAgentsByIds,
   getSkillPath,
   type Agent,
@@ -30,6 +31,7 @@ import type { SkillInfo, RepoSource } from '../utils/source/source';
 
 interface AddOptions {
   global?: boolean;
+  globalAgent?: string[];
   agent?: string[];
   repo?: boolean;
   skill?: string[];
@@ -70,6 +72,16 @@ export async function add(source: string, options: AddOptions): Promise<void> {
     console.log(pc.dim('  https://gitlab.com/owner/repo'));
     process.exit(1);
   }
+
+  const globalAgentIds = options.globalAgent?.filter((id) => id.trim()) ?? [];
+  const requestedAgentIds = [
+    ...(options.agent?.filter((id) => id.trim()) ?? []),
+    ...globalAgentIds,
+  ];
+  const isGlobal = (options.global ?? false) || globalAgentIds.length > 0;
+  const explicitTargetAgents = requestedAgentIds.length > 0
+    ? resolveAgentsOrExit(requestedAgentIds)
+    : null;
 
   const sourceLabel = `${repoSource.owner}/${repoSource.repo}`;
   const isExplicitGitHubRefSource = repoSource.platform === 'github' && repoSource.hasExplicitRef === true;
@@ -186,19 +198,10 @@ export async function add(source: string, options: AddOptions): Promise<void> {
 
   // Detect or select agents
   let targetAgents: Agent[];
-  const isGlobal = options.global ?? false;
   let usedFallbackAgent = false;
 
-  if (options.agent && options.agent.length > 0) {
-    targetAgents = getAgentsByIds(options.agent);
-    if (targetAgents.length === 0) {
-      error(`Invalid agent(s): ${options.agent.join(', ')}`);
-      console.log(pc.dim('Available agents:'));
-      for (const agent of AGENTS) {
-        console.log(pc.dim(`  - ${agent.id} (${agent.name})`));
-      }
-      process.exit(1);
-    }
+  if (explicitTargetAgents) {
+    targetAgents = explicitTargetAgents;
   } else {
     targetAgents = detectPreferredAgents(isGlobal);
     usedFallbackAgent = targetAgents.length === 1 && targetAgents[0]?.id === FALLBACK_AGENT_ID;
@@ -637,6 +640,10 @@ async function hydrateCompanionFilesForInstall(
   for (const entry of entries) {
     if (entry.skill.companionFiles) continue;
 
+    if (await hydrateCompanionFilesFromRegistryBundle(entry)) {
+      continue;
+    }
+
     const installSource = entry.installSource;
     if (!installSource || installSource.platform !== 'github') {
       continue;
@@ -653,6 +660,42 @@ async function hydrateCompanionFilesForInstall(
       verboseLog(`Failed to fetch companion files for ${entry.skill.name}: ${err instanceof Error ? err.message : 'unknown'}`);
       entry.companionFilesHydrationFailed = true;
     }
+  }
+}
+
+async function hydrateCompanionFilesFromRegistryBundle(entry: ResolvedInstallSkill): Promise<boolean> {
+  if (!entry.registrySlug) {
+    return false;
+  }
+
+  try {
+    const bundle = await fetchSkillFiles(entry.registrySlug);
+    if (!bundle || bundle.files.length === 0) {
+      return false;
+    }
+
+    const companionFiles: NonNullable<SkillInfo['companionFiles']> = [];
+    for (const file of bundle.files) {
+      const normalizedPath = normalizeCompanionRelativePath(file.path);
+      if (!normalizedPath) continue;
+
+      if (normalizedPath.toLowerCase() === 'skill.md') {
+        entry.skill.content = file.content;
+        continue;
+      }
+
+      companionFiles.push({
+        path: normalizedPath,
+        content: Buffer.from(file.content, 'utf-8'),
+      });
+    }
+
+    entry.skill.companionFiles = companionFiles;
+    entry.companionFilesHydrationFailed = false;
+    return true;
+  } catch (err) {
+    verboseLog(`Failed to fetch registry bundle for ${entry.skill.name}: ${err instanceof Error ? err.message : 'unknown'}`);
+    return false;
   }
 }
 
@@ -847,7 +890,46 @@ function formatSkillPathHint(path?: string): string {
 }
 
 function formatAddCommand(source: string, options: AddOptions): string {
-  return options.repo ? `npx skillscat add ${source} --repo` : `npx skillscat add ${source}`;
+  const parts = ['npx skillscat add', source];
+  if (options.repo) {
+    parts.push('--repo');
+  }
+  if (options.globalAgent && options.globalAgent.length > 0) {
+    parts.push('--global-agent', ...options.globalAgent);
+  } else if (options.global) {
+    parts.push('--global');
+  }
+  if (options.agent && options.agent.length > 0) {
+    parts.push('--agent', ...options.agent);
+  }
+  return parts.join(' ');
+}
+
+function resolveAgentsOrExit(ids: string[]): Agent[] {
+  const invalidIds = ids.filter((id) => !getAgentById(id));
+  if (invalidIds.length > 0) {
+    error(`Invalid agent(s): ${invalidIds.join(', ')}`);
+    console.log(pc.dim('Available agents:'));
+    for (const agent of AGENTS) {
+      const aliases = agent.aliases && agent.aliases.length > 0
+        ? `; aliases: ${agent.aliases.join(', ')}`
+        : '';
+      console.log(pc.dim(`  - ${agent.id} (${agent.name}${aliases})`));
+    }
+    process.exit(1);
+  }
+
+  const agents = getAgentsByIds(ids);
+  const deduped: Agent[] = [];
+  const seen = new Set<string>();
+  for (const agent of agents) {
+    if (seen.has(agent.id)) {
+      continue;
+    }
+    seen.add(agent.id);
+    deduped.push(agent);
+  }
+  return deduped;
 }
 
 function toSkillFilePath(path?: string): string {

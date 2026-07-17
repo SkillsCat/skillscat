@@ -1,4 +1,5 @@
 import { getValidToken, getBaseUrl } from '../auth/auth';
+import { fetchWithTimeout, getBackgroundRequestTimeoutMs } from '../core/fetch';
 
 /**
  * Track a skill installation on the server.
@@ -17,9 +18,10 @@ export async function trackInstallation(slug: string): Promise<void> {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    await fetch(`${baseUrl}/api/skills/${encodeURIComponent(slug)}/track-install`, {
+    await fetchWithTimeout(`${baseUrl}/api/skills/${encodeURIComponent(slug)}/track-install`, {
       method: 'POST',
       headers,
+      timeoutMs: getBackgroundRequestTimeoutMs(),
     });
   } catch {
     // Fail silently — tracking should never block installation

@@ -1,5 +1,6 @@
 import pc from 'picocolors';
 import { getValidToken, getBaseUrl } from '../utils/auth/auth';
+import { fetchWithTimeout } from '../utils/core/fetch';
 import { prompt, warn } from '../utils/core/ui';
 import { parseSlug } from '../utils/core/slug';
 
@@ -25,7 +26,7 @@ interface UnpublishResponse {
  */
 async function findSkillBySlug(slug: string, token: string): Promise<SkillInfo | null> {
   const { owner, name } = parseSlug(slug);
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${getBaseUrl()}/api/skills/${owner}/${name}`,
     {
       method: 'GET',
@@ -104,7 +105,7 @@ export async function unpublishSkill(slug: string, options: UnpublishOptions): P
     }
     const baseUrl = getBaseUrl();
     const { owner, name } = parseSlug(slug);
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${baseUrl}/api/skills/${owner}/${name}`,
       {
         method: 'DELETE',

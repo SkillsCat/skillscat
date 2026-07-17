@@ -1,6 +1,7 @@
 import pc from 'picocolors';
 
 import { getBaseUrl, getValidToken } from '../utils/auth/auth';
+import { fetchWithTimeout } from '../utils/core/fetch';
 import { error, prompt, success } from '../utils/core/ui';
 
 interface ReportOptions {
@@ -48,7 +49,7 @@ export async function report(slug: string, options: ReportOptions = {}): Promise
   }
 
   const baseUrl = getBaseUrl();
-  const response = await fetch(`${baseUrl}/api/skills/${encodeURIComponent(slug)}/report`, {
+  const response = await fetchWithTimeout(`${baseUrl}/api/skills/${encodeURIComponent(slug)}/report`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,

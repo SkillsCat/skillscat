@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getValidToken } from '../utils/auth/auth';
 import { getRegistryUrl } from '../utils/config/config';
+import { fetchWithTimeout } from '../utils/core/fetch';
 import { box, prompt, warn } from '../utils/core/ui';
 
 interface PublishOptions {
@@ -43,7 +44,7 @@ interface UploadResponse {
  */
 async function getPreview(content: string, token: string, org?: string): Promise<PreviewResponse> {
   const baseUrl = getRegistryUrl().replace('/registry', '');
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${baseUrl}/api/skills/upload/preview`,
     {
       method: 'POST',
@@ -179,7 +180,7 @@ export async function publish(skillPath: string, options: PublishOptions): Promi
       process.exit(1);
     }
     const baseUrl = getRegistryUrl().replace('/registry', '');
-    const response = await fetch(`${baseUrl}/api/skills/upload`, {
+    const response = await fetchWithTimeout(`${baseUrl}/api/skills/upload`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${uploadToken}`,
