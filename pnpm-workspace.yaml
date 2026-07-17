@@ -2,8 +2,20 @@ packages:
   - apps/*
   - packages/*
 
+overrides:
+  '@esbuild-kit/core-utils>esbuild': ^0.25.12
+  cookie: ^0.7.2
+
+minimumReleaseAge: 0
+
 onlyBuiltDependencies:
   - '@hugeicons/svelte'
   - esbuild
   - sharp
   - workerd
+
+allowBuilds:
+  '@hugeicons/svelte': true
+  esbuild: true
+  sharp: true
+  workerd: true
