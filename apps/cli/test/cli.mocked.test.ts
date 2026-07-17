@@ -242,6 +242,60 @@ describe('CLI commands with mocked network', () => {
     expect(removeResult.stdout).toContain('Removed Test Skill');
   });
 
+  it('installs directly to global Codex, Claude Code, and OpenCode targets', async () => {
+    mockGitHubFetch(SKILL_MD_V1, 'sha-global-agents');
+
+    const { add } = await import('../src/commands/add');
+    const { getInstalledSkills } = await import('../src/utils/storage/db');
+
+    const home = process.env.HOME;
+    if (!home) {
+      throw new Error('HOME is not configured for CLI tests');
+    }
+
+    try {
+      const result = await runCommand(() =>
+        add('testowner/testrepo', {
+          globalAgent: ['codex', 'claude', 'opencode'],
+          yes: true,
+        })
+      );
+
+      expect(result.exitCode).toBeNull();
+
+      expect(existsSync(join(home, '.codex', 'skills', 'Test Skill', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(home, '.claude', 'skills', 'Test Skill', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(home, '.config', 'opencode', 'skill', 'Test Skill', 'SKILL.md'))).toBe(true);
+
+      const tracked = getInstalledSkills().find((skill) => skill.name === 'Test Skill' && skill.global);
+      expect(tracked?.agents).toEqual(['codex', 'claude-code', 'opencode']);
+    } finally {
+      rmSync(join(home, '.codex'), { recursive: true, force: true });
+      rmSync(join(home, '.claude'), { recursive: true, force: true });
+      rmSync(join(home, '.config', 'opencode'), { recursive: true, force: true });
+    }
+  });
+
+  it('rejects invalid agent names before making network requests', async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      throw new Error(`Unexpected fetch: ${toUrlString(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() =>
+      add('testowner/testrepo', {
+        agent: ['codex', 'not-a-real-agent'],
+        yes: true,
+      })
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Invalid agent(s): not-a-real-agent');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('copies fallback .agents installs into a tool-specific directory with convert', async () => {
     mockGitHubFetch(SKILL_MD_V1, 'sha-convert');
 
@@ -823,6 +877,22 @@ describe('CLI commands with mocked network', () => {
         }, 200);
       }
 
+      if (url === `http://localhost:3000/api/skills/${encodeURIComponent('testowner/test-skill')}/files`) {
+        return mockResponse({
+          folderName: 'registry-first-skill',
+          files: [
+            {
+              path: 'SKILL.md',
+              content: SKILL_MD_V1.replace('Test Skill', 'Registry First Skill').replace('# Test Skill', '# Registry First Skill'),
+            },
+            {
+              path: 'notes.txt',
+              content: 'registry bundle companion',
+            },
+          ],
+        }, 200);
+      }
+
       if (url.endsWith('/api/submit')) {
         return mockResponse({ success: true }, 200);
       }
@@ -839,10 +909,13 @@ describe('CLI commands with mocked network', () => {
     const skillFile = join(process.cwd(), '.agents', 'Registry First Skill', 'SKILL.md');
     expect(existsSync(skillFile)).toBe(true);
     expect(readFileSync(skillFile, 'utf-8')).toContain('Registry First Skill');
+    expect(readFileSync(join(process.cwd(), '.agents', 'Registry First Skill', 'notes.txt'), 'utf-8')).toBe('registry bundle companion');
 
     expect(seenUrls).toContain(`${REGISTRY_URL}/skill/testowner/testrepo`);
     expect(seenUrls).toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
     expect(seenUrls).toContain(`${REGISTRY_URL}/skill/testowner/test-skill`);
+    expect(seenUrls).toContain(`http://localhost:3000/api/skills/${encodeURIComponent('testowner/test-skill')}/files`);
+    expect(seenUrls.some((url) => url.includes('https://api.github.com/repos/testowner/testrepo'))).toBe(false);
     expect(seenUrls).not.toContain('http://localhost:3000/api/submit');
   });
 

@@ -4,6 +4,7 @@ import { getValidToken } from '../utils/auth/auth';
 import { error, spinner, warn, info } from '../utils/core/ui';
 import { verboseRequest, verboseResponse, verboseConfig, isVerbose } from '../utils/core/verbose';
 import { parseNetworkError, parseHttpError } from '../utils/core/errors';
+import { fetchWithTimeout } from '../utils/core/fetch';
 
 interface SearchOptions {
   category?: string;
@@ -61,7 +62,7 @@ export async function search(query?: string, options: SearchOptions = {}): Promi
 
     verboseRequest('GET', url, headers);
 
-    const response = await fetch(url, { headers });
+    const response = await fetchWithTimeout(url, { headers });
 
     verboseResponse(response.status, response.statusText, Date.now() - startTime);
 

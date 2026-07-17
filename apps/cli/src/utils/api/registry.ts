@@ -1,10 +1,11 @@
 import { getRegistryUrl } from '../config/config';
-import { getValidToken } from '../auth/auth';
+import { getBaseUrl, getValidToken } from '../auth/auth';
 import { verboseRequest, verboseResponse, verboseLog } from '../core/verbose';
 import { parseNetworkError, parseHttpError } from '../core/errors';
 import { getCachedSkill, cacheSkill, calculateContentHash } from '../storage/cache';
 import { parseSlug } from '../core/slug';
 import { githubRequest } from '../core/github-request';
+import { fetchWithTimeout } from '../core/fetch';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -45,6 +46,16 @@ export interface RegistryRepoSkillSummary {
 export interface RegistryRepoResult {
   skills: RegistryRepoSkillSummary[];
   total: number;
+}
+
+export interface RegistrySkillFile {
+  path: string;
+  content: string;
+}
+
+export interface RegistrySkillFilesResult {
+  folderName: string;
+  files: RegistrySkillFile[];
 }
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
@@ -113,7 +124,7 @@ export async function fetchSkill(skillIdentifier: string): Promise<SkillRegistry
   verboseRequest('GET', url, headers);
 
   try {
-    const response = await fetch(url, { headers });
+    const response = await fetchWithTimeout(url, { headers });
     verboseResponse(response.status, response.statusText, Date.now() - startTime);
 
     if (!response.ok) {
@@ -206,7 +217,7 @@ export async function searchSkills(
   verboseRequest('GET', url, headers);
 
   try {
-    const response = await fetch(url, { headers });
+    const response = await fetchWithTimeout(url, { headers });
     verboseResponse(response.status, response.statusText, Date.now() - startTime);
 
     if (!response.ok) {
@@ -241,7 +252,7 @@ export async function fetchSkillsByRepo(
   verboseRequest('GET', url, headers);
 
   try {
-    const response = await fetch(url, { headers });
+    const response = await fetchWithTimeout(url, { headers });
     verboseResponse(response.status, response.statusText, Date.now() - startTime);
 
     if (!response.ok) {
@@ -253,6 +264,46 @@ export async function fetchSkillsByRepo(
     }
 
     return await response.json() as RegistryRepoResult;
+  } catch (error) {
+    if (error instanceof Error && !error.message.includes('Rate limit')) {
+      const networkError = parseNetworkError(error);
+      throw new Error(networkError.message);
+    }
+    throw error;
+  }
+}
+
+export async function fetchSkillFiles(slug: string): Promise<RegistrySkillFilesResult | null> {
+  const url = `${getBaseUrl()}/api/skills/${encodeURIComponent(slug)}/files`;
+  const headers = await getAuthHeaders();
+  const startTime = Date.now();
+
+  verboseRequest('GET', url, headers);
+
+  try {
+    const response = await fetchWithTimeout(url, { headers });
+    verboseResponse(response.status, response.statusText, Date.now() - startTime);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null;
+      }
+      const parsed = parseHttpError(response.status, response.statusText);
+      throw new Error(parsed.message);
+    }
+
+    const payload = await response.json() as RegistrySkillFilesResult;
+    if (!Array.isArray(payload.files)) {
+      return null;
+    }
+
+    return {
+      folderName: payload.folderName,
+      files: payload.files.filter((file) => (
+        typeof file?.path === 'string'
+        && typeof file?.content === 'string'
+      )),
+    };
   } catch (error) {
     if (error instanceof Error && !error.message.includes('Rate limit')) {
       const networkError = parseNetworkError(error);

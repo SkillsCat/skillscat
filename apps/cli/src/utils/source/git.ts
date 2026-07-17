@@ -4,6 +4,7 @@ import { SKILL_DISCOVERY_PATHS, parseSkillFrontmatter } from './source';
 import { calculateContentHash } from '../storage/cache';
 import { cacheGitHubBlob, cacheGitHubTree, getCachedGitHubBlob, getCachedGitHubTree } from '../storage/github-cache';
 import { githubRequest } from '../core/github-request';
+import { fetchWithTimeout } from '../core/fetch';
 
 const GITHUB_API = 'https://api.github.com';
 const GITHUB_RAW = 'https://raw.githubusercontent.com';
@@ -204,7 +205,7 @@ async function fetchGitHubRepoInfo(owner: string, repo: string): Promise<GitHubR
  */
 async function getGitLabDefaultBranch(owner: string, repo: string): Promise<string> {
   const projectPath = encodeURIComponent(`${owner}/${repo}`);
-  const response = await fetch(`${GITLAB_API}/projects/${projectPath}`, {
+  const response = await fetchWithTimeout(`${GITLAB_API}/projects/${projectPath}`, {
     headers: { 'User-Agent': 'skillscat-cli/1.0' }
   });
 
@@ -386,7 +387,7 @@ async function fetchGitLabFile(owner: string, repo: string, path: string, ref?: 
   const filePath = encodeURIComponent(path);
   const branch = ref || 'main';
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${GITLAB_API}/projects/${projectPath}/repository/files/${filePath}?ref=${branch}`,
     {
       headers: { 'User-Agent': 'skillscat-cli/1.0' }
@@ -395,7 +396,7 @@ async function fetchGitLabFile(owner: string, repo: string, path: string, ref?: 
 
   if (!response.ok) {
     // Try master branch
-    const masterResponse = await fetch(
+    const masterResponse = await fetchWithTimeout(
       `${GITLAB_API}/projects/${projectPath}/repository/files/${filePath}?ref=master`,
       {
         headers: { 'User-Agent': 'skillscat-cli/1.0' }
@@ -431,7 +432,7 @@ async function fetchGitLabTree(owner: string, repo: string, branch: string): Pro
   let page = 1;
 
   while (true) {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${GITLAB_API}/projects/${projectPath}/repository/tree?ref=${branch}&recursive=true&per_page=100&page=${page}`,
       {
         headers: { 'User-Agent': 'skillscat-cli/1.0' }

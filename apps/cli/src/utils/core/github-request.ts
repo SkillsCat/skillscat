@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from './fetch';
+
 const DEFAULT_API_VERSION = '2022-11-28';
 const DEFAULT_USER_AGENT = 'skillscat-cli/1.0';
 const DEFAULT_MAX_RETRIES = 3;
@@ -69,6 +71,7 @@ export interface GitHubRequestOptions extends Omit<RequestInit, 'headers'> {
   maxRetries?: number;
   retryableStatuses?: number[];
   maxDelayMs?: number;
+  timeoutMs?: number;
 }
 
 /**
@@ -86,6 +89,7 @@ export async function githubRequest(
     maxRetries = DEFAULT_MAX_RETRIES,
     retryableStatuses,
     maxDelayMs = 30_000,
+    timeoutMs,
     ...requestInit
   } = options;
 
@@ -108,9 +112,10 @@ export async function githubRequest(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         ...requestInit,
         headers,
+        timeoutMs,
       });
 
       const shouldRetry =

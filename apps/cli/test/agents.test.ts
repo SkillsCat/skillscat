@@ -44,6 +44,12 @@ describe('getAgentById', () => {
       projectPath: '.agents/',
     });
   });
+
+  it('resolves common global install aliases', () => {
+    expect(getAgentById('claude')).toMatchObject({ id: 'claude-code' });
+    expect(getAgentById('openai-codex')).toMatchObject({ id: 'codex' });
+    expect(getAgentById('open-code')).toMatchObject({ id: 'opencode' });
+  });
 });
 
 describe('detectPreferredAgents', () => {

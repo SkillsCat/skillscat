@@ -2,6 +2,7 @@ import { hostname, platform, release } from 'node:os';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
 import { getAuthPath, ensureConfigDir as ensureNewConfigDir, getRegistryUrl } from '../config/config';
+import { fetchWithTimeout } from '../core/fetch';
 
 const CONFIG_FILE = getAuthPath();
 
@@ -86,7 +87,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
   refreshTokenExpiresAt?: number;
 } | null> {
   try {
-    const response = await fetch(`${getBaseUrl()}/api/device/refresh`, {
+    const response = await fetchWithTimeout(`${getBaseUrl()}/api/device/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refreshToken }),
@@ -182,7 +183,7 @@ export async function getValidToken(): Promise<string | null> {
  */
 export async function validateAccessToken(token: string): Promise<AuthConfig['user'] | null> {
   try {
-    const response = await fetch(`${getBaseUrl()}/api/tokens/validate`, {
+    const response = await fetchWithTimeout(`${getBaseUrl()}/api/tokens/validate`, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -286,7 +287,7 @@ export async function initAuthSession(
   let response: Response;
 
   try {
-    response = await fetch(url, {
+    response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -331,7 +332,7 @@ export async function exchangeCodeForTokens(
     image?: string;
   };
 }> {
-  const response = await fetch(`${baseUrl}/auth/token`, {
+  const response = await fetchWithTimeout(`${baseUrl}/auth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
