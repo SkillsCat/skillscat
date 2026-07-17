@@ -95,6 +95,63 @@ describe('repo metadata queries', () => {
     expect(result.has('skill-missing')).toBe(false);
   });
 
+  it('dedupes repeated repositories while mapping metadata to every requested id', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      data: {
+        repo0: {
+          stargazerCount: 42,
+          forkCount: 7,
+          pushedAt: '2026-03-01T00:00:00Z',
+        },
+      },
+    }));
+
+    const result = await graphqlBatchRepoMetadata([
+      { owner: 'Good', name: 'Repo', id: 'skill-root' },
+      { owner: 'good', name: 'repo', id: 'skill-nested' },
+    ], {
+      token: 'test-token',
+      includeExtendedMetadata: false,
+    });
+
+    expect(result.get('skill-root')?.stargazerCount).toBe(42);
+    expect(result.get('skill-nested')?.stargazerCount).toBe(42);
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as { query: string };
+    expect(body.query.match(/repository\(owner:/g)).toHaveLength(1);
+    expect(body.query).not.toContain('repositoryTopics');
+  });
+
+  it('keeps completed chunks when a later metadata chunk fails', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse({
+        data: {
+          repo0: {
+            stargazerCount: 42,
+            forkCount: 7,
+            pushedAt: '2026-03-01T00:00:00Z',
+          },
+        },
+      }))
+      .mockRejectedValueOnce(new Error('upstream unavailable'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const repos = Array.from({ length: 51 }, (_, index) => ({
+      owner: 'good',
+      name: `repo-${index}`,
+      id: `skill-${index}`,
+    }));
+    const result = await graphqlBatchRepoMetadata(repos, {
+      token: 'test-token',
+      includeExtendedMetadata: false,
+      continueOnChunkError: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.get('skill-0')?.stargazerCount).toBe(42);
+    expect(result.has('skill-50')).toBe(false);
+  });
+
   it('returns null for unresolved resurrection metadata queries', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
       data: { repository: null },

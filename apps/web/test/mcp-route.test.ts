@@ -3,10 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('../src/lib/server/registry/search');
-  vi.unmock('../src/lib/server/registry/repo');
-  vi.unmock('../src/lib/server/skill/detail');
-  vi.unmock('../src/lib/server/skill/files');
+  vi.doUnmock('../src/lib/server/registry/search');
+  vi.doUnmock('../src/lib/server/registry/repo');
+  vi.doUnmock('../src/lib/server/skill/detail');
+  vi.doUnmock('../src/lib/server/skill/files');
 });
 
 describe('mcp route', () => {

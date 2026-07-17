@@ -352,18 +352,24 @@
     };
   });
 
+  function commitSearch(query = value) {
+    isFocused = false;
+    isFetchingSuggestions = false;
+    skillSuggestions = [];
+    addQueryToHistory(query);
+    onSearch?.(query);
+  }
+
   function handleSubmit(e: Event) {
     e.preventDefault();
-    isFocused = false;
-    addQueryToHistory(value);
-    onSearch?.(value);
+    commitSearch();
   }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
-      isFocused = false;
-      addQueryToHistory(value);
-      onSearch?.(value);
+      e.preventDefault();
+      e.stopPropagation();
+      commitSearch();
     } else if (e.key === 'Escape') {
       isFocused = false;
       inputElement?.blur();

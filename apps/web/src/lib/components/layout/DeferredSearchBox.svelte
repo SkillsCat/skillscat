@@ -62,9 +62,7 @@
     await loadingPromise;
   }
 
-  function handleFallbackSubmit(event: SubmitEvent) {
-    event.preventDefault();
-
+  function commitFallbackSearch() {
     const query = value.trim();
     if (!query) {
       return;
@@ -76,6 +74,21 @@
     }
 
     void goto(`/search?q=${encodeURIComponent(query)}`);
+  }
+
+  function handleFallbackSubmit(event: SubmitEvent) {
+    event.preventDefault();
+    commitFallbackSearch();
+  }
+
+  function handleFallbackKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Enter') {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    commitFallbackSearch();
   }
 
   onMount(() => {
@@ -142,6 +155,7 @@
         placeholder={placeholder}
         class="deferred-search-input"
         autocomplete="off"
+        onkeydown={handleFallbackKeydown}
         onfocus={() => void loadSearchBox({ autofocus: true })}
         onpointerdown={() => void loadSearchBox({ autofocus: true })}
       />

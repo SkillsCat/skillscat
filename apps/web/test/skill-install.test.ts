@@ -123,7 +123,7 @@ describe('buildAgentInstallPrompt', () => {
     });
 
     expect(prompt).toContain('Install this SkillsCat skill into the current workspace.');
-    expect(prompt).toContain('Command:\nnpx skillscat add testowner/testrepo/nested-skill');
+    expect(prompt).toContain('Command:\nnpx skillscat add testowner/testrepo/nested-skill --yes');
     expect(prompt).not.toContain('Preferred command:');
     expect(prompt).not.toContain('Fallback command:');
     expect(prompt).not.toContain('Alternate SkillsCat command:');

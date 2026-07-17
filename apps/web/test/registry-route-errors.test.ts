@@ -4,8 +4,8 @@ import { error as httpError } from '@sveltejs/kit';
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('../src/lib/server/registry/repo');
-  vi.unmock('../src/lib/server/registry/search');
+  vi.doUnmock('../src/lib/server/registry/repo');
+  vi.doUnmock('../src/lib/server/registry/search');
 });
 
 describe('registry route error handling', () => {

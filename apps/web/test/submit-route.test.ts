@@ -92,9 +92,9 @@ function buildDbMock(existingByPath: Record<string, MockExistingSkill> = {}) {
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('../src/lib/server/github-client/request');
-  vi.unmock('../src/lib/server/auth/middleware');
-  vi.unmock('../src/lib/server/skill/resurrection');
+  vi.doUnmock('../src/lib/server/github-client/request');
+  vi.doUnmock('../src/lib/server/auth/middleware');
+  vi.doUnmock('../src/lib/server/skill/resurrection');
 });
 
 describe('submit route', () => {

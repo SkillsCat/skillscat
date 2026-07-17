@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('../src/lib/server/cache');
-  vi.unmock('../src/lib/server/github-client/rest');
+  vi.doUnmock('../src/lib/server/cache');
+  vi.doUnmock('../src/lib/server/github-client/rest');
 });
 
 describe('parseSkillFilesInput', () => {

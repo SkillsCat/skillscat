@@ -62,7 +62,7 @@ function createMockR2(entries: Record<string, string>): R2Bucket {
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('../src/lib/server/github-client/rest');
+  vi.doUnmock('../src/lib/server/github-client/rest');
 });
 
 describe('resolveOpenClawBundleFiles', () => {
