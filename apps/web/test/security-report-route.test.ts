@@ -38,8 +38,8 @@ function createDbMock(steps: Step[]) {
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('$lib/server/auth/middleware');
-  vi.unmock('$lib/server/auth/permissions');
+  vi.doUnmock('$lib/server/auth/middleware');
+  vi.doUnmock('$lib/server/auth/permissions');
 });
 
 describe('skill report route', () => {

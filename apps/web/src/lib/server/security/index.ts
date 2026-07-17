@@ -79,6 +79,22 @@ const CODE_EXTENSIONS = new Set([
   'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cc', 'cpp', 'h',
   'hpp', 'php', 'lua', 'pl', 'r', 'scala'
 ]);
+const SECURITY_ANALYSIS_IGNORED_PREFIXES = [
+  '.github/',
+  '.gitlab/',
+  '.circleci/',
+  '.devcontainer/',
+];
+const SECURITY_ANALYSIS_IGNORED_FILES = new Set([
+  '.gitlab-ci.yml',
+  '.travis.yml',
+  'appveyor.yml',
+  'azure-pipelines.yml',
+  'bitbucket-pipelines.yml',
+  'circle.yml',
+  'jenkinsfile',
+  'renovate.json',
+]);
 
 const HEURISTIC_PATTERNS: Record<SecurityDimension, Array<{ pattern: RegExp; score: number; reason: string }>> = {
   prompt_injection: [
@@ -126,6 +142,23 @@ function extension(path: string): string {
   return index >= 0 ? name.slice(index + 1) : '';
 }
 
+function normalizeSecurityAnalysisPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
+}
+
+export function isIgnoredSecurityAnalysisPath(path: string): boolean {
+  const normalized = normalizeSecurityAnalysisPath(path);
+  if (!normalized) return true;
+  if (SECURITY_ANALYSIS_IGNORED_PREFIXES.some((prefix) => normalized.startsWith(prefix))) {
+    return true;
+  }
+  return SECURITY_ANALYSIS_IGNORED_FILES.has(normalized);
+}
+
+export function filterSecurityAnalysisFiles<T extends { path: string }>(files: T[]): T[] {
+  return files.filter((file) => !isIgnoredSecurityAnalysisPath(file.path));
+}
+
 export function classifySecurityFileKind(path: string, type: 'text' | 'binary'): SecurityFileKind {
   if (type === 'binary') {
     return 'binary';
@@ -166,7 +199,7 @@ export function isPureTextSkill(files: Array<Pick<SecurityFileInput, 'path' | 't
 }
 
 export async function buildSecurityContentFingerprint(files: Array<Pick<DirectoryFile, 'path' | 'sha' | 'size' | 'type'>>): Promise<string> {
-  const normalized = files
+  const normalized = filterSecurityAnalysisFiles(files)
     .map((file) => ({
       path: file.path,
       sha: file.sha || '',
@@ -302,6 +335,7 @@ export function normalizeSecurityFileScores(fileScores: SecurityFileScore[]): Se
 }
 
 export function runSecurityHeuristics(files: SecurityFileInput[]): SecurityHeuristicResult {
+  const analyzedFiles = filterSecurityAnalysisFiles(files);
   const counts = new Map<SecurityDimension, number>();
   const reasons = new Map<SecurityDimension, string[]>();
   const maxScores = new Map<SecurityDimension, number>();
@@ -315,7 +349,7 @@ export function runSecurityHeuristics(files: SecurityFileInput[]): SecurityHeuri
     maxScores.set(dimension, 0);
   }
 
-  for (const file of files) {
+  for (const file of analyzedFiles) {
     const fileKind = classifySecurityFileKind(file.path, file.type);
     if (fileKind === 'binary') {
       hasBinary = true;
@@ -384,7 +418,7 @@ export function runSecurityHeuristics(files: SecurityFileInput[]): SecurityHeuri
     maxScore: Math.max(...dimensions.map((dimension) => dimension.score), 0),
     hasExecutableSurface,
     hasBinary,
-    pureText: files.every((file) => isPureTextFileKind(classifySecurityFileKind(file.path, file.type))),
+    pureText: analyzedFiles.every((file) => isPureTextFileKind(classifySecurityFileKind(file.path, file.type))),
   };
 }
 
