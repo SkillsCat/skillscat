@@ -1,3 +1,4 @@
+import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { syncCategoryPublicStatsMock } = vi.hoisted(() => ({
@@ -11,6 +12,7 @@ vi.mock('../src/lib/server/db/business/stats', () => ({
 import { getSkillRefreshSelectColumns, resolveRefreshRepoMetrics } from '../workers/shared/trending/refresh';
 import {
   detectReclassificationNeeded,
+  loadRepoSiblingRefreshUpdates,
   queueTrendingHeadSecurityPremium,
   shouldRegenerateTrendingListCaches,
   syncUpdatedSkillCategoryStats,
@@ -64,6 +66,103 @@ describe('resolveRefreshRepoMetrics', () => {
     } as unknown as RefreshSkill;
 
     expect(resolveRefreshRepoMetrics(incompleteSkill, null)).toBeNull();
+  });
+});
+
+class SqliteD1Statement {
+  private params: unknown[] = [];
+
+  constructor(
+    private readonly db: DatabaseSync,
+    private readonly sql: string
+  ) {}
+
+  bind(...params: unknown[]) {
+    this.params = params;
+    return this;
+  }
+
+  async all<T>() {
+    const results = this.db.prepare(this.sql).all(...this.params) as T[];
+    return { results };
+  }
+}
+
+class SqliteD1Database {
+  constructor(private readonly db: DatabaseSync) {}
+
+  prepare(sql: string) {
+    return new SqliteD1Statement(this.db, sql);
+  }
+
+  async batch<T>(statements: SqliteD1Statement[]) {
+    return Promise.all(statements.map((statement) => statement.all<T>()));
+  }
+}
+
+function createRepoMetricsDb() {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE skills (
+      id TEXT PRIMARY KEY NOT NULL,
+      repo_owner TEXT,
+      repo_name TEXT,
+      stars INTEGER DEFAULT 0,
+      forks INTEGER DEFAULT 0,
+      star_snapshots TEXT,
+      indexed_at INTEGER NOT NULL,
+      last_commit_at INTEGER,
+      tier TEXT NOT NULL DEFAULT 'cold',
+      last_accessed_at INTEGER,
+      access_count_7d INTEGER NOT NULL DEFAULT 0,
+      download_count_7d INTEGER NOT NULL DEFAULT 0,
+      next_update_at INTEGER,
+      source_type TEXT DEFAULT 'github'
+    );
+  `);
+  return db;
+}
+
+describe('loadRepoSiblingRefreshUpdates', () => {
+  it('recomputes all derived fields for changed skills from the same repository', async () => {
+    const sqlite = createRepoMetricsDb();
+    sqlite.exec(`
+      INSERT INTO skills (
+        id, repo_owner, repo_name, stars, forks, star_snapshots, indexed_at,
+        last_commit_at, tier, last_accessed_at, access_count_7d,
+        download_count_7d, next_update_at, source_type
+      ) VALUES
+        ('selected', 'backrunner', 'skillscat', 42, 8, '[]', 1700000000000, 1700000000000, 'cool', NULL, 0, 0, NULL, 'github'),
+        ('nested', 'backrunner', 'skillscat', 17, 3, 'not-json', 1700000000000, 1700000000000, 'cool', NULL, 0, 0, NULL, 'github'),
+        ('archived', 'backrunner', 'skillscat', 17, 3, '[]', 1700000000000, 1700000000000, 'archived', NULL, 0, 0, NULL, 'github'),
+        ('upload', 'backrunner', 'skillscat', 99, 20, '[]', 1700000000000, 1700000000000, 'cool', NULL, 0, 0, NULL, 'upload'),
+        ('other', 'backrunner', 'another', 5, 1, '[]', 1700000000000, 1700000000000, 'cold', NULL, 0, 0, NULL, 'github');
+    `);
+
+    const updates = await loadRepoSiblingRefreshUpdates(
+      new SqliteD1Database(sqlite) as never,
+      [{
+        owner: 'backrunner',
+        name: 'skillscat',
+        stars: 42,
+        forks: 8,
+        pushedAt: '2026-07-15T00:00:00Z',
+      }],
+      ['selected']
+    );
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({
+      id: 'nested',
+      stars: 42,
+      forks: 8,
+      tier: 'cool',
+    });
+    expect(updates[0]?.score).toBeGreaterThan(0);
+    expect(updates[0]?.nextUpdateAt).toBeGreaterThan(Date.now());
+    expect(JSON.parse(updates[0]?.starSnapshots || '[]')).toContainEqual(
+      expect.objectContaining({ s: 42 })
+    );
   });
 });
 
