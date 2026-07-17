@@ -10,7 +10,10 @@
  */
 
 import type { BaseEnv, GitHubGraphQLRepoData, SkillTier, ExecutionContext, ScheduledController } from './shared/types';
-import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
+import {
+  estimateGraphqlBatchRepoMetadataCalls,
+  graphqlBatchRepoMetadata,
+} from '../src/lib/server/github-client/queries';
 import { getGitHubRequestAuthFromEnv, hasGitHubAuthConfigured } from '../src/lib/server/github-client/env';
 import { restoreArchivedSkillFromR2 } from '../src/lib/server/skill/resurrection';
 
@@ -22,23 +25,10 @@ interface ArchivedSkill {
   repo_name: string;
 }
 
-const BATCH_SIZE = 50;
-
 // Resurrection thresholds
 const QUARTERLY_STAR_THRESHOLD = 50;
 const USER_ACCESS_STAR_THRESHOLD = 20;
 const RECENT_ACTIVITY_DAYS = 90;
-
-/**
- * Split array into chunks
- */
-function chunks<T>(arr: T[], size: number): T[][] {
-  const result: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) {
-    result.push(arr.slice(i, i + size));
-  }
-  return result;
-}
 
 /**
  * Check if a date is within recent activity window
@@ -67,6 +57,8 @@ async function batchFetchGitHubRepos(
     const batch = await graphqlBatchRepoMetadata(repos, {
       ...getGitHubRequestAuthFromEnv(env),
       userAgent: 'SkillsCat-Resurrection-Worker/1.0',
+      includeExtendedMetadata: false,
+      continueOnChunkError: true,
     });
     batch.forEach((value, key) => {
       results.set(key, value as GitHubGraphQLRepoData);
@@ -241,46 +233,38 @@ export default {
     let failed = 0;
     let githubCalls = 0;
 
-    // Process in batches
-    const batches = chunks(archived.results, BATCH_SIZE);
+    const reposToFetch = archived.results.map(s => ({
+      owner: s.repo_owner,
+      name: s.repo_name,
+      id: s.id,
+    }));
 
-    for (const batch of batches) {
-      githubCalls++;
+    githubCalls = hasGitHubAuthConfigured(env)
+      ? estimateGraphqlBatchRepoMetadataCalls(reposToFetch)
+      : 0;
 
-      const reposToFetch = batch.map(s => ({
-        owner: s.repo_owner,
-        name: s.repo_name,
-        id: s.id,
-      }));
+    const githubData = await batchFetchGitHubRepos(reposToFetch, env);
 
-      const githubData = await batchFetchGitHubRepos(reposToFetch, env);
-
-      for (const skill of batch) {
-        const data = githubData.get(skill.id);
-        if (!data) {
-          failed++;
-          continue;
-        }
-
-        // Check resurrection conditions (high threshold for batch)
-        const shouldResurrect =
-          data.stargazerCount >= QUARTERLY_STAR_THRESHOLD ||
-          isRecentlyActive(data.pushedAt, RECENT_ACTIVITY_DAYS);
-
-        if (shouldResurrect) {
-          const success = await resurrectSkill(env, skill.id, data.stargazerCount);
-          if (success) {
-            resurrected++;
-            console.log(`Resurrected: ${skill.repo_owner}/${skill.repo_name} (stars: ${data.stargazerCount})`);
-          } else {
-            failed++;
-          }
-        }
+    for (const skill of archived.results) {
+      const data = githubData.get(skill.id);
+      if (!data) {
+        failed++;
+        continue;
       }
 
-      // Rate limiting: wait between batches
-      if (batches.indexOf(batch) < batches.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      // Check resurrection conditions (high threshold for batch)
+      const shouldResurrect =
+        data.stargazerCount >= QUARTERLY_STAR_THRESHOLD ||
+        isRecentlyActive(data.pushedAt, RECENT_ACTIVITY_DAYS);
+
+      if (shouldResurrect) {
+        const success = await resurrectSkill(env, skill.id, data.stargazerCount);
+        if (success) {
+          resurrected++;
+          console.log(`Resurrected: ${skill.repo_owner}/${skill.repo_name} (stars: ${data.stargazerCount})`);
+        } else {
+          failed++;
+        }
       }
     }
 

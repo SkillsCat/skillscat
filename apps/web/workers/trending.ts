@@ -29,7 +29,10 @@ import {
   syncCategoryPublicStats,
   writeCachedPublicStats,
 } from '../src/lib/server/db/business/stats';
-import { graphqlBatchRepoMetadata } from '../src/lib/server/github-client/queries';
+import {
+  estimateGraphqlBatchRepoMetadataCalls,
+  graphqlBatchRepoMetadata,
+} from '../src/lib/server/github-client/queries';
 import { buildRecentActivitySortSql, getNonlinearStarScore, buildTopRatedSortScoreSql } from '../src/lib/server/ranking';
 import { markSearchDirtyBatch } from '../src/lib/server/ranking/search-precompute';
 import {
@@ -43,13 +46,14 @@ import {
 import { getGitHubRequestAuthFromEnv, hasGitHubAuthConfigured } from '../src/lib/server/github-client/env';
 import { createDurableObjectKvStore } from '../src/lib/server/state/client';
 
-const BATCH_SIZE = 50; // GitHub GraphQL limit
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 const SKILL_REFRESH_SELECT_COLUMNS = getSkillRefreshSelectColumns();
 const DAILY_METRICS_RETENTION_DAYS = 95;
 const D1_SAFE_IN_CLAUSE_BATCH_SIZE = 90;
 const CATEGORY_STATS_SYNC_SKILL_BATCH_SIZE = D1_SAFE_IN_CLAUSE_BATCH_SIZE;
+const D1_SKILL_UPDATE_BATCH_SIZE = 50;
+const D1_REPO_REFRESH_LOOKUP_BATCH_SIZE = 40;
 
 function getTrendingStateStore(env: TrendingEnv): KVNamespace {
   return createDurableObjectKvStore(env.STATE_DO, {
@@ -203,6 +207,8 @@ async function batchFetchGitHubRepos(
     const batch = await graphqlBatchRepoMetadata(repos, {
       ...getGitHubRequestAuthFromEnv(env),
       userAgent: 'SkillsCat-Trending-Worker/2.0',
+      includeExtendedMetadata: false,
+      continueOnChunkError: true,
     });
     batch.forEach((value, key) => {
       results.set(key, value as GitHubGraphQLRepoData);
@@ -212,6 +218,207 @@ async function batchFetchGitHubRepos(
   }
 
   return results;
+}
+
+interface SkillRefreshUpdate {
+  id: string;
+  stars: number;
+  forks: number;
+  starSnapshots: string;
+  score: number;
+  tier: SkillTier;
+  nextUpdateAt: number | null;
+}
+
+interface RepoMetricSync {
+  owner: string;
+  name: string;
+  stars: number;
+  forks: number;
+  pushedAt: string | null;
+}
+
+interface SkillRefreshRunResult {
+  count: number;
+  updatedIds: string[];
+  githubApiCalls: number;
+}
+
+function getRepoMetricSyncKey(owner: string, name: string): string {
+  return `${owner.toLowerCase()}/${name.toLowerCase()}`;
+}
+
+function parseStoredStarSnapshots(skill: Pick<SkillRecord, 'id' | 'star_snapshots'>): StarSnapshot[] {
+  if (!skill.star_snapshots) return [];
+
+  try {
+    const parsed = JSON.parse(skill.star_snapshots) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed.filter((entry): entry is StarSnapshot => (
+        typeof entry === 'object'
+        && entry !== null
+        && typeof (entry as { d?: unknown }).d === 'string'
+        && typeof (entry as { s?: unknown }).s === 'number'
+        && Number.isFinite((entry as { s: number }).s)
+      ));
+    }
+  } catch {
+    // Invalid legacy snapshots are replaced on the next successful refresh.
+  }
+
+  console.warn(`Ignoring invalid star snapshots for skill ${skill.id}`);
+  return [];
+}
+
+function buildSkillRefreshUpdate(
+  skill: SkillRecord,
+  ghData: GitHubGraphQLRepoData | undefined,
+  options: { requireGithubData: boolean }
+): SkillRefreshUpdate | null {
+  if (options.requireGithubData && !ghData) {
+    return null;
+  }
+
+  const repoMetrics = resolveRefreshRepoMetrics(skill, ghData);
+  if (!repoMetrics) {
+    return null;
+  }
+
+  const snapshots = parseStoredStarSnapshots(skill);
+
+  if (ghData && repoMetrics.stars !== skill.stars) {
+    snapshots.push({
+      d: new Date().toISOString().split('T')[0],
+      s: repoMetrics.stars,
+    });
+  }
+
+  const compressed = compressSnapshots(snapshots);
+
+  const score = calculateTrendingScore({
+    stars: repoMetrics.stars,
+    starSnapshots: compressed,
+    indexedAt: skill.indexed_at,
+    lastCommitAt: repoMetrics.lastCommitAt,
+    downloadCount7d: skill.download_count_7d,
+  });
+
+  const tier = calculateTier({
+    stars: repoMetrics.stars,
+    lastAccessedAt: skill.last_accessed_at,
+    accessCount7d: skill.access_count_7d,
+  });
+
+  return {
+    id: skill.id,
+    stars: repoMetrics.stars,
+    forks: repoMetrics.forks,
+    starSnapshots: JSON.stringify(compressed),
+    score,
+    tier,
+    nextUpdateAt: getNextUpdateTime(tier),
+  };
+}
+
+function rememberRepoMetricSync(
+  syncs: Map<string, RepoMetricSync>,
+  skill: SkillRecord,
+  update: Pick<SkillRefreshUpdate, 'stars' | 'forks'>,
+  ghData: GitHubGraphQLRepoData | undefined
+): void {
+  if (!ghData) return;
+
+  syncs.set(getRepoMetricSyncKey(skill.repo_owner, skill.repo_name), {
+    owner: skill.repo_owner,
+    name: skill.repo_name,
+    stars: update.stars,
+    forks: update.forks,
+    pushedAt: ghData.pushedAt,
+  });
+}
+
+export async function loadRepoSiblingRefreshUpdates(
+  db: D1Database,
+  repoMetricSyncs: RepoMetricSync[],
+  selectedSkillIds: string[]
+): Promise<SkillRefreshUpdate[]> {
+  const siblingUpdates: SkillRefreshUpdate[] = [];
+  if (repoMetricSyncs.length === 0) {
+    return siblingUpdates;
+  }
+
+  const selectedIds = new Set(selectedSkillIds);
+  const syncByRepo = new Map(
+    repoMetricSyncs.map((sync) => [getRepoMetricSyncKey(sync.owner, sync.name), sync])
+  );
+
+  for (let i = 0; i < repoMetricSyncs.length; i += D1_REPO_REFRESH_LOOKUP_BATCH_SIZE) {
+    const chunk = repoMetricSyncs.slice(i, i + D1_REPO_REFRESH_LOOKUP_BATCH_SIZE);
+    const repoPredicates = chunk.map(() => '(repo_owner = ? AND repo_name = ?)').join(' OR ');
+    const result = await db.prepare(`
+      SELECT ${SKILL_REFRESH_SELECT_COLUMNS}
+      FROM skills
+      WHERE source_type = 'github'
+        AND tier != 'archived'
+        AND (${repoPredicates})
+    `)
+      .bind(...chunk.flatMap((sync) => [sync.owner, sync.name]))
+      .all<SkillRecord>();
+
+    for (const skill of result.results || []) {
+      if (selectedIds.has(skill.id)) continue;
+
+      const sync = syncByRepo.get(getRepoMetricSyncKey(skill.repo_owner, skill.repo_name));
+      if (!sync || (skill.stars === sync.stars && skill.forks === sync.forks)) continue;
+
+      const update = buildSkillRefreshUpdate(skill, {
+        stargazerCount: sync.stars,
+        forkCount: sync.forks,
+        pushedAt: sync.pushedAt,
+        description: null,
+        repositoryTopics: { nodes: [] },
+      }, { requireGithubData: true });
+      if (update) {
+        siblingUpdates.push(update);
+      }
+    }
+  }
+
+  return siblingUpdates;
+}
+
+async function applySkillRefreshUpdates(
+  env: TrendingEnv,
+  updates: SkillRefreshUpdate[],
+  repoMetricSyncs: RepoMetricSync[]
+): Promise<string[]> {
+  const siblingUpdates = await loadRepoSiblingRefreshUpdates(
+    env.DB,
+    repoMetricSyncs,
+    updates.map((update) => update.id)
+  );
+  const allUpdates = [...updates, ...siblingUpdates];
+  const updatedIds = allUpdates.map((update) => update.id);
+
+  if (allUpdates.length > 0) {
+    const statement = env.DB.prepare(`
+      UPDATE skills
+      SET stars = ?, forks = ?, star_snapshots = ?,
+          trending_score = ?, tier = ?, next_update_at = ?
+      WHERE id = ?
+    `);
+
+    for (let i = 0; i < allUpdates.length; i += D1_SKILL_UPDATE_BATCH_SIZE) {
+      const chunk = allUpdates.slice(i, i + D1_SKILL_UPDATE_BATCH_SIZE);
+      await env.DB.batch(
+        chunk.map((u) =>
+          statement.bind(u.stars, u.forks, u.starSnapshots, u.score, u.tier, u.nextUpdateAt, u.id)
+        )
+      );
+    }
+  }
+
+  return Array.from(new Set(updatedIds));
 }
 
 /**
@@ -263,7 +470,7 @@ function getNextUpdateTime(tier: SkillTier): number | null {
  */
 async function updateMarkedSkills(
   env: TrendingEnv
-): Promise<{ count: number; updatedIds: string[] }> {
+): Promise<SkillRefreshRunResult> {
   const skills = await env.DB.prepare(`
     SELECT ${SKILL_REFRESH_SELECT_COLUMNS}
     FROM skills INDEXED BY skills_next_update_idx
@@ -275,7 +482,7 @@ async function updateMarkedSkills(
     .all<SkillRecord>();
 
   if (skills.results.length === 0) {
-    return { count: 0, updatedIds: [] };
+    return { count: 0, updatedIds: [], githubApiCalls: 0 };
   }
 
   // Batch fetch from GitHub
@@ -286,82 +493,31 @@ async function updateMarkedSkills(
   }));
 
   const githubData = await batchFetchGitHubRepos(reposToFetch, env);
+  const githubApiCalls = hasGitHubAuthConfigured(env)
+    ? estimateGraphqlBatchRepoMetadataCalls(reposToFetch)
+    : 0;
 
-  const updates: Array<{
-    id: string;
-    stars: number;
-    forks: number;
-    starSnapshots: string;
-    score: number;
-    tier: SkillTier;
-    nextUpdateAt: number | null;
-  }> = [];
+  const updates: SkillRefreshUpdate[] = [];
+  const repoMetricSyncs = new Map<string, RepoMetricSync>();
 
   for (const skill of skills.results) {
     const ghData = githubData.get(skill.id);
-    if (!ghData) continue;
-
-    const snapshots: StarSnapshot[] = skill.star_snapshots
-      ? JSON.parse(skill.star_snapshots)
-      : [];
-
-    const repoMetrics = resolveRefreshRepoMetrics(skill, ghData);
-    if (!repoMetrics) {
+    const update = buildSkillRefreshUpdate(skill, ghData, { requireGithubData: true });
+    if (!update) {
       console.warn(`Skipping marked skill ${skill.id}: repo metrics unavailable`);
       continue;
     }
 
-    const newStars = repoMetrics.stars;
-    if (newStars !== skill.stars) {
-      snapshots.push({
-        d: new Date().toISOString().split('T')[0],
-        s: newStars,
-      });
-    }
-
-    const compressed = compressSnapshots(snapshots);
-
-    const score = calculateTrendingScore({
-      stars: newStars,
-      starSnapshots: compressed,
-      indexedAt: skill.indexed_at,
-      lastCommitAt: repoMetrics.lastCommitAt,
-      downloadCount7d: skill.download_count_7d,
-    });
-
-    const newTier = calculateTier({
-      stars: newStars,
-      lastAccessedAt: skill.last_accessed_at,
-      accessCount7d: skill.access_count_7d,
-    });
-
-    updates.push({
-      id: skill.id,
-      stars: newStars,
-      forks: repoMetrics.forks,
-      starSnapshots: JSON.stringify(compressed),
-      score,
-      tier: newTier,
-      nextUpdateAt: getNextUpdateTime(newTier),
-    });
+    updates.push(update);
+    rememberRepoMetricSync(repoMetricSyncs, skill, update, ghData);
   }
 
-  if (updates.length > 0) {
-    const statements = updates.map((u) =>
-      env.DB.prepare(`
-        UPDATE skills
-        SET stars = ?, forks = ?, star_snapshots = ?,
-            trending_score = ?, tier = ?, next_update_at = ?
-        WHERE id = ?
-      `).bind(u.stars, u.forks, u.starSnapshots, u.score, u.tier, u.nextUpdateAt, u.id)
-    );
-
-    await env.DB.batch(statements);
-  }
+  const updatedIds = await applySkillRefreshUpdates(env, updates, Array.from(repoMetricSyncs.values()));
 
   return {
-    count: updates.length,
-    updatedIds: updates.map((update) => update.id),
+    count: updatedIds.length,
+    updatedIds,
+    githubApiCalls,
   };
 }
 
@@ -423,7 +579,7 @@ async function updateSkillsByTier(
   env: TrendingEnv,
   tiers: SkillTier[],
   limit: number
-): Promise<{ count: number; updatedIds: string[] }> {
+): Promise<SkillRefreshRunResult> {
   const now = Date.now();
   const tierPlaceholders = tiers.map(() => '?').join(',');
   const skillSelectSql = `
@@ -474,101 +630,39 @@ async function updateSkillsByTier(
   }
 
   if (selectedSkills.length === 0) {
-    return { count: 0, updatedIds: [] };
+    return { count: 0, updatedIds: [], githubApiCalls: 0 };
   }
 
   console.log(`Processing ${selectedSkills.length} skills from tiers: ${tiers.join(', ')}`);
 
-  // Process in batches of BATCH_SIZE for GraphQL
-  let totalUpdated = 0;
-  const allUpdatedIds: string[] = [];
+  const reposToFetch = selectedSkills.map(s => ({
+    owner: s.repo_owner,
+    name: s.repo_name,
+    id: s.id,
+  }));
 
-  for (let i = 0; i < selectedSkills.length; i += BATCH_SIZE) {
-    const batch = selectedSkills.slice(i, i + BATCH_SIZE);
-    const reposToFetch = batch.map(s => ({
-      owner: s.repo_owner,
-      name: s.repo_name,
-      id: s.id,
-    }));
+  const githubData = await batchFetchGitHubRepos(reposToFetch, env);
+  const githubApiCalls = hasGitHubAuthConfigured(env)
+    ? estimateGraphqlBatchRepoMetadataCalls(reposToFetch)
+    : 0;
+  const updates: SkillRefreshUpdate[] = [];
+  const repoMetricSyncs = new Map<string, RepoMetricSync>();
 
-    const githubData = await batchFetchGitHubRepos(reposToFetch, env);
-
-    const updates: Array<{
-      id: string;
-      stars: number;
-      forks: number;
-      starSnapshots: string;
-      score: number;
-      tier: SkillTier;
-      nextUpdateAt: number | null;
-    }> = [];
-
-    for (const skill of batch) {
-      const ghData = githubData.get(skill.id);
-
-      const repoMetrics = resolveRefreshRepoMetrics(skill, ghData);
-      if (!repoMetrics) {
-        console.warn(`Skipping tier refresh for ${skill.id}: repo metrics unavailable`);
-        continue;
-      }
-
-      const newStars = repoMetrics.stars;
-
-      const snapshots: StarSnapshot[] = skill.star_snapshots
-        ? JSON.parse(skill.star_snapshots)
-        : [];
-
-      if (ghData && newStars !== skill.stars) {
-        snapshots.push({
-          d: new Date().toISOString().split('T')[0],
-          s: newStars,
-        });
-      }
-
-      const compressed = compressSnapshots(snapshots);
-
-      const score = calculateTrendingScore({
-        stars: newStars,
-        starSnapshots: compressed,
-        indexedAt: skill.indexed_at,
-        lastCommitAt: repoMetrics.lastCommitAt,
-        downloadCount7d: skill.download_count_7d,
-      });
-
-      const newTier = calculateTier({
-        stars: newStars,
-        lastAccessedAt: skill.last_accessed_at,
-        accessCount7d: skill.access_count_7d,
-      });
-
-      updates.push({
-        id: skill.id,
-        stars: newStars,
-        forks: repoMetrics.forks,
-        starSnapshots: JSON.stringify(compressed),
-        score,
-        tier: newTier,
-        nextUpdateAt: getNextUpdateTime(newTier),
-      });
+  for (const skill of selectedSkills) {
+    const ghData = githubData.get(skill.id);
+    const update = buildSkillRefreshUpdate(skill, ghData, { requireGithubData: false });
+    if (!update) {
+      console.warn(`Skipping tier refresh for ${skill.id}: repo metrics unavailable`);
+      continue;
     }
 
-    if (updates.length > 0) {
-      const statements = updates.map((u) =>
-        env.DB.prepare(`
-          UPDATE skills
-          SET stars = ?, forks = ?, star_snapshots = ?,
-              trending_score = ?, tier = ?, next_update_at = ?
-          WHERE id = ?
-        `).bind(u.stars, u.forks, u.starSnapshots, u.score, u.tier, u.nextUpdateAt, u.id)
-      );
-
-      await env.DB.batch(statements);
-      totalUpdated += updates.length;
-      allUpdatedIds.push(...updates.map(u => u.id));
-    }
+    updates.push(update);
+    rememberRepoMetricSync(repoMetricSyncs, skill, update, ghData);
   }
 
-  return { count: totalUpdated, updatedIds: allUpdatedIds };
+  const allUpdatedIds = await applySkillRefreshUpdates(env, updates, Array.from(repoMetricSyncs.values()));
+
+  return { count: allUpdatedIds.length, updatedIds: allUpdatedIds, githubApiCalls };
 }
 
 /**
@@ -1123,9 +1217,10 @@ export default {
     }
 
     // 8. Record metrics
-    const totalBatches = Math.ceil(
-      (markedResult.count + hotResult.count + warmResult.count + coolResult.count) / BATCH_SIZE
-    );
+    const totalBatches = markedResult.githubApiCalls
+      + hotResult.githubApiCalls
+      + warmResult.githubApiCalls
+      + coolResult.githubApiCalls;
     await recordMetrics(env, {
       markedUpdates: markedResult.count,
       hotUpdates: hotResult.count,
