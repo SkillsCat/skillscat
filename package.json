@@ -6,7 +6,7 @@
   "repository": "https://github.com/backrunner/skillscat",
   "license": "AGPL-3.0",
   "type": "module",
-  "packageManager": "pnpm@10.33.4",
+  "packageManager": "pnpm@11.10.0",
   "scripts": {
     "init:project": "node scripts/init.mjs",
     "init:local": "node scripts/init.mjs --local",
@@ -74,17 +74,11 @@
     "test:cli:all": "pnpm --filter ./apps/cli test:all"
   },
   "devDependencies": {
-    "eslint": "^9.39.4",
-    "eslint-plugin-svelte": "^3.17.1",
+    "eslint": "^10.6.0",
+    "eslint-plugin-svelte": "^3.20.0",
     "eslint-plugin-unused-imports": "^4.4.1",
-    "svelte-eslint-parser": "^1.6.1",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.59.3"
-  },
-  "pnpm": {
-    "overrides": {
-      "@esbuild-kit/core-utils>esbuild": "^0.25.12",
-      "cookie": "^0.7.2"
-    }
+    "svelte-eslint-parser": "^1.8.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.62.1"
   }
 }

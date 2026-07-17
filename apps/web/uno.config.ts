@@ -1,5 +1,4 @@
 import { defineConfig, presetWind, presetIcons } from 'unocss';
-import transformerDirectives from '@unocss/transformer-directives';
 
 export default defineConfig({
   presets: [
@@ -9,7 +8,6 @@ export default defineConfig({
       cdn: 'https://esm.sh/'
     })
   ],
-  transformers: [transformerDirectives()],
   safelist: [
     // Grid classes used dynamically in Grid.svelte
     'grid',
