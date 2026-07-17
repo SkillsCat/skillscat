@@ -296,11 +296,13 @@ async function buildSkillFilesData(
     r2,
     githubToken,
     githubRateLimitKV,
+    waitUntil,
   }: {
     skill: SkillInfo;
     r2: R2Bucket;
     githubToken?: string;
     githubRateLimitKV?: KVNamespace;
+    waitUntil?: WaitUntilFn;
   }
 ): Promise<SkillFilesResult> {
   const files: SkillFile[] = [];
@@ -367,7 +369,14 @@ async function buildSkillFilesData(
           );
 
           if (githubFiles.length > 0) {
-            await updateR2Cache(r2, r2Prefix, githubFiles, latestCommit.sha);
+            const cacheWrite = updateR2Cache(r2, r2Prefix, githubFiles, latestCommit.sha).catch(() => {
+              // Best-effort cache refresh; the response already has the fresh files.
+            });
+            if (waitUntil) {
+              waitUntil(cacheWrite);
+            } else {
+              await cacheWrite;
+            }
             files.push(...githubFiles);
           } else {
             files.push(...r2Files);
@@ -438,7 +447,7 @@ export async function resolveSkillFiles(
         }
 
         return {
-          result: await buildSkillFilesData({ skill, r2, githubToken, githubRateLimitKV }),
+          result: await buildSkillFilesData({ skill, r2, githubToken, githubRateLimitKV, waitUntil }),
         };
       },
       PUBLIC_CACHE_TTL_SECONDS,
@@ -479,7 +488,7 @@ export async function resolveSkillFiles(
     }
   }
 
-  const result = await buildSkillFilesData({ skill: bypassSkill, r2, githubToken, githubRateLimitKV });
+  const result = await buildSkillFilesData({ skill: bypassSkill, r2, githubToken, githubRateLimitKV, waitUntil });
 
   return {
     data: result,

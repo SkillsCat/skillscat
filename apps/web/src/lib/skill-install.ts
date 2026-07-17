@@ -117,7 +117,7 @@ export function buildAgentInstallPrompt(target: SkillInstallTarget): string {
   lines.push(`Skill page: ${buildSkillPageUrl(target.slug)}`);
   lines.push('');
   lines.push('Command:');
-  lines.push(skillscatCommand);
+  lines.push(`${skillscatCommand} --yes`);
 
   if (visibilityNote) {
     lines.push('');
@@ -125,7 +125,7 @@ export function buildAgentInstallPrompt(target: SkillInstallTarget): string {
   }
 
   lines.push('');
-  lines.push('If CLI installation is not possible, use this SkillsCat bundle endpoint instead and preserve nested file paths exactly:');
+  lines.push('If CLI installation is not possible or the command times out, use this SkillsCat bundle endpoint instead and preserve nested file paths exactly:');
   lines.push(buildSkillFilesUrl(target.slug));
   lines.push('');
   lines.push('After installing, tell me where the skill was written and what changed.');

@@ -1,6 +1,5 @@
 import { getCached } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
-import { getAccessibleSkillIds } from '$lib/server/auth/permissions';
 import { normalizeSearchText } from '$lib/server/ranking/search-precompute';
 import { buildPrefixRange, type PrefixRange } from '$lib/server/text/prefix-range';
 
@@ -49,6 +48,11 @@ export interface ResolvedRegistrySearch {
   data: RegistrySearchResult;
   cacheControl: string;
   cacheStatus: 'HIT' | 'MISS' | 'BYPASS';
+}
+
+interface RegistrySearchAccess {
+  userId: string | null;
+  now: number;
 }
 
 function parseClampedInt(raw: unknown, fallback: number, min: number, max: number): number {
@@ -149,6 +153,18 @@ function buildPrefixRangeParams(range: PrefixRange): string[] {
   return [range.start];
 }
 
+function deriveExactTotalFromLoadedPage(input: RegistrySearchInput, loadedIds: string[]): number | null {
+  if (input.offset === 0) {
+    return loadedIds.length <= input.limit ? loadedIds.length : null;
+  }
+
+  if (loadedIds.length > 0 && loadedIds.length < input.limit) {
+    return input.offset + loadedIds.length;
+  }
+
+  return null;
+}
+
 async function hasSearchTermsTable(db: D1Database): Promise<boolean> {
   if (hasSkillSearchTermsTable !== null) {
     return hasSkillSearchTermsTable;
@@ -216,14 +232,14 @@ export async function resolveRegistrySearch(
   }
 
   let canIncludePrivate = false;
-  let accessiblePrivateIds: string[] = [];
+  let access: RegistrySearchAccess = { userId: null, now: Date.now() };
 
   if (input.includePrivate) {
     const auth = await getAuthContext(request, locals, db);
     if (auth.userId) {
       requireScope(auth, 'read');
       canIncludePrivate = true;
-      accessiblePrivateIds = await getAccessibleSkillIds(auth.userId, db);
+      access = { userId: auth.userId, now: Date.now() };
     }
   }
 
@@ -235,7 +251,7 @@ export async function resolveRegistrySearch(
     const cacheKey = `search:${REGISTRY_SEARCH_CACHE_VERSION}:${input.query}:${input.category}:${cacheLimit}:${input.offset}`;
     const cached = await getCached(
       cacheKey,
-      async () => fetchSearchResults(db, { ...input, limit: cacheLimit }, []),
+      async () => fetchSearchResults(db, { ...input, limit: cacheLimit }, { userId: null, now: Date.now() }),
       REGISTRY_SEARCH_CACHE_TTL_SECONDS,
       { waitUntil }
     );
@@ -252,46 +268,57 @@ export async function resolveRegistrySearch(
   }
 
   return {
-    data: await fetchSearchResults(db, input, accessiblePrivateIds),
+    data: await fetchSearchResults(db, input, access),
     cacheControl: 'private, no-cache',
     cacheStatus: 'BYPASS',
   };
 }
 
 function buildVisibilityFilter(
-  accessiblePrivateIds: string[],
+  access: RegistrySearchAccess,
   tableAlias: string
-): { sql: string; params: string[] } {
-  if (accessiblePrivateIds.length === 0) {
+): { sql: string; params: Array<string | number> } {
+  if (!access.userId) {
     return {
       sql: `${tableAlias}.visibility = 'public'`,
       params: []
     };
   }
 
-  const placeholders = accessiblePrivateIds.map(() => '?').join(',');
   return {
-    sql: `(${tableAlias}.visibility = 'public' OR ${tableAlias}.id IN (${placeholders}))`,
-    params: [...accessiblePrivateIds]
+    sql: `(
+      ${tableAlias}.visibility = 'public'
+      OR ${tableAlias}.owner_id = ?
+      OR ${tableAlias}.org_id IN (
+        SELECT org_id
+        FROM org_members
+        WHERE user_id = ?
+      )
+      OR ${tableAlias}.id IN (
+        SELECT skill_id
+        FROM skill_permissions
+        WHERE grantee_type = 'user'
+          AND grantee_id = ?
+          AND (expires_at IS NULL OR expires_at > ?)
+      )
+    )`,
+    params: [access.userId, access.userId, access.userId, access.now]
   };
 }
 
 async function fetchSearchResults(
   db: D1Database,
   input: RegistrySearchInput,
-  accessiblePrivateIds: string[]
+  access: RegistrySearchAccess
 ): Promise<RegistrySearchResult> {
-  const visibilityFilter = buildVisibilityFilter(accessiblePrivateIds, 's');
-  const queryLimit = input.offset === 0 ? input.limit + 1 : input.limit;
   const normalizedQuery = normalizeSearchQuery(input.query);
-  const queryTokens = splitQueryTokens(normalizedQuery);
   const searchTermsEnabled = normalizedQuery
     ? await hasSearchTermsTable(db)
     : false;
 
   if (normalizedQuery && searchTermsEnabled) {
     try {
-      return await fetchSearchTermResults(db, input, accessiblePrivateIds);
+      return await fetchSearchTermResults(db, input, access);
     } catch (error) {
       if (!isSearchTermQueryTooComplexError(error)) {
         throw error;
@@ -301,7 +328,7 @@ async function fetchSearchResults(
     }
   }
 
-  return fetchSimpleSearchResults(db, input, accessiblePrivateIds);
+  return fetchSimpleSearchResults(db, input, access);
 }
 
 function isSearchTermQueryTooComplexError(error: unknown): boolean {
@@ -312,9 +339,9 @@ function isSearchTermQueryTooComplexError(error: unknown): boolean {
 async function fetchSearchTermResults(
   db: D1Database,
   input: RegistrySearchInput,
-  accessiblePrivateIds: string[]
+  access: RegistrySearchAccess
 ): Promise<RegistrySearchResult> {
-  const visibilityFilter = buildVisibilityFilter(accessiblePrivateIds, 's');
+  const visibilityFilter = buildVisibilityFilter(access, 's');
   const queryLimit = input.offset === 0 ? input.limit + 1 : input.limit;
   const normalizedQuery = normalizeSearchQuery(input.query);
   const queryTokens = splitQueryTokens(normalizedQuery);
@@ -323,7 +350,7 @@ async function fetchSearchTermResults(
     const tokenPlaceholders = queryTokens.map(() => '?').join(',');
     const tokenRanges = queryTokens.map((token) => buildPrefixRange(token));
     const rawCandidateBranches: string[] = [];
-    const rawCandidateParams: string[] = [];
+    const rawCandidateParams: Array<string | number> = [];
 
     for (const [columnName, indexName] of [
       ['name', 'skills_visibility_lower_name_idx'],
@@ -392,10 +419,8 @@ async function fetchSearchTermResults(
     const hasMoreOnFirstPage = input.offset === 0 && rawPageIds.length > input.limit;
     const pageIds = hasMoreOnFirstPage ? rawPageIds.slice(0, input.limit) : rawPageIds;
 
-    let total: number;
-    if (input.offset === 0 && !hasMoreOnFirstPage) {
-      total = pageIds.length;
-    } else {
+    let total = deriveExactTotalFromLoadedPage(input, rawPageIds);
+    if (total === null) {
       const countResult = await db.prepare(`
         WITH raw_candidates AS (
           ${rawCandidatesSql}
@@ -506,9 +531,9 @@ async function fetchSearchTermResults(
 async function fetchSimpleSearchResults(
   db: D1Database,
   input: RegistrySearchInput,
-  accessiblePrivateIds: string[]
+  access: RegistrySearchAccess
 ): Promise<RegistrySearchResult> {
-  const visibilityFilter = buildVisibilityFilter(accessiblePrivateIds, 's');
+  const visibilityFilter = buildVisibilityFilter(access, 's');
   const queryLimit = input.offset === 0 ? input.limit + 1 : input.limit;
   const queryLike = `%${input.query}%`;
   const queryFilterSql = input.query ? 'AND (s.name LIKE ? OR s.description LIKE ?)' : '';
@@ -542,10 +567,8 @@ async function fetchSimpleSearchResults(
   const hasMoreOnFirstPage = input.offset === 0 && rawPageIds.length > input.limit;
   const pageIds = hasMoreOnFirstPage ? rawPageIds.slice(0, input.limit) : rawPageIds;
 
-  let total: number;
-  if (input.offset === 0 && !hasMoreOnFirstPage) {
-    total = pageIds.length;
-  } else {
+  let total = deriveExactTotalFromLoadedPage(input, rawPageIds);
+  if (total === null) {
     const countResult = input.category
       ? await db.prepare(`
         SELECT COUNT(*) as total

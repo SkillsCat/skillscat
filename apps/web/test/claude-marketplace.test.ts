@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  vi.unmock('../src/lib/server/marketplace/claude');
+  vi.doUnmock('../src/lib/server/marketplace/claude');
 });
 
 describe('claude marketplace mapping', () => {
