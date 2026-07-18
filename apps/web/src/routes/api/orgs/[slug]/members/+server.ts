@@ -2,15 +2,29 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { invalidateCache } from '$lib/server/cache';
 import { getOrgPageSnapshotCacheKey } from '$lib/server/cache/keys';
+import { touchOrganizationUpdatedAt } from '$lib/server/org/mutations';
 
-function normalizeInviteRole(value: unknown): 'admin' | 'member' {
+async function readMemberRequest(request: Request): Promise<Record<string, unknown>> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    throw error(400, 'Invalid JSON body');
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw error(400, 'Member request must be a JSON object');
+  }
+  return body as Record<string, unknown>;
+}
+
+function normalizeInviteRole(value: unknown): 'member' {
   if (value === undefined || value === null || value === '') {
     return 'member';
   }
-  if (value === 'admin' || value === 'member') {
+  if (value === 'member') {
     return value;
   }
-  throw error(400, 'role must be either "admin" or "member"');
+  throw error(400, 'role must be "member"');
 }
 
 /**
@@ -22,14 +36,14 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
     throw error(500, 'Database not available');
   }
 
-  const { slug } = params;
+  const slug = params.slug?.trim().toLowerCase();
   if (!slug) {
     throw error(400, 'Organization slug is required');
   }
 
   // Get org ID
   const org = await db.prepare(`
-    SELECT id FROM organizations WHERE slug = ?
+    SELECT id FROM organizations WHERE slug = ? COLLATE NOCASE
   `)
     .bind(slug)
     .first<{ id: string }>();
@@ -48,7 +62,7 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
       .first<{ role: string }>();
     requesterRole = membership?.role || null;
   }
-  const canViewEmails = requesterRole !== null && ['owner', 'admin'].includes(requesterRole);
+  const canViewEmails = requesterRole === 'owner';
 
   const results = await db.prepare(`
     SELECT om.user_id, om.role, om.joined_at, u.name, u.email, u.image,
@@ -74,7 +88,7 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
     success: true,
     members: results.results.map(m => ({
       userId: m.user_id,
-      role: m.role,
+      role: m.role === 'owner' ? 'owner' : 'member',
       joinedAt: m.joined_at,
       name: m.name,
       githubUsername: m.github_username,
@@ -98,29 +112,26 @@ export const POST: RequestHandler = async ({ locals, platform, params, request }
     throw error(500, 'Database not available');
   }
 
-  const { slug } = params;
+  const slug = params.slug?.trim().toLowerCase();
   if (!slug) {
     throw error(400, 'Organization slug is required');
   }
 
-  // Check if user is owner or admin and get org info
+  // Check if user is the organization owner and get org info.
   const orgData = await db.prepare(`
     SELECT o.id as org_id, o.name as org_name, o.slug as org_slug, o.display_name, om.role
     FROM org_members om
     INNER JOIN organizations o ON om.org_id = o.id
-    WHERE o.slug = ? AND om.user_id = ?
+    WHERE o.slug = ? COLLATE NOCASE AND om.user_id = ?
   `)
     .bind(slug, session.user.id)
     .first<{ org_id: string; org_name: string; org_slug: string; display_name: string | null; role: string }>();
 
-  if (!orgData || !['owner', 'admin'].includes(orgData.role)) {
-    throw error(403, 'Only organization owners and admins can invite members');
+  if (orgData?.role !== 'owner') {
+    throw error(403, 'Only the organization owner can invite members');
   }
 
-  const body = await request.json() as {
-    githubUsername?: string;
-    role?: unknown;
-  };
+  const body = await readMemberRequest(request);
 
   const githubUsername = typeof body.githubUsername === 'string' ? body.githubUsername : '';
   const role = normalizeInviteRole(body.role);
@@ -137,7 +148,10 @@ export const POST: RequestHandler = async ({ locals, platform, params, request }
 
   // Look up user in authors table by GitHub username
   const author = await db.prepare(`
-    SELECT id, username, user_id, display_name FROM authors WHERE username = ?
+    SELECT id, username, user_id, display_name
+    FROM authors
+    WHERE username = ? COLLATE NOCASE
+    LIMIT 1
   `)
     .bind(cleanUsername)
     .first<{ id: string; username: string; user_id: string | null; display_name: string | null }>();
@@ -161,19 +175,6 @@ export const POST: RequestHandler = async ({ locals, platform, params, request }
     throw error(409, `@${cleanUsername} is already a member of this organization`);
   }
 
-  // Check if there's already a pending invitation
-  const existingInvite = await db.prepare(`
-    SELECT id FROM notifications
-    WHERE user_id = ? AND type = 'org_invite' AND processed = 0
-    AND json_extract(metadata, '$.orgId') = ?
-  `)
-    .bind(author.user_id, orgData.org_id)
-    .first();
-
-  if (existingInvite) {
-    throw error(409, `@${cleanUsername} already has a pending invitation to this organization`);
-  }
-
   // Create notification for the invited user
   const notificationId = crypto.randomUUID();
   const orgDisplayName = orgData.display_name || orgData.org_name;
@@ -186,21 +187,33 @@ export const POST: RequestHandler = async ({ locals, platform, params, request }
     role,
   });
 
-  await db.prepare(`
+  const inserted = await db.prepare(`
     INSERT INTO notifications (id, user_id, type, title, message, metadata, read, processed, created_at)
-    VALUES (?, ?, 'org_invite', ?, ?, ?, 0, 0, ?)
+    SELECT ?, ?, 'org_invite', ?, ?, ?, 0, 0, ?
+    WHERE NOT EXISTS (
+      SELECT 1 FROM notifications
+      WHERE user_id = ?
+        AND type = 'org_invite'
+        AND processed = 0
+        AND json_extract(metadata, '$.orgId') = ?
+      LIMIT 1
+    )
   `)
     .bind(
       notificationId,
       author.user_id,
       `Invitation to join ${orgDisplayName}`,
-      `${session.user.name} invited you to join ${orgDisplayName} as ${role === 'admin' ? 'an admin' : 'a member'}.`,
+      `${session.user.name} invited you to join ${orgDisplayName} as a member.`,
       metadata,
-      Date.now()
+      Date.now(),
+      author.user_id,
+      orgData.org_id
     )
     .run();
 
-  await invalidateCache(getOrgPageSnapshotCacheKey(slug));
+  if (inserted.meta.changes === 0) {
+    throw error(409, `@${cleanUsername} already has a pending invitation to this organization`);
+  }
 
   return json({
     success: true,
@@ -222,21 +235,18 @@ export const DELETE: RequestHandler = async ({ locals, platform, params, request
     throw error(500, 'Database not available');
   }
 
-  const { slug } = params;
+  const slug = params.slug?.trim().toLowerCase();
   if (!slug) {
     throw error(400, 'Organization slug is required');
   }
 
-  const body = await request.json() as { userId: string };
-  const { userId } = body;
-
-  if (!userId) {
-    throw error(400, 'userId is required');
-  }
+  const body = await readMemberRequest(request);
+  const requestedUserId = typeof body.userId === 'string' ? body.userId.trim() : '';
+  const userId = requestedUserId || session.user.id;
 
   // Get org and check permissions
   const org = await db.prepare(`
-    SELECT id, owner_id FROM organizations WHERE slug = ?
+    SELECT id, owner_id FROM organizations WHERE slug = ? COLLATE NOCASE
   `)
     .bind(slug)
     .first<{ id: string; owner_id: string }>();
@@ -250,19 +260,19 @@ export const DELETE: RequestHandler = async ({ locals, platform, params, request
     throw error(400, 'Cannot remove the organization owner');
   }
 
-  // Check if requester is owner or admin
+  // Check if requester is the organization owner.
   const requesterMembership = await db.prepare(`
     SELECT role FROM org_members WHERE org_id = ? AND user_id = ?
   `)
     .bind(org.id, session.user.id)
     .first<{ role: string }>();
 
-  // Users can remove themselves, or owners/admins can remove others
+  // Users can remove themselves, or the owner can remove others.
   const isSelf = userId === session.user.id;
-  const isAdmin = requesterMembership && ['owner', 'admin'].includes(requesterMembership.role);
+  const canManageMembers = requesterMembership?.role === 'owner';
 
-  if (!isSelf && !isAdmin) {
-    throw error(403, 'Only organization owners and admins can remove members');
+  if (!isSelf && !canManageMembers) {
+    throw error(403, 'Only the organization owner can remove members');
   }
 
   const result = await db.prepare(`
@@ -274,6 +284,8 @@ export const DELETE: RequestHandler = async ({ locals, platform, params, request
   if (result.meta.changes === 0) {
     throw error(404, 'Member not found');
   }
+
+  await touchOrganizationUpdatedAt(db, org.id);
 
   await invalidateCache(getOrgPageSnapshotCacheKey(slug));
 

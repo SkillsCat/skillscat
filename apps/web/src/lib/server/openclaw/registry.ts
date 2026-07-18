@@ -19,8 +19,15 @@ export function buildOpenClawResponseHeaders(opts: {
   cacheControl: string;
   cacheStatus?: 'HIT' | 'MISS' | 'BYPASS';
 }): Record<string, string> {
+  // OpenClaw skills can be soft-deleted or restored at any time. Keep the
+  // Worker cache as the only shared cache so a public edge response cannot
+  // outlive a visibility change and expose stale skill content.
+  const responseCacheControl = opts.cacheControl.trim().toLowerCase().startsWith('public')
+    ? 'private, no-cache'
+    : opts.cacheControl;
   const headers: Record<string, string> = {
-    'Cache-Control': opts.cacheControl,
+    'Cache-Control': responseCacheControl,
+    'CDN-Cache-Control': 'no-store',
     Vary: 'Authorization',
   };
 
@@ -149,13 +156,14 @@ export function buildOpenClawStats(input: {
   stars?: number | null | undefined;
   downloadCount90d?: number | null | undefined;
   downloadCount30d?: number | null | undefined;
+  versions?: number | null | undefined;
 }): Record<string, number> {
   return {
     downloads: Number(input.downloadCount90d ?? 0),
     installsCurrent: Number(input.downloadCount30d ?? 0),
     installsAllTime: Number(input.downloadCount90d ?? 0),
     stars: Number(input.stars ?? 0),
-    versions: 1,
+    versions: Math.max(1, Math.floor(Number(input.versions ?? 1))),
     comments: 0,
   };
 }

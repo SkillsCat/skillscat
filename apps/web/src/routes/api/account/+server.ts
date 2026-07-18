@@ -1,10 +1,12 @@
 import { json, error } from '@sveltejs/kit';
 import type { D1Database } from '@cloudflare/workers-types';
 import type { RequestHandler } from './$types';
+import { deleteSkillArtifactsAndInvalidateCaches } from '$lib/server/skill/delete';
+import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 
 interface OwnedOrganizationRow {
   id: string;
-  public_skills_count: number;
+  slug: string;
 }
 
 interface ReplacementOwnerRow {
@@ -12,9 +14,15 @@ interface ReplacementOwnerRow {
   user_id: string;
 }
 
-interface OrganizationPrivateSkillRow {
-  org_id: string;
+interface AccountSkillRow {
   id: string;
+  slug: string;
+  visibility: 'public' | 'private' | 'unlisted';
+  source_type: string;
+  repo_owner: string | null;
+  repo_name: string | null;
+  skill_path: string | null;
+  org_id: string | null;
 }
 
 async function loadOwnedOrganizations(
@@ -22,15 +30,9 @@ async function loadOwnedOrganizations(
   userId: string
 ): Promise<OwnedOrganizationRow[]> {
   const result = await db.prepare(`
-    SELECT
-      o.id,
-      COUNT(s.id) AS public_skills_count
+    SELECT o.id, o.slug
     FROM organizations o
-    LEFT JOIN skills s
-      ON s.org_id = o.id
-     AND s.visibility = 'public'
     WHERE o.owner_id = ?
-    GROUP BY o.id
   `)
     .bind(userId)
     .all<OwnedOrganizationRow>();
@@ -56,11 +58,7 @@ async function loadReplacementOwnersByOrg(
         ROW_NUMBER() OVER (
           PARTITION BY om.org_id
           ORDER BY
-            CASE om.role
-              WHEN 'owner' THEN 0
-              WHEN 'admin' THEN 1
-              ELSE 2
-            END,
+            CASE om.role WHEN 'owner' THEN 0 ELSE 1 END,
             om.joined_at ASC
         ) AS rn
       FROM org_members om
@@ -77,35 +75,67 @@ async function loadReplacementOwnersByOrg(
   return new Map((result.results || []).map((row) => [row.org_id, row.user_id]));
 }
 
-async function loadOrganizationPrivateSkillIds(
+async function loadPersonalSkills(
+  db: D1Database,
+  userId: string
+): Promise<AccountSkillRow[]> {
+  const result = await db.prepare(`
+    SELECT
+      id,
+      slug,
+      visibility,
+      source_type,
+      repo_owner,
+      repo_name,
+      skill_path,
+      org_id
+    FROM skills
+    WHERE owner_id = ?
+      AND org_id IS NULL
+  `)
+    .bind(userId)
+    .all<AccountSkillRow>();
+
+  return result.results || [];
+}
+
+async function loadOrganizationSkillsByOrg(
   db: D1Database,
   orgIds: string[]
-): Promise<Map<string, string[]>> {
+): Promise<Map<string, AccountSkillRow[]>> {
   if (orgIds.length === 0) {
     return new Map();
   }
 
   const placeholders = orgIds.map(() => '?').join(',');
   const result = await db.prepare(`
-    SELECT org_id, id
+    SELECT
+      id,
+      slug,
+      visibility,
+      source_type,
+      repo_owner,
+      repo_name,
+      skill_path,
+      org_id
     FROM skills
     WHERE org_id IN (${placeholders})
-      AND visibility != 'public'
   `)
     .bind(...orgIds)
-    .all<OrganizationPrivateSkillRow>();
+    .all<AccountSkillRow>();
 
-  const privateSkillIdsByOrg = new Map<string, string[]>();
+  const skillsByOrg = new Map<string, AccountSkillRow[]>();
   for (const row of result.results || []) {
-    const existing = privateSkillIdsByOrg.get(row.org_id);
+    if (!row.org_id) continue;
+    const existing = skillsByOrg.get(row.org_id);
     if (existing) {
-      existing.push(row.id);
+      existing.push(row);
     } else {
-      privateSkillIdsByOrg.set(row.org_id, [row.id]);
+      skillsByOrg.set(row.org_id, [row]);
     }
   }
 
-  return privateSkillIdsByOrg;
+  return skillsByOrg;
 }
 
 /**
@@ -132,87 +162,75 @@ export const DELETE: RequestHandler = async ({ locals, platform }) => {
   const userId = session.user.id;
 
   try {
-    // Get user's GitHub account ID for re-linking support
-    const accountResult = await db.prepare(`
-      SELECT account_id FROM account WHERE user_id = ? AND provider_id = 'github'
-    `).bind(userId).first<{ account_id: string }>();
+    // Keep the current session alive until all resource ownership work has
+    // completed. If an R2 or D1 operation fails before the final batch, the
+    // user can retry instead of being locked out with a half-deleted account.
 
-    const githubUserId = accountResult?.account_id;
-
-    // Start deletion process
-    // 1. Delete sessions (logs user out)
-    await db.prepare(`DELETE FROM session WHERE user_id = ?`).bind(userId).run();
-
-    // 2. Delete API tokens
-    await db.prepare(`DELETE FROM api_tokens WHERE user_id = ?`).bind(userId).run();
-
-    // 3. Delete refresh tokens
-    await db.prepare(`DELETE FROM refresh_tokens WHERE user_id = ?`).bind(userId).run();
-
-    // 4. Delete device codes
-    await db.prepare(`DELETE FROM device_codes WHERE user_id = ?`).bind(userId).run();
-
-    // 5. Delete favorites
-    await db.prepare(`DELETE FROM favorites WHERE user_id = ?`).bind(userId).run();
-
-    // 6. Delete private/unlisted skills completely
-    // First get the IDs of private skills to delete related data
-    const privateSkillsResult = await db.prepare(`
-      SELECT id FROM skills WHERE owner_id = ? AND visibility != 'public'
-    `).bind(userId).all<{ id: string }>();
-
-    const privateSkillIds = privateSkillsResult.results.map(s => s.id);
-
-    if (privateSkillIds.length > 0) {
-      // Delete skill categories for private skills
-      for (const skillId of privateSkillIds) {
-        await db.prepare(`DELETE FROM skill_categories WHERE skill_id = ?`).bind(skillId).run();
-        await db.prepare(`DELETE FROM skill_tags WHERE skill_id = ?`).bind(skillId).run();
-        await db.prepare(`DELETE FROM skill_permissions WHERE skill_id = ?`).bind(skillId).run();
-        await db.prepare(`DELETE FROM content_hashes WHERE skill_id = ?`).bind(skillId).run();
-      }
-
-      // Delete the private skills themselves
-      await db.prepare(`
-        DELETE FROM skills WHERE owner_id = ? AND visibility != 'public'
-      `).bind(userId).run();
+    // 1. Delete private/unlisted skills completely
+    const personalSkills = await loadPersonalSkills(db, userId);
+    for (const skill of personalSkills) {
+      if (skill.visibility === 'public') continue;
+      await deleteSkillArtifactsAndInvalidateCaches({
+        db,
+        r2: platform?.env?.R2,
+        skill: {
+          id: skill.id,
+          slug: skill.slug,
+          sourceType: skill.source_type,
+          repoOwner: skill.repo_owner,
+          repoName: skill.repo_name,
+          skillPath: skill.skill_path,
+        },
+      });
     }
 
-    // 7. Orphan public skills (set owner_id = NULL)
+    // 2. Orphan public skills (set owner_id = NULL)
     // The github_user_id is stored in the authors table for re-linking
-    if (githubUserId) {
-      // Update authors table to preserve the link for re-linking
-      await db.prepare(`
-        UPDATE authors SET user_id = NULL WHERE user_id = ?
-      `).bind(userId).run();
-    }
+    // Always unlink the local user reference. GitHub-backed author rows retain
+    // their github_id even when the Better Auth account row is missing.
+    await db.prepare(`
+      UPDATE authors SET user_id = NULL WHERE user_id = ?
+    `).bind(userId).run();
 
     // Orphan public skills
     await db.prepare(`
-      UPDATE skills SET owner_id = NULL WHERE owner_id = ? AND visibility = 'public'
+      UPDATE skills SET owner_id = NULL WHERE owner_id = ? AND org_id IS NULL AND visibility = 'public'
     `).bind(userId).run();
 
-    // 8. Handle organizations
+    for (const skill of personalSkills) {
+      if (skill.visibility === 'public') {
+        await invalidateOpenClawSkillCaches(skill.id, skill.slug);
+      }
+    }
+
+    // Organization skills belong to the organization. Remove the historical
+    // uploader link before deleting the account; membership/organization role
+    // remains the authority for those skills.
+    await db.prepare(`
+      UPDATE skills SET owner_id = NULL WHERE owner_id = ? AND org_id IS NOT NULL
+    `).bind(userId).run();
+
+    // 3. Handle organizations
     const ownedOrganizations = await loadOwnedOrganizations(db, userId);
-    const orgIdsWithPublicSkills = ownedOrganizations
-      .filter((org) => Number(org.public_skills_count) > 0)
-      .map((org) => org.id);
-    const replacementOwnersByOrg = await loadReplacementOwnersByOrg(db, orgIdsWithPublicSkills, userId);
-    const orgPrivateSkillIdsByOrg = await loadOrganizationPrivateSkillIds(db, orgIdsWithPublicSkills);
+    const ownedOrgIds = ownedOrganizations.map((org) => org.id);
+    const replacementOwnersByOrg = await loadReplacementOwnersByOrg(db, ownedOrgIds, userId);
+    const orgIdsWithoutReplacement = ownedOrgIds.filter((orgId) => !replacementOwnersByOrg.has(orgId));
+    const orgSkillsByOrg = await loadOrganizationSkillsByOrg(db, orgIdsWithoutReplacement);
 
     for (const org of ownedOrganizations) {
-      if (org.public_skills_count > 0) {
-        // Keep orgs with public skills: transfer ownership if possible.
-        const replacementOwnerUserId = replacementOwnersByOrg.get(org.id) || null;
-        const transferAt = Date.now();
+      const replacementOwnerUserId = replacementOwnersByOrg.get(org.id) || null;
+      const transferAt = Date.now();
 
-        if (replacementOwnerUserId) {
+      if (replacementOwnerUserId) {
+          // Preserve the organization and all of its skills when another member
+          // can take ownership, regardless of current skill visibility.
           await db.prepare(`
             UPDATE organizations
-            SET owner_id = ?, updated_at = ?
+            SET owner_id = ?,
+                updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
             WHERE id = ?
           `)
-            .bind(replacementOwnerUserId, transferAt, org.id)
+            .bind(replacementOwnerUserId, transferAt, transferAt, org.id)
             .run();
 
           await db.prepare(`
@@ -222,43 +240,78 @@ export const DELETE: RequestHandler = async ({ locals, platform }) => {
           `)
             .bind(org.id, replacementOwnerUserId)
             .run();
-        } else {
+      } else {
           // No remaining member to transfer to.
           // Treat org as deleted: remove non-public org skills, keep public skills.
-          const orgPrivateSkillIds = orgPrivateSkillIdsByOrg.get(org.id) || [];
-          if (orgPrivateSkillIds.length > 0) {
-            for (const skillId of orgPrivateSkillIds) {
-              await db.prepare(`DELETE FROM skill_categories WHERE skill_id = ?`).bind(skillId).run();
-              await db.prepare(`DELETE FROM skill_tags WHERE skill_id = ?`).bind(skillId).run();
-              await db.prepare(`DELETE FROM skill_permissions WHERE skill_id = ?`).bind(skillId).run();
-              await db.prepare(`DELETE FROM content_hashes WHERE skill_id = ?`).bind(skillId).run();
-            }
-
-            await db.prepare(`
-              DELETE FROM skills WHERE org_id = ? AND visibility != 'public'
-            `).bind(org.id).run();
+          const orgSkills = orgSkillsByOrg.get(org.id) || [];
+          for (const skill of orgSkills) {
+            if (skill.visibility === 'public') continue;
+            await deleteSkillArtifactsAndInvalidateCaches({
+              db,
+              r2: platform?.env?.R2,
+              skill: {
+                id: skill.id,
+                slug: skill.slug,
+                sourceType: skill.source_type,
+                repoOwner: skill.repo_owner,
+                repoName: skill.repo_name,
+                skillPath: skill.skill_path,
+              },
+            });
           }
+
+          // Once the organization is removed, its surviving public skills
+          // become ownerless records. Historical uploaders must not regain
+          // personal control through ON DELETE SET NULL on skills.org_id.
+          await db.prepare(`
+            UPDATE skills
+            SET owner_id = NULL
+            WHERE org_id = ? AND visibility = 'public'
+          `).bind(org.id).run();
 
           // Delete org members first (explicit), then org.
           // Public skills are preserved and detached via ON DELETE SET NULL (skills.org_id).
           await db.prepare(`DELETE FROM org_members WHERE org_id = ?`).bind(org.id).run();
           await db.prepare(`DELETE FROM organizations WHERE id = ?`).bind(org.id).run();
-        }
-      } else {
-        // Delete organization without public skills
-        await db.prepare(`DELETE FROM org_members WHERE org_id = ?`).bind(org.id).run();
-        await db.prepare(`DELETE FROM organizations WHERE id = ?`).bind(org.id).run();
+
+          for (const skill of orgSkills) {
+            if (skill.visibility === 'public') {
+              await invalidateOpenClawSkillCaches(skill.id, skill.slug, org.slug);
+            }
+          }
       }
     }
+
+    // Advance the organization marker before removing the remaining
+    // memberships. Other data centers validate public snapshots against this
+    // marker, so a departed user is not shown until the local cache TTL ends.
+    const membershipRemovalAt = Date.now();
+    await db.prepare(`
+      UPDATE organizations
+      SET updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
+      WHERE id IN (
+        SELECT org_id FROM org_members WHERE user_id = ?
+      )
+    `)
+      .bind(membershipRemovalAt, membershipRemovalAt, userId)
+      .run();
 
     // Remove user from organizations they don't own
     await db.prepare(`DELETE FROM org_members WHERE user_id = ?`).bind(userId).run();
 
-    // 9. Delete OAuth accounts
-    await db.prepare(`DELETE FROM account WHERE user_id = ?`).bind(userId).run();
-
-    // 10. Delete user record
-    await db.prepare(`DELETE FROM user WHERE id = ?`).bind(userId).run();
+    // 4. Atomically remove authentication and user-owned private state last.
+    // D1 batch executes transactionally, so a failure keeps the account and
+    // current session available for a safe retry.
+    await db.batch([
+      db.prepare(`DELETE FROM session WHERE user_id = ?`).bind(userId),
+      db.prepare(`DELETE FROM api_tokens WHERE user_id = ?`).bind(userId),
+      db.prepare(`DELETE FROM refresh_tokens WHERE user_id = ?`).bind(userId),
+      db.prepare(`DELETE FROM device_codes WHERE user_id = ?`).bind(userId),
+      db.prepare(`DELETE FROM favorites WHERE user_id = ?`).bind(userId),
+      db.prepare(`UPDATE user_actions SET user_id = NULL WHERE user_id = ?`).bind(userId),
+      db.prepare(`DELETE FROM account WHERE user_id = ?`).bind(userId),
+      db.prepare(`DELETE FROM user WHERE id = ?`).bind(userId),
+    ]);
 
     return json({
       success: true,

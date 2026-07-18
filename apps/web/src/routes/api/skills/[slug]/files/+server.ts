@@ -4,8 +4,12 @@ import { getGitHubRateLimitKVFromEnv, getGitHubRequestAuthFromEnv } from '$lib/s
 import { parseSkillFilesInput, resolveSkillFiles } from '$lib/server/skill/files';
 
 function responseHeaders(opts: { cacheControl: string; cacheStatus?: 'HIT' | 'MISS' | 'BYPASS' }): Record<string, string> {
+  const responseCacheControl = opts.cacheControl.trim().toLowerCase().startsWith('public')
+    ? 'private, no-cache'
+    : opts.cacheControl;
   const headers: Record<string, string> = {
-    'Cache-Control': opts.cacheControl,
+    'Cache-Control': responseCacheControl,
+    'CDN-Cache-Control': 'no-store',
     Vary: 'Authorization',
   };
   if (opts.cacheStatus) {

@@ -1,9 +1,7 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { SITE_URL } from '$lib/seo/constants';
 import { buildSkillPath, parseSkillSlug } from '$lib/skill-path';
-import { getCached } from '$lib/server/cache';
 
-const CACHE_TTL_SECONDS = 600;
 const MARKETPLACE_NAME = 'SkillsCat Marketplace';
 const GITHUB_SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
@@ -263,7 +261,6 @@ function buildMarketplacePayload(rows: MarketplaceSkillRow[]): ClaudeMarketplace
 
 export async function resolveClaudeMarketplace({
   db,
-  waitUntil,
 }: {
   db: D1Database | undefined;
   waitUntil?: (promise: Promise<unknown>) => void;
@@ -278,17 +275,10 @@ export async function resolveClaudeMarketplace({
     };
   }
 
-  const cached = await getCached(
-    'claude-marketplace:v1',
-    async () => buildMarketplacePayload(await fetchMarketplaceSkills(db)),
-    CACHE_TTL_SECONDS,
-    { waitUntil }
-  );
-
   return {
-    data: cached.data,
-    cacheControl: `public, max-age=${CACHE_TTL_SECONDS}, stale-while-revalidate=3600`,
-    cacheStatus: cached.hit ? 'HIT' : 'MISS',
+    data: buildMarketplacePayload(await fetchMarketplaceSkills(db)),
+    cacheControl: 'private, no-cache',
+    cacheStatus: 'BYPASS',
     status: 200,
   };
 }

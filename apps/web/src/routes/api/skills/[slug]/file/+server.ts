@@ -199,7 +199,9 @@ export const GET: RequestHandler = async ({ params, platform, request, url, loca
 
     return json(data, {
       headers: {
-        'Cache-Control': `public, max-age=${PUBLIC_FILE_CACHE_TTL_SECONDS}, stale-while-revalidate=600`,
+        'Cache-Control': 'private, no-cache',
+        'CDN-Cache-Control': 'no-store',
+        Vary: 'Authorization',
         'X-Cache': hit ? 'HIT' : 'MISS',
       },
     });
@@ -209,6 +211,8 @@ export const GET: RequestHandler = async ({ params, platform, request, url, loca
   return json(data, {
     headers: {
       'Cache-Control': resolved.cacheControl,
+      'CDN-Cache-Control': 'no-store',
+      Vary: 'Authorization',
       'X-Cache': resolved.cacheStatus,
     },
   });

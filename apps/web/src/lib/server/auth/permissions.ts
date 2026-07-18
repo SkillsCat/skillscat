@@ -16,14 +16,33 @@ interface SkillAccessInfo {
   orgId: string | null;
 }
 
+export interface SkillAccessPrincipal {
+  userId: string | null;
+  orgId: string | null;
+}
+
+type SkillPrincipalInput = string | null | SkillAccessPrincipal;
+
+function normalizePrincipal(input: SkillPrincipalInput): SkillAccessPrincipal {
+  if (typeof input === 'string' || input === null) {
+    return { userId: input, orgId: null };
+  }
+
+  return {
+    userId: input.userId ?? null,
+    orgId: input.orgId ?? null,
+  };
+}
+
 /**
  * Check if a user has access to a skill
  */
 export async function checkSkillAccess(
   skillId: string,
-  userId: string | null,
+  principalInput: SkillPrincipalInput,
   db: D1Database
 ): Promise<boolean> {
+  const principal = normalizePrincipal(principalInput);
   // Get skill info
   const skill = await db.prepare(`
     SELECT
@@ -52,22 +71,28 @@ export async function checkSkillAccess(
   }
 
   // Private skills require authentication
-  if (!userId) {
+  if (!principal.userId && !principal.orgId) {
     return false;
   }
 
-  // Owner always has access
-  if (skill.ownerId === userId) {
+  // Personal skill owners retain direct access. Organization skills require
+  // current membership so a former member cannot keep access via owner_id.
+  if (principal.userId && !skill.orgId && skill.ownerId === principal.userId) {
+    return true;
+  }
+
+  // Organization tokens represent the organization directly.
+  if (principal.orgId && skill.orgId === principal.orgId) {
     return true;
   }
 
   // Check organization membership
-  if (skill.orgId) {
+  if (skill.orgId && principal.userId) {
     const membership = await db.prepare(`
       SELECT 1 FROM org_members
       WHERE org_id = ? AND user_id = ?
     `)
-      .bind(skill.orgId, userId)
+      .bind(skill.orgId, principal.userId)
       .first();
 
     if (membership) {
@@ -76,14 +101,25 @@ export async function checkSkillAccess(
   }
 
   // Check explicit permissions
+  if (!principal.userId) {
+    return false;
+  }
+
   const permission = await db.prepare(`
     SELECT 1 FROM skill_permissions
     WHERE skill_id = ?
-      AND grantee_type = 'user'
-      AND grantee_id = ?
+      AND (
+        (grantee_type = 'user' AND grantee_id = ?)
+        OR (
+          grantee_type = 'email'
+          AND LOWER(grantee_id) = (
+            SELECT LOWER(email) FROM user WHERE id = ? LIMIT 1
+          )
+        )
+      )
       AND (expires_at IS NULL OR expires_at > ?)
   `)
-    .bind(skillId, userId, Date.now())
+    .bind(skillId, principal.userId, principal.userId, Date.now())
     .first();
 
   return permission !== null;
@@ -107,13 +143,14 @@ export async function isSkillOwner(
 }
 
 /**
- * Check if a user can write to a skill (owner or org admin)
+ * Check if a user can write to a skill (skill owner or organization owner)
  */
 export async function canWriteSkill(
   skillId: string,
-  userId: string,
+  principalInput: SkillPrincipalInput,
   db: D1Database
 ): Promise<boolean> {
+  const principal = normalizePrincipal(principalInput);
   const skill = await db.prepare(`
     SELECT owner_id, org_id FROM skills WHERE id = ?
   `)
@@ -124,35 +161,53 @@ export async function canWriteSkill(
     return false;
   }
 
-  // Owner can always write
-  if (skill.owner_id === userId) {
+  // Personal skill owners can always write.
+  if (principal.userId && !skill.org_id && skill.owner_id === principal.userId) {
     return true;
   }
 
-  // Check org admin/owner role
-  if (skill.org_id) {
+  if (principal.orgId && skill.org_id === principal.orgId) {
+    return true;
+  }
+
+  // Check organization owner role
+  if (skill.org_id && principal.userId) {
     const membership = await db.prepare(`
       SELECT role FROM org_members
       WHERE org_id = ? AND user_id = ?
     `)
-      .bind(skill.org_id, userId)
+      .bind(skill.org_id, principal.userId)
       .first<{ role: string }>();
 
-    if (membership && ['owner', 'admin'].includes(membership.role)) {
+    if (
+      membership?.role === 'owner'
+      || (membership && skill.owner_id === principal.userId)
+    ) {
       return true;
     }
   }
 
   // Check explicit write permission
+  if (!principal.userId) {
+    return false;
+  }
+
   const permission = await db.prepare(`
     SELECT 1 FROM skill_permissions
     WHERE skill_id = ?
-      AND grantee_type = 'user'
-      AND grantee_id = ?
+      AND (
+        (grantee_type = 'user' AND grantee_id = ?)
+        OR (
+          grantee_type = 'email'
+          AND LOWER(grantee_id) = (
+            SELECT LOWER(email) FROM user WHERE id = ? LIMIT 1
+          )
+        )
+      )
       AND permission = 'write'
       AND (expires_at IS NULL OR expires_at > ?)
   `)
-    .bind(skillId, userId, Date.now())
+    .bind(skillId, principal.userId, principal.userId, Date.now())
     .first();
 
   return permission !== null;
@@ -162,34 +217,58 @@ export async function canWriteSkill(
  * Get all skill IDs accessible to a user
  */
 export async function getAccessibleSkillIds(
-  userId: string,
+  principalInput: SkillPrincipalInput,
   db: D1Database
 ): Promise<string[]> {
+  const principal = normalizePrincipal(principalInput);
+  if (!principal.userId && !principal.orgId) {
+    return [];
+  }
+
   // Get skills owned by user
-  const ownedSkills = await db.prepare(`
-    SELECT id FROM skills WHERE owner_id = ?
-  `)
-    .bind(userId)
-    .all<{ id: string }>();
+  const ownedSkills = principal.userId
+    ? await db.prepare(`
+        SELECT id FROM skills WHERE owner_id = ? AND org_id IS NULL
+      `)
+      .bind(principal.userId)
+      .all<{ id: string }>()
+    : { results: [] };
 
   // Get skills from user's organizations
-  const orgSkills = await db.prepare(`
-    SELECT s.id FROM skills s
-    INNER JOIN org_members om ON s.org_id = om.org_id
-    WHERE om.user_id = ?
-  `)
-    .bind(userId)
-    .all<{ id: string }>();
+  const orgSkills = principal.orgId
+    ? await db.prepare(`
+        SELECT id FROM skills WHERE org_id = ?
+      `)
+      .bind(principal.orgId)
+      .all<{ id: string }>()
+    : principal.userId
+      ? await db.prepare(`
+          SELECT s.id FROM skills s
+          INNER JOIN org_members om ON s.org_id = om.org_id
+          WHERE om.user_id = ?
+        `)
+        .bind(principal.userId)
+        .all<{ id: string }>()
+      : { results: [] };
 
   // Get skills with explicit permissions
-  const permittedSkills = await db.prepare(`
-    SELECT skill_id as id FROM skill_permissions
-    WHERE grantee_type = 'user'
-      AND grantee_id = ?
-      AND (expires_at IS NULL OR expires_at > ?)
-  `)
-    .bind(userId, Date.now())
-    .all<{ id: string }>();
+  const permittedSkills = principal.userId
+    ? await db.prepare(`
+        SELECT skill_id as id FROM skill_permissions
+        WHERE (
+          (grantee_type = 'user' AND grantee_id = ?)
+          OR (
+            grantee_type = 'email'
+            AND LOWER(grantee_id) = (
+              SELECT LOWER(email) FROM user WHERE id = ? LIMIT 1
+            )
+          )
+        )
+        AND (expires_at IS NULL OR expires_at > ?)
+      `)
+      .bind(principal.userId, principal.userId, Date.now())
+      .all<{ id: string }>()
+    : { results: [] };
 
   const allIds = new Set([
     ...ownedSkills.results.map(r => r.id),
@@ -214,7 +293,9 @@ export async function grantSkillPermission(
 ): Promise<string> {
   const id = crypto.randomUUID();
   const now = Date.now();
-  const expiresAt = expiresInDays ? now + expiresInDays * 24 * 60 * 60 * 1000 : null;
+  const expiresAt = expiresInDays === undefined || expiresInDays === null
+    ? null
+    : now + expiresInDays * 24 * 60 * 60 * 1000;
 
   await db.prepare(`
     INSERT INTO skill_permissions (id, skill_id, grantee_type, grantee_id, permission, granted_by, created_at, expires_at)
@@ -239,9 +320,12 @@ export async function revokeSkillPermission(
   granteeId: string,
   db: D1Database
 ): Promise<boolean> {
+  const granteePredicate = granteeType === 'email'
+    ? 'LOWER(grantee_id) = LOWER(?)'
+    : 'grantee_id = ?';
   const result = await db.prepare(`
     DELETE FROM skill_permissions
-    WHERE skill_id = ? AND grantee_type = ? AND grantee_id = ?
+    WHERE skill_id = ? AND grantee_type = ? AND ${granteePredicate}
   `)
     .bind(skillId, granteeType, granteeId)
     .run();

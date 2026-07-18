@@ -63,6 +63,35 @@ describe('claude marketplace mapping', () => {
     });
     expect(plugin?.name).toMatch(/^skillscat-test-owner--demo-skill--nested-[a-z0-9]{6}$/);
   });
+
+  it('builds the marketplace from authoritative public rows without shared cache', async () => {
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        all: async () => {
+          expect(sql).toContain("WHERE s.visibility = 'public'");
+          return {
+            results: [{
+              slug: 'test-owner/demo-skill',
+              name: 'Demo Skill',
+              description: 'A demo.',
+              repoOwner: 'test-owner',
+              repoName: 'demo-skill',
+              skillPath: null,
+              githubUrl: 'https://github.com/test-owner/demo-skill',
+              commitSha: null,
+            }],
+          };
+        },
+      })),
+    };
+
+    const { resolveClaudeMarketplace } = await import('../src/lib/server/marketplace/claude');
+    const result = await resolveClaudeMarketplace({ db: db as never });
+
+    expect(result.cacheStatus).toBe('BYPASS');
+    expect(result.cacheControl).toBe('private, no-cache');
+    expect(result.data?.plugins).toHaveLength(1);
+  });
 });
 
 describe('marketplace route', () => {
@@ -85,7 +114,7 @@ describe('marketplace route', () => {
     } as never);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get('cache-control')).toBe('public, max-age=600');
+    expect(response.headers.get('cache-control')).toBe('private, no-cache');
     expect(response.headers.get('x-cache')).toBe('MISS');
     await expect(response.json()).resolves.toEqual({
       name: 'SkillsCat Marketplace',

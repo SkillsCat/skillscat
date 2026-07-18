@@ -16,6 +16,15 @@ function parseOffset(raw: string | null): number {
   return parsed;
 }
 
+function parseNotificationMetadata(raw: string | null): unknown {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * GET /api/notifications - List user notifications
  */
@@ -69,7 +78,7 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
       type: n.type,
       title: n.title,
       message: n.message,
-      metadata: n.metadata ? JSON.parse(n.metadata) : null,
+      metadata: parseNotificationMetadata(n.metadata),
       read: Boolean(n.read),
       processed: Boolean(n.processed),
       createdAt: n.created_at,

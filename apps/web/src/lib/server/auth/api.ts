@@ -21,6 +21,19 @@ interface ValidateApiTokenOptions {
   updateLastUsedAt?: boolean;
 }
 
+const TOKEN_LAST_USED_WRITE_INTERVAL_MS = 15 * 60 * 1000;
+
+function parseTokenScopes(raw: string): string[] | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) && parsed.every((scope) => typeof scope === 'string')
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Generate a cryptographically secure random token
  */
@@ -87,7 +100,7 @@ export async function validateApiToken(
   const now = Date.now();
 
   const result = await db.prepare(`
-    SELECT id, user_id, org_id, name, scopes, expires_at
+    SELECT id, user_id, org_id, name, scopes, expires_at, last_used_at
     FROM api_tokens
     WHERE token_hash = ?
       AND revoked_at IS NULL
@@ -101,6 +114,7 @@ export async function validateApiToken(
       name: string;
       scopes: string;
       expires_at: number | null;
+      last_used_at: number | null;
     }>();
 
   if (!result) {
@@ -109,17 +123,27 @@ export async function validateApiToken(
 
   const userId = result.user_id || null;
   const orgId = result.org_id || null;
+  if ((userId === null) === (orgId === null)) {
+    return null;
+  }
   const principalId = userId || orgId;
 
   if (!principalId) {
     return null;
   }
 
-  if (updateLastUsedAt) {
+  const scopes = parseTokenScopes(result.scopes);
+  if (!scopes) {
+    return null;
+  }
+
+  if (updateLastUsedAt && (result.last_used_at === null || result.last_used_at <= now - TOKEN_LAST_USED_WRITE_INTERVAL_MS)) {
     await db.prepare(`
-      UPDATE api_tokens SET last_used_at = ? WHERE id = ?
+      UPDATE api_tokens
+      SET last_used_at = ?
+      WHERE id = ? AND (last_used_at IS NULL OR last_used_at <= ?)
     `)
-      .bind(now, result.id)
+      .bind(now, result.id, now - TOKEN_LAST_USED_WRITE_INTERVAL_MS)
       .run();
   }
 
@@ -130,7 +154,7 @@ export async function validateApiToken(
     principalType: userId ? 'user' : 'org',
     principalId,
     name: result.name,
-    scopes: JSON.parse(result.scopes),
+    scopes,
     expiresAt: result.expires_at,
   };
 }
@@ -190,7 +214,7 @@ export async function listUserTokens(
     id: row.id,
     name: row.name,
     tokenPrefix: row.token_prefix,
-    scopes: JSON.parse(row.scopes),
+    scopes: parseTokenScopes(row.scopes) || [],
     lastUsedAt: row.last_used_at,
     expiresAt: row.expires_at,
     createdAt: row.created_at,
@@ -260,7 +284,7 @@ export async function listOrgTokens(
     id: row.id,
     name: row.name,
     tokenPrefix: row.token_prefix,
-    scopes: JSON.parse(row.scopes),
+    scopes: parseTokenScopes(row.scopes) || [],
     lastUsedAt: row.last_used_at,
     expiresAt: row.expires_at,
     createdAt: row.created_at,

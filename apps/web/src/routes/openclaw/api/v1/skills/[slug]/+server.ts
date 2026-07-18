@@ -19,8 +19,14 @@ import {
 import { invalidateCategoryCaches } from '$lib/server/cache/categories';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { canWriteSkill } from '$lib/server/auth/permissions';
-import { readOpenClawManifest, writeOpenClawManifest } from '$lib/server/openclaw/compat-store';
+import {
+  acquireOpenClawPublishLock,
+  readOpenClawManifest,
+  releaseOpenClawPublishLock,
+  writeOpenClawManifest,
+} from '$lib/server/openclaw/compat-store';
 import { syncCategoryPublicStats } from '$lib/server/db/business/stats';
+import { buildTouchOrganizationStatement } from '$lib/server/org/mutations';
 
 interface SkillStatsRow {
   stars: number | null;
@@ -32,6 +38,10 @@ interface SkillDeleteRow {
   id: string;
   slug: string;
   sourceType: string;
+  orgId: string | null;
+  orgSlug: string | null;
+  repoOwner: string | null;
+  repoName: string | null;
 }
 
 interface SkillCategoryRow {
@@ -111,6 +121,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
           stars: statsRow?.stars ?? skill.stars,
           downloadCount30d: statsRow?.downloadCount30d,
           downloadCount90d: statsRow?.downloadCount90d,
+          versions: versionState.versions.length,
         }),
         createdAt: skill.createdAt,
         updatedAt: skill.updatedAt,
@@ -155,7 +166,7 @@ export const DELETE: RequestHandler = async ({ params, platform, request, locals
   }
 
   const auth = await getAuthContext(request, locals, db);
-  if (!auth.userId) {
+  if (!auth.userId && !auth.orgId) {
     throw error(401, 'Authentication required');
   }
   requireScope(auth, 'write');
@@ -163,11 +174,16 @@ export const DELETE: RequestHandler = async ({ params, platform, request, locals
   const skill = await db
     .prepare(`
       SELECT
-        id,
-        slug,
-        source_type as sourceType
-      FROM skills
-      WHERE slug = ?
+        s.id,
+        s.slug,
+        s.source_type as sourceType,
+        s.org_id as orgId,
+        s.repo_owner as repoOwner,
+        s.repo_name as repoName,
+        o.slug as orgSlug
+      FROM skills s
+      LEFT JOIN organizations o ON o.id = s.org_id
+      WHERE s.slug = ?
       LIMIT 1
     `)
     .bind(nativeSlug)
@@ -180,54 +196,101 @@ export const DELETE: RequestHandler = async ({ params, platform, request, locals
     throw error(400, 'Only uploaded SkillsCat skills can be soft-deleted through the ClawHub compatibility API.');
   }
 
-  const canWrite = await canWriteSkill(skill.id, auth.userId, db);
+  const canWrite = await canWriteSkill(skill.id, {
+    userId: auth.userId,
+    orgId: auth.orgId,
+  }, db);
   if (!canWrite) {
     throw error(403, 'You do not have permission to delete this skill.');
   }
 
-  const now = Date.now();
-  const categoryRows = await db.prepare(`
-    SELECT category_slug FROM skill_categories WHERE skill_id = ?
-  `)
-    .bind(skill.id)
-    .all<SkillCategoryRow>();
-  const categorySlugs = Array.from(
-    new Set(
-      (categoryRows.results || [])
-        .map((row) => row.category_slug)
-        .filter((slug): slug is string => typeof slug === 'string' && slug.length > 0)
-    )
-  );
-
-  await db.prepare(`UPDATE skills SET visibility = 'private', updated_at = ? WHERE id = ?`).bind(now, skill.id).run();
-
-  if (categorySlugs.length > 0) {
-    await syncCategoryPublicStats(db, categorySlugs, now);
+  const publishLock = await acquireOpenClawPublishLock(r2, params.slug);
+  if (!publishLock) {
+    throw error(409, 'Another publish is already in progress for this skill');
   }
 
-  const manifest = await readOpenClawManifest(r2, params.slug);
-  if (manifest) {
+  try {
+    const manifest = await readOpenClawManifest(r2, params.slug);
+    if (!manifest) {
+      throw error(409, 'Only skills published through the ClawHub compatibility API can be soft-deleted.');
+    }
+
+    const now = Date.now();
+    const categoryRows = await db.prepare(`
+      SELECT category_slug FROM skill_categories WHERE skill_id = ?
+    `)
+      .bind(skill.id)
+      .all<SkillCategoryRow>();
+    const categorySlugs = Array.from(
+      new Set(
+        (categoryRows.results || [])
+          .map((row) => row.category_slug)
+          .filter((slug): slug is string => typeof slug === 'string' && slug.length > 0)
+      )
+    );
+
     await writeOpenClawManifest(r2, {
       ...manifest,
       deleted: true,
-      deletedAt: now,
+      deletedAt: manifest.deletedAt || now,
       updatedAt: now,
     });
-  }
 
-  await invalidateOpenClawSkillCaches(skill.id, skill.slug);
-
-  if (categorySlugs.length > 0) {
-    await invalidateCategoryCaches(categorySlugs);
-  }
-
-  return json(
-    { ok: true },
-    {
-      headers: buildOpenClawResponseHeaders({
-        cacheControl: 'no-store',
-        cacheStatus: 'BYPASS',
-      }),
+    try {
+      const updateStatement = db
+        .prepare(`UPDATE skills SET visibility = 'private', updated_at = ? WHERE id = ?`)
+        .bind(now, skill.id);
+      if (skill.orgId) {
+        await db.batch([
+          updateStatement,
+          buildTouchOrganizationStatement(db, skill.orgId, now),
+        ]);
+      } else {
+        await updateStatement.run();
+      }
+    } catch (dbError) {
+      try {
+        await writeOpenClawManifest(r2, manifest);
+      } catch (rollbackError) {
+        console.error(`Failed to roll back OpenClaw deletion ${skill.slug}:`, rollbackError);
+      }
+      throw dbError;
     }
-  );
+
+    if (categorySlugs.length > 0) {
+      try {
+        await syncCategoryPublicStats(db, categorySlugs, now);
+      } catch (statsError) {
+        console.error(`Failed to sync category stats for deleted skill ${skill.slug}:`, statsError);
+      }
+    }
+
+    try {
+      await invalidateOpenClawSkillCaches(skill.id, skill.slug, skill.orgSlug, {
+        owner: skill.repoOwner,
+        name: skill.repoName,
+      });
+      if (categorySlugs.length > 0) {
+        await invalidateCategoryCaches(categorySlugs);
+      }
+    } catch (cacheError) {
+      console.error(`Failed to invalidate caches for deleted skill ${skill.slug}:`, cacheError);
+    }
+
+    return json(
+      { ok: true },
+      {
+        headers: buildOpenClawResponseHeaders({
+          cacheControl: 'no-store',
+          cacheStatus: 'BYPASS',
+        }),
+      }
+    );
+  } finally {
+    try {
+      await releaseOpenClawPublishLock(r2, publishLock);
+    } catch (lockError) {
+      console.error(`Failed to release OpenClaw publish lock for ${skill.slug}:`, lockError);
+    }
+  }
 };

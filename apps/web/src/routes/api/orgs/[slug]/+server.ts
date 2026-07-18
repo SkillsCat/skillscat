@@ -3,6 +3,86 @@ import type { RequestHandler } from './$types';
 import { invalidateCache } from '$lib/server/cache';
 import { getOrgPageSnapshotCacheKey } from '$lib/server/cache/keys';
 
+interface OrganizationUpdate {
+  hasDisplayName: boolean;
+  displayName: string | null;
+  hasDescription: boolean;
+  description: string | null;
+  hasAvatarUrl: boolean;
+  avatarUrl: string | null;
+}
+
+async function readOrganizationUpdate(request: Request): Promise<OrganizationUpdate> {
+  let rawBody: unknown;
+  try {
+    rawBody = await request.json();
+  } catch {
+    throw error(400, 'Invalid JSON body');
+  }
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    throw error(400, 'Organization update must be a JSON object');
+  }
+
+  const body = rawBody as Record<string, unknown>;
+  const hasDisplayName = Object.hasOwn(body, 'displayName');
+  const hasDescription = Object.hasOwn(body, 'description');
+  const hasAvatarUrl = Object.hasOwn(body, 'avatarUrl');
+
+  let displayName: string | null = null;
+  if (hasDisplayName) {
+    if (typeof body.displayName !== 'string' || !body.displayName.trim()) {
+      throw error(400, 'displayName must be a non-empty string');
+    }
+    displayName = body.displayName.trim();
+    if (displayName.length > 100) {
+      throw error(400, 'displayName must be 100 characters or less');
+    }
+  }
+
+  let description: string | null = null;
+  if (hasDescription) {
+    if (body.description !== null && typeof body.description !== 'string') {
+      throw error(400, 'description must be a string or null');
+    }
+    description = typeof body.description === 'string' ? body.description.trim() || null : null;
+    if (description && description.length > 500) {
+      throw error(400, 'description must be 500 characters or less');
+    }
+  }
+
+  let avatarUrl: string | null = null;
+  if (hasAvatarUrl) {
+    if (body.avatarUrl !== null && typeof body.avatarUrl !== 'string') {
+      throw error(400, 'avatarUrl must be an HTTPS URL or null');
+    }
+    avatarUrl = typeof body.avatarUrl === 'string' ? body.avatarUrl.trim() || null : null;
+    if (avatarUrl) {
+      let parsed: URL;
+      try {
+        parsed = new URL(avatarUrl);
+      } catch {
+        throw error(400, 'avatarUrl must be an HTTPS URL or null');
+      }
+      if (parsed.protocol !== 'https:' || avatarUrl.length > 2048) {
+        throw error(400, 'avatarUrl must be an HTTPS URL or null');
+      }
+    }
+  }
+
+  if (!hasDisplayName && !hasDescription && !hasAvatarUrl) {
+    throw error(400, 'At least one organization field is required');
+  }
+
+  return {
+    hasDisplayName,
+    displayName,
+    hasDescription,
+    description,
+    hasAvatarUrl,
+    avatarUrl,
+  };
+}
+
 /**
  * GET /api/orgs/[slug] - Get organization details
  */
@@ -12,7 +92,7 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
     throw error(500, 'Database not available');
   }
 
-  const { slug } = params;
+  const slug = params.slug?.trim().toLowerCase();
   if (!slug) {
     throw error(400, 'Organization slug is required');
   }
@@ -20,7 +100,7 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
   const org = await db.prepare(`
     SELECT id, name, slug, display_name, description, avatar_url, github_org_id, verified_at, owner_id, created_at, updated_at
     FROM organizations
-    WHERE slug = ?
+    WHERE slug = ? COLLATE NOCASE
   `)
     .bind(slug)
     .first<{
@@ -85,7 +165,7 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
       updatedAt: org.updated_at,
       memberCount: memberCount?.count || 0,
       skillCount: skillCount?.count || 0,
-      userRole,
+      userRole: userRole === 'owner' ? 'owner' : userRole ? 'member' : null,
     },
   });
 };
@@ -104,41 +184,46 @@ export const PUT: RequestHandler = async ({ locals, platform, params, request })
     throw error(500, 'Database not available');
   }
 
-  const { slug } = params;
+  const slug = params.slug?.trim().toLowerCase();
   if (!slug) {
     throw error(400, 'Organization slug is required');
   }
 
-  // Check if user is owner or admin
+  // Check if user is the organization owner
   const membership = await db.prepare(`
     SELECT om.role FROM org_members om
     INNER JOIN organizations o ON om.org_id = o.id
-    WHERE o.slug = ? AND om.user_id = ?
+    WHERE o.slug = ? COLLATE NOCASE AND om.user_id = ?
   `)
     .bind(slug, session.user.id)
     .first<{ role: string }>();
 
-  if (!membership || !['owner', 'admin'].includes(membership.role)) {
-    throw error(403, 'Only organization owners and admins can update the organization');
+  if (membership?.role !== 'owner') {
+    throw error(403, 'Only the organization owner can update the organization');
   }
 
-  const body = await request.json() as {
-    displayName?: string;
-    description?: string;
-    avatarUrl?: string;
-  };
-
-  const { displayName, description, avatarUrl } = body;
+  const update = await readOrganizationUpdate(request);
+  const now = Date.now();
 
   await db.prepare(`
     UPDATE organizations
-    SET display_name = COALESCE(?, display_name),
-        description = COALESCE(?, description),
-        avatar_url = COALESCE(?, avatar_url),
-        updated_at = ?
-    WHERE slug = ?
+    SET display_name = CASE WHEN ? = 1 THEN ? ELSE display_name END,
+        description = CASE WHEN ? = 1 THEN ? ELSE description END,
+        avatar_url = CASE WHEN ? = 1 THEN ? ELSE avatar_url END,
+        updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
+    WHERE slug = ? COLLATE NOCASE
   `)
-    .bind(displayName, description, avatarUrl, Date.now(), slug)
+    .bind(
+      update.hasDisplayName ? 1 : 0,
+      update.displayName,
+      update.hasDescription ? 1 : 0,
+      update.description,
+      update.hasAvatarUrl ? 1 : 0,
+      update.avatarUrl,
+      now,
+      now,
+      slug
+    )
     .run();
 
   await invalidateCache(getOrgPageSnapshotCacheKey(slug));
@@ -163,14 +248,14 @@ export const DELETE: RequestHandler = async ({ locals, platform, params }) => {
     throw error(500, 'Database not available');
   }
 
-  const { slug } = params;
+  const slug = params.slug?.trim().toLowerCase();
   if (!slug) {
     throw error(400, 'Organization slug is required');
   }
 
   // Only owner can delete
   const org = await db.prepare(`
-    SELECT id, owner_id FROM organizations WHERE slug = ?
+    SELECT id, owner_id FROM organizations WHERE slug = ? COLLATE NOCASE
   `)
     .bind(slug)
     .first<{ id: string; owner_id: string }>();
@@ -183,22 +268,22 @@ export const DELETE: RequestHandler = async ({ locals, platform, params }) => {
     throw error(403, 'Only the organization owner can delete it');
   }
 
-  // Check if org has skills
-  const skillCount = await db.prepare(`
-    SELECT COUNT(*) as count FROM skills INDEXED BY skills_org_stars_created_idx WHERE org_id = ?
+  // Keep the skill guard and delete in one statement so a concurrent publish
+  // cannot leave an orphaned skill or a half-deleted organization.
+  const deleted = await db.prepare(`
+    DELETE FROM organizations
+    WHERE id = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM skills WHERE org_id = ? LIMIT 1
+      )
   `)
-    .bind(org.id)
-    .first<{ count: number }>();
+    .bind(org.id, org.id)
+    .run();
 
-  if (skillCount && skillCount.count > 0) {
-    throw error(400, 'Cannot delete organization with existing skills. Transfer or delete skills first.');
+  if (deleted.meta.changes === 0) {
+    throw error(409, 'Cannot delete organization with existing skills. Remove or transfer skills first.');
   }
 
-  // Delete org members first (cascade should handle this, but be explicit)
-  await db.prepare(`DELETE FROM org_members WHERE org_id = ?`).bind(org.id).run();
-
-  // Delete organization
-  await db.prepare(`DELETE FROM organizations WHERE id = ?`).bind(org.id).run();
   await invalidateCache(getOrgPageSnapshotCacheKey(slug));
 
   return json({

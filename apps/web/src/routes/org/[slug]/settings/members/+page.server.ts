@@ -12,7 +12,7 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
         throw error(500, 'Database not available');
     }
 
-    const { slug } = params;
+    const slug = params.slug?.trim().toLowerCase();
     if (!slug) {
         throw error(400, 'Organization slug is required');
     }
@@ -22,7 +22,7 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
     SELECT o.id, o.slug, om.role as user_role
     FROM organizations o
     LEFT JOIN org_members om ON o.id = om.org_id AND om.user_id = ?
-    WHERE o.slug = ?
+    WHERE o.slug = ? COLLATE NOCASE
   `)
         .bind(session.user.id, slug)
         .first<{ id: string; slug: string; user_role: string | null }>();
@@ -32,8 +32,8 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
     }
 
     // Check permissions
-    if (!orgData.user_role || !['owner', 'admin'].includes(orgData.user_role)) {
-        throw error(403, 'Only organization owners and admins can view members');
+    if (orgData.user_role !== 'owner') {
+        throw error(403, 'Only the organization owner can view members');
     }
 
     // Get members
@@ -63,7 +63,7 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
         },
         members: results.results.map(m => ({
             userId: m.user_id,
-            role: m.role as 'owner' | 'admin' | 'member',
+            role: (m.role === 'owner' ? 'owner' : 'member') as 'owner' | 'member',
             joinedAt: m.joined_at,
             name: m.name ?? '',
             githubUsername: m.github_username,

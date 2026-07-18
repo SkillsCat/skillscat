@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   buildOpenClawFileCacheKey,
   buildOpenClawResolveCacheKey,
+  canCacheOpenClawBrowseList,
   canUsePublicOpenClawCache,
   getOpenClawRouteCachePolicy,
   getOpenClawSelectedVersionContentToken,
   getOpenClawVersionsStateToken,
   isOpenClawImmutableVersionRequest,
 } from '../src/lib/server/openclaw/cache';
+import { buildOpenClawResponseHeaders, buildOpenClawStats } from '../src/lib/server/openclaw/registry';
 import type { OpenClawResolvedVersionState } from '../src/lib/server/openclaw/skill-state';
 
 function createVersionState(overrides: Partial<OpenClawResolvedVersionState> = {}): OpenClawResolvedVersionState {
@@ -51,6 +53,11 @@ function createVersionState(overrides: Partial<OpenClawResolvedVersionState> = {
 }
 
 describe('openclaw cache helpers', () => {
+  it('reports the manifest version count while preserving the legacy default', () => {
+    expect(buildOpenClawStats({ versions: 3 }).versions).toBe(3);
+    expect(buildOpenClawStats({}).versions).toBe(1);
+  });
+
   it('uses shorter TTLs for latest aliases and longer TTLs for immutable versions', () => {
     expect(getOpenClawRouteCachePolicy()).toEqual({
       ttlSeconds: 300,
@@ -66,6 +73,32 @@ describe('openclaw cache helpers', () => {
     expect(canUsePublicOpenClawCache('public, max-age=300')).toBe(true);
     expect(canUsePublicOpenClawCache('private, no-cache')).toBe(false);
     expect(canUsePublicOpenClawCache('no-store')).toBe(false);
+  });
+
+  it('only caches the OpenClaw browse page that mutations can invalidate', () => {
+    expect(canCacheOpenClawBrowseList({ limit: 25, offset: 0 })).toBe(true);
+    expect(canCacheOpenClawBrowseList({ limit: 10, offset: 0 })).toBe(false);
+    expect(canCacheOpenClawBrowseList({ limit: 25, offset: 25 })).toBe(false);
+  });
+
+  it('keeps mutable OpenClaw responses out of browser and CDN caches', () => {
+    expect(buildOpenClawResponseHeaders({
+      cacheControl: 'public, max-age=300, stale-while-revalidate=900',
+      cacheStatus: 'MISS',
+    })).toMatchObject({
+      'Cache-Control': 'private, no-cache',
+      'CDN-Cache-Control': 'no-store',
+      Vary: 'Authorization',
+      'X-Cache': 'MISS',
+    });
+
+    expect(buildOpenClawResponseHeaders({
+      cacheControl: 'no-store',
+      cacheStatus: 'BYPASS',
+    })).toMatchObject({
+      'Cache-Control': 'no-store',
+      'CDN-Cache-Control': 'no-store',
+    });
   });
 
   it('treats explicit version requests as immutable but keeps latest aliases dynamic', () => {

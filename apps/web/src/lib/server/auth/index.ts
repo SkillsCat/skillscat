@@ -36,6 +36,7 @@ export function createAuth(env: AuthEnv, baseURL?: string) {
       github: {
         clientId: env.GITHUB_CLIENT_ID,
         clientSecret: env.GITHUB_CLIENT_SECRET,
+        scope: ['read:org'],
       }
     },
     session: {

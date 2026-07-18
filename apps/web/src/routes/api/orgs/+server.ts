@@ -1,28 +1,44 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getGitHubRateLimitKVFromEnv, getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
-import { getUserByLogin } from '$lib/server/github-client/rest';
+import { getUserByLogin, getViewerOrgMembership } from '$lib/server/github-client/rest';
+import { invalidateCache } from '$lib/server/cache';
+import { getOrgPageSnapshotCacheKey } from '$lib/server/cache/keys';
 
-/**
- * Check if a name exists on GitHub (as user or organization)
- */
-async function checkGitHubNameExists(
+interface GitHubNamespace {
+  id: number;
+  avatarUrl: string | null;
+  type: string;
+}
+
+async function getGitHubNamespace(
   name: string,
   githubToken: string,
   githubRateLimitKV?: KVNamespace
-): Promise<boolean> {
+): Promise<GitHubNamespace | null> {
   try {
-    // Check if it's a user or org on GitHub
     const response = await getUserByLogin(name, {
       token: githubToken,
       rateLimitKV: githubRateLimitKV,
       userAgent: 'SkillsCat/1.0',
     });
-    // 200 means the name exists, 404 means it doesn't
-    return response.status === 200;
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json() as {
+      id: number;
+      avatar_url?: string | null;
+      type?: string;
+    };
+    return {
+      id: data.id,
+      avatarUrl: data.avatar_url || null,
+      type: data.type || '',
+    };
   } catch {
-    // On error, allow creation (fail open)
-    return false;
+    // GitHub availability must not prevent creating an unverified local org.
+    return null;
   }
 }
 
@@ -40,29 +56,47 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     throw error(500, 'Database not available');
   }
 
-  const body = await request.json() as {
-    name: string;
-    displayName?: string;
-    description?: string;
-  };
+  let rawBody: unknown;
+  try {
+    rawBody = await request.json();
+  } catch {
+    throw error(400, 'Invalid JSON body');
+  }
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    throw error(400, 'Invalid organization request');
+  }
 
-  const { name, displayName, description } = body;
+  const body = rawBody as Record<string, unknown>;
+  const requestedName = typeof body.name === 'string' ? body.name.trim() : '';
+  const requestedSlug = typeof body.slug === 'string' ? body.slug.trim() : requestedName;
+  const displayName = typeof body.displayName === 'string'
+    ? body.displayName.trim()
+    : requestedName;
+  const description = typeof body.description === 'string' ? body.description.trim() : '';
 
-  if (!name || typeof name !== 'string') {
+  if (!requestedName) {
     throw error(400, 'Organization name is required');
   }
 
-  // Validate name format (alphanumeric, hyphens, underscores)
-  if (!/^[a-zA-Z0-9_-]+$/.test(name) || name.length < 2 || name.length > 39) {
-    throw error(400, 'Organization name must be 2-39 characters and contain only letters, numbers, hyphens, and underscores');
+  // `name` historically doubled as the slug. Accept an explicit slug so the
+  // settings UI can keep a human-readable display name without breaking the
+  // stable owner namespace used by skill slugs and GitHub verification.
+  if (!/^[a-zA-Z0-9_-]+$/.test(requestedSlug) || requestedSlug.length < 2 || requestedSlug.length > 39) {
+    throw error(400, 'Organization slug must be 2-39 characters and contain only letters, numbers, hyphens, and underscores');
+  }
+  if (displayName.length > 100) {
+    throw error(400, 'Organization display name must be 100 characters or less');
+  }
+  if (description.length > 500) {
+    throw error(400, 'Organization description must be 500 characters or less');
   }
 
-  // Generate slug from name
-  const slug = name.toLowerCase();
+  const slug = requestedSlug.toLowerCase();
+  const name = slug;
 
   // Check if slug already exists
   const existing = await db.prepare(`
-    SELECT id FROM organizations WHERE slug = ?
+    SELECT id FROM organizations WHERE slug = ? COLLATE NOCASE
   `)
     .bind(slug)
     .first();
@@ -71,42 +105,104 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     throw error(409, 'An organization with this name already exists');
   }
 
-  // Check if name exists on GitHub
+  let githubOrgId: number | null = null;
+  let githubAvatarUrl: string | null = null;
+  let verifiedAt: number | null = null;
+
+  // Existing GitHub namespaces are reserved. A matching organization can be
+  // claimed only by an active GitHub admin and is verified during creation.
   const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
   if (githubToken) {
-    const existsOnGitHub = await checkGitHubNameExists(
+    const githubNamespace = await getGitHubNamespace(
       slug,
       githubToken,
       getGitHubRateLimitKVFromEnv(platform?.env)
     );
-    if (existsOnGitHub) {
+
+    if (githubNamespace && githubNamespace.type.toLowerCase() !== 'organization') {
       throw error(409, 'This name is already taken on GitHub');
+    }
+
+    if (githubNamespace?.type.toLowerCase() === 'organization') {
+      const account = await db.prepare(`
+        SELECT access_token FROM account
+        WHERE user_id = ? AND provider_id = 'github'
+        LIMIT 1
+      `)
+        .bind(session.user.id)
+        .first<{ access_token: string | null }>();
+
+      if (!account?.access_token) {
+        throw error(409, 'This GitHub organization name is reserved. Sign in with GitHub to claim it.');
+      }
+
+      const membershipResponse = await getViewerOrgMembership(slug, {
+        token: account.access_token,
+        userAgent: 'SkillsCat/1.0',
+      });
+      if (!membershipResponse.ok) {
+        throw error(403, `You must be an admin of the GitHub organization '${slug}' to claim it`);
+      }
+
+      const membership = await membershipResponse.json() as { role?: string; state?: string };
+      if (membership.state !== 'active' || membership.role !== 'admin') {
+        throw error(403, `You must be an active admin of the GitHub organization '${slug}' to claim it`);
+      }
+
+      githubOrgId = githubNamespace.id;
+      githubAvatarUrl = githubNamespace.avatarUrl;
+      verifiedAt = Date.now();
     }
   }
 
   const orgId = crypto.randomUUID();
   const now = Date.now();
 
-  // Create organization
-  await db.prepare(`
-    INSERT INTO organizations (id, name, slug, display_name, description, owner_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `)
-    .bind(orgId, name, slug, displayName || name, description || null, session.user.id, now, now)
-    .run();
+  try {
+    await db.batch([
+      db.prepare(`
+        INSERT INTO organizations (
+          id, name, slug, display_name, description, avatar_url, github_org_id,
+          verified_at, owner_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        orgId,
+        name,
+        slug,
+        displayName || name,
+        description || null,
+        githubAvatarUrl,
+        githubOrgId,
+        verifiedAt,
+        session.user.id,
+        now,
+        now
+      ),
+      db.prepare(`
+        INSERT INTO org_members (org_id, user_id, role, joined_at)
+        VALUES (?, ?, 'owner', ?)
+      `).bind(orgId, session.user.id, now),
+    ]);
+  } catch (insertError) {
+    const message = String(insertError);
+    if (
+      message.includes('organizations_slug_unique')
+      || message.includes('organizations.slug')
+      || message.includes('organizations_name_unique')
+      || message.includes('organizations.name')
+    ) {
+      throw error(409, 'An organization with this name already exists');
+    }
+    throw insertError;
+  }
 
-  // Add creator as owner member
-  await db.prepare(`
-    INSERT INTO org_members (org_id, user_id, role, joined_at)
-    VALUES (?, ?, 'owner', ?)
-  `)
-    .bind(orgId, session.user.id, now)
-    .run();
+  await invalidateCache(getOrgPageSnapshotCacheKey(slug));
 
   return json({
     success: true,
     orgId,
     slug,
+    verified: verifiedAt !== null,
     message: 'Organization created successfully',
   });
 };
@@ -156,7 +252,7 @@ export const GET: RequestHandler = async ({ locals, platform }) => {
       description: org.description,
       avatarUrl: org.avatar_url,
       verified: org.verified_at !== null,
-      role: org.role,
+      role: org.role === 'owner' ? 'owner' : 'member',
       createdAt: org.created_at,
     })),
   });

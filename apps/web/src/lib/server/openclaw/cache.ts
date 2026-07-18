@@ -11,11 +11,16 @@ import {
   invalidateCache,
 } from '$lib/server/cache';
 import {
+  getOrgPageSnapshotCacheKey,
+  getRegistryRepoCacheKey,
+  getRegistrySkillCacheInvalidationKeys,
   getSkillPageCacheInvalidationKeys,
+  getSkillSourceCacheKey,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
 } from '$lib/server/cache/keys';
 import { getOnlineRecommendCacheKeys } from '$lib/server/ranking/recommend-runtime';
 import { getSkillDetailCacheKeys } from '$lib/server/skill/detail';
+import { bumpRegistrySearchCacheRevision } from '$lib/server/registry/cache';
 
 export interface OpenClawRouteCachePolicy {
   ttlSeconds: number;
@@ -125,6 +130,15 @@ export function buildOpenClawBrowseListCacheKey(input: {
     encodeCacheSegment(input.limit),
     encodeCacheSegment(input.offset),
   ].join(':');
+}
+
+export function canCacheOpenClawBrowseList(input: {
+  limit: number;
+  offset: number;
+}): boolean {
+  // Mutations can invalidate every sort for this one canonical page. Arbitrary
+  // cursor/limit combinations cannot be enumerated safely with Cache API keys.
+  return input.limit === OPENCLAW_DEFAULT_LIMIT && input.offset === 0;
 }
 
 export function buildOpenClawSkillDetailCacheKey(input: {
@@ -339,14 +353,23 @@ export async function resolveOpenClawBinaryCache(input: {
   });
 }
 
-export async function invalidateOpenClawSkillCaches(skillId: string, nativeSlug: string): Promise<void> {
+export async function invalidateOpenClawSkillCaches(
+  skillId: string,
+  nativeSlug: string,
+  orgSlug?: string | null,
+  repo?: { owner: string | null; name: string | null }
+): Promise<void> {
   const cacheKeys = [
+    ...getRegistrySkillCacheInvalidationKeys(nativeSlug),
     ...getSkillDetailCacheKeys(nativeSlug),
     `api:skill-files:${nativeSlug}`,
     `skill:${skillId}`,
     ...getOnlineRecommendCacheKeys(skillId),
+    getSkillSourceCacheKey(nativeSlug),
     ...getSkillPageCacheInvalidationKeys(nativeSlug),
     ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
+    ...(orgSlug ? [getOrgPageSnapshotCacheKey(orgSlug)] : []),
+    ...(repo?.owner && repo.name ? [getRegistryRepoCacheKey(repo.owner, repo.name)] : []),
     ...OPENCLAW_BROWSE_INVALIDATION_SORTS.map((sort) =>
       buildOpenClawBrowseListCacheKey({
         sort,
@@ -356,5 +379,8 @@ export async function invalidateOpenClawSkillCaches(skillId: string, nativeSlug:
     ),
   ];
 
-  await Promise.all(cacheKeys.map((cacheKey) => invalidateCache(cacheKey)));
+  await Promise.all([
+    ...cacheKeys.map((cacheKey) => invalidateCache(cacheKey)),
+    bumpRegistrySearchCacheRevision(),
+  ]);
 }

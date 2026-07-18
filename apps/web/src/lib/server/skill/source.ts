@@ -2,6 +2,7 @@ import { getCached } from '$lib/server/cache';
 import { getSkillSourceCacheKey } from '$lib/server/cache/keys';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
+import { getCurrentSkillVisibility } from '$lib/server/skill/visibility';
 
 const PUBLIC_SKILL_SOURCE_CACHE_TTL_SECONDS = 300;
 
@@ -84,34 +85,49 @@ export async function resolveSkillSourceInfo(
     };
   }
 
+  const currentVisibility = await getCurrentSkillVisibility(db, slug);
+  if (!currentVisibility) {
+    return {
+      skill: null,
+      cacheControl: 'no-store',
+      cacheStatus: 'BYPASS',
+      error: 'Skill not found',
+      status: 404,
+    };
+  }
+
   let skill: SkillSourceInfo | null = null;
   let cacheStatus: 'HIT' | 'MISS' | 'BYPASS' = 'BYPASS';
 
-  try {
-    const cached = await getCached(
-      getSkillSourceCacheKey(slug),
-      async () => {
-        const row = await fetchSkillSourceInfo(db, slug);
-        if (!row) {
-          throw new PublicSkillSourceCacheBypass('not_found');
-        }
-        if (row.visibility !== 'public') {
-          throw new PublicSkillSourceCacheBypass(row.visibility, row);
-        }
-        return row;
-      },
-      PUBLIC_SKILL_SOURCE_CACHE_TTL_SECONDS,
-      { waitUntil }
-    );
+  if (currentVisibility === 'public') {
+    try {
+      const cached = await getCached(
+        getSkillSourceCacheKey(slug),
+        async () => {
+          const row = await fetchSkillSourceInfo(db, slug);
+          if (!row) {
+            throw new PublicSkillSourceCacheBypass('not_found');
+          }
+          if (row.visibility !== 'public') {
+            throw new PublicSkillSourceCacheBypass(row.visibility, row);
+          }
+          return row;
+        },
+        PUBLIC_SKILL_SOURCE_CACHE_TTL_SECONDS,
+        { waitUntil }
+      );
 
-    skill = cached.data;
-    cacheStatus = cached.hit ? 'HIT' : 'MISS';
-  } catch (err) {
-    if (err instanceof PublicSkillSourceCacheBypass) {
-      skill = err.skill;
-    } else {
-      throw err;
+      skill = cached.data;
+      cacheStatus = cached.hit ? 'HIT' : 'MISS';
+    } catch (err) {
+      if (err instanceof PublicSkillSourceCacheBypass) {
+        skill = err.skill;
+      } else {
+        throw err;
+      }
     }
+  } else {
+    skill = await fetchSkillSourceInfo(db, slug);
   }
 
   if (!skill) {
@@ -126,7 +142,7 @@ export async function resolveSkillSourceInfo(
 
   if (skill.visibility === 'private') {
     const auth = await getAuthContext(request, locals, db);
-    if (!auth.userId) {
+    if (!auth.userId && !auth.orgId) {
       return {
         skill: null,
         cacheControl: 'no-store',
@@ -136,7 +152,10 @@ export async function resolveSkillSourceInfo(
       };
     }
     requireScope(auth, 'read');
-    const hasAccess = await checkSkillAccess(skill.id, auth.userId, db);
+    const hasAccess = await checkSkillAccess(skill.id, {
+      userId: auth.userId,
+      orgId: auth.orgId,
+    }, db);
     if (!hasAccess) {
       return {
         skill: null,

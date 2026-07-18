@@ -5,22 +5,23 @@ import {
   buildUploadSkillR2Prefix,
 } from '$lib/skill-path';
 import { invalidateCache } from '$lib/server/cache';
-import {
-  getOrgPageSnapshotCacheKey,
-  getSkillPageCacheInvalidationKeys,
-  getSkillSourceCacheKey,
-  PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
-} from '$lib/server/cache/keys';
 import { getCategoryPageCacheInvalidationKeys } from '$lib/server/cache/categories';
-import { getOnlineRecommendCacheKeys } from '$lib/server/ranking/recommend-runtime';
-import { getSkillDetailCacheKeys } from '$lib/server/skill/detail';
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
+import {
+  acquireOpenClawPublishLock,
+  buildOpenClawManifestKey,
+  buildOpenClawVersionsPrefix,
+  deleteOpenClawPrefix,
+  releaseOpenClawPublishLock,
+} from '$lib/server/openclaw/compat-store';
+import { encodeClawHubCompatSlug } from '$lib/server/openclaw/clawhub-compat';
 import {
   buildIndexNowSkillUrls,
   resolveIndexNowOwnerHandle,
   scheduleIndexNowSubmission,
 } from '$lib/server/seo/indexnow';
 import { syncCategoryPublicStats } from '$lib/server/db/business/stats';
+import { buildTouchOrganizationStatement } from '$lib/server/org/mutations';
 
 export interface DeleteSkillArtifactsInput {
   db: D1Database;
@@ -47,6 +48,13 @@ export interface DeleteSkillArtifactsInput {
     repoName: string | null;
     skillPath: string | null;
   };
+}
+
+export class SkillMutationConflictError extends Error {
+  constructor(slug: string) {
+    super(`Another mutation is already in progress for ${slug}`);
+    this.name = 'SkillMutationConflictError';
+  }
 }
 
 function buildSkillR2Prefix(skill: DeleteSkillArtifactsInput['skill']): string {
@@ -156,7 +164,20 @@ async function deleteR2Artifacts(
     }
   }
 
-  await Promise.all([...keysToDelete].map((key) => r2.delete(key)));
+  const results = await Promise.allSettled([...keysToDelete].map((key) => r2.delete(key)));
+  const failed = results.find((result) => result.status === 'rejected');
+  if (failed?.status === 'rejected') {
+    throw failed.reason;
+  }
+}
+
+async function deleteOpenClawArtifacts(r2: R2Bucket | undefined, nativeSlug: string): Promise<void> {
+  if (!r2) return;
+  const compatSlug = encodeClawHubCompatSlug(nativeSlug);
+  await Promise.all([
+    r2.delete(buildOpenClawManifestKey(compatSlug)),
+    deleteOpenClawPrefix(r2, buildOpenClawVersionsPrefix(compatSlug)),
+  ]);
 }
 
 export async function deleteSkillArtifactsAndInvalidateCaches(
@@ -167,6 +188,7 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
     | {
         file_structure: string | null;
         visibility: string | null;
+        org_id: string | null;
         repo_owner: string | null;
         org_slug: string | null;
         owner_username: string | null;
@@ -177,6 +199,7 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
       SELECT
         s.file_structure AS file_structure,
         s.visibility AS visibility,
+        s.org_id AS org_id,
         s.repo_owner AS repo_owner,
         o.slug AS org_slug,
         a.username AS owner_username
@@ -190,6 +213,7 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
       .first<{
         file_structure: string | null;
         visibility: string | null;
+        org_id: string | null;
         repo_owner: string | null;
         org_slug: string | null;
         owner_username: string | null;
@@ -211,7 +235,52 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
       }, indexNow?.env)
     : [];
 
-  await db.prepare('DELETE FROM skills WHERE id = ?').bind(skill.id).run();
+  const compatSlug = encodeClawHubCompatSlug(skill.slug);
+  const mutationLock = r2
+    ? await acquireOpenClawPublishLock(r2, compatSlug)
+    : null;
+  if (r2 && !mutationLock) {
+    throw new SkillMutationConflictError(skill.slug);
+  }
+
+  try {
+    // Clear mutable objects while the authoritative slug still exists. The
+    // shared publish lock serializes concurrent hard deletes and OpenClaw
+    // publishes, preventing old cleanup from deleting a newly recreated skill.
+    const cleanupResults = await Promise.allSettled([
+      deleteR2Artifacts(r2, buildSkillR2DeletePlan(skill, skillRow?.file_structure || null)),
+      ...(skill.sourceType === 'upload' ? [deleteOpenClawArtifacts(r2, skill.slug)] : []),
+    ]);
+    let cleanupFailure: unknown = null;
+    for (const cleanupResult of cleanupResults) {
+      if (cleanupResult.status === 'rejected') {
+        console.error(`Failed to delete R2 artifacts for skill ${skill.id}:`, cleanupResult.reason);
+        cleanupFailure ||= cleanupResult.reason;
+      }
+    }
+    if (cleanupFailure) {
+      throw cleanupFailure;
+    }
+
+    const deletedAt = Date.now();
+    const deleteStatement = db.prepare('DELETE FROM skills WHERE id = ?').bind(skill.id);
+    if (skillRow?.org_id) {
+      await db.batch([
+        deleteStatement,
+        buildTouchOrganizationStatement(db, skillRow.org_id, deletedAt),
+      ]);
+    } else {
+      await deleteStatement.run();
+    }
+  } finally {
+    if (r2 && mutationLock) {
+      try {
+        await releaseOpenClawPublishLock(r2, mutationLock);
+      } catch (error) {
+        console.error(`Failed to release mutation lock for skill ${skill.id}:`, error);
+      }
+    }
+  }
 
   if (categorySlugs.length > 0) {
     try {
@@ -222,34 +291,21 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
   }
 
   try {
-    await deleteR2Artifacts(r2, buildSkillR2DeletePlan(skill, skillRow?.file_structure || null));
-  } catch (error) {
-    console.error(`Failed to delete R2 artifacts for skill ${skill.id}:`, error);
-  }
-
-  try {
-    const cacheKeys = new Set<string>([
-      ...getSkillDetailCacheKeys(skill.slug),
-      `api:skill-files:${skill.slug}`,
-      `skill:${skill.id}`,
-      ...getOnlineRecommendCacheKeys(skill.id),
-      getSkillSourceCacheKey(skill.slug),
-      ...getSkillPageCacheInvalidationKeys(skill.slug),
-      ...PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
-    ]);
-
-    if (skillRow?.org_slug) {
-      cacheKeys.add(getOrgPageSnapshotCacheKey(skillRow.org_slug));
-    }
+    const categoryCacheKeys = new Set<string>();
 
     for (const categorySlug of categorySlugs) {
       for (const cacheKey of getCategoryPageCacheInvalidationKeys(categorySlug)) {
-        cacheKeys.add(cacheKey);
+        categoryCacheKeys.add(cacheKey);
       }
     }
 
-    await Promise.all(Array.from(cacheKeys, (cacheKey) => invalidateCache(cacheKey)));
-    await invalidateOpenClawSkillCaches(skill.id, skill.slug);
+    await Promise.all([
+      ...Array.from(categoryCacheKeys, (cacheKey) => invalidateCache(cacheKey)),
+      invalidateOpenClawSkillCaches(skill.id, skill.slug, skillRow?.org_slug, {
+        owner: skill.repoOwner,
+        name: skill.repoName,
+      }),
+    ]);
   } catch (error) {
     console.error(`Failed to invalidate caches for deleted skill ${skill.id}:`, error);
   }

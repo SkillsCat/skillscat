@@ -15,6 +15,7 @@ import {
   shouldLoadRecommendSignals,
   type RealtimeRecommendMode,
 } from '$lib/server/ranking/recommend-runtime';
+import { getCurrentSkillVisibility } from '$lib/server/skill/visibility';
 
 const PUBLIC_CACHE_TTL_SECONDS = 300;
 const NO_RECOMMEND_SKILL_DETAIL_CACHE_SUFFIX = ':norecommend:v1';
@@ -296,39 +297,59 @@ export async function resolveSkillDetail(
     };
   }
 
+  const currentVisibility = await getCurrentSkillVisibility(db, slug);
+  if (!currentVisibility) {
+    return {
+      data: null,
+      cacheControl: 'no-store',
+      cacheStatus: 'BYPASS',
+      error: 'Skill not found',
+      status: 404,
+    };
+  }
+
   let data: SkillDetailPayload | null = null;
   let cacheStatus: 'HIT' | 'MISS' | 'BYPASS' = 'BYPASS';
 
-  try {
-    const cached = await getCached(
-      getSkillDetailCacheKey(slug, { includeRecommendSkills }),
-      async () => {
-        const payload = await fetchSkillDetailPayload(db, slug, {
-          r2,
-          waitUntil,
-          includeRecommendSkills,
-          recommendAlgoVersion,
-        });
-        if (!payload) {
-          throw new PublicSkillDetailCacheBypass('not_found');
-        }
-        if (payload.skill.visibility !== 'public') {
-          throw new PublicSkillDetailCacheBypass(payload.skill.visibility, payload);
-        }
-        return payload;
-      },
-      PUBLIC_CACHE_TTL_SECONDS,
-      { waitUntil }
-    );
+  if (currentVisibility === 'public') {
+    try {
+      const cached = await getCached(
+        getSkillDetailCacheKey(slug, { includeRecommendSkills }),
+        async () => {
+          const payload = await fetchSkillDetailPayload(db, slug, {
+            r2,
+            waitUntil,
+            includeRecommendSkills,
+            recommendAlgoVersion,
+          });
+          if (!payload) {
+            throw new PublicSkillDetailCacheBypass('not_found');
+          }
+          if (payload.skill.visibility !== 'public') {
+            throw new PublicSkillDetailCacheBypass(payload.skill.visibility, payload);
+          }
+          return payload;
+        },
+        PUBLIC_CACHE_TTL_SECONDS,
+        { waitUntil }
+      );
 
-    data = cached.data;
-    cacheStatus = cached.hit ? 'HIT' : 'MISS';
-  } catch (err) {
-    if (err instanceof PublicSkillDetailCacheBypass) {
-      data = err.data;
-    } else {
-      throw err;
+      data = cached.data;
+      cacheStatus = cached.hit ? 'HIT' : 'MISS';
+    } catch (err) {
+      if (err instanceof PublicSkillDetailCacheBypass) {
+        data = err.data;
+      } else {
+        throw err;
+      }
     }
+  } else {
+    data = await fetchSkillDetailPayload(db, slug, {
+      r2,
+      waitUntil,
+      includeRecommendSkills: false,
+      recommendAlgoVersion,
+    });
   }
 
   if (!data) {
@@ -343,7 +364,7 @@ export async function resolveSkillDetail(
 
   if (data.skill.visibility === 'private') {
     const auth = await getAuthContext(request, locals, db);
-    if (!auth.userId) {
+    if (!auth.userId && !auth.orgId) {
       return {
         data: null,
         cacheControl: 'no-store',
@@ -361,7 +382,10 @@ export async function resolveSkillDetail(
         status: 403,
       };
     }
-    const hasAccess = await checkSkillAccess(data.skill.id, auth.userId, db);
+    const hasAccess = await checkSkillAccess(data.skill.id, {
+      userId: auth.userId,
+      orgId: auth.orgId,
+    }, db);
     if (!hasAccess) {
       return {
         data: null,
@@ -369,6 +393,18 @@ export async function resolveSkillDetail(
         cacheStatus: 'BYPASS',
         error: 'You do not have permission to access this skill',
         status: 403,
+      };
+    }
+
+    if (includeRecommendSkills) {
+      data = {
+        ...data,
+        recommendSkills: await resolveRecommendSkills(db, data.skill, {
+          r2,
+          waitUntil,
+          recommendAlgoVersion,
+          tier: data.skill.tier,
+        }),
       };
     }
 
@@ -381,6 +417,18 @@ export async function resolveSkillDetail(
   }
 
   if (data.skill.visibility === 'unlisted') {
+    if (includeRecommendSkills) {
+      data = {
+        ...data,
+        recommendSkills: await resolveRecommendSkills(db, data.skill, {
+          r2,
+          waitUntil,
+          recommendAlgoVersion,
+          tier: data.skill.tier,
+        }),
+      };
+    }
+
     return {
       data,
       cacheControl: 'private, no-cache',

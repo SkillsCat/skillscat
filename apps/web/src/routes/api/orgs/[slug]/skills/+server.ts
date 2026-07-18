@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAuthContext, hasScope } from '$lib/server/auth/middleware';
+import { getAuthContext, hasScope, requireScope } from '$lib/server/auth/middleware';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
@@ -27,7 +27,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, params, u
     throw error(500, 'Database not available');
   }
 
-  const { slug } = params;
+  const slug = params.slug?.trim().toLowerCase();
   if (!slug) {
     throw error(400, 'Organization slug is required');
   }
@@ -39,7 +39,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, params, u
 
   // Get org ID
   const org = await db.prepare(`
-    SELECT id FROM organizations WHERE slug = ?
+    SELECT id FROM organizations WHERE slug = ? COLLATE NOCASE
   `)
     .bind(slug)
     .first<{ id: string }>();
@@ -51,10 +51,15 @@ export const GET: RequestHandler = async ({ locals, platform, request, params, u
   // Get current user/token for permission check
   const auth = await getAuthContext(request, locals, db);
   const userId = auth.userId;
+  if (auth.userId || auth.orgId) {
+    requireScope(auth, 'read');
+  }
   const canUseReadScope = hasScope(auth, 'read');
 
-  // Check if user is a member of the org
-  let isMember = false;
+  // Check if the requester is a member of the org or is using a token
+  // issued directly for this organization. Organization tokens represent
+  // the organization and may read all of its private skills with `read`.
+  let isMember = auth.orgId === org.id && canUseReadScope;
   if (userId && canUseReadScope) {
     const membership = await db.prepare(`
       SELECT 1 FROM org_members WHERE org_id = ? AND user_id = ?

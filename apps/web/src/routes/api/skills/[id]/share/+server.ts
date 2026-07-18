@@ -8,6 +8,21 @@ import {
   listSkillPermissions,
 } from '$lib/server/auth/permissions';
 
+async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
+  let value: unknown;
+  try {
+    value = await request.json();
+  } catch {
+    throw error(400, 'Invalid JSON body');
+  }
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw error(400, 'JSON body must be an object');
+  }
+
+  return value as Record<string, unknown>;
+}
+
 /**
  * POST /api/skills/[id]/share - Add a share permission
  */
@@ -18,7 +33,7 @@ export const POST: RequestHandler = async ({ locals, platform, request, params }
   }
 
   const auth = await getAuthContext(request, locals, db);
-  if (!auth.userId) {
+  if (!auth.userId && !auth.orgId) {
     throw error(401, 'Authentication required');
   }
   requireScope(auth, 'write');
@@ -29,12 +44,15 @@ export const POST: RequestHandler = async ({ locals, platform, request, params }
   }
 
   // Check write permission
-  const canWrite = await canWriteSkill(skillId, auth.userId, db);
+  const canWrite = await canWriteSkill(skillId, {
+    userId: auth.userId,
+    orgId: auth.orgId,
+  }, db);
   if (!canWrite) {
     throw error(403, 'You do not have permission to share this skill');
   }
 
-  const body = await request.json() as {
+  const body = await readJsonObject(request) as {
     email?: string;
     userId?: string;
     permission?: 'read' | 'write';
@@ -43,19 +61,43 @@ export const POST: RequestHandler = async ({ locals, platform, request, params }
 
   const { email, userId, permission = 'read', expiresInDays } = body;
 
-  if (!email && !userId) {
+  if ((!email && !userId) || (email && userId)) {
+    throw error(400, 'Provide exactly one of email or userId');
+  }
+
+  if (!['read', 'write'].includes(permission)) {
+    throw error(400, 'permission must be read or write');
+  }
+
+  if (
+    expiresInDays !== undefined
+    && (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 365)
+  ) {
+    throw error(400, 'expiresInDays must be an integer between 1 and 365');
+  }
+
+  const normalizedEmail = email?.trim().toLowerCase();
+  const normalizedUserId = userId?.trim();
+  if (normalizedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    throw error(400, 'Invalid email address');
+  }
+  if (userId && !normalizedUserId) {
+    throw error(400, 'userId cannot be empty');
+  }
+
+  if (!normalizedEmail && !normalizedUserId) {
     throw error(400, 'Either email or userId is required');
   }
 
-  const granteeType = userId ? 'user' : 'email';
-  const granteeId = userId || email!;
+  const granteeType = normalizedUserId ? 'user' : 'email';
+  const granteeId = normalizedUserId || normalizedEmail!;
 
   await grantSkillPermission(
     skillId,
     granteeType,
     granteeId,
     permission,
-    auth.userId,
+    auth.principalId!,
     db,
     expiresInDays
   );
@@ -76,7 +118,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, params })
   }
 
   const auth = await getAuthContext(request, locals, db);
-  if (!auth.userId) {
+  if (!auth.userId && !auth.orgId) {
     throw error(401, 'Authentication required');
   }
   requireScope(auth, 'read');
@@ -87,7 +129,10 @@ export const GET: RequestHandler = async ({ locals, platform, request, params })
   }
 
   // Check write permission
-  const canWrite = await canWriteSkill(skillId, auth.userId, db);
+  const canWrite = await canWriteSkill(skillId, {
+    userId: auth.userId,
+    orgId: auth.orgId,
+  }, db);
   if (!canWrite) {
     throw error(403, 'You do not have permission to view shares for this skill');
   }
@@ -110,7 +155,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
   }
 
   const auth = await getAuthContext(request, locals, db);
-  if (!auth.userId) {
+  if (!auth.userId && !auth.orgId) {
     throw error(401, 'Authentication required');
   }
   requireScope(auth, 'write');
@@ -121,24 +166,33 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
   }
 
   // Check write permission
-  const canWrite = await canWriteSkill(skillId, auth.userId, db);
+  const canWrite = await canWriteSkill(skillId, {
+    userId: auth.userId,
+    orgId: auth.orgId,
+  }, db);
   if (!canWrite) {
     throw error(403, 'You do not have permission to manage shares for this skill');
   }
 
-  const body = await request.json() as {
+  const body = await readJsonObject(request) as {
     email?: string;
     userId?: string;
   };
 
   const { email, userId } = body;
 
-  if (!email && !userId) {
+  if ((!email && !userId) || (email && userId)) {
+    throw error(400, 'Provide exactly one of email or userId');
+  }
+
+  const normalizedEmail = email?.trim().toLowerCase();
+  const normalizedUserId = userId?.trim();
+  if (!normalizedEmail && !normalizedUserId) {
     throw error(400, 'Either email or userId is required');
   }
 
-  const granteeType = userId ? 'user' : 'email';
-  const granteeId = userId || email!;
+  const granteeType = normalizedUserId ? 'user' : 'email';
+  const granteeId = normalizedUserId || normalizedEmail!;
 
   const revoked = await revokeSkillPermission(skillId, granteeType, granteeId, db);
 

@@ -1,6 +1,6 @@
-import { getCached } from '$lib/server/cache';
-import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
-import { getAccessibleSkillIds } from '$lib/server/auth/permissions';
+import { getCached, invalidateCache } from '$lib/server/cache';
+import { getAuthContext, hasScope, requireScope } from '$lib/server/auth/middleware';
+import { getRegistryRepoCacheKey } from '$lib/server/cache/keys';
 
 const MAX_PATH_LENGTH = 512;
 const MAX_OWNER_LENGTH = 100;
@@ -32,6 +32,12 @@ export interface RegistryRepoInput {
   pathFilter: string | null;
 }
 
+interface RegistryRepoAccess {
+  userId: string | null;
+  orgId: string | null;
+  now: number;
+}
+
 export interface ResolvedRegistryRepo {
   data: RegistryRepoResult;
   cacheControl: string;
@@ -57,8 +63,10 @@ function hasOwn(input: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(input, key);
 }
 
-function buildRepoCacheKey(owner: string, repo: string, pathFilter: string | null): string {
-  return `registry-repo:${owner.toLowerCase()}:${repo.toLowerCase()}:${pathFilter === null ? 'path:*' : `path:${pathFilter}`}`;
+export function canCachePublicRegistryRepo(input: RegistryRepoInput, canReadPrivate: boolean): boolean {
+  // Only the unfiltered repo list has a stable key that skill mutations can
+  // invalidate. Path-filtered variants remain bounded DB reads.
+  return !canReadPrivate && input.pathFilter === null;
 }
 
 export function parseRegistryRepoInput(input: Record<string, unknown>): RegistryRepoInput | null {
@@ -106,32 +114,75 @@ export async function resolveRegistryRepo(
     };
   }
 
-  let accessiblePrivateIds: string[] = [];
   const auth = await getAuthContext(request, locals, db);
-  if (auth.userId) {
+  if (auth.userId || auth.orgId) {
     requireScope(auth, 'read');
-    accessiblePrivateIds = await getAccessibleSkillIds(auth.userId, db);
   }
+  const canReadPrivate = Boolean(auth.userId || auth.orgId) && hasScope(auth, 'read');
+  const access: RegistryRepoAccess = {
+    userId: canReadPrivate ? auth.userId : null,
+    orgId: canReadPrivate ? auth.orgId : null,
+    now: Date.now(),
+  };
 
-  const canCachePublic = !auth.userId;
+  const canCachePublic = canCachePublicRegistryRepo(input, canReadPrivate);
 
   if (canCachePublic) {
+    const cacheKey = getRegistryRepoCacheKey(input.owner, input.repo);
     const cached = await getCached(
-      buildRepoCacheKey(input.owner, input.repo, input.pathFilter),
-      async () => fetchRepoSkills(db, { ...input, accessiblePrivateIds: [] }),
+      cacheKey,
+      async () => fetchRepoSkills(db, {
+        ...input,
+        access: { userId: null, orgId: null, now: Date.now() },
+      }),
       PUBLIC_CACHE_TTL_SECONDS,
       { waitUntil }
     );
 
+    let data = cached.data;
+    let cacheStatus: ResolvedRegistryRepo['cacheStatus'] = cached.hit ? 'HIT' : 'MISS';
+    if (cached.hit) {
+      const current = await db.prepare(`
+        SELECT slug
+        FROM skills
+        WHERE repo_owner = ? AND repo_name = ? AND visibility = 'public'
+      `)
+        .bind(input.owner, input.repo)
+        .all<{ slug: string }>();
+      const currentSlugs = new Set((current.results || []).map((row) => row.slug));
+      const cachedSlugs = new Set(cached.data.skills.map((skill) => skill.slug));
+      const samePublicSet = currentSlugs.size === cachedSlugs.size
+        && [...currentSlugs].every((slug) => cachedSlugs.has(slug));
+
+      if (!samePublicSet) {
+        data = await fetchRepoSkills(db, {
+          ...input,
+          access: { userId: null, orgId: null, now: Date.now() },
+        });
+        await invalidateCache(cacheKey);
+        cacheStatus = 'MISS';
+      }
+    }
+
     return {
-      data: cached.data,
-      cacheControl: `public, max-age=${PUBLIC_CACHE_TTL_SECONDS}, stale-while-revalidate=180`,
-      cacheStatus: cached.hit ? 'HIT' : 'MISS',
+      data,
+      // Shared caching is owned by the Worker Cache API. Generic edge caches
+      // cannot be invalidated when a skill becomes private.
+      cacheControl: 'private, no-cache',
+      cacheStatus,
+    };
+  }
+
+  if (!canReadPrivate) {
+    return {
+      data: await fetchRepoSkills(db, { ...input, access }),
+      cacheControl: 'no-store',
+      cacheStatus: 'BYPASS',
     };
   }
 
   return {
-    data: await fetchRepoSkills(db, { ...input, accessiblePrivateIds }),
+    data: await fetchRepoSkills(db, { ...input, access }),
     cacheControl: 'private, no-cache',
     cacheStatus: 'BYPASS',
   };
@@ -143,8 +194,8 @@ async function fetchRepoSkills(
     owner,
     repo,
     pathFilter,
-    accessiblePrivateIds,
-  }: RegistryRepoInput & { accessiblePrivateIds: string[] }
+    access,
+  }: RegistryRepoInput & { access: RegistryRepoAccess }
 ): Promise<RegistryRepoResult> {
   let sql = `
     SELECT
@@ -166,10 +217,30 @@ async function fetchRepoSkills(
   `;
   const bindValues: Array<string | number> = [owner, repo];
 
-  if (accessiblePrivateIds.length > 0) {
-    const placeholders = accessiblePrivateIds.map(() => '?').join(',');
-    sql += ` OR s.id IN (${placeholders})`;
-    bindValues.push(...accessiblePrivateIds);
+  if (access.userId) {
+    sql += `
+        OR (s.owner_id = ? AND s.org_id IS NULL)
+        OR s.org_id IN (SELECT org_id FROM org_members WHERE user_id = ?)
+        OR s.id IN (
+          SELECT skill_id
+          FROM skill_permissions
+          WHERE (
+            (grantee_type = 'user' AND grantee_id = ?)
+            OR (
+              grantee_type = 'email'
+              AND LOWER(grantee_id) = (
+                SELECT LOWER(email) FROM user WHERE id = ? LIMIT 1
+              )
+            )
+          )
+          AND (expires_at IS NULL OR expires_at > ?)
+        )`;
+    bindValues.push(access.userId, access.userId, access.userId, access.userId, access.now);
+  }
+
+  if (access.orgId) {
+    sql += ' OR s.org_id = ?';
+    bindValues.push(access.orgId);
   }
 
   sql += ')';

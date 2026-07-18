@@ -95,4 +95,33 @@ describe('resolveTokenBackedUser', () => {
     expect(result).toBeNull();
     expect(db.prepare).not.toHaveBeenCalled();
   });
+
+  it('preserves org-scoped identity for private SSR authorization', async () => {
+    validateApiToken.mockResolvedValue({
+      id: 'token_2',
+      userId: null,
+      orgId: 'org_1',
+      principalType: 'org',
+      principalId: 'org_1',
+      name: 'Org token',
+      scopes: ['read'],
+      expiresAt: null,
+    });
+    const db = { prepare: vi.fn() } as unknown as D1Database;
+
+    const { resolveTokenBackedIdentity } = await import('../src/lib/server/auth/request-user');
+    const result = await resolveTokenBackedIdentity(new Request('https://skills.cat/skills/acme/private', {
+      headers: { Authorization: 'Bearer sk_org_token' },
+    }), db);
+
+    expect(result).toEqual({
+      user: null,
+      principal: {
+        userId: null,
+        orgId: 'org_1',
+        scopes: ['read'],
+      },
+    });
+    expect(db.prepare).not.toHaveBeenCalled();
+  });
 });

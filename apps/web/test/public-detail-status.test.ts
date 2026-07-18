@@ -138,7 +138,7 @@ describe('public detail status overrides', () => {
       error: 'Organization not found',
     });
     expect(headers.get('X-Skillscat-Status-Override')).toBe('404');
-    expect(headers.has('Cache-Control')).toBe(false);
+    expect(headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('returns a rendered skill fallback with 500 override on temporary detail failures', async () => {

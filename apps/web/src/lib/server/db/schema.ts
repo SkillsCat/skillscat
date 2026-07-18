@@ -82,7 +82,7 @@ export const organizations = sqliteTable('organizations', {
 export const orgMembers = sqliteTable('org_members', {
   orgId: text('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   userId: text('user_id').notNull(),
-  role: text('role').notNull().default('member'), // 'owner', 'admin', 'member'
+  role: text('role').notNull().default('member'), // 'owner', 'member'
   invitedBy: text('invited_by'),
   joinedAt: integer('joined_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [

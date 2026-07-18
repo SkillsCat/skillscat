@@ -18,26 +18,33 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     throw error(500, 'Database not available');
   }
 
-  const body = await request.json() as {
-    name?: string;
-    scopes?: string[];
-    expiresInDays?: number;
-  };
+  const rawBody = await request.json() as unknown;
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    throw error(400, 'Invalid token request');
+  }
+  const body = rawBody as Record<string, unknown>;
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const scopes = body.scopes === undefined ? ['read'] : body.scopes;
+  const expiresInDays = body.expiresInDays;
 
-  const { name, scopes = ['read'], expiresInDays } = body;
-
-  if (!name || typeof name !== 'string' || name.length < 1 || name.length > 100) {
+  if (!name || name.length > 100) {
     throw error(400, 'Token name is required (1-100 characters)');
   }
 
   // Validate scopes
+  if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === 'string')) {
+    throw error(400, 'scopes must be an array of strings');
+  }
   const invalidScopes = scopes.filter(s => !VALID_SCOPES.includes(s));
   if (invalidScopes.length > 0) {
     throw error(400, `Invalid scopes: ${invalidScopes.join(', ')}`);
   }
 
   // Validate expiration
-  if (expiresInDays !== undefined && (expiresInDays < 1 || expiresInDays > 365)) {
+  if (
+    expiresInDays !== undefined
+    && (typeof expiresInDays !== 'number' || !Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 365)
+  ) {
     throw error(400, 'Expiration must be between 1 and 365 days');
   }
 
@@ -46,7 +53,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     name,
     scopes,
     db,
-    expiresInDays
+    expiresInDays as number | undefined
   );
 
   return json({

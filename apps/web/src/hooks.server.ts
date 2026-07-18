@@ -28,7 +28,9 @@ import {
   getSkillPublicHintCacheKey,
 } from '$lib/server/cache/keys';
 import { getPublicDiscoveryHtmlCacheKey } from '$lib/server/cache/public-html';
-import { resolveTokenBackedUser } from '$lib/server/auth/request-user';
+import { resolveTokenBackedIdentity } from '$lib/server/auth/request-user';
+import type { SkillAccessPrincipal } from '$lib/server/auth/permissions';
+import { getCurrentSkillVisibility } from '$lib/server/skill/visibility';
 
 const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
 const STATUS_OVERRIDE_HEADER = 'X-Skillscat-Status-Override';
@@ -290,6 +292,11 @@ async function maybeRespondWithCachedSkillHtml(
     return null;
   }
 
+  const db = event.platform?.env?.DB;
+  if (!db || await getCurrentSkillVisibility(db, slug) !== 'public') {
+    return null;
+  }
+
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
   const cachedHtml = await peekCachedText(getSkillHtmlCacheKey(event.locals.locale, slug), { waitUntil });
   if (!cachedHtml) {
@@ -410,7 +417,12 @@ async function shouldSkipAuthForSharedSkillHtml(
 
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
   const publicHint = await peekCachedText(getSkillPublicHintCacheKey(slug), { waitUntil });
-  return publicHint === '1';
+  if (publicHint !== '1') {
+    return false;
+  }
+
+  const db = event.platform?.env?.DB;
+  return Boolean(db && await getCurrentSkillVisibility(db, slug) === 'public');
 }
 
 function maybeWriteSkillHtmlCache(
@@ -638,7 +650,7 @@ async function maybeRespondWithOpenClawHomeMarkdown(event: Parameters<Handle>[0]
 async function maybeRespondWithOpenClawSkillMarkdown(
   event: Parameters<Handle>[0]['event'],
   env: RuntimeEnv,
-  userId: string | null
+  principal: SkillAccessPrincipal | null
 ): Promise<Response | null> {
   if (!isOpenClawUserAgent(event.request.headers.get('user-agent'))) {
     return null;
@@ -659,7 +671,7 @@ async function maybeRespondWithOpenClawSkillMarkdown(
       R2: env.R2,
     },
     slug,
-    userId
+    principal
   );
 
   if (!skill) {
@@ -793,6 +805,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     event.locals.auth = async () => ({ user: null });
     event.locals.session = null;
     event.locals.user = null;
+    event.locals.authPrincipal = null;
     const response = await resolve(event, withHtmlLangTransform(event.locals.htmlLang));
     const homeCacheWriteCandidate = isHomeHtmlCacheableRequest(event) ? response.clone() : null;
     const publicDiscoveryCacheWriteCandidate = isPublicDiscoveryHtmlCacheableRequest(event)
@@ -856,6 +869,11 @@ export const handle: Handle = async ({ event, resolve }) => {
   if (sessionData) {
     event.locals.session = sessionData.session;
     event.locals.user = sessionData.user;
+    event.locals.authPrincipal = {
+      userId: sessionData.user.id,
+      orgId: null,
+      scopes: ['read', 'write', 'publish'],
+    };
 
     if (sessionData.user.id) {
       const markerValue = `u:${sessionData.user.id}`;
@@ -892,7 +910,11 @@ export const handle: Handle = async ({ event, resolve }) => {
     }
   } else {
     event.locals.session = null;
-    event.locals.user = await resolveTokenBackedUser(event.request, env.DB);
+    const tokenIdentity = isSkillRouteRequest(event)
+      ? await resolveTokenBackedIdentity(event.request, env.DB)
+      : null;
+    event.locals.user = tokenIdentity?.user ?? null;
+    event.locals.authPrincipal = tokenIdentity?.principal ?? null;
     event.locals.auth = async () => ({
       user: event.locals.user,
     });
@@ -901,7 +923,12 @@ export const handle: Handle = async ({ event, resolve }) => {
   const openClawSkillResponse = await maybeRespondWithOpenClawSkillMarkdown(
     event,
     env,
-    event.locals.user?.id ?? null
+    event.locals.authPrincipal?.scopes.includes('read')
+      ? {
+          userId: event.locals.authPrincipal.userId,
+          orgId: event.locals.authPrincipal.orgId,
+        }
+      : null
   );
   if (openClawSkillResponse) {
     return openClawSkillResponse;

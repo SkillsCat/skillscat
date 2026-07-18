@@ -1,4 +1,4 @@
-import { getCached } from '$lib/server/cache';
+import { getCached, invalidateCache } from '$lib/server/cache';
 import { getOrgPageSnapshotCacheKey } from '$lib/server/cache/keys';
 
 const PUBLIC_ORG_PAGE_CACHE_TTL_SECONDS = 30 * 60;
@@ -228,6 +228,63 @@ async function fetchPublicOrgSnapshot(db: D1Database, slug: string): Promise<Org
   };
 }
 
+async function isCachedPublicOrgSnapshotCurrent(
+  db: D1Database,
+  payload: OrgPagePayload
+): Promise<boolean> {
+  if (!payload.org) return false;
+
+  const skillIds = payload.skills.map((skill) => skill.id);
+  if (skillIds.length === 0) {
+    const org = await db.prepare(`
+      SELECT id, updated_at as updatedAt
+      FROM organizations
+      WHERE slug = ?
+      LIMIT 1
+    `)
+      .bind(payload.slug)
+      .first<{ id: string; updatedAt: number }>();
+
+    return Boolean(
+      org
+      && org.id === payload.org.id
+      && Number(org.updatedAt) === Number(payload.org.updatedAt)
+    );
+  }
+
+  const placeholders = skillIds.map(() => '?').join(',');
+  const result = await db.prepare(`
+    SELECT
+      o.id as orgId,
+      o.updated_at as orgUpdatedAt,
+      s.id as skillId
+    FROM organizations o
+    LEFT JOIN skills s INDEXED BY skills_visibility_id_idx
+      ON s.visibility = 'public'
+      AND s.id IN (${placeholders})
+      AND s.org_id = o.id
+    WHERE o.slug = ?
+    LIMIT ?
+  `)
+    .bind(...skillIds, payload.slug, skillIds.length + 1)
+    .all<{ orgId: string; orgUpdatedAt: number; skillId: string | null }>();
+
+  const rows = result.results || [];
+  const orgRow = rows[0];
+  if (
+    !orgRow
+    || orgRow.orgId !== payload.org.id
+    || Number(orgRow.orgUpdatedAt) !== Number(payload.org.updatedAt)
+  ) {
+    return false;
+  }
+
+  const currentPublicSkillIds = new Set(
+    rows.map((row) => row.skillId).filter((id): id is string => Boolean(id))
+  );
+  return currentPublicSkillIds.size === new Set(skillIds).size;
+}
+
 async function applyMemberOverlay(
   db: D1Database,
   payload: OrgPagePayload,
@@ -300,9 +357,10 @@ export async function resolveOrgPagePayload(
   },
   slug: string
 ): Promise<ResolvedOrgPagePayload> {
+  const normalizedSlug = slug.trim().toLowerCase();
   if (!db) {
     return {
-      data: buildTemporaryFailurePayload(slug),
+      data: buildTemporaryFailurePayload(normalizedSlug),
       cacheControl: 'no-store',
       cacheStatus: 'BYPASS',
       status: 503,
@@ -310,17 +368,48 @@ export async function resolveOrgPagePayload(
   }
 
   try {
+    const cacheKey = getOrgPageSnapshotCacheKey(normalizedSlug);
     const cached = await getCached(
-      getOrgPageSnapshotCacheKey(slug),
-      () => fetchPublicOrgSnapshot(db, slug),
+      cacheKey,
+      () => fetchPublicOrgSnapshot(db, normalizedSlug),
       PUBLIC_ORG_PAGE_CACHE_TTL_SECONDS,
       { waitUntil }
     );
 
-    const publicPayload = cached.data;
+    let publicPayload = cached.data;
+    let cacheHit = cached.hit;
+
+    // Cache API entries are data-center local. Recheck misses for newly created
+    // organizations and validate positive snapshots before exposing cached
+    // public skill metadata.
+    if (!publicPayload && cached.hit) {
+      const exists = await db.prepare(`
+        SELECT 1
+        FROM organizations
+        WHERE slug = ?
+        LIMIT 1
+      `)
+        .bind(normalizedSlug)
+        .first();
+
+      if (exists) {
+        publicPayload = await fetchPublicOrgSnapshot(db, normalizedSlug);
+        cacheHit = false;
+        await invalidateCache(cacheKey);
+      }
+    } else if (
+      publicPayload
+      && cached.hit
+      && !await isCachedPublicOrgSnapshotCurrent(db, publicPayload)
+    ) {
+      publicPayload = await fetchPublicOrgSnapshot(db, normalizedSlug);
+      cacheHit = false;
+      await invalidateCache(cacheKey);
+    }
+
     if (!publicPayload) {
       return {
-        data: buildNotFoundPayload(slug),
+        data: buildNotFoundPayload(normalizedSlug),
         cacheControl: 'no-store',
         cacheStatus: 'BYPASS',
         status: 404,
@@ -331,8 +420,8 @@ export async function resolveOrgPagePayload(
     if (!session?.user?.id) {
       return {
         data: publicPayload,
-        cacheControl: `public, max-age=${PUBLIC_ORG_PAGE_CACHE_TTL_SECONDS}, stale-while-revalidate=3600`,
-        cacheStatus: cached.hit ? 'HIT' : 'MISS',
+        cacheControl: 'private, no-cache',
+        cacheStatus: cacheHit ? 'HIT' : 'MISS',
         status: 200,
       };
     }
@@ -342,22 +431,22 @@ export async function resolveOrgPagePayload(
       return {
         data: overlayPayload,
         cacheControl: 'private, no-cache',
-        cacheStatus: overlayPayload.org?.userRole ? 'BYPASS' : (cached.hit ? 'HIT' : 'MISS'),
+        cacheStatus: overlayPayload.org?.userRole ? 'BYPASS' : (cacheHit ? 'HIT' : 'MISS'),
         status: 200,
       };
     } catch (error) {
-      console.error(`Failed to apply org member overlay for ${slug}:`, error);
+      console.error(`Failed to apply org member overlay for ${normalizedSlug}:`, error);
       return {
         data: publicPayload,
         cacheControl: 'private, no-cache',
-        cacheStatus: cached.hit ? 'HIT' : 'MISS',
+        cacheStatus: cacheHit ? 'HIT' : 'MISS',
         status: 200,
       };
     }
   } catch (error) {
-    console.error(`Failed to resolve org page payload for ${slug}:`, error);
+    console.error(`Failed to resolve org page payload for ${normalizedSlug}:`, error);
     return {
-      data: buildTemporaryFailurePayload(slug),
+      data: buildTemporaryFailurePayload(normalizedSlug),
       cacheControl: 'no-store',
       cacheStatus: 'BYPASS',
       status: 500,
