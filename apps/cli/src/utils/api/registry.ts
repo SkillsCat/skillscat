@@ -2,12 +2,9 @@ import { getRegistryUrl } from '../config/config';
 import { getBaseUrl, getValidToken } from '../auth/auth';
 import { verboseRequest, verboseResponse, verboseLog } from '../core/verbose';
 import { parseNetworkError, parseHttpError } from '../core/errors';
-import { getCachedSkill, cacheSkill, calculateContentHash } from '../storage/cache';
+import { cacheSkill } from '../storage/cache';
 import { parseSlug } from '../core/slug';
-import { githubRequest } from '../core/github-request';
 import { fetchWithTimeout } from '../core/fetch';
-
-const GITHUB_API = 'https://api.github.com';
 
 export interface SkillRegistryItem {
   name: string;
@@ -58,6 +55,16 @@ export interface RegistrySkillFilesResult {
   files: RegistrySkillFile[];
 }
 
+export class RegistryRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = 'RegistryRequestError';
+  }
+}
+
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const token = await getValidToken();
   const headers: Record<string, string> = {
@@ -68,49 +75,6 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
     headers['Authorization'] = `Bearer ${token}`;
   }
   return headers;
-}
-
-/**
- * Parse GitHub URL to extract owner, repo, and skill path
- */
-function parseGitHubUrl(url: string): { owner: string; repo: string; skillPath?: string } | null {
-  // Match: https://github.com/owner/repo or https://github.com/owner/repo/tree/branch/path
-  const match = url.match(/github\.com\/([^\/]+)\/([^\/]+)(?:\/tree\/[^\/]+\/(.+))?/);
-  if (!match) return null;
-  return {
-    owner: match[1],
-    repo: match[2].replace(/\.git$/, ''),
-    skillPath: match[3]
-  };
-}
-
-/**
- * Fetch SKILL.md content directly from GitHub
- */
-async function fetchFromGitHub(owner: string, repo: string, skillPath?: string): Promise<string | null> {
-  const path = skillPath ? `${skillPath}/SKILL.md` : 'SKILL.md';
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}`;
-
-  verboseLog(`Fetching from GitHub: ${url}`);
-
-  try {
-    const response = await githubRequest(url, {
-      userAgent: 'skillscat-cli/0.1.0',
-    });
-
-    if (!response.ok) {
-      verboseLog(`GitHub fetch failed: ${response.status}`);
-      return null;
-    }
-
-    const data = await response.json() as { content?: string; encoding?: string };
-    if (data.encoding === 'base64' && data.content) {
-      return Buffer.from(data.content, 'base64').toString('utf-8');
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 export async function fetchSkill(skillIdentifier: string): Promise<SkillRegistryItem | null> {
@@ -132,68 +96,25 @@ export async function fetchSkill(skillIdentifier: string): Promise<SkillRegistry
         return null;
       }
       const error = parseHttpError(response.status, response.statusText);
-      throw new Error(error.message);
+      throw new RegistryRequestError(error.message, response.status);
     }
 
-    const skill = await response.json() as SkillRegistryItem;
+    const payload = await response.json() as SkillRegistryItem;
+    const skill: SkillRegistryItem = {
+      ...payload,
+      slug: payload.slug || skillIdentifier,
+      skillPath: payload.skillPath || '',
+    };
 
-    // For private skills, return as-is (content from R2)
-    if (skill.visibility === 'private') {
-      verboseLog('Private skill - using registry content');
-      return skill;
+    if (skill.content && skill.owner && skill.repo) {
+      cacheSkill(skill.owner, skill.repo, skill.content, 'registry', skill.skillPath || undefined);
     }
-
-    // For public skills, try to use cache or fetch from GitHub
-    const githubInfo = skill.githubUrl ? parseGitHubUrl(skill.githubUrl) : null;
-    if (!githubInfo) {
-      verboseLog('No GitHub URL - using registry content');
-      return skill;
-    }
-
-    const { owner, repo, skillPath } = githubInfo;
-
-    // Check local cache first
-    const cached = getCachedSkill(owner, repo, skillPath);
-    if (cached) {
-      // If we have a contentHash from registry, validate cache
-      if (skill.contentHash && cached.contentHash === skill.contentHash) {
-        verboseLog('Using cached version (hash match)');
-        return { ...skill, content: cached.content };
-      }
-      // If no contentHash from registry, use cache if recent (< 1 hour)
-      if (!skill.contentHash && Date.now() - cached.cachedAt < 3600000) {
-        verboseLog('Using cached version (recent)');
-        return { ...skill, content: cached.content };
-      }
-    }
-
-    // Fetch fresh content from GitHub
-    verboseLog('Fetching from GitHub...');
-    const githubContent = await fetchFromGitHub(owner, repo, skillPath);
-
-    if (githubContent) {
-      // Cache the content
-      cacheSkill(owner, repo, githubContent, 'github', skillPath);
-      verboseLog('Cached GitHub content');
-      return {
-        ...skill,
-        content: githubContent,
-        contentHash: calculateContentHash(githubContent)
-      };
-    }
-
-    // Fall back to registry content (R2)
-    verboseLog('GitHub fetch failed - using registry content');
-    if (skill.content) {
-      cacheSkill(owner, repo, skill.content, 'registry', skillPath);
-    }
+    verboseLog('Using indexed registry content');
     return skill;
   } catch (error) {
-    if (error instanceof Error && !error.message.includes('Authentication') && !error.message.includes('Access denied')) {
-      const networkError = parseNetworkError(error);
-      throw new Error(networkError.message);
-    }
-    throw error;
+    if (error instanceof RegistryRequestError) throw error;
+    const networkError = parseNetworkError(error);
+    throw new Error(networkError.message);
   }
 }
 
@@ -222,16 +143,14 @@ export async function searchSkills(
 
     if (!response.ok) {
       const error = parseHttpError(response.status, response.statusText);
-      throw new Error(error.message);
+      throw new RegistryRequestError(error.message, response.status);
     }
 
     return await response.json() as RegistrySearchResult;
   } catch (error) {
-    if (error instanceof Error && !error.message.includes('Rate limit')) {
-      const networkError = parseNetworkError(error);
-      throw new Error(networkError.message);
-    }
-    throw error;
+    if (error instanceof RegistryRequestError) throw error;
+    const networkError = parseNetworkError(error);
+    throw new Error(networkError.message);
   }
 }
 
@@ -260,16 +179,14 @@ export async function fetchSkillsByRepo(
         return { skills: [], total: 0 };
       }
       const parsed = parseHttpError(response.status, response.statusText);
-      throw new Error(parsed.message);
+      throw new RegistryRequestError(parsed.message, response.status);
     }
 
     return await response.json() as RegistryRepoResult;
   } catch (error) {
-    if (error instanceof Error && !error.message.includes('Rate limit')) {
-      const networkError = parseNetworkError(error);
-      throw new Error(networkError.message);
-    }
-    throw error;
+    if (error instanceof RegistryRequestError) throw error;
+    const networkError = parseNetworkError(error);
+    throw new Error(networkError.message);
   }
 }
 
@@ -289,7 +206,7 @@ export async function fetchSkillFiles(slug: string): Promise<RegistrySkillFilesR
         return null;
       }
       const parsed = parseHttpError(response.status, response.statusText);
-      throw new Error(parsed.message);
+      throw new RegistryRequestError(parsed.message, response.status);
     }
 
     const payload = await response.json() as RegistrySkillFilesResult;
@@ -305,10 +222,8 @@ export async function fetchSkillFiles(slug: string): Promise<RegistrySkillFilesR
       )),
     };
   } catch (error) {
-    if (error instanceof Error && !error.message.includes('Rate limit')) {
-      const networkError = parseNetworkError(error);
-      throw new Error(networkError.message);
-    }
-    throw error;
+    if (error instanceof RegistryRequestError) throw error;
+    const networkError = parseNetworkError(error);
+    throw new Error(networkError.message);
   }
 }

@@ -5,6 +5,7 @@ import { error, spinner, warn, info } from '../utils/core/ui';
 import { verboseRequest, verboseResponse, verboseConfig, isVerbose } from '../utils/core/verbose';
 import { parseNetworkError, parseHttpError } from '../utils/core/errors';
 import { fetchWithTimeout } from '../utils/core/fetch';
+import { RegistryRequestError } from '../utils/api/registry';
 
 interface SearchOptions {
   category?: string;
@@ -29,7 +30,16 @@ interface SearchResult {
 }
 
 export async function search(query?: string, options: SearchOptions = {}): Promise<void> {
-  const limit = parseInt(options.limit || '20', 10);
+  const rawLimit = options.limit || '20';
+  if (!/^\d+$/.test(rawLimit)) {
+    error('Invalid limit. Use an integer from 1 to 50.');
+    process.exit(1);
+  }
+  const limit = Number.parseInt(rawLimit, 10);
+  if (limit < 1 || limit > 50) {
+    error('Invalid limit. Use an integer from 1 to 50.');
+    process.exit(1);
+  }
 
   // Show verbose config info
   if (isVerbose()) {
@@ -77,12 +87,17 @@ export async function search(query?: string, options: SearchOptions = {}): Promi
         process.exit(1);
       }
       const httpError = parseHttpError(response.status, response.statusText);
-      throw new Error(httpError.message);
+      throw new RegistryRequestError(httpError.message, response.status);
     }
 
     result = await response.json() as SearchResult;
   } catch (err) {
     searchSpinner.stop(false);
+
+    if (err instanceof RegistryRequestError) {
+      error(err.message);
+      process.exit(1);
+    }
 
     // Check for network errors
     const networkError = parseNetworkError(err);
@@ -102,7 +117,7 @@ export async function search(query?: string, options: SearchOptions = {}): Promi
       console.log(pc.dim('Popular skill repositories:'));
       console.log(`  ${pc.dim('•')} vercel-labs/agent-skills - React, Next.js best practices`);
       console.log(`  ${pc.dim('•')} anthropics/claude-code-skills - Official Claude Code skills`);
-      return;
+      process.exit(1);
     }
 
     error(err instanceof Error ? err.message : 'Failed to search skills');

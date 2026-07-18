@@ -41,13 +41,18 @@ export interface SkillMetadata {
  * Parse repository source from various formats
  */
 export function parseSource(source: string): RepoSource | null {
-  // GitHub shorthand: owner/repo
-  const shorthandMatch = source.match(/^([^\/\s]+)\/([^\/\s]+)$/);
+  // GitHub shorthand or a nested published slug: owner/repo[/path]
+  const shorthandMatch = source.match(/^([^\/\s]+)\/([^\/\s]+)(?:\/(.+))?$/);
   if (shorthandMatch) {
+    const path = shorthandMatch[3];
+    if (path?.split('/').some((segment) => !segment || segment === '.' || segment === '..')) {
+      return null;
+    }
     return {
       platform: 'github',
       owner: shorthandMatch[1],
-      repo: shorthandMatch[2]
+      repo: shorthandMatch[2],
+      path: path || undefined,
     };
   }
 

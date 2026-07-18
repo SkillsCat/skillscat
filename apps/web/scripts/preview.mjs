@@ -109,12 +109,13 @@ if (!skipBuild) {
 }
 
 const defaultPort = useProdData ? '3001' : '3000';
+const persistTo = process.env.SKILLSCAT_TEST_PERSIST_TO || './.wrangler/state';
 
 // Step 2: 启动 wrangler dev
 const wranglerArgs = [
   'exec', 'wrangler', 'dev',
   ...configs.flatMap((config) => ['-c', config]),
-  '--persist-to', './.wrangler/state',
+  '--persist-to', persistTo,
   ...(hasExplicitPort ? [] : ['--port', defaultPort]),
   ...(useProdData && !hasExplicitEnv ? ['-e', 'production'] : []),
   ...passthroughArgs,

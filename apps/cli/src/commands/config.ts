@@ -1,5 +1,5 @@
 import pc from 'picocolors';
-import { loadSettings, getSetting, setSetting, deleteSetting, getConfigDir, type Settings } from '../utils/config/config';
+import { loadSettings, getSetting, setSetting, deleteSetting, getConfigDir, normalizeRegistryUrl, type Settings } from '../utils/config/config';
 import { verboseConfig, isVerbose } from '../utils/core/verbose';
 
 const DEFAULT_REGISTRY_URL = 'https://skills.cat/registry';
@@ -19,6 +19,15 @@ export async function configSet(key: string, value: string, options: ConfigSetOp
     console.error(pc.red(`Unknown config key: ${key}`));
     console.log(pc.dim(`Valid keys: ${VALID_KEYS.join(', ')}`));
     process.exit(1);
+  }
+
+  if (key === 'registry') {
+    const normalized = normalizeRegistryUrl(value);
+    if (!normalized) {
+      console.error(pc.red('Invalid registry URL. Use HTTPS, or HTTP only for localhost/loopback, with a /registry or /openclaw path.'));
+      process.exit(1);
+    }
+    value = normalized;
   }
 
   setSetting(key as keyof Settings, value);

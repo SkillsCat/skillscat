@@ -1,13 +1,21 @@
 import { hostname, platform, release } from 'node:os';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
-import { getAuthPath, ensureConfigDir as ensureNewConfigDir, getRegistryUrl } from '../config/config';
+import { CLI_VERSION } from '../../version';
+import {
+  DEFAULT_REGISTRY_URL,
+  getAuthPath,
+  ensureConfigDir as ensureNewConfigDir,
+  getRegistryOrigin,
+  getRegistryUrl,
+} from '../config/config';
 import { fetchWithTimeout } from '../core/fetch';
 
 const CONFIG_FILE = getAuthPath();
 
 export interface AuthConfig {
   accessToken?: string;
+  authOrigin?: string;
   accessTokenExpiresAt?: number;
   refreshToken?: string;
   refreshTokenExpiresAt?: number;
@@ -17,6 +25,16 @@ export interface AuthConfig {
     email?: string;
     image?: string;
   };
+  principal?: AuthPrincipal;
+}
+
+export interface AuthPrincipal {
+  type: 'user' | 'org';
+  id: string;
+  name?: string;
+  email?: string;
+  image?: string;
+  slug?: string;
 }
 
 function ensureConfigDir(): void {
@@ -62,8 +80,31 @@ export function clearConfig(): void {
  */
 export function getBaseUrl(): string {
   const registryUrl = getRegistryUrl();
-  // Remove /registry suffix to get base URL
-  return registryUrl.replace(/\/registry$/, '');
+  return registryUrl.replace(/\/(?:registry|openclaw)$/, '');
+}
+
+/**
+ * Browser/device auth is implemented by the SkillsCat registry surface. The
+ * OpenClaw compatibility registry shares the same origin and token, but does
+ * not duplicate the /auth endpoints.
+ */
+export function getRegistryAuthUrl(): string {
+  return getRegistryUrl().replace(/\/openclaw$/, '/registry');
+}
+
+function isAuthConfigForCurrentRegistry(config: AuthConfig): boolean {
+  const currentOrigin = getRegistryOrigin();
+  if (!currentOrigin) {
+    return false;
+  }
+
+  if (config.authOrigin) {
+    return config.authOrigin === currentOrigin;
+  }
+
+  // Legacy configs predate origin binding. Only trust them for the default
+  // service; custom registries must authenticate again.
+  return currentOrigin === getRegistryOrigin(DEFAULT_REGISTRY_URL);
 }
 
 /**
@@ -73,7 +114,7 @@ export function getClientInfo(): { os: string; hostname: string; version: string
   return {
     os: `${platform()} ${release()}`,
     hostname: hostname(),
-    version: '0.1.0',
+    version: CLI_VERSION,
   };
 }
 
@@ -132,7 +173,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
 export async function getValidToken(): Promise<string | null> {
   const config = loadConfig();
 
-  if (!config.accessToken) {
+  if (!config.accessToken || !isAuthConfigForCurrentRegistry(config)) {
     return null;
   }
 
@@ -181,7 +222,7 @@ export async function getValidToken(): Promise<string | null> {
 /**
  * Validate an access token by calling token auth endpoint.
  */
-export async function validateAccessToken(token: string): Promise<AuthConfig['user'] | null> {
+export async function validateAccessToken(token: string): Promise<AuthPrincipal | null> {
   try {
     const response = await fetchWithTimeout(`${getBaseUrl()}/api/tokens/validate`, {
       headers: {
@@ -196,6 +237,7 @@ export async function validateAccessToken(token: string): Promise<AuthConfig['us
 
     const data = await response.json() as {
       success?: boolean;
+      principal?: AuthPrincipal;
       user?: AuthConfig['user'];
     };
 
@@ -203,7 +245,13 @@ export async function validateAccessToken(token: string): Promise<AuthConfig['us
       return null;
     }
 
-    return data.user ?? null;
+    if (data.principal) {
+      return data.principal;
+    }
+
+    return data.user
+      ? { type: 'user', ...data.user }
+      : null;
   } catch {
     return null;
   }
@@ -212,10 +260,19 @@ export async function validateAccessToken(token: string): Promise<AuthConfig['us
 /**
  * Set token directly (for --token flag)
  */
-export function setToken(token: string, user?: AuthConfig['user']): void {
+export function setToken(token: string, principal?: AuthPrincipal): void {
   const config: AuthConfig = {
     accessToken: token,
-    user,
+    authOrigin: getRegistryOrigin() || undefined,
+    principal,
+    user: principal?.type === 'user'
+      ? {
+          id: principal.id,
+          name: principal.name,
+          email: principal.email,
+          image: principal.image,
+        }
+      : undefined,
   };
   saveConfig(config);
 }
@@ -232,10 +289,14 @@ export function setTokens(tokens: {
 }): void {
   const config: AuthConfig = {
     accessToken: tokens.accessToken,
+    authOrigin: getRegistryOrigin() || undefined,
     accessTokenExpiresAt: tokens.accessTokenExpiresAt,
     refreshToken: tokens.refreshToken,
     refreshTokenExpiresAt: tokens.refreshTokenExpiresAt,
     user: tokens.user,
+    principal: tokens.user
+      ? { type: 'user', ...tokens.user }
+      : undefined,
   };
   saveConfig(config);
 }
@@ -248,6 +309,17 @@ export function isAuthenticated(): boolean {
 export function getUser(): AuthConfig['user'] | undefined {
   const config = loadConfig();
   return config.user;
+}
+
+export function getPrincipal(): AuthPrincipal | undefined {
+  const config = loadConfig();
+  if (config.principal) {
+    return config.principal;
+  }
+
+  return config.user
+    ? { type: 'user', ...config.user }
+    : undefined;
 }
 
 /**

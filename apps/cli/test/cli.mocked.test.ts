@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { configureAuth, configureRegistry, createWorkspace, resetTestCacheDir, resetTestConfigDir } from './helpers/env';
 import { runCommand } from './helpers/output';
@@ -161,10 +161,18 @@ describe('CLI commands with mocked network', () => {
   it('config set/get/list/delete', async () => {
     const { configSet, configGet, configList, configDelete } = await import('../src/commands/config');
 
-    await runCommand(() => configSet('registry', 'http://example.test/registry'));
+    await runCommand(() => configSet('registry', 'https://example.test/registry'));
 
     const getResult = await runCommand(() => configGet('registry'));
-    expect(getResult.stdout).toContain('http://example.test/registry');
+    expect(getResult.stdout).toContain('https://example.test/registry');
+
+    await runCommand(() => configSet('registry', 'https://example.test/registry/'));
+    const { getRegistryUrl } = await import('../src/utils/config/config');
+    expect(getRegistryUrl()).toBe('https://example.test/registry');
+
+    const insecureResult = await runCommand(() => configSet('registry', 'http://example.test/registry'));
+    expect(insecureResult.exitCode).toBe(1);
+    expect(insecureResult.stderr).toContain('Invalid registry URL');
 
     const listResult = await runCommand(() => configList());
     expect(listResult.stdout).toContain('registry');
@@ -209,6 +217,10 @@ describe('CLI commands with mocked network', () => {
 
     const logoutResult = await runCommand(() => logout());
     expect(logoutResult.stdout).toContain('Successfully logged out');
+
+    const loggedOutWhoami = await runCommand(() => whoami());
+    expect(loggedOutWhoami.exitCode).toBe(1);
+    expect(loggedOutWhoami.stdout).toContain('Not logged in');
   });
 
   it('add/list/update/remove with GitHub mock', async () => {
@@ -240,6 +252,49 @@ describe('CLI commands with mocked network', () => {
 
     const removeResult = await runCommand(() => remove('Test Skill', {}));
     expect(removeResult.stdout).toContain('Removed Test Skill');
+  });
+
+  it('keeps failed agent removals tracked for retry', async () => {
+    if (process.platform === 'win32') return;
+
+    const skillName = 'Partial Remove';
+    const agentsSkillDir = join(process.cwd(), '.agents', skillName);
+    const claudeBase = join(process.cwd(), '.claude', 'skills');
+    const claudeSkillDir = join(claudeBase, skillName);
+    mkdirSync(agentsSkillDir, { recursive: true });
+    mkdirSync(claudeSkillDir, { recursive: true });
+    writeFileSync(join(agentsSkillDir, 'SKILL.md'), SKILL_MD_V1, 'utf-8');
+    writeFileSync(join(claudeSkillDir, 'SKILL.md'), SKILL_MD_V1, 'utf-8');
+
+    const { getInstalledSkills, recordInstallation } = await import('../src/utils/storage/db');
+    recordInstallation({
+      name: skillName,
+      description: 'Partial remove test',
+      registrySlug: 'testowner/partial-remove',
+      updateStrategy: 'registry',
+      agents: ['agents', 'claude-code'],
+      global: false,
+      installedAt: Date.now(),
+      path: 'SKILL.md',
+      contentHash: 'hash',
+      installRoot: process.cwd(),
+    });
+
+    chmodSync(claudeSkillDir, 0o555);
+    try {
+      const { remove } = await import('../src/commands/remove');
+      const result = await runCommand(() => remove(skillName, {
+        agent: ['agents', 'claude-code'],
+      }));
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Failed to remove from Claude Code');
+      expect(existsSync(agentsSkillDir)).toBe(false);
+      expect(existsSync(claudeSkillDir)).toBe(true);
+      expect(getInstalledSkills()[0]?.agents).toEqual(['claude-code']);
+    } finally {
+      chmodSync(claudeSkillDir, 0o755);
+    }
   });
 
   it('installs directly to global Codex, Claude Code, and OpenCode targets', async () => {
@@ -296,6 +351,101 @@ describe('CLI commands with mocked network', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects mixed valid and invalid agent filters for local commands', async () => {
+    const { list } = await import('../src/commands/list');
+    const { remove } = await import('../src/commands/remove');
+    const { update } = await import('../src/commands/update');
+    const { recordInstallation } = await import('../src/utils/storage/db');
+    const skillDir = join(process.cwd(), '.agents', 'Agent Filter Skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), SKILL_MD_V1, 'utf-8');
+    recordInstallation({
+      name: 'Agent Filter Skill',
+      description: 'Agent validation test',
+      registrySlug: 'testowner/agent-filter-skill',
+      updateStrategy: 'registry',
+      agents: ['agents'],
+      global: false,
+      installedAt: Date.now(),
+      path: 'SKILL.md',
+      contentHash: 'hash',
+      installRoot: process.cwd(),
+    });
+
+    for (const result of [
+      await runCommand(() => list({ agent: ['agents', 'not-a-real-agent'] })),
+      await runCommand(() => remove('Agent Filter Skill', { agent: ['agents', 'not-a-real-agent'] })),
+      await runCommand(() => update('Agent Filter Skill', { agent: ['agents', 'not-a-real-agent'] })),
+    ]) {
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Invalid agent(s): not-a-real-agent');
+    }
+  });
+
+  it('rejects invalid search limits before contacting the registry', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { search } = await import('../src/commands/search');
+
+    for (const limit of ['NaN', '0', '51', '5items']) {
+      const result = await runCommand(() => search('skill', { limit }));
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Invalid limit');
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns an error when registry search cannot connect', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('fetch failed');
+    }) as unknown as typeof fetch);
+    const { search } = await import('../src/commands/search');
+
+    const result = await runCommand(() => search('skill'));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Unable to connect');
+  });
+
+  it('preserves registry authorization failures instead of reporting a network error', async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      if (url.startsWith(`${REGISTRY_URL}/search?`)) {
+        return mockResponse({ error: 'Scope required' }, 403);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { search } = await import('../src/commands/search');
+    const result = await runCommand(() => search('private skill'));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Access denied');
+    expect(result.stdout).not.toContain('unexpected network error');
+    expect(result.stdout).not.toContain('install skills directly');
+  });
+
+  it('does not fall back to GitHub when an exact registry slug is forbidden', async () => {
+    const seenUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      seenUrls.push(url);
+      if (url === `${REGISTRY_URL}/skill/testowner/private-skill`) {
+        return mockResponse({ error: 'Forbidden' }, 403);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { add } = await import('../src/commands/add');
+    const result = await runCommand(() => add('testowner/private-skill', { yes: true }));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Access denied');
+    expect(seenUrls).toEqual([`${REGISTRY_URL}/skill/testowner/private-skill`]);
+  });
+
   it('copies fallback .agents installs into a tool-specific directory with convert', async () => {
     mockGitHubFetch(SKILL_MD_V1, 'sha-convert');
 
@@ -334,6 +484,53 @@ describe('CLI commands with mocked network', () => {
 
     const skippedInstall = getInstalledSkills().find((skill) => skill.name === skippedSkillName && !skill.global);
     expect(skippedInstall?.agents).toEqual(['agents']);
+  });
+
+  it('tracks successful convert copies when another skill copy fails', async () => {
+    if (process.platform === 'win32') return;
+
+    const goodName = 'Convertible Skill';
+    const failedName = 'Unreadable Skill';
+    const sourceBase = join(process.cwd(), '.agents');
+    for (const name of [goodName, failedName]) {
+      const skillDir = join(sourceBase, name);
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, 'SKILL.md'), SKILL_MD_V1.replaceAll('Test Skill', name), 'utf-8');
+    }
+
+    const { getInstalledSkills, recordInstallation } = await import('../src/utils/storage/db');
+    for (const name of [goodName, failedName]) {
+      recordInstallation({
+        name,
+        description: 'Convert failure test',
+        registrySlug: `testowner/${name.toLowerCase().replaceAll(' ', '-')}`,
+        updateStrategy: 'registry',
+        agents: ['agents'],
+        global: false,
+        installedAt: Date.now(),
+        path: 'SKILL.md',
+        contentHash: 'hash',
+        installRoot: process.cwd(),
+      });
+    }
+
+    const unreadableFile = join(sourceBase, failedName, 'SKILL.md');
+    chmodSync(unreadableFile, 0o000);
+    try {
+      const { convert } = await import('../src/commands/convert');
+      const result = await runCommand(() => convert('claude-code', {}));
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(`Failed to copy ${failedName}`);
+      expect(existsSync(join(process.cwd(), '.claude', 'skills', goodName, 'SKILL.md'))).toBe(true);
+      expect(getInstalledSkills().find((skill) => skill.name === goodName)?.agents).toEqual([
+        'agents',
+        'claude-code',
+      ]);
+      expect(getInstalledSkills().find((skill) => skill.name === failedName)?.agents).toEqual(['agents']);
+    } finally {
+      chmodSync(unreadableFile, 0o644);
+    }
   });
 
   it('drops tracked installs after the local skill directory is manually deleted', async () => {
@@ -976,6 +1173,137 @@ describe('CLI commands with mocked network', () => {
     expect(seenUrls).not.toContain(`${REGISTRY_URL}/repo/testowner/testrepo`);
   });
 
+  it('does not install a private registry skill when bundle access is forbidden', async () => {
+    const slug = 'testowner/private-bundle-forbidden';
+    const seenUrls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      seenUrls.push(url);
+      if (url === `${REGISTRY_URL}/skill/${slug}`) {
+        return mockResponse({
+          name: 'Private Bundle Forbidden',
+          description: 'Private bundle access test',
+          owner: 'testowner',
+          repo: 'private-bundle-forbidden',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Private Bundle Forbidden'),
+          githubUrl: '',
+          visibility: 'private',
+          slug,
+        }, 200);
+      }
+      if (url === `http://localhost:3000/api/skills/${encodeURIComponent(slug)}/files`) {
+        return mockResponse({ error: 'Forbidden' }, 403);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch);
+
+    const { add } = await import('../src/commands/add');
+    const result = await runCommand(() => add(slug, { yes: true }));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Access denied');
+    expect(existsSync(join(process.cwd(), '.agents', 'Private Bundle Forbidden', 'SKILL.md'))).toBe(false);
+    expect(seenUrls.some((url) => url.includes('api.github.com'))).toBe(false);
+  });
+
+  it('returns an error when an agent installation cannot be written', async () => {
+    const slug = 'testowner/add-write-failure';
+    const skillName = 'Add Write Failure';
+    const content = SKILL_MD_V2.replaceAll('Test Skill', skillName);
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      if (url === `${REGISTRY_URL}/skill/${slug}`) {
+        return mockResponse({
+          name: skillName,
+          description: 'Write failure test',
+          owner: 'testowner',
+          repo: 'add-write-failure',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content,
+          githubUrl: '',
+          visibility: 'private',
+          slug,
+        }, 200);
+      }
+      if (url === `http://localhost:3000/api/skills/${encodeURIComponent(slug)}/files`) {
+        return mockResponse({
+          folderName: 'add-write-failure',
+          files: [{ path: 'SKILL.md', content }],
+        }, 200);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch);
+
+    const skillDir = join(process.cwd(), '.agents', skillName);
+    const skillFile = join(skillDir, 'SKILL.md');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(skillFile, SKILL_MD_V1.replaceAll('Test Skill', skillName), 'utf-8');
+    chmodSync(skillFile, 0o444);
+
+    try {
+      const { add } = await import('../src/commands/add');
+      const result = await runCommand(() => add(slug, { yes: true }));
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(`Failed to install ${skillName}`);
+      expect(result.stderr).toContain('1 agent installation(s) could not be written.');
+      expect(result.stdout).not.toContain('Skills are now available');
+    } finally {
+      chmodSync(skillFile, 0o644);
+    }
+  });
+
+  it('prefers an exact nested registry slug before treating it as a repository path', async () => {
+    const seenUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      seenUrls.push(url);
+
+      if (url === `${REGISTRY_URL}/skill/testowner/testrepo/nested-skill`) {
+        return mockResponse({
+          name: 'Nested Exact Skill',
+          description: 'Published under a nested slug',
+          owner: 'testowner',
+          repo: 'testrepo',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Nested Exact Skill'),
+          githubUrl: '',
+          visibility: 'private',
+          slug: 'testowner/testrepo/nested-skill',
+        }, 200);
+      }
+
+      if (url === `http://localhost:3000/api/skills/${encodeURIComponent('testowner/testrepo/nested-skill')}/files`) {
+        return mockResponse({
+          folderName: 'nested-skill',
+          files: [{
+            path: 'SKILL.md',
+            content: SKILL_MD_V1.replaceAll('Test Skill', 'Nested Exact Skill'),
+          }],
+        }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() => add('testowner/testrepo/nested-skill', { yes: true }));
+    expect(result.exitCode).toBeNull();
+    expect(existsSync(join(process.cwd(), '.agents', 'Nested Exact Skill', 'SKILL.md'))).toBe(true);
+    expect(seenUrls[0]).toBe(`${REGISTRY_URL}/skill/testowner/testrepo/nested-skill`);
+    expect(seenUrls.some((url) => url.startsWith(`${REGISTRY_URL}/repo/`))).toBe(false);
+    expect(seenUrls.some((url) => url.includes('api.github.com'))).toBe(false);
+  });
+
   it('treats shorthand input as a repository when --repo is explicit', async () => {
     const seenUrls: string[] = [];
     const fetchMock = vi.fn(async (input: unknown) => {
@@ -1605,16 +1933,529 @@ describe('CLI commands with mocked network', () => {
 
     const { add } = await import('../src/commands/add');
     const { update } = await import('../src/commands/update');
+    const { calculateContentHash } = await import('../src/utils/storage/cache');
+    const { getInstalledSkills } = await import('../src/utils/storage/db');
 
     await runCommand(() => add('testowner/testrepo', { yes: true }));
 
     const skillFile = join(process.cwd(), '.agents', 'Private Registry Skill', 'SKILL.md');
     expect(existsSync(skillFile)).toBe(true);
     expect(readFileSync(skillFile, 'utf-8')).toContain('Hello from v1');
+    expect(getInstalledSkills()[0]?.contentHash).toBe(calculateContentHash(SKILL_MD_V1));
 
     const updateResult = await runCommand(() => update(undefined, {}));
     expect(updateResult.stdout).toContain('Updated');
     expect(readFileSync(skillFile, 'utf-8')).toContain('Hello from v2');
+  });
+
+  it('does not report removed registry skills as up to date', async () => {
+    const slug = 'testowner/removed-skill';
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      if (url === `${REGISTRY_URL}/skill/${slug}`) {
+        return mockResponse({ error: 'Not found' }, 404);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch);
+
+    const { recordInstallation } = await import('../src/utils/storage/db');
+    const { update } = await import('../src/commands/update');
+    const skillDir = join(process.cwd(), '.agents', 'Removed Skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), SKILL_MD_V1, 'utf-8');
+    recordInstallation({
+      name: 'Removed Skill',
+      description: 'Removed from registry',
+      source: { platform: 'github', owner: 'testowner', repo: 'removed-skill' },
+      registrySlug: slug,
+      updateStrategy: 'registry',
+      agents: ['agents'],
+      global: false,
+      installedAt: Date.now(),
+      path: 'SKILL.md',
+      contentHash: 'previous-hash',
+      installRoot: process.cwd(),
+    });
+
+    const result = await runCommand(() => update('Removed Skill', { check: true }));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Skill no longer exists in registry');
+    expect(result.stderr).toContain('1 skill(s) could not be checked.');
+    expect(result.stdout).not.toContain('All skills are up to date!');
+  });
+
+  it('fails update checks when a private registry token is no longer authorized', async () => {
+    const slug = 'testowner/revoked-private-skill';
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      if (url === `${REGISTRY_URL}/skill/${slug}`) {
+        return mockResponse({ error: 'Forbidden' }, 403);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch);
+
+    const { recordInstallation } = await import('../src/utils/storage/db');
+    const { update } = await import('../src/commands/update');
+    const skillDir = join(process.cwd(), '.agents', 'Revoked Private Skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), SKILL_MD_V1, 'utf-8');
+    recordInstallation({
+      name: 'Revoked Private Skill',
+      description: 'Private registry skill',
+      registrySlug: slug,
+      updateStrategy: 'registry',
+      agents: ['agents'],
+      global: false,
+      installedAt: Date.now(),
+      path: 'SKILL.md',
+      contentHash: 'previous-hash',
+      installRoot: process.cwd(),
+    });
+
+    const result = await runCommand(() => update('Revoked Private Skill', { check: true }));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Failed to check');
+    expect(result.stderr).toContain('1 skill(s) could not be checked.');
+    expect(result.stdout).not.toContain('All skills are up to date!');
+  });
+
+  it('does not update private registry content when bundle access is forbidden', async () => {
+    const slug = 'testowner/private-update-bundle-forbidden';
+    const skillName = 'Private Update Bundle Forbidden';
+    const v1 = SKILL_MD_V1.replaceAll('Test Skill', skillName);
+    const v2 = SKILL_MD_V2.replaceAll('Test Skill', skillName);
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      if (url === `${REGISTRY_URL}/skill/${slug}`) {
+        return mockResponse({
+          name: skillName,
+          description: 'Private update bundle access test',
+          owner: 'testowner',
+          repo: 'private-update-bundle-forbidden',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: v2,
+          githubUrl: '',
+          visibility: 'private',
+          slug,
+        }, 200);
+      }
+      if (url === `http://localhost:3000/api/skills/${encodeURIComponent(slug)}/files`) {
+        return mockResponse({ error: 'Forbidden' }, 403);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch);
+
+    const skillDir = join(process.cwd(), '.agents', skillName);
+    const skillFile = join(skillDir, 'SKILL.md');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(skillFile, v1, 'utf-8');
+
+    const { calculateContentHash } = await import('../src/utils/storage/cache');
+    const { recordInstallation } = await import('../src/utils/storage/db');
+    recordInstallation({
+      name: skillName,
+      description: 'Private update bundle access test',
+      registrySlug: slug,
+      updateStrategy: 'registry',
+      agents: ['agents'],
+      global: false,
+      installedAt: Date.now(),
+      path: 'SKILL.md',
+      contentHash: calculateContentHash(v1),
+      installRoot: process.cwd(),
+    });
+
+    const { update } = await import('../src/commands/update');
+    const result = await runCommand(() => update(skillName, {}));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('Failed to check');
+    expect(readFileSync(skillFile, 'utf-8')).toBe(v1);
+  });
+
+  it('updates registry companion files and removes stale managed files', async () => {
+    let registryFetchCount = 0;
+    let bundleFetchCount = 0;
+    const slug = 'testowner/private-with-files';
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+
+      if (url === `${REGISTRY_URL}/skill/${slug}`) {
+        registryFetchCount += 1;
+        return mockResponse({
+          name: 'Private With Files',
+          description: 'Private registry bundle',
+          owner: 'testowner',
+          repo: 'private-with-files',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V1.replaceAll('Test Skill', 'Private With Files'),
+          githubUrl: '',
+          visibility: 'private',
+          slug,
+        }, 200);
+      }
+
+      if (url === `http://localhost:3000/api/skills/${encodeURIComponent(slug)}/files`) {
+        bundleFetchCount += 1;
+        const currentSkill = SKILL_MD_V1.replaceAll('Test Skill', 'Private With Files');
+        return mockResponse({
+          folderName: 'private-with-files',
+          files: bundleFetchCount === 1
+            ? [
+                { path: 'SKILL.md', content: currentSkill },
+                { path: 'old.txt', content: 'old companion' },
+              ]
+            : [
+                { path: 'SKILL.md', content: currentSkill },
+                { path: 'new.txt', content: 'new companion' },
+              ],
+        }, 200);
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { add } = await import('../src/commands/add');
+    const { update } = await import('../src/commands/update');
+    const addResult = await runCommand(() => add(slug, { yes: true }));
+    expect(addResult.exitCode).toBeNull();
+
+    const skillRoot = join(process.cwd(), '.agents', 'Private With Files');
+    expect(readFileSync(join(skillRoot, 'old.txt'), 'utf-8')).toBe('old companion');
+
+    const updateResult = await runCommand(() => update('Private With Files', {}));
+    expect(updateResult.exitCode).toBeNull();
+    expect(existsSync(join(skillRoot, 'old.txt'))).toBe(false);
+    expect(readFileSync(join(skillRoot, 'new.txt'), 'utf-8')).toBe('new companion');
+    expect(readFileSync(join(skillRoot, 'SKILL.md'), 'utf-8')).toContain('Hello from v1');
+  });
+
+  it('keeps the previous tracked hash when only some agent writes succeed', async () => {
+    const slug = 'testowner/partial-update';
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      if (url === `${REGISTRY_URL}/skill/${slug}`) {
+        return mockResponse({
+          name: 'Partial Update',
+          description: 'Partial update test',
+          owner: 'testowner',
+          repo: 'partial-update',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: SKILL_MD_V2.replaceAll('Test Skill', 'Partial Update'),
+          githubUrl: '',
+          visibility: 'private',
+          slug,
+        }, 200);
+      }
+      if (url === `http://localhost:3000/api/skills/${encodeURIComponent(slug)}/files`) {
+        return mockResponse({
+          folderName: 'partial-update',
+          files: [{
+            path: 'SKILL.md',
+            content: SKILL_MD_V2.replaceAll('Test Skill', 'Partial Update'),
+          }],
+        }, 200);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const agentsSkillDir = join(process.cwd(), '.agents', 'Partial Update');
+    const claudeSkillDir = join(process.cwd(), '.claude', 'skills', 'Partial Update');
+    mkdirSync(agentsSkillDir, { recursive: true });
+    mkdirSync(claudeSkillDir, { recursive: true });
+    const v1 = SKILL_MD_V1.replaceAll('Test Skill', 'Partial Update');
+    writeFileSync(join(agentsSkillDir, 'SKILL.md'), v1, 'utf-8');
+    writeFileSync(join(claudeSkillDir, 'SKILL.md'), v1, 'utf-8');
+    chmodSync(join(claudeSkillDir, 'SKILL.md'), 0o444);
+
+    const { calculateContentHash } = await import('../src/utils/storage/cache');
+    const { getInstalledSkills, recordInstallation } = await import('../src/utils/storage/db');
+    const previousHash = calculateContentHash(v1);
+    recordInstallation({
+      name: 'Partial Update',
+      description: 'Partial update test',
+      registrySlug: slug,
+      updateStrategy: 'registry',
+      agents: ['agents', 'claude-code'],
+      global: false,
+      installedAt: Date.now(),
+      path: 'SKILL.md',
+      contentHash: previousHash,
+      installRoot: process.cwd(),
+    });
+
+    try {
+      const { update } = await import('../src/commands/update');
+      const result = await runCommand(() => update('Partial Update', {}));
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Failed to update Partial Update for Claude Code');
+      expect(getInstalledSkills()[0]?.contentHash).toBe(previousHash);
+      expect(readFileSync(join(agentsSkillDir, 'SKILL.md'), 'utf-8')).toContain('Hello from v2');
+      expect(readFileSync(join(claudeSkillDir, 'SKILL.md'), 'utf-8')).toContain('Hello from v1');
+    } finally {
+      chmodSync(join(claudeSkillDir, 'SKILL.md'), 0o644);
+    }
+  });
+
+  it('exits with an error when every update target write fails', async () => {
+    const slug = 'testowner/failed-update';
+    const skillName = 'Failed Update';
+    const v1 = SKILL_MD_V1.replaceAll('Test Skill', skillName);
+    const v2 = SKILL_MD_V2.replaceAll('Test Skill', skillName);
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      if (url === `${REGISTRY_URL}/skill/${slug}`) {
+        return mockResponse({
+          name: skillName,
+          description: 'Failed update test',
+          owner: 'testowner',
+          repo: 'failed-update',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: v2,
+          githubUrl: '',
+          visibility: 'private',
+          slug,
+        }, 200);
+      }
+      if (url === `http://localhost:3000/api/skills/${encodeURIComponent(slug)}/files`) {
+        return mockResponse({
+          folderName: 'failed-update',
+          files: [{ path: 'SKILL.md', content: v2 }],
+        }, 200);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const skillDir = join(process.cwd(), '.agents', skillName);
+    const skillFile = join(skillDir, 'SKILL.md');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(skillFile, v1, 'utf-8');
+    chmodSync(skillFile, 0o444);
+
+    const { calculateContentHash } = await import('../src/utils/storage/cache');
+    const { recordInstallation } = await import('../src/utils/storage/db');
+    recordInstallation({
+      name: skillName,
+      description: 'Failed update test',
+      registrySlug: slug,
+      updateStrategy: 'registry',
+      agents: ['agents'],
+      global: false,
+      installedAt: Date.now(),
+      path: 'SKILL.md',
+      contentHash: calculateContentHash(v1),
+      installRoot: process.cwd(),
+    });
+
+    try {
+      const { update } = await import('../src/commands/update');
+      const result = await runCommand(() => update(skillName, {}));
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Failed to install 1 update(s)');
+      expect(result.stdout).not.toContain('successfully');
+      expect(readFileSync(skillFile, 'utf-8')).toBe(v1);
+    } finally {
+      chmodSync(skillFile, 0o644);
+    }
+  });
+
+  it('does not advance the shared hash when updating only a subset of agents', async () => {
+    const slug = 'testowner/subset-update';
+    const v1 = SKILL_MD_V1.replaceAll('Test Skill', 'Subset Update');
+    const v2 = SKILL_MD_V2.replaceAll('Test Skill', 'Subset Update');
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = toUrlString(input);
+      if (url === `${REGISTRY_URL}/skill/${slug}`) {
+        return mockResponse({
+          name: 'Subset Update',
+          description: 'Subset update test',
+          owner: 'testowner',
+          repo: 'subset-update',
+          stars: 0,
+          updatedAt: Date.now(),
+          categories: [],
+          content: v2,
+          githubUrl: '',
+          visibility: 'private',
+          slug,
+        }, 200);
+      }
+      if (url === `http://localhost:3000/api/skills/${encodeURIComponent(slug)}/files`) {
+        return mockResponse({ folderName: 'subset-update', files: [{ path: 'SKILL.md', content: v2 }] }, 200);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const agentsSkillDir = join(process.cwd(), '.agents', 'Subset Update');
+    const claudeSkillDir = join(process.cwd(), '.claude', 'skills', 'Subset Update');
+    mkdirSync(agentsSkillDir, { recursive: true });
+    mkdirSync(claudeSkillDir, { recursive: true });
+    writeFileSync(join(agentsSkillDir, 'SKILL.md'), v1, 'utf-8');
+    writeFileSync(join(claudeSkillDir, 'SKILL.md'), v1, 'utf-8');
+
+    const { calculateContentHash } = await import('../src/utils/storage/cache');
+    const { getInstalledSkills, recordInstallation } = await import('../src/utils/storage/db');
+    const previousHash = calculateContentHash(v1);
+    recordInstallation({
+      name: 'Subset Update',
+      description: 'Subset update test',
+      registrySlug: slug,
+      updateStrategy: 'registry',
+      agents: ['agents', 'claude-code'],
+      global: false,
+      installedAt: Date.now(),
+      path: 'SKILL.md',
+      contentHash: previousHash,
+      installRoot: process.cwd(),
+    });
+
+    const { update } = await import('../src/commands/update');
+    const result = await runCommand(() => update('Subset Update', { agent: ['agents'] }));
+
+    expect(result.exitCode).toBeNull();
+    expect(getInstalledSkills()[0]?.contentHash).toBe(previousHash);
+    expect(readFileSync(join(agentsSkillDir, 'SKILL.md'), 'utf-8')).toContain('Hello from v2');
+    expect(readFileSync(join(claudeSkillDir, 'SKILL.md'), 'utf-8')).toContain('Hello from v1');
+
+    const repeated = await runCommand(() => update('Subset Update', { agent: ['agents'] }));
+    expect(repeated.exitCode).toBeNull();
+    expect(repeated.stdout).toContain('All skills are up to date');
+  });
+
+  it('stops publishing when preview detects a duplicate public skill', async () => {
+    const skillDir = join(process.cwd(), 'duplicate-skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), SKILL_MD_V1, 'utf-8');
+
+    let uploadCalled = false;
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = toUrlString(input);
+      if (url.endsWith('/api/skills/upload/preview')) {
+        return mockResponse({
+          success: true,
+          preview: {
+            name: 'Test Skill',
+            slug: 'testowner/test-skill',
+            description: 'Example skill',
+            categories: [],
+            owner: 'testowner',
+          },
+          suggestedVisibility: 'private',
+          canPublishPrivate: false,
+        }, 200);
+      }
+      if (url.endsWith('/api/skills/upload')) {
+        uploadCalled = true;
+        return mockResponse({ success: true }, 200);
+      }
+      throw new Error(`Unexpected fetch: ${url} ${String(init?.method || 'GET')}`);
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { publish } = await import('../src/commands/publish');
+    const result = await runCommand(() => publish(skillDir, { yes: true }));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('identical content already exists');
+    expect(uploadCalled).toBe(false);
+  });
+
+  it('uses --name consistently for preview and upload', async () => {
+    const skillDir = join(process.cwd(), 'renamed-skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), SKILL_MD_V1, 'utf-8');
+    mkdirSync(join(skillDir, 'templates'), { recursive: true });
+    writeFileSync(join(skillDir, 'templates', 'prompt.txt'), 'Prompt template', 'utf-8');
+
+    let previewBody: Record<string, unknown> | null = null;
+    let uploadedName: FormDataEntryValue | null = null;
+    let uploadedOrg: FormDataEntryValue | null = null;
+    let uploadedFiles: Array<{ name: string; content: string }> = [];
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = toUrlString(input);
+      if (url.endsWith('/api/skills/upload/preview')) {
+        previewBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return mockResponse({
+          success: true,
+          preview: {
+            name: 'CLI Override',
+            slug: 'acme/cli-override',
+            description: 'Example skill',
+            categories: [],
+            owner: 'testowner',
+          },
+          suggestedVisibility: 'private',
+          canPublishPrivate: true,
+        }, 200);
+      }
+      if (url.endsWith('/api/skills/upload')) {
+        const form = init?.body as FormData;
+        uploadedName = form.get('name');
+        uploadedOrg = form.get('org');
+        uploadedFiles = await Promise.all(form.getAll('files').map(async (entry) => ({
+          name: (entry as File).name,
+          content: await (entry as File).text(),
+        })));
+        return mockResponse({
+          success: true,
+          slug: 'acme/cli-override',
+          name: 'CLI Override',
+          categories: [],
+        }, 200);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { publish } = await import('../src/commands/publish');
+    const result = await runCommand(() => publish(skillDir, {
+      name: 'CLI Override',
+      org: 'ACME',
+      yes: true,
+    }));
+
+    expect(result.exitCode).toBeNull();
+    expect(previewBody).toMatchObject({
+      name: 'CLI Override',
+      org: 'acme',
+      files: [{ path: 'templates/prompt.txt', content: 'Prompt template' }],
+    });
+    expect(uploadedName).toBe('CLI Override');
+    expect(uploadedOrg).toBe('acme');
+    expect(uploadedFiles).toEqual([{ name: 'templates/prompt.txt', content: 'Prompt template' }]);
+    expect(result.stdout).toContain('npx skillscat add acme/cli-override');
+  });
+
+  it('surfaces organization authorization errors returned by publish preview', async () => {
+    const skillDir = join(process.cwd(), 'unauthorized-org-skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), SKILL_MD_V1, 'utf-8');
+
+    vi.stubGlobal('fetch', vi.fn(async () => mockResponse({
+      message: 'You are not a member of this organization',
+    }, 403)) as unknown as typeof fetch);
+
+    const { publish } = await import('../src/commands/publish');
+    const result = await runCommand(() => publish(skillDir, { org: 'acme', yes: true }));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('You are not a member of this organization');
   });
 
   it('publish and unpublish fail fast when token is expired', async () => {

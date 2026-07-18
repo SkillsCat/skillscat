@@ -19,13 +19,14 @@ import { unpublishSkill } from './commands/unpublish';
 import { view } from './commands/view';
 import { configSet, configGet, configList, configDelete } from './commands/config';
 import { setVerbose } from './utils/core/verbose';
+import { CLI_VERSION } from './version';
 
 const program = new Command();
 
 program
   .name('skillscat')
   .description('CLI for installing agent skills from GitHub repositories')
-  .version('0.1.0')
+  .version(CLI_VERSION)
   .option('-v, --verbose', 'Enable verbose output')
   .hook('preAction', (thisCommand) => {
     const opts = thisCommand.opts();

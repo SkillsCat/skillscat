@@ -1,7 +1,6 @@
 import pc from 'picocolors';
-import { setToken, setTokens, isAuthenticated, getUser, getBaseUrl, getClientInfo, generateRandomState, generateCodeVerifier, computeCodeChallenge, initAuthSession, exchangeCodeForTokens, validateAccessToken } from '../utils/auth/auth';
+import { setToken, setTokens, isAuthenticated, getPrincipal, getValidToken, getRegistryAuthUrl, getClientInfo, generateRandomState, generateCodeVerifier, computeCodeChallenge, initAuthSession, exchangeCodeForTokens, validateAccessToken } from '../utils/auth/auth';
 import { startCallbackServer } from '../utils/auth/callback-server';
-import { getRegistryUrl } from '../utils/config/config';
 import { spinner, success, error, info, warn, box } from '../utils/core/ui';
 
 interface LoginOptions {
@@ -9,21 +8,20 @@ interface LoginOptions {
 }
 
 export async function login(options: LoginOptions): Promise<void> {
-  const baseUrl = getBaseUrl();
-  const registryUrl = getRegistryUrl();
+  const registryUrl = getRegistryAuthUrl();
 
   // If token is provided directly, use it
   if (options.token) {
     const sp = spinner('Validating token...');
     try {
-      const user = await validateAccessToken(options.token);
-      if (!user) {
+      const principal = await validateAccessToken(options.token);
+      if (!principal) {
         sp.stop(false);
         error('Invalid token. Please check your token and try again.');
         process.exit(1);
       }
 
-      setToken(options.token, user);
+      setToken(options.token, principal);
       sp.stop(true);
       success('Successfully logged in with API token.');
       return;
@@ -36,10 +34,13 @@ export async function login(options: LoginOptions): Promise<void> {
 
   // Check if already authenticated
   if (isAuthenticated()) {
-    const user = getUser();
-    warn(`Already logged in${user?.name ? ` as ${user.name}` : ''}.`);
-    info('Run `skillscat logout` to sign out first.');
-    return;
+    const currentToken = await getValidToken();
+    const principal = getPrincipal();
+    if (currentToken && await validateAccessToken(currentToken)) {
+      warn(`Already logged in${principal?.name ? ` as ${principal.name}` : ''}.`);
+      info('Run `skillscat logout` to sign out first.');
+      return;
+    }
   }
 
   // OAuth-style callback flow

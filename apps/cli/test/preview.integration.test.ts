@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configureAuth, configureRegistry, createWorkspace, resetTestConfigDir } from './helpers/env';
@@ -13,9 +13,16 @@ const TEST_USER_ID = process.env.SKILLSCAT_TEST_USER_ID || 'user_cli_test';
 const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 function execLocalD1(sql: string): void {
+  const persistArgs = process.env.SKILLSCAT_TEST_PERSIST_TO
+    ? ['--persist-to', process.env.SKILLSCAT_TEST_PERSIST_TO]
+    : [];
   const result = spawnSync(
     'pnpm',
-    ['--filter', '@skillscat/web', 'exec', 'wrangler', 'd1', 'execute', 'skillscat-db', '--local', '-c', 'wrangler.preview.toml', '--command', sql],
+    [
+      '--filter', '@skillscat/web', 'exec', 'wrangler',
+      'd1', 'execute', 'skillscat-db', '--local',
+      '-c', 'wrangler.preview.toml', ...persistArgs, '--command', sql,
+    ],
     {
       cwd: ROOT_DIR,
       env: process.env,
@@ -55,6 +62,8 @@ describe('CLI preview integration', () => {
     const uniqueName = `Test Skill ${Date.now()}`;
     const skillMd = `---\nname: ${uniqueName}\ndescription: Test skill for CLI integration\n---\n# ${uniqueName}\nThis is a local test skill used for CLI integration tests.\n`;
     writeFileSync(join(skillDir, 'SKILL.md'), skillMd, 'utf-8');
+    mkdirSync(join(skillDir, 'templates'), { recursive: true });
+    writeFileSync(join(skillDir, 'templates', 'prompt.txt'), 'Integration companion file', 'utf-8');
 
     const { publish } = await import('../src/commands/publish');
     const publishResult = await runCommand(() => publish(skillDir, { yes: true }));
@@ -65,6 +74,20 @@ describe('CLI preview integration', () => {
     const slugMatch = publishResult.stdout.match(/Slug:\s+([^\s]+)/);
     expect(slugMatch).toBeTruthy();
     const slug = slugMatch![1];
+
+    const baseUrl = REGISTRY_URL.replace(/\/registry\/?$/, '');
+    const filesResponse = await fetch(`${baseUrl}/api/skills/${encodeURIComponent(slug)}/files`, {
+      headers: {
+        Authorization: `Bearer ${TEST_TOKEN}`,
+        'User-Agent': 'skillscat-cli/0.1.0',
+      },
+    });
+    expect(filesResponse.status).toBe(200);
+    const bundle = await filesResponse.json() as { files: Array<{ path: string; content: string }> };
+    expect(bundle.files).toEqual(expect.arrayContaining([
+      { path: 'SKILL.md', content: skillMd },
+      { path: 'templates/prompt.txt', content: 'Integration companion file' },
+    ]));
 
     const { unpublishSkill } = await import('../src/commands/unpublish');
     const unpublishResult = await runCommand(() => unpublishSkill(slug, { yes: true }));
@@ -93,7 +116,7 @@ describe('CLI preview integration', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(response.headers.get('cache-control') || '').toContain('public');
+    expect(response.headers.get('cache-control') || '').toContain('private, no-cache');
     const xCache = response.headers.get('x-cache');
     if (xCache) {
       expect(['HIT', 'MISS', 'BYPASS']).toContain(xCache);
@@ -154,7 +177,7 @@ private content
     });
 
     expect(publicResponse.status).toBe(200);
-    expect(publicResponse.headers.get('cache-control') || '').toContain('public');
+    expect(publicResponse.headers.get('cache-control') || '').toContain('private, no-cache');
     expect(publicResponse.headers.get('vary') || '').toContain('Authorization');
     expect(publicResponse.headers.get('x-cache')).toMatch(/^(HIT|MISS)$/);
     const publicData = await publicResponse.json() as { name: string; visibility: string };
@@ -243,7 +266,7 @@ private api content
     });
 
     expect(publicDetailResponse.status).toBe(200);
-    expect(publicDetailResponse.headers.get('cache-control') || '').toContain('public');
+    expect(publicDetailResponse.headers.get('cache-control') || '').toContain('private, no-cache');
     expect(publicDetailResponse.headers.get('vary') || '').toContain('Authorization');
     expect(publicDetailResponse.headers.get('x-cache')).toMatch(/^(HIT|MISS)$/);
     const publicDetail = await publicDetailResponse.json() as { success: boolean; data: { skill: { visibility: string } } };
@@ -283,7 +306,7 @@ private api content
     });
 
     expect(publicFilesResponse.status).toBe(200);
-    expect(publicFilesResponse.headers.get('cache-control') || '').toContain('public');
+    expect(publicFilesResponse.headers.get('cache-control') || '').toContain('private, no-cache');
     expect(publicFilesResponse.headers.get('vary') || '').toContain('Authorization');
     expect(publicFilesResponse.headers.get('x-cache')).toMatch(/^(HIT|MISS)$/);
     const publicFiles = await publicFilesResponse.json() as { files: Array<{ path: string }> };
@@ -314,6 +337,225 @@ private api content
     const privateFiles = await privateFilesAuthed.json() as { files: Array<{ path: string; content: string }> };
     expect(privateFiles.files[0]?.path).toBe('SKILL.md');
     expect(privateFiles.files[0]?.content).toContain('private api content');
+  });
+
+  it('keeps warmed public content inaccessible after the authoritative row becomes private', async () => {
+    const unique = Date.now();
+    const owner = 'cacheboundary';
+    const name = `transition-${unique}`;
+    const slug = `${owner}/${name}`;
+    const now = Date.now();
+
+    execLocalD1(`
+      INSERT INTO skills (
+        id, name, slug, description, repo_owner, repo_name, visibility,
+        source_type, owner_id, readme, created_at, updated_at, indexed_at
+      ) VALUES (
+        'cache-boundary-${unique}',
+        'Cache Boundary Skill',
+        '${slug}',
+        'public before transition',
+        '${owner}',
+        '${name}',
+        'public',
+        'upload',
+        '${TEST_USER_ID}',
+        '# Cache Boundary Skill
+public cached content
+',
+        ${now},
+        ${now},
+        ${now}
+      );
+    `);
+
+    const registryEndpoint = `${REGISTRY_URL}/skill/${owner}/${name}`;
+    const repoEndpoint = `${REGISTRY_URL}/repo/${owner}/${name}`;
+    const searchEndpoint = `${REGISTRY_URL}/search?q=${encodeURIComponent('Cache Boundary Skill')}`;
+    const apiSearchEndpoint = `http://localhost:3000/api/search?q=${encodeURIComponent('Cache Boundary Skill')}`;
+    const encodedSlug = encodeURIComponent(slug);
+    const publicHeaders = { 'User-Agent': 'skillscat-cli/0.1.0' };
+    expect((await fetch(registryEndpoint, { headers: publicHeaders })).status).toBe(200);
+    expect((await fetch(`http://localhost:3000/api/skills/${encodedSlug}`, { headers: publicHeaders })).status).toBe(200);
+    expect((await fetch(`http://localhost:3000/api/skills/${encodedSlug}/files`, { headers: publicHeaders })).status).toBe(200);
+    const warmedRepo = await fetch(repoEndpoint, { headers: publicHeaders });
+    expect(warmedRepo.status).toBe(200);
+    expect((await warmedRepo.json() as { skills: Array<{ slug: string }> }).skills)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ slug })]));
+    const warmedSearch = await fetch(searchEndpoint, { headers: publicHeaders });
+    expect(warmedSearch.status).toBe(200);
+    expect((await warmedSearch.json() as { skills: Array<{ slug: string }> }).skills)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ slug })]));
+    const warmedApiSearch = await fetch(apiSearchEndpoint, { headers: publicHeaders });
+    expect(warmedApiSearch.status).toBe(200);
+    expect((await warmedApiSearch.json() as { data: { skills: Array<{ slug: string }> } }).data.skills)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ slug })]));
+
+    const visibilityResponse = await fetch(
+      `http://localhost:3000/api/skills/cache-boundary-${unique}/visibility`,
+      {
+        method: 'PUT',
+        headers: {
+          ...publicHeaders,
+          Authorization: `Bearer ${TEST_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ visibility: 'private' }),
+      }
+    );
+    expect(visibilityResponse.status).toBe(200);
+
+    expect((await fetch(registryEndpoint, { headers: publicHeaders })).status).toBe(401);
+    expect((await fetch(`http://localhost:3000/api/skills/${encodedSlug}`, { headers: publicHeaders })).status).toBe(401);
+    expect((await fetch(`http://localhost:3000/api/skills/${encodedSlug}/files`, { headers: publicHeaders })).status).toBe(401);
+    const privateRepo = await fetch(repoEndpoint, { headers: publicHeaders });
+    expect(privateRepo.status).toBe(200);
+    expect((await privateRepo.json() as { skills: Array<{ slug: string }> }).skills)
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ slug })]));
+    const privateSearch = await fetch(searchEndpoint, { headers: publicHeaders });
+    expect(privateSearch.status).toBe(200);
+    expect((await privateSearch.json() as { skills: Array<{ slug: string }> }).skills)
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ slug })]));
+    const privateApiSearch = await fetch(apiSearchEndpoint, { headers: publicHeaders });
+    expect(privateApiSearch.status).toBe(200);
+    expect((await privateApiSearch.json() as { data: { skills: Array<{ slug: string }> } }).data.skills)
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ slug })]));
+
+    const authorized = await fetch(registryEndpoint, {
+      headers: { ...publicHeaders, Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(authorized.status).toBe(200);
+    expect(await authorized.text()).toContain('public cached content');
+  });
+
+  it('supports organization-token search, install, view, and update after the uploader leaves', async () => {
+    const unique = Date.now();
+    const orgId = `org-cli-${unique}`;
+    const orgSlug = `orgcli${unique}`;
+    const skillId = `org-skill-${unique}`;
+    const skillName = `Org Private Skill ${unique}`;
+    const skillSlug = `${orgSlug}/private-skill`;
+    const orgToken = `sk_org_preview_${unique}`;
+    const now = Date.now();
+    const v1 = `---
+name: ${skillName}
+description: Organization private integration skill
+---
+# ${skillName}
+organization private v1
+`;
+
+    execLocalD1(`
+      INSERT INTO organizations (id, name, slug, display_name, owner_id, created_at, updated_at)
+      VALUES ('${orgId}', '${orgSlug}', '${orgSlug}', 'Org CLI Test', '${TEST_USER_ID}', ${now}, ${now});
+
+      INSERT INTO org_members (org_id, user_id, role, joined_at)
+      VALUES ('${orgId}', '${TEST_USER_ID}', 'owner', ${now});
+
+      INSERT INTO api_tokens (
+        id, user_id, org_id, name, token_hash, token_prefix, scopes, expires_at, created_at
+      ) VALUES (
+        'org-token-${unique}',
+        NULL,
+        '${orgId}',
+        'Org Integration Token',
+        '${hashTestToken(orgToken)}',
+        '${orgToken.slice(0, 11)}',
+        '["read","write","publish"]',
+        NULL,
+        ${now}
+      );
+
+      INSERT INTO skills (
+        id, name, slug, description, repo_owner, repo_name, visibility,
+        source_type, owner_id, org_id, readme, created_at, updated_at, indexed_at
+      ) VALUES (
+        '${skillId}',
+        '${skillName}',
+        '${skillSlug}',
+        'Organization private integration skill',
+        '${orgSlug}',
+        'private-skill',
+        'private',
+        'upload',
+        '${TEST_USER_ID}',
+        '${orgId}',
+        '${v1.replaceAll("'", "''")}',
+        ${now},
+        ${now},
+        ${now}
+      );
+    `);
+
+    const { setToken } = await import('../src/utils/auth/auth');
+    setToken(orgToken, { type: 'org', id: orgId, slug: orgSlug, name: 'Org CLI Test' });
+
+    const { whoami } = await import('../src/commands/whoami');
+    const whoamiResult = await runCommand(() => whoami());
+    expect(whoamiResult.stdout).toContain('Organization: Org CLI Test');
+
+    const { search } = await import('../src/commands/search');
+    const searchResult = await runCommand(() => search(skillName, { limit: '5' }));
+    expect(searchResult.exitCode).toBeNull();
+    expect(searchResult.stdout).toContain(skillSlug);
+    expect(searchResult.stdout).toContain('[private]');
+
+    // The historical uploader no longer has implicit access after leaving.
+    execLocalD1(`DELETE FROM org_members WHERE org_id = '${orgId}' AND user_id = '${TEST_USER_ID}';`);
+    const userResponse = await fetch(`${REGISTRY_URL}/skill/${orgSlug}/private-skill`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(userResponse.status).toBe(403);
+
+    const { add } = await import('../src/commands/add');
+    const addResult = await runCommand(() => add(skillSlug, { yes: true, agent: ['agents'] }));
+    expect(addResult.exitCode).toBeNull();
+    const installedFile = join(process.cwd(), '.agents', skillName, 'SKILL.md');
+    expect(readFileSync(installedFile, 'utf-8')).toContain('organization private v1');
+
+    const { view } = await import('../src/commands/view');
+    const viewResult = await runCommand(() => view(skillSlug));
+    expect(viewResult.exitCode).toBeNull();
+    expect(viewResult.stdout).toContain('organization private v1');
+
+    const v2 = v1.replace('organization private v1', 'organization private v2');
+    execLocalD1(`
+      UPDATE skills
+      SET readme = '${v2.replaceAll("'", "''")}', content_hash = NULL, updated_at = ${now + 1}
+      WHERE id = '${skillId}';
+    `);
+
+    const { update } = await import('../src/commands/update');
+    const updateResult = await runCommand(() => update(skillName, {}));
+    expect(updateResult.exitCode).toBeNull();
+    expect(updateResult.stdout).toContain('Updated 1 skill');
+    expect(readFileSync(installedFile, 'utf-8')).toContain('organization private v2');
+
+    const writeOnlyOrgToken = `sk_org_write_preview_${unique}`;
+    execLocalD1(`
+      INSERT INTO api_tokens (
+        id, user_id, org_id, name, token_hash, token_prefix, scopes, expires_at, created_at
+      ) VALUES (
+        'org-write-token-${unique}',
+        NULL,
+        '${orgId}',
+        'Org Write Integration Token',
+        '${hashTestToken(writeOnlyOrgToken)}',
+        '${writeOnlyOrgToken.slice(0, 11)}',
+        '["write"]',
+        NULL,
+        ${now + 2}
+      );
+    `);
+    setToken(writeOnlyOrgToken, { type: 'org', id: orgId, slug: orgSlug, name: 'Org CLI Test' });
+
+    const { unpublishSkill } = await import('../src/commands/unpublish');
+    const unpublishResult = await runCommand(() => unpublishSkill(skillSlug, { yes: true }));
+    expect(unpublishResult.exitCode).toBeNull();
+    expect(unpublishResult.stdout).toContain('Skill unpublished successfully');
+    expect((await fetch(`${REGISTRY_URL}/skill/${orgSlug}/private-skill`, {
+      headers: { 'User-Agent': 'skillscat-cli/0.1.0' },
+    })).status).toBe(404);
   });
 
   it('registry repo and search preserve 403 with no-store when token lacks read scope', async () => {

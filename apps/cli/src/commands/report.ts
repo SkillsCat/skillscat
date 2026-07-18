@@ -1,6 +1,7 @@
 import pc from 'picocolors';
 
 import { getBaseUrl, getValidToken } from '../utils/auth/auth';
+import { parseHttpError, parseNetworkError } from '../utils/core/errors';
 import { fetchWithTimeout } from '../utils/core/fetch';
 import { error, prompt, success } from '../utils/core/ui';
 
@@ -49,23 +50,39 @@ export async function report(slug: string, options: ReportOptions = {}): Promise
   }
 
   const baseUrl = getBaseUrl();
-  const response = await fetchWithTimeout(`${baseUrl}/api/skills/${encodeURIComponent(slug)}/report`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      Origin: baseUrl,
-      'User-Agent': 'skillscat-cli/0.1.0',
-    },
-    body: JSON.stringify({
-      reason,
-      details: options.details || undefined,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(`${baseUrl}/api/skills/${encodeURIComponent(slug)}/report`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Origin: baseUrl,
+        'User-Agent': 'skillscat-cli/0.1.0',
+      },
+      body: JSON.stringify({
+        reason,
+        details: options.details || undefined,
+      }),
+    });
+  } catch (requestError) {
+    const parsed = parseNetworkError(requestError);
+    error(parsed.message);
+    if (parsed.suggestion) {
+      console.log(pc.dim(parsed.suggestion));
+    }
+    process.exit(1);
+  }
 
-  const payload = await response.json() as ReportResponse;
+  let payload: ReportResponse = {};
+  try {
+    payload = await response.json() as ReportResponse;
+  } catch {
+    // Preserve the HTTP status when an upstream error body is not JSON.
+  }
   if (!response.ok || !payload.success) {
-    error(payload.error || payload.message || 'Failed to submit report');
+    const httpError = parseHttpError(response.status, response.statusText);
+    error(payload.error || payload.message || httpError.message || 'Failed to submit report');
     process.exit(1);
   }
 

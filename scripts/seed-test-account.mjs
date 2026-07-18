@@ -19,6 +19,8 @@ const userId = process.env.SKILLSCAT_TEST_USER_ID || 'user_cli_test';
 const userName = process.env.SKILLSCAT_TEST_USER_NAME || 'testuser';
 const userEmail = process.env.SKILLSCAT_TEST_USER_EMAIL || 'test@skillscat.local';
 const tokenId = process.env.SKILLSCAT_TEST_TOKEN_ID || 'token_cli_test';
+const persistTo = process.env.SKILLSCAT_TEST_PERSIST_TO;
+const persistArgs = persistTo ? ['--persist-to', persistTo] : [];
 
 const now = Date.now();
 const tokenHash = createHash('sha256').update(token).digest('hex');
@@ -54,7 +56,10 @@ VALUES ('${publicSkillId}', '${publicSkillName}', '${publicSkillSlug}', 'Seeded 
 
 try {
   // Seed D1 database
-  execFileSync('npx', [
+  execFileSync('pnpm', [
+    '--filter',
+    '@skillscat/web',
+    'exec',
     'wrangler',
     'd1',
     'execute',
@@ -62,6 +67,7 @@ try {
     '--local',
     '-c',
     WRANGLER_CONFIG,
+    ...persistArgs,
     '--command',
     sql,
   ], {
@@ -75,7 +81,10 @@ try {
   writeFileSync(tmpFile, publicSkillContent, 'utf-8');
 
   const r2Key = `skills/${publicSkillRepoOwner}/${publicSkillRepoName}/SKILL.md`;
-  execFileSync('npx', [
+  execFileSync('pnpm', [
+    '--filter',
+    '@skillscat/web',
+    'exec',
     'wrangler',
     'r2',
     'object',
@@ -88,6 +97,7 @@ try {
     'text/markdown',
     '-c',
     WRANGLER_CONFIG,
+    ...persistArgs,
   ], {
     cwd: ROOT_DIR,
     stdio: 'inherit',

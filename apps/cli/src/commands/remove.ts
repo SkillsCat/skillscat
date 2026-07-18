@@ -1,6 +1,6 @@
 import { existsSync, rmSync } from 'node:fs';
 import pc from 'picocolors';
-import { AGENTS, getAgentsByIds, getSkillPath, type Agent } from '../utils/agents/agents';
+import { AGENTS, getAgentsByIds, getInvalidAgentIds, getSkillPath, type Agent } from '../utils/agents/agents';
 import { getInstalledSkills, removeInstallation } from '../utils/storage/db';
 import { success, error, warn } from '../utils/core/ui';
 
@@ -17,11 +17,12 @@ export async function remove(skillName: string, options: RemoveOptions): Promise
   let agents: Agent[];
 
   if (options.agent && options.agent.length > 0) {
-    agents = getAgentsByIds(options.agent);
-    if (agents.length === 0) {
-      error(`Invalid agent(s): ${options.agent.join(', ')}`);
+    const invalidAgentIds = getInvalidAgentIds(options.agent);
+    if (invalidAgentIds.length > 0) {
+      error(`Invalid agent(s): ${invalidAgentIds.join(', ')}`);
       process.exit(1);
     }
+    agents = getAgentsByIds(options.agent);
   } else {
     agents = AGENTS;
   }
@@ -29,6 +30,8 @@ export async function remove(skillName: string, options: RemoveOptions): Promise
   const isGlobal = options.global ?? false;
   let removed = 0;
   let notFound = 0;
+  let removeFailures = 0;
+  const removedAgentIds: string[] = [];
 
   for (const agent of agents) {
     const skillDir = getSkillPath(agent, skillName, isGlobal);
@@ -41,15 +44,17 @@ export async function remove(skillName: string, options: RemoveOptions): Promise
     try {
       rmSync(skillDir, { recursive: true });
       removed++;
+      removedAgentIds.push(agent.id);
       success(`Removed ${skillName} from ${agent.name}`);
     } catch (err) {
       error(`Failed to remove from ${agent.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      removeFailures += 1;
     }
   }
 
   if (removed > 0) {
     removeInstallation(skillName, {
-      agents: agents.map((agent) => agent.id),
+      agents: removedAgentIds,
       global: isGlobal,
       installRoot: isGlobal ? undefined : process.cwd(),
     });
@@ -73,5 +78,9 @@ export async function remove(skillName: string, options: RemoveOptions): Promise
   } else {
     console.log();
     success(`Removed ${skillName} from ${removed} agent(s).`);
+  }
+
+  if (removeFailures > 0) {
+    process.exit(1);
   }
 }
