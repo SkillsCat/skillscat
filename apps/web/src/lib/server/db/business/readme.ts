@@ -1,5 +1,5 @@
 import type { SkillDetail } from '$lib/types';
-import { buildGithubSkillR2Keys, buildUploadSkillR2Key, parseSkillSlug } from '$lib/skill-path';
+import { buildGithubSkillR2Keys, buildUploadSkillR2Key } from '$lib/skill-path';
 import type { DbEnv } from '$lib/server/db/shared/types';
 
 export type SkillReadmeLookupInput = Pick<
@@ -16,23 +16,11 @@ export async function loadSkillReadmeFromR2(
   let readme: string | null = null;
 
   if (skill.sourceType === 'upload') {
-    const slugParts = parseSkillSlug(skill.slug);
-    const candidatePaths = new Set<string>();
     const canonicalPath = buildUploadSkillR2Key(skill.slug, 'SKILL.md');
     if (canonicalPath) {
-      candidatePaths.add(canonicalPath);
-    }
-    // Backward compatibility for older upload paths.
-    if (slugParts) {
-      candidatePaths.add(`skills/${slugParts.owner}/${slugParts.name.split('/')[0] || skill.name}/SKILL.md`);
-      candidatePaths.add(`skills/${slugParts.owner}/${skill.name}/SKILL.md`);
-    }
-
-    for (const path of candidatePaths) {
-      const object = await env.R2.get(path);
+      const object = await env.R2.get(canonicalPath);
       if (object) {
         readme = await object.text();
-        break;
       }
     }
   } else {
