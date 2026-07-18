@@ -224,7 +224,12 @@ export function getAgentById(id: string): Agent | undefined {
  * Get agents by IDs
  */
 export function getAgentsByIds(ids: string[]): Agent[] {
-  return ids.map(id => getAgentById(id)).filter((a): a is Agent => a !== undefined);
+  const agents = ids.map(id => getAgentById(id)).filter((a): a is Agent => a !== undefined);
+  return Array.from(new Map(agents.map((agent) => [agent.id, agent])).values());
+}
+
+export function getInvalidAgentIds(ids: string[]): string[] {
+  return ids.filter((id) => !getAgentById(id));
 }
 
 export function getFallbackAgent(): Agent {

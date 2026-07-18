@@ -1,6 +1,7 @@
 import * as browser from '../utils/core/browser';
 import { getRegistryUrl } from '../utils/config/config';
-import { getValidToken } from '../utils/auth/auth';
+import { getPrincipal, getValidToken, loadConfig } from '../utils/auth/auth';
+import { fetchSkill as fetchRegistrySkill } from '../utils/api/registry';
 import { parseHttpError, parseNetworkError } from '../utils/core/errors';
 import { fetchWithTimeout } from '../utils/core/fetch';
 import { buildSkillPath, parseSlug } from '../utils/core/slug';
@@ -13,7 +14,11 @@ interface ViewOptions {
 
 type ViewOutput = 'html' | 'markdown';
 
-class ViewHttpError extends Error {}
+class ViewHttpError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
 
 function normalizeOutputFormat(output?: string): ViewOutput | null {
   if (!output) {
@@ -81,7 +86,7 @@ async function fetchSkillDocument(slug: string, output: ViewOutput): Promise<str
 
     if (!response.ok) {
       const httpError = parseHttpError(response.status, response.statusText);
-      throw new ViewHttpError(httpError.message);
+      throw new ViewHttpError(httpError.message, response.status);
     }
 
     return response.text();
@@ -95,8 +100,35 @@ async function fetchSkillDocument(slug: string, output: ViewOutput): Promise<str
   }
 }
 
+async function fetchMarkdownWithRegistryFallback(slug: string): Promise<string> {
+  try {
+    return await fetchSkillDocument(slug, 'markdown');
+  } catch (err) {
+    if (!(err instanceof ViewHttpError) || ![401, 403, 404].includes(err.status)) {
+      throw err;
+    }
+
+    const registrySkill = await fetchRegistrySkill(slug);
+    if (registrySkill?.content) {
+      return registrySkill.content;
+    }
+
+    throw err;
+  }
+}
+
 function writeOutput(body: string): void {
   console.log(body);
+}
+
+async function shouldPreferAuthenticatedTerminalView(): Promise<boolean> {
+  const token = await getValidToken();
+  if (!token) {
+    return false;
+  }
+
+  const config = loadConfig();
+  return getPrincipal()?.type === 'org' || !config.refreshToken;
 }
 
 export async function view(slug: string, options: ViewOptions = {}): Promise<void> {
@@ -115,7 +147,9 @@ export async function view(slug: string, options: ViewOptions = {}): Promise<voi
     }
 
     try {
-      const body = await fetchSkillDocument(slug, output);
+      const body = output === 'markdown'
+        ? await fetchMarkdownWithRegistryFallback(slug)
+        : await fetchSkillDocument(slug, output);
       writeOutput(body);
       return;
     } catch (err) {
@@ -125,6 +159,17 @@ export async function view(slug: string, options: ViewOptions = {}): Promise<voi
   }
 
   const url = buildSkillUrl(slug);
+
+  if (await shouldPreferAuthenticatedTerminalView()) {
+    try {
+      const markdown = await fetchMarkdownWithRegistryFallback(slug);
+      writeOutput(markdown);
+      return;
+    } catch (err) {
+      error(err instanceof Error ? err.message : 'Failed to fetch skill view');
+      process.exit(1);
+    }
+  }
 
   if (browser.canOpenUrlInBrowser()) {
     const opened = await browser.openUrlInBrowser(url);
@@ -139,7 +184,7 @@ export async function view(slug: string, options: ViewOptions = {}): Promise<voi
   }
 
   try {
-    const markdown = await fetchSkillDocument(slug, 'markdown');
+      const markdown = await fetchMarkdownWithRegistryFallback(slug);
     writeOutput(markdown);
   } catch (err) {
     error(err instanceof Error ? err.message : 'Failed to fetch skill view');

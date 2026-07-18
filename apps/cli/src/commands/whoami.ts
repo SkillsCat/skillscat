@@ -1,33 +1,37 @@
 import pc from 'picocolors';
-import { isAuthenticated, getUser, getValidToken, validateAccessToken } from '../utils/auth/auth';
+import { isAuthenticated, getPrincipal, getValidToken, validateAccessToken } from '../utils/auth/auth';
 
 export async function whoami(): Promise<void> {
   if (!isAuthenticated()) {
     console.log(pc.yellow('Not logged in.'));
     console.log(pc.dim('Run `skillscat login` to authenticate.'));
-    return;
+    process.exit(1);
   }
 
-  const cachedUser = getUser();
+  const cachedPrincipal = getPrincipal();
   const token = await getValidToken();
   if (!token) {
     console.log(pc.yellow('Token expired.'));
     console.log(pc.dim('Run `skillscat login` to re-authenticate.'));
-    return;
+    process.exit(1);
   }
 
-  const user = await validateAccessToken(token);
-  if (user) {
+  const principal = await validateAccessToken(token);
+  if (principal) {
     console.log(pc.green('Logged in'));
-    if (user.name) {
-      console.log(`  Username: ${pc.cyan(user.name)}`);
-    } else if (cachedUser?.name) {
-      console.log(`  Username: ${pc.cyan(cachedUser.name)}`);
+    const displayName = principal.name || cachedPrincipal?.name;
+    if (principal.type === 'org') {
+      console.log(`  Organization: ${pc.cyan(displayName || principal.slug || principal.id)}`);
+      if (principal.slug) {
+        console.log(`  Slug: ${pc.cyan(principal.slug)}`);
+      }
+    } else if (displayName) {
+      console.log(`  Username: ${pc.cyan(displayName)}`);
     }
-    if (user.email) {
-      console.log(`  Email: ${pc.dim(user.email)}`);
-    } else if (cachedUser?.email) {
-      console.log(`  Email: ${pc.dim(cachedUser.email)}`);
+    if (principal.email) {
+      console.log(`  Email: ${pc.dim(principal.email)}`);
+    } else if (cachedPrincipal?.email) {
+      console.log(`  Email: ${pc.dim(cachedPrincipal.email)}`);
     }
     console.log(`  Token: ${pc.dim(token.slice(0, 11) + '...')}`);
     return;
@@ -35,4 +39,5 @@ export async function whoami(): Promise<void> {
 
   console.log(pc.yellow('Token may be invalid or expired.'));
   console.log(pc.dim('Run `skillscat login` to re-authenticate.'));
+  process.exit(1);
 }

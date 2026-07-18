@@ -54,27 +54,36 @@ export async function convert(targetAgentId: string, options: ConvertOptions): P
 
   let copied = 0;
   let skipped = 0;
+  let copyFailures = 0;
   const copiedSkillDirs: string[] = [];
 
   for (const sourceSkillDir of sourceSkills) {
     const skillName = basename(sourceSkillDir);
     const targetSkillDir = join(targetBase, skillName);
 
-    if (existsSync(targetSkillDir)) {
-      if (!options.force) {
-        skipped += 1;
-        continue;
+    try {
+      if (existsSync(targetSkillDir)) {
+        if (!options.force) {
+          skipped += 1;
+          continue;
+        }
+        rmSync(targetSkillDir, { recursive: true, force: true });
       }
-      rmSync(targetSkillDir, { recursive: true, force: true });
-    }
 
-    mkdirSync(dirname(targetSkillDir), { recursive: true });
-    cpSync(sourceSkillDir, targetSkillDir, { recursive: true });
-    copied += 1;
-    copiedSkillDirs.push(sourceSkillDir);
+      mkdirSync(dirname(targetSkillDir), { recursive: true });
+      cpSync(sourceSkillDir, targetSkillDir, { recursive: true });
+      copied += 1;
+      copiedSkillDirs.push(sourceSkillDir);
+    } catch (copyError) {
+      copyFailures += 1;
+      error(`Failed to copy ${skillName}: ${copyError instanceof Error ? copyError.message : 'Unknown error'}`);
+    }
   }
 
   if (copied === 0) {
+    if (copyFailures > 0) {
+      process.exit(1);
+    }
     warn(`All ${sourceSkills.length} skill(s) already exist in ${targetAgent.name}.`);
     console.log(pc.dim('Use `--force` to overwrite the target copy.'));
     return;
@@ -96,5 +105,10 @@ export async function convert(targetAgentId: string, options: ConvertOptions): P
 
   if (trackedUpdates > 0) {
     console.log(pc.dim(`Updated ${trackedUpdates} tracked installation(s) so future updates also target ${targetAgent.name}.`));
+  }
+
+  if (copyFailures > 0) {
+    warn(`${copyFailures} skill(s) could not be copied.`);
+    process.exit(1);
   }
 }

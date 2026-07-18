@@ -1,8 +1,7 @@
 import pc from 'picocolors';
-import { readFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { getValidToken } from '../utils/auth/auth';
-import { getRegistryUrl } from '../utils/config/config';
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
+import { getBaseUrl, getValidToken } from '../utils/auth/auth';
 import { fetchWithTimeout } from '../utils/core/fetch';
 import { box, prompt, warn } from '../utils/core/ui';
 
@@ -27,6 +26,7 @@ interface PreviewResponse {
   canPublishPrivate?: boolean;
   warnings?: string[];
   error?: string;
+  message?: string;
 }
 
 interface UploadResponse {
@@ -39,11 +39,105 @@ interface UploadResponse {
   error?: string;
 }
 
+interface PublishFile {
+  path: string;
+  content: string;
+}
+
+const MAX_PUBLISH_FILES = 50;
+const MAX_PUBLISH_FILE_BYTES = 512 * 1024;
+const MAX_PUBLISH_TOTAL_BYTES = 5 * 1024 * 1024;
+const MAX_PUBLISH_PATH_LENGTH = 512;
+const SKIPPED_DIRECTORIES = new Set(['.git', 'node_modules']);
+const SKIPPED_FILES = new Set(['.DS_Store', '.skillscat-companion-files.json']);
+
+function collectPublishFiles(resolvedPath: string, skillMdPath: string): PublishFile[] {
+  if (resolvedPath === skillMdPath) {
+    return [{ path: 'SKILL.md', content: readFileSync(skillMdPath, 'utf-8') }];
+  }
+
+  const files: PublishFile[] = [];
+  let totalBytes = 0;
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+
+  const walk = (directory: string, isRoot: boolean): void => {
+    const entries = readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    // Nested skills are independent bundles, not companion files of the root skill.
+    if (!isRoot && entries.some((entry) => entry.isFile() && entry.name.toLowerCase() === 'skill.md')) {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory() && SKIPPED_DIRECTORIES.has(entry.name)) {
+        continue;
+      }
+      if (entry.isFile() && SKIPPED_FILES.has(entry.name)) {
+        continue;
+      }
+
+      const absolutePath = resolve(directory, entry.name);
+      const stat = lstatSync(absolutePath);
+      if (stat.isSymbolicLink()) {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        walk(absolutePath, false);
+        continue;
+      }
+      if (!stat.isFile()) {
+        continue;
+      }
+
+      const path = relative(resolvedPath, absolutePath).replace(/\\/g, '/');
+      if (!path || path.length > MAX_PUBLISH_PATH_LENGTH) {
+        throw new Error(`Invalid or overly long companion file path: ${path || entry.name}`);
+      }
+      if (files.length >= MAX_PUBLISH_FILES) {
+        throw new Error(`A maximum of ${MAX_PUBLISH_FILES} files can be published at once.`);
+      }
+      if (stat.size > MAX_PUBLISH_FILE_BYTES) {
+        throw new Error(`File exceeds the ${MAX_PUBLISH_FILE_BYTES} byte limit: ${path}`);
+      }
+      totalBytes += stat.size;
+      if (totalBytes > MAX_PUBLISH_TOTAL_BYTES) {
+        throw new Error(`Published files exceed the ${MAX_PUBLISH_TOTAL_BYTES} byte total limit.`);
+      }
+
+      const bytes = readFileSync(absolutePath);
+      let content: string;
+      try {
+        content = decoder.decode(bytes);
+      } catch {
+        throw new Error(`Only UTF-8 text companion files are supported: ${path}`);
+      }
+      if (/[\x00-\x08\x0E-\x1F]/.test(content)) {
+        throw new Error(`Companion file contains unsupported control characters: ${path}`);
+      }
+      files.push({
+        path: path.toLowerCase() === 'skill.md' ? 'SKILL.md' : path,
+        content,
+      });
+    }
+  };
+
+  walk(resolvedPath, true);
+  if (!files.some((file) => file.path === 'SKILL.md')) {
+    throw new Error('SKILL.md was not found in the publish bundle.');
+  }
+  return files.sort((left, right) => left.path.localeCompare(right.path));
+}
+
 /**
  * Get preview of skill metadata before publishing
  */
-async function getPreview(content: string, token: string, org?: string): Promise<PreviewResponse> {
-  const baseUrl = getRegistryUrl().replace('/registry', '');
+async function getPreview(files: PublishFile[], token: string, org?: string, name?: string): Promise<PreviewResponse> {
+  const skillMd = files.find((file) => file.path === 'SKILL.md');
+  if (!skillMd) {
+    throw new Error('SKILL.md was not found in the publish bundle.');
+  }
+  const baseUrl = getBaseUrl();
   const response = await fetchWithTimeout(
     `${baseUrl}/api/skills/upload/preview`,
     {
@@ -55,8 +149,12 @@ async function getPreview(content: string, token: string, org?: string): Promise
         'Origin': baseUrl,
       },
       body: JSON.stringify({
-        content,
-        org: org || undefined,
+        content: skillMd.content,
+        files: files
+          .filter((file) => file.path !== 'SKILL.md')
+          .map((file) => ({ path: file.path, content: file.content })),
+        org: org?.trim().toLowerCase() || undefined,
+        name: name || undefined,
       }),
     }
   );
@@ -87,22 +185,35 @@ export async function publish(skillPath: string, options: PublishOptions): Promi
     process.exit(1);
   }
 
-  // Read SKILL.md content
-  const content = readFileSync(skillMdPath, 'utf-8');
+  let publishFiles: PublishFile[];
+  try {
+    publishFiles = collectPublishFiles(resolvedPath, skillMdPath);
+  } catch (fileError) {
+    console.error(pc.red(fileError instanceof Error ? fileError.message : 'Failed to read skill files.'));
+    process.exit(1);
+  }
+  const skillMd = publishFiles.find((file) => file.path === 'SKILL.md')!;
+  const content = skillMd.content;
 
   // Get preview first
   console.log(pc.cyan('Analyzing skill...'));
   console.log();
 
   try {
-    const previewResult = await getPreview(content, token, options.org);
+    const previewResult = await getPreview(publishFiles, token, options.org, options.name);
 
     if (!previewResult.success || !previewResult.preview) {
-      console.error(pc.red(`Failed to analyze skill: ${previewResult.error || 'Unknown error'}`));
+      console.error(pc.red(`Failed to analyze skill: ${previewResult.error || previewResult.message || 'Unknown error'}`));
       process.exit(1);
     }
 
     const { preview, warnings, suggestedVisibility, canPublishPrivate } = previewResult;
+
+    if (canPublishPrivate === false) {
+      console.error(pc.red('Cannot publish: identical content already exists as a public skill.'));
+      console.log(pc.dim('Update the skill content or install the existing public skill instead.'));
+      process.exit(1);
+    }
 
     // Determine final visibility
     // - If --private flag is set, use private (if allowed)
@@ -110,14 +221,7 @@ export async function publish(skillPath: string, options: PublishOptions): Promi
     let visibility: 'public' | 'private';
 
     if (options.private) {
-      // User wants private, check if allowed
-      if (canPublishPrivate === false) {
-        console.error(pc.red('Cannot publish as private: identical content exists as a public skill.'));
-        console.log(pc.dim('The skill will be published as public instead.'));
-        visibility = 'public';
-      } else {
-        visibility = 'private';
-      }
+      visibility = 'private';
     } else {
       // Use suggested visibility (public if org connected to GitHub, private otherwise)
       visibility = suggestedVisibility || 'private';
@@ -163,11 +267,15 @@ export async function publish(skillPath: string, options: PublishOptions): Promi
     // Prepare form data
     const formData = new FormData();
     formData.append('skill_md', new Blob([content], { type: 'text/markdown' }), 'SKILL.md');
+    for (const file of publishFiles) {
+      if (file.path === 'SKILL.md') continue;
+      formData.append('files', new Blob([file.content], { type: 'text/plain' }), file.path);
+    }
     formData.append('name', options.name || preview.name);
     formData.append('visibility', visibility);
 
     if (options.org) {
-      formData.append('org', options.org);
+      formData.append('org', options.org.trim().toLowerCase());
     }
 
     if (options.description) {
@@ -179,7 +287,7 @@ export async function publish(skillPath: string, options: PublishOptions): Promi
       console.error(pc.red('Session expired. Please run `skillscat login` and try again.'));
       process.exit(1);
     }
-    const baseUrl = getRegistryUrl().replace('/registry', '');
+    const baseUrl = getBaseUrl();
     const response = await fetchWithTimeout(`${baseUrl}/api/skills/upload`, {
       method: 'POST',
       headers: {
@@ -206,7 +314,7 @@ export async function publish(skillPath: string, options: PublishOptions): Promi
     }
     console.log();
     console.log(pc.dim('To install this skill:'));
-    console.log(pc.cyan(`  skillscat add ${result.slug}`));
+    console.log(pc.cyan(`  npx skillscat add ${result.slug}`));
   } catch (error) {
     console.error(pc.red('Failed to connect to registry.'));
     if (error instanceof Error) {

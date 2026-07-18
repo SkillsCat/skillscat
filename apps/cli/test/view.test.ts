@@ -48,6 +48,8 @@ describe('view command', () => {
   });
 
   it('prints markdown from the OpenClaw-compatible skill page when requested', async () => {
+    await configureRegistry('https://skills.cat/registry');
+    await configureAuth(TEST_TOKEN);
     await configureRegistry('https://skills.cat/openclaw');
 
     const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
@@ -132,5 +134,70 @@ describe('view command', () => {
     expect(result.exitCode).toBeNull();
     expect(result.stdout).toContain('# Fallback Markdown');
     expect(result.stderr).toContain('No browser environment detected');
+  });
+
+  it('falls back to authenticated registry content for private skills', async () => {
+    const browser = await import('../src/utils/core/browser');
+    vi.spyOn(browser, 'canOpenUrlInBrowser').mockReturnValue(false);
+
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = toUrlString(input);
+      if (url === 'http://localhost:3000/skills/demo/private-skill') {
+        return mockTextResponse('Not found', 404);
+      }
+
+      expect(url).toBe('http://localhost:3000/registry/skill/demo/private-skill');
+      const headers = init?.headers as Record<string, string> | undefined;
+      expect(headers?.Authorization).toBe(`Bearer ${TEST_TOKEN}`);
+      return new Response(JSON.stringify({
+        name: 'Private Skill',
+        description: 'private skill',
+        owner: 'demo',
+        repo: 'private-skill',
+        stars: 0,
+        updatedAt: Date.now(),
+        categories: [],
+        content: '# Private Skill\n',
+        githubUrl: '',
+        visibility: 'private',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { view } = await import('../src/commands/view');
+    const result = await runCommand(() => view('demo/private-skill'));
+
+    expect(result.exitCode).toBeNull();
+    expect(result.stdout).toContain('# Private Skill');
+  });
+
+  it('prints authenticated markdown instead of opening an unusable browser page for org tokens', async () => {
+    const { setToken } = await import('../src/utils/auth/auth');
+    setToken(TEST_TOKEN, { type: 'org', id: 'org-1', slug: 'demo' });
+
+    const browser = await import('../src/utils/core/browser');
+    const canOpenSpy = vi.spyOn(browser, 'canOpenUrlInBrowser').mockReturnValue(true);
+    const openSpy = vi.spyOn(browser, 'openUrlInBrowser').mockResolvedValue(true);
+
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      expect(toUrlString(input)).toBe('http://localhost:3000/skills/demo/private-skill');
+      const headers = init?.headers as Record<string, string> | undefined;
+      expect(headers?.Authorization).toBe(`Bearer ${TEST_TOKEN}`);
+      expect(headers?.['User-Agent']).toContain('OpenClaw/1.0');
+      return mockTextResponse('# Org Private Skill\n');
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { view } = await import('../src/commands/view');
+    const result = await runCommand(() => view('demo/private-skill'));
+
+    expect(result.exitCode).toBeNull();
+    expect(result.stdout).toContain('# Org Private Skill');
+    expect(canOpenSpy).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
   });
 });

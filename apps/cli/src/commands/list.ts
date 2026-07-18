@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import pc from 'picocolors';
-import { AGENTS, getAgentsByIds, type Agent } from '../utils/agents/agents';
+import { AGENTS, getAgentsByIds, getInvalidAgentIds, type Agent } from '../utils/agents/agents';
 import { getInstalledSkills } from '../utils/storage/db';
 import { parseSkillFrontmatter } from '../utils/source/source';
 import { error, warn } from '../utils/core/ui';
@@ -65,11 +65,12 @@ export async function list(options: ListOptions): Promise<void> {
   let agents: Agent[];
 
   if (options.agent && options.agent.length > 0) {
-    agents = getAgentsByIds(options.agent);
-    if (agents.length === 0) {
-      error(`Invalid agent(s): ${options.agent.join(', ')}`);
+    const invalidAgentIds = getInvalidAgentIds(options.agent);
+    if (invalidAgentIds.length > 0) {
+      error(`Invalid agent(s): ${invalidAgentIds.join(', ')}`);
       process.exit(1);
     }
+    agents = getAgentsByIds(options.agent);
   } else {
     agents = AGENTS;
   }

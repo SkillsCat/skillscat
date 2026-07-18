@@ -1,12 +1,11 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = resolve(__dirname, '../../..');
-const WEB_DIR = resolve(ROOT_DIR, 'apps/web');
-const WORKER_PATH = resolve(WEB_DIR, '.svelte-kit/cloudflare/_worker.js');
 
 const DEFAULT_TOKEN = 'sk_test_local_token';
 const DEFAULT_USER_ID = 'user_cli_test';
@@ -56,14 +55,20 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   process.env.SKILLSCAT_TEST_USER_NAME = process.env.SKILLSCAT_TEST_USER_NAME || DEFAULT_USER_NAME;
   process.env.SKILLSCAT_TEST_USER_EMAIL = process.env.SKILLSCAT_TEST_USER_EMAIL || DEFAULT_USER_EMAIL;
   process.env.SKILLSCAT_TEST_REGISTRY_URL = process.env.SKILLSCAT_TEST_REGISTRY_URL || DEFAULT_REGISTRY_URL;
+  const ownsPersistDirectory = !process.env.SKILLSCAT_TEST_PERSIST_TO;
+  const persistTo = process.env.SKILLSCAT_TEST_PERSIST_TO
+    || mkdtempSync(join(tmpdir(), 'skillscat-preview-'));
+  process.env.SKILLSCAT_TEST_PERSIST_TO = persistTo;
 
-  // Ensure web build exists for preview
-  if (!existsSync(WORKER_PATH)) {
-    runCommand('pnpm', ['--filter', '@skillscat/web', 'build'], ROOT_DIR);
-  }
+  // Preview must run the current source, never a stale build from an earlier test.
+  runCommand('pnpm', ['--filter', '@skillscat/web', 'build'], ROOT_DIR);
 
-  // Apply local migrations
-  runCommand('pnpm', ['--filter', '@skillscat/web', 'db:migrate'], ROOT_DIR);
+  // Apply local migrations in the same isolated state used by seed and preview.
+  runCommand('pnpm', [
+    '--filter', '@skillscat/web', 'exec', 'wrangler',
+    'd1', 'migrations', 'apply', 'skillscat-db', '--local',
+    '-c', 'wrangler.preview.toml', '--persist-to', persistTo,
+  ], ROOT_DIR);
 
   // Seed local test account + token
   runCommand('node', ['scripts/seed-test-account.mjs'], ROOT_DIR);
@@ -94,5 +99,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       preview.on('close', () => resolve());
       setTimeout(() => resolve(), 5000);
     });
+    if (ownsPersistDirectory) {
+      rmSync(persistTo, { recursive: true, force: true });
+    }
   };
 }

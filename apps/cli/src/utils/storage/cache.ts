@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { getCacheDir } from '../config/config';
 
 const MAX_CACHE_ITEMS = 100;
 const PRUNE_PERCENTAGE = 0.2;
+const PRIVATE_DIRECTORY_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
 
 export interface CachedSkill {
   content: string;
@@ -37,9 +39,31 @@ function getCacheIndexPath(): string {
  * Ensure cache directories exist
  */
 function ensureCacheDir(): void {
+  const cacheDir = getCacheDir();
   const skillsDir = getSkillsCacheDir();
   if (!existsSync(skillsDir)) {
-    mkdirSync(skillsDir, { recursive: true });
+    mkdirSync(skillsDir, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+  }
+
+  if (process.platform !== 'win32') {
+    for (const directory of [cacheDir, skillsDir]) {
+      try {
+        chmodSync(directory, PRIVATE_DIRECTORY_MODE);
+      } catch {
+        // Best-effort hardening for filesystems without POSIX permissions.
+      }
+    }
+  }
+}
+
+function writePrivateFile(path: string, content: string): void {
+  writeFileSync(path, content, { mode: PRIVATE_FILE_MODE });
+  if (process.platform !== 'win32') {
+    try {
+      chmodSync(path, PRIVATE_FILE_MODE);
+    } catch {
+      // Best-effort hardening for filesystems without POSIX permissions.
+    }
   }
 }
 
@@ -47,8 +71,9 @@ function ensureCacheDir(): void {
  * Generate a cache key from skill identifier
  */
 export function getCacheKey(owner: string, repo: string, skillPath?: string): string {
-  const pathPart = skillPath ? skillPath.replace(/\//g, '_').replace(/\.md$/i, '') : 'root';
-  return `${owner}_${repo}_${pathPart}`;
+  return `v2_${createHash('sha256')
+    .update(JSON.stringify([owner, repo, skillPath || '']))
+    .digest('hex')}`;
 }
 
 /**
@@ -78,7 +103,7 @@ function loadCacheIndex(): CacheIndex {
  */
 function saveCacheIndex(index: CacheIndex): void {
   ensureCacheDir();
-  writeFileSync(getCacheIndexPath(), JSON.stringify(index, null, 2));
+  writePrivateFile(getCacheIndexPath(), JSON.stringify(index, null, 2));
 }
 
 /**
@@ -97,7 +122,7 @@ export function getCachedSkill(owner: string, repo: string, skillPath?: string):
 
     // Update last accessed time
     cached.lastAccessedAt = Date.now();
-    writeFileSync(filePath, JSON.stringify(cached, null, 2));
+    writePrivateFile(filePath, JSON.stringify(cached, null, 2));
 
     // Update index
     const index = loadCacheIndex();
@@ -137,7 +162,7 @@ export function cacheSkill(
       source
     };
 
-    writeFileSync(filePath, JSON.stringify(cached, null, 2));
+    writePrivateFile(filePath, JSON.stringify(cached, null, 2));
 
     // Update index
     const index = loadCacheIndex();

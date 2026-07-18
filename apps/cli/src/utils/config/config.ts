@@ -8,6 +8,45 @@ export interface Settings {
   registry?: string;
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === 'localhost'
+    || normalized === '127.0.0.1'
+    || normalized === '::1'
+    || normalized === '[::1]';
+}
+
+export function normalizeRegistryUrl(value: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    return null;
+  }
+
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    return null;
+  }
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && isLoopbackHostname(parsed.hostname))) {
+    return null;
+  }
+
+  const pathname = parsed.pathname.replace(/\/+$/, '');
+  if (!pathname.endsWith('/registry') && !pathname.endsWith('/openclaw')) {
+    return null;
+  }
+
+  return `${parsed.protocol}//${parsed.host}${pathname}`;
+}
+
+export function getRegistryOrigin(value = getRegistryUrl()): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Get the platform-specific config directory
  * - macOS: ~/Library/Application Support/skillscat/
@@ -128,7 +167,8 @@ export function deleteSetting<K extends keyof Settings>(key: K): void {
  * Get the registry URL (from settings or default)
  */
 export function getRegistryUrl(): string {
-  return getSetting('registry') || DEFAULT_REGISTRY_URL;
+  const configured = getSetting('registry') || DEFAULT_REGISTRY_URL;
+  return normalizeRegistryUrl(configured) || DEFAULT_REGISTRY_URL;
 }
 
 function normalizeRegistryUrlForCompare(url: string): string {

@@ -126,4 +126,35 @@ describe('report command', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('rate limited');
   });
+
+  it('returns a friendly error when the report request cannot connect', async () => {
+    await configureAuth(TEST_TOKEN);
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw Object.assign(new Error('connection refused'), { code: 'ECONNREFUSED' });
+    }) as unknown as typeof fetch);
+
+    const { report } = await import('../src/commands/report');
+    const result = await runCommand(() => report('testowner/demo', { reason: 'security' }));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Connection refused');
+  });
+
+  it('preserves HTTP status errors when the report response is not JSON', async () => {
+    await configureAuth(TEST_TOKEN);
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+      json: async () => {
+        throw new SyntaxError('not json');
+      },
+    })) as unknown as typeof fetch);
+
+    const { report } = await import('../src/commands/report');
+    const result = await runCommand(() => report('testowner/demo', { reason: 'security' }));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Service unavailable');
+  });
 });

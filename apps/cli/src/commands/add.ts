@@ -8,7 +8,13 @@ import {
   fetchSkillCompanionFilesWithOptions,
   type GitHubRepoSnapshot,
 } from '../utils/source/git';
-import { fetchSkill, fetchSkillFiles, fetchSkillsByRepo, type RegistryRepoSkillSummary } from '../utils/api/registry';
+import {
+  fetchSkill,
+  fetchSkillFiles,
+  fetchSkillsByRepo,
+  RegistryRequestError,
+  type RegistryRepoSkillSummary,
+} from '../utils/api/registry';
 import { submitRepoForIndexingInBackground } from '../utils/api/background-submit';
 import {
   AGENTS,
@@ -23,7 +29,7 @@ import {
 import { recordInstallation } from '../utils/storage/db';
 import { trackInstallation } from '../utils/api/tracking';
 import { success, error, warn, info, spinner, prompt } from '../utils/core/ui';
-import { cacheSkill, getCachedSkill } from '../utils/storage/cache';
+import { cacheSkill, calculateContentHash, getCachedSkill } from '../utils/storage/cache';
 import { verboseLog } from '../utils/core/verbose';
 import { isDefaultRegistry } from '../utils/config/config';
 import type { SkillRegistryItem } from '../utils/api/registry';
@@ -61,6 +67,10 @@ interface ResolveInstallSkillsResult {
 
 const COMPANION_MANIFEST_FILE = '.skillscat-companion-files.json';
 const COMPANION_MANIFEST_VERSION = 1;
+
+function isRegistryAccessError(error: unknown): error is RegistryRequestError {
+  return error instanceof RegistryRequestError && (error.status === 401 || error.status === 403);
+}
 
 export async function add(source: string, options: AddOptions): Promise<void> {
   const explicitRepoInstall = options.repo === true;
@@ -251,6 +261,7 @@ export async function add(source: string, options: AddOptions): Promise<void> {
 
   let installed = 0;
   let skipped = 0;
+  let installFailures = 0;
   let wroteGitDiscoveredSkill = false;
 
   for (const entry of selectedEntries) {
@@ -278,7 +289,6 @@ export async function add(source: string, options: AddOptions): Promise<void> {
           const overwrite = await prompt('Overwrite? [y/N] ');
           if (overwrite.toLowerCase() !== 'y') {
             skipped++;
-            activeAgentIds.add(agent.id);
             continue;
           }
         }
@@ -310,10 +320,8 @@ export async function add(source: string, options: AddOptions): Promise<void> {
           verboseLog(`Cached skill: ${skill.name}`);
         }
       } catch (err) {
-        if (existedBefore) {
-          activeAgentIds.add(agent.id);
-        }
         error(`Failed to install ${skill.name} to ${agent.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        installFailures += 1;
       }
     }
 
@@ -357,11 +365,21 @@ export async function add(source: string, options: AddOptions): Promise<void> {
     info(`Skipped ${skipped} skill(s) (already up to date)`);
   }
 
-  console.log();
-  console.log(pc.dim('Skills are now available in your coding agents.'));
-  console.log(pc.dim('Restart your agent or start a new session to use them.'));
-  if (usedFallbackAgent) {
-    console.log(pc.dim('Need a tool-specific copy later? Run `npx skillscat convert <agent>` to copy from .agents.'));
+  if (installFailures > 0) {
+    warn(`${installFailures} agent installation(s) could not be written.`);
+  }
+
+  if (installed > 0 || skipped > 0) {
+    console.log();
+    console.log(pc.dim('Skills are now available in your coding agents.'));
+    console.log(pc.dim('Restart your agent or start a new session to use them.'));
+    if (usedFallbackAgent) {
+      console.log(pc.dim('Need a tool-specific copy later? Run `npx skillscat convert <agent>` to copy from .agents.'));
+    }
+  }
+
+  if (installFailures > 0) {
+    process.exit(1);
   }
 }
 
@@ -384,7 +402,9 @@ async function resolveInstallSkills({
   const needsRegistryFirst = repoSource.platform === 'github' && !explicitRefBypassRegistry;
   const ambiguousSlugOrRepoInput = isAmbiguousSlugOrRepoInput(sourceInput, repoSource);
   const preferRepoSelection = explicitRepoInstall || ambiguousSlugOrRepoInput;
-  const canShortCircuitExactSlug = ambiguousSlugOrRepoInput && !explicitRepoInstall && requestedNamesLower.size === 0;
+  const canShortCircuitExactSlug = isBareRegistrySlugInput(sourceInput, repoSource)
+    && !explicitRepoInstall
+    && requestedNamesLower.size === 0;
 
   let resolved: ResolvedInstallSkill[] = [];
   let selectionMode: ResolveSelectionMode = 'default';
@@ -393,6 +413,7 @@ async function resolveInstallSkills({
 
   if (canShortCircuitExactSlug) {
     const registrySlugSkill = await fetchSkill(sourceInput).catch((err) => {
+      if (isRegistryAccessError(err)) throw err;
       verboseLog(`Registry slug lookup failed: ${err instanceof Error ? err.message : 'unknown'}`);
       return null;
     });
@@ -434,6 +455,9 @@ async function resolveInstallSkills({
         }
       }
     } catch (err) {
+      if (!explicitRepoInstall && isRegistryAccessError(err)) {
+        throw err;
+      }
       verboseLog(`Registry repo lookup failed: ${err instanceof Error ? err.message : 'unknown'}`);
     }
   }
@@ -474,7 +498,10 @@ async function resolveInstallSkills({
 
       // Fallback: preserve existing behavior for registry slugs or private skills.
       if (!explicitRepoInstall && resolved.length === 0 && !gitDiscoveryRanFailedDueToEmptyPath(err)) {
-        const registrySkill = await fetchSkill(sourceInput).catch(() => null);
+        const registrySkill = await fetchSkill(sourceInput).catch((registryError) => {
+          if (isRegistryAccessError(registryError)) throw registryError;
+          return null;
+        });
         if (registrySkill?.content) {
           resolved.push(toRegistryResolvedSkill(registrySkill, sourceInput, repoSource));
           return {
@@ -528,8 +555,19 @@ async function fetchRegistryResolvedSkills(
         missingSummaries.push(summary);
         continue;
       }
-      resolved.push(toRegistryResolvedSkill(full, sourceInput, repoSource));
+      const exact = {
+        ...full,
+        slug: full.slug || summary.slug,
+        skillPath: full.skillPath ?? summary.skillPath,
+        repo: full.repo || summary.repo,
+        githubUrl: full.githubUrl || summary.githubUrl || '',
+      };
+      resolved.push(toRegistryResolvedSkill(exact, summary.slug, {
+        ...repoSource,
+        path: normalizeSkillPath(summary.skillPath) || repoSource.path,
+      }));
     } catch (err) {
+      if (isRegistryAccessError(err)) throw err;
       verboseLog(`Failed to fetch registry skill ${summary.slug}: ${err instanceof Error ? err.message : 'unknown'}`);
       missingSummaries.push(summary);
     }
@@ -593,7 +631,7 @@ function toRegistryResolvedSkill(skill: SkillRegistryItem, fallbackInput: string
       description: skill.description || '',
       path: skillPath,
       content: skill.content,
-      contentHash: skill.contentHash,
+      contentHash: skill.contentHash || calculateContentHash(skill.content),
     },
     installSource: parsedGitSource,
     registrySlug,
@@ -694,12 +732,15 @@ async function hydrateCompanionFilesFromRegistryBundle(entry: ResolvedInstallSki
     entry.companionFilesHydrationFailed = false;
     return true;
   } catch (err) {
+    if (isRegistryAccessError(err)) {
+      throw err;
+    }
     verboseLog(`Failed to fetch registry bundle for ${entry.skill.name}: ${err instanceof Error ? err.message : 'unknown'}`);
     return false;
   }
 }
 
-function companionFilesAreUpToDate(
+export function companionFilesAreUpToDate(
   skillDir: string,
   skill: SkillInfo,
   options?: { skipValidation?: boolean }
@@ -746,7 +787,7 @@ function companionFilesAreUpToDate(
   return true;
 }
 
-function syncCompanionFiles(skillDir: string, skill: SkillInfo): void {
+export function syncCompanionFiles(skillDir: string, skill: SkillInfo): void {
   const expectedFiles = getExpectedCompanionFiles(skill);
   const expectedPaths = expectedFiles.map((file) => file.path);
   const previousPaths = readCompanionManifest(skillDir) ?? [];
@@ -944,6 +985,17 @@ function isAmbiguousSlugOrRepoInput(sourceInput: string, repoSource: RepoSource)
     && !repoSource.branch
     && repoSource.hasExplicitRef !== true
     && sourceInput.trim() === `${repoSource.owner}/${repoSource.repo}`
+  );
+}
+
+function isBareRegistrySlugInput(sourceInput: string, repoSource: RepoSource): boolean {
+  const normalized = sourceInput.trim();
+  return (
+    repoSource.platform === 'github'
+    && repoSource.hasExplicitRef !== true
+    && !normalized.includes('://')
+    && !normalized.startsWith('git@')
+    && /^[^\s/]+\/[^\s/]+(?:\/[^\s/]+)*$/.test(normalized)
   );
 }
 
