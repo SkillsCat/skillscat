@@ -1,5 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { setPublicPageCache } from '$lib/server/cache/page';
+import { redirect } from '@sveltejs/kit';
 
 interface Org {
   id: string;
@@ -44,8 +45,18 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
     staleWhileRevalidate: 600,
     varyByLanguageHeader: false,
   });
+  // The page embeds a mutable public skill list. Keep the server-side snapshot
+  // cache, but never let a generic edge cache outlive a visibility mutation.
+  setHeaders({
+    'Cache-Control': 'no-store',
+    'CDN-Cache-Control': 'no-store',
+    Vary: 'Cookie',
+  });
 
   const slug = params.slug;
+  if (slug && slug !== slug.toLowerCase()) {
+    throw redirect(308, `/org/${encodeURIComponent(slug.toLowerCase())}`);
+  }
   const fallback = {
     slug,
     org: null as Org | null,

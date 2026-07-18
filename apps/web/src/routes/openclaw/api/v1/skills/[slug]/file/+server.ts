@@ -19,6 +19,15 @@ import {
   resolveOpenClawTextCache,
 } from '$lib/server/openclaw/cache';
 
+function isValidFilePath(path: string): boolean {
+  return Boolean(
+    path
+    && !path.startsWith('/')
+    && !path.includes('\\')
+    && !path.split('/').some((segment) => !segment || segment === '.' || segment === '..')
+  );
+}
+
 export const GET: RequestHandler = async ({ params, platform, request, locals, url }) => {
   const slug = decodeClawHubCompatSlug(params.slug);
   const path = (url.searchParams.get('path') ?? '').trim();
@@ -31,7 +40,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
   if (!path) {
     throw error(400, 'Query parameter "path" is required.');
   }
-  if (path.includes('..') || path.startsWith('/')) {
+  if (!isValidFilePath(path)) {
     throw error(400, 'Invalid file path.');
   }
   if (!isSupportedOpenClawTag(tag)) {

@@ -16,7 +16,8 @@ export const DELETE: RequestHandler = async ({ locals, platform, params }) => {
     throw error(500, 'Database not available');
   }
 
-  const { slug, id: tokenId } = params;
+  const slug = params.slug?.trim().toLowerCase();
+  const tokenId = params.id;
   if (!slug) {
     throw error(400, 'Organization slug is required');
   }
@@ -28,13 +29,13 @@ export const DELETE: RequestHandler = async ({ locals, platform, params }) => {
   const membership = await db.prepare(`
     SELECT om.role, o.id as org_id FROM org_members om
     INNER JOIN organizations o ON om.org_id = o.id
-    WHERE o.slug = ? AND om.user_id = ?
+    WHERE o.slug = ? COLLATE NOCASE AND om.user_id = ?
   `)
     .bind(slug, session.user.id)
     .first<{ role: string; org_id: string }>();
 
-  if (!membership || !['owner', 'admin'].includes(membership.role)) {
-    throw error(403, 'Only organization owners and admins can revoke tokens');
+  if (membership?.role !== 'owner') {
+    throw error(403, 'Only the organization owner can revoke tokens');
   }
 
   const revoked = await revokeOrgApiToken(tokenId, membership.org_id, db);

@@ -7,7 +7,11 @@ function responseHeaders(opts: {
   cacheStatus?: 'HIT' | 'MISS' | 'BYPASS';
 }): Record<string, string> {
   const headers: Record<string, string> = {
-    'Cache-Control': opts.cacheControl,
+    'Cache-Control': opts.cacheControl.trim().toLowerCase().startsWith('public')
+      ? 'private, no-cache'
+      : opts.cacheControl,
+    'CDN-Cache-Control': 'no-store',
+    Vary: 'Authorization',
   };
 
   if (opts.cacheStatus) {

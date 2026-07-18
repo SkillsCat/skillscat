@@ -12,14 +12,19 @@ interface TokenBackedUserRow {
   updatedAt: Date | number;
 }
 
-/**
- * Resolve a Better Auth-compatible user from a Bearer token so SSR routes
- * can honor the same API tokens that the JSON endpoints accept.
- */
-export async function resolveTokenBackedUser(
+export interface TokenBackedIdentity {
+  user: User | null;
+  principal: {
+    userId: string | null;
+    orgId: string | null;
+    scopes: string[];
+  };
+}
+
+export async function resolveTokenBackedIdentity(
   request: Request,
   db: D1Database | undefined
-): Promise<User | null> {
+): Promise<TokenBackedIdentity | null> {
   if (!db) {
     return null;
   }
@@ -35,8 +40,18 @@ export async function resolveTokenBackedUser(
   }
 
   const tokenInfo = await validateApiToken(token, db);
-  if (!tokenInfo?.userId) {
+  if (!tokenInfo) {
     return null;
+  }
+
+  const principal = {
+    userId: tokenInfo.userId,
+    orgId: tokenInfo.orgId,
+    scopes: tokenInfo.scopes,
+  };
+
+  if (!tokenInfo.userId) {
+    return { user: null, principal };
   }
 
   const row = await db.prepare(`
@@ -55,12 +70,21 @@ export async function resolveTokenBackedUser(
     .bind(tokenInfo.userId)
     .first<TokenBackedUserRow>();
 
-  if (!row) {
-    return null;
-  }
-
   return {
-    ...row,
-    emailVerified: Boolean(row.emailVerified),
-  } as User;
+    user: row
+      ? ({ ...row, emailVerified: Boolean(row.emailVerified) } as User)
+      : null,
+    principal,
+  };
+}
+
+/**
+ * Resolve a Better Auth-compatible user from a Bearer token so SSR routes
+ * can honor the same API tokens that the JSON endpoints accept.
+ */
+export async function resolveTokenBackedUser(
+  request: Request,
+  db: D1Database | undefined
+): Promise<User | null> {
+  return (await resolveTokenBackedIdentity(request, db))?.user ?? null;
 }

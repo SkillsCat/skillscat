@@ -1,7 +1,8 @@
-import { getCached } from '$lib/server/cache';
+import { getCached, invalidateCache } from '$lib/server/cache';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { normalizeSearchText } from '$lib/server/ranking/search-precompute';
 import { buildPrefixRange, type PrefixRange } from '$lib/server/text/prefix-range';
+import { getRegistrySearchCacheRevision } from '$lib/server/registry/cache';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -14,7 +15,7 @@ const MAX_QUERY_TOKENS = 8;
 const MIN_QUERY_TOKEN_LENGTH = 2;
 const TOKEN_SPLIT_REGEX = /[^\p{L}\p{N}]+/u;
 
-let hasSkillSearchTermsTable: boolean | null = null;
+const searchTermsTableSupport = new WeakMap<object, boolean>();
 
 export interface RegistrySkillItem {
   id: string;
@@ -52,6 +53,7 @@ export interface ResolvedRegistrySearch {
 
 interface RegistrySearchAccess {
   userId: string | null;
+  orgId: string | null;
   now: number;
 }
 
@@ -166,10 +168,13 @@ function deriveExactTotalFromLoadedPage(input: RegistrySearchInput, loadedIds: s
 }
 
 async function hasSearchTermsTable(db: D1Database): Promise<boolean> {
-  if (hasSkillSearchTermsTable !== null) {
-    return hasSkillSearchTermsTable;
+  const cacheKey = db as unknown as object;
+  const cached = searchTermsTableSupport.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
   }
 
+  let supported = false;
   try {
     const result = await db.prepare(`
       SELECT 1
@@ -177,12 +182,13 @@ async function hasSearchTermsTable(db: D1Database): Promise<boolean> {
       WHERE type = 'table' AND name = 'skill_search_terms'
       LIMIT 1
     `).first<{ 1: number }>();
-    hasSkillSearchTermsTable = Boolean(result);
+    supported = Boolean(result);
   } catch {
-    hasSkillSearchTermsTable = false;
+    supported = false;
   }
 
-  return hasSkillSearchTermsTable;
+  searchTermsTableSupport.set(cacheKey, supported);
+  return supported;
 }
 
 export function parseRegistrySearchInput(input: {
@@ -232,14 +238,14 @@ export async function resolveRegistrySearch(
   }
 
   let canIncludePrivate = false;
-  let access: RegistrySearchAccess = { userId: null, now: Date.now() };
+  let access: RegistrySearchAccess = { userId: null, orgId: null, now: Date.now() };
 
   if (input.includePrivate) {
     const auth = await getAuthContext(request, locals, db);
-    if (auth.userId) {
+    if (auth.userId || auth.orgId) {
       requireScope(auth, 'read');
       canIncludePrivate = true;
-      access = { userId: auth.userId, now: Date.now() };
+      access = { userId: auth.userId, orgId: auth.orgId, now: Date.now() };
     }
   }
 
@@ -248,22 +254,51 @@ export async function resolveRegistrySearch(
   const canUseSharedCache = canCache && input.offset <= MAX_SHARED_CACHE_OFFSET;
 
   if (canUseSharedCache) {
-    const cacheKey = `search:${REGISTRY_SEARCH_CACHE_VERSION}:${input.query}:${input.category}:${cacheLimit}:${input.offset}`;
+    const revision = await getRegistrySearchCacheRevision(waitUntil);
+    const cacheKey = `search:${REGISTRY_SEARCH_CACHE_VERSION}:${revision}:${input.query}:${input.category}:${cacheLimit}:${input.offset}`;
     const cached = await getCached(
       cacheKey,
-      async () => fetchSearchResults(db, { ...input, limit: cacheLimit }, { userId: null, now: Date.now() }),
+      async () => fetchSearchResults(db, { ...input, limit: cacheLimit }, { userId: null, orgId: null, now: Date.now() }),
       REGISTRY_SEARCH_CACHE_TTL_SECONDS,
       { waitUntil }
     );
-    const skills = cached.data.skills.slice(0, input.limit);
+    let data = cached.data;
+    let cacheStatus: ResolvedRegistrySearch['cacheStatus'] = cached.hit ? 'HIT' : 'MISS';
+
+    if (cached.hit && cached.data.skills.length > 0) {
+      const ids = cached.data.skills.map((skill) => skill.id);
+      const placeholders = ids.map(() => '?').join(',');
+      const current = await db.prepare(`
+        SELECT id
+        FROM skills
+        WHERE id IN (${placeholders}) AND visibility = 'public'
+      `)
+        .bind(...ids)
+        .all<{ id: string }>();
+      const currentIds = new Set((current.results || []).map((row) => row.id));
+
+      if (currentIds.size !== ids.length) {
+        data = await fetchSearchResults(
+          db,
+          { ...input, limit: cacheLimit },
+          { userId: null, orgId: null, now: Date.now() }
+        );
+        await invalidateCache(cacheKey);
+        cacheStatus = 'MISS';
+      }
+    }
+
+    const skills = data.skills.slice(0, input.limit);
 
     return {
       data: {
-        ...cached.data,
+        ...data,
         skills,
       },
-      cacheControl: `public, max-age=${REGISTRY_SEARCH_CACHE_TTL_SECONDS}, stale-while-revalidate=3600`,
-      cacheStatus: cached.hit ? 'HIT' : 'MISS',
+      // The Worker Cache API owns shared caching. Generic edge caches cannot
+      // follow the mutation revision or enforce the visibility recheck.
+      cacheControl: 'private, no-cache',
+      cacheStatus,
     };
   }
 
@@ -278,31 +313,54 @@ function buildVisibilityFilter(
   access: RegistrySearchAccess,
   tableAlias: string
 ): { sql: string; params: Array<string | number> } {
-  if (!access.userId) {
+  if (!access.userId && !access.orgId) {
     return {
       sql: `${tableAlias}.visibility = 'public'`,
       params: []
     };
   }
 
-  return {
-    sql: `(
-      ${tableAlias}.visibility = 'public'
-      OR ${tableAlias}.owner_id = ?
-      OR ${tableAlias}.org_id IN (
+  const params: Array<string | number> = [];
+  const privatePredicates: string[] = [`${tableAlias}.visibility = 'public'`];
+
+  if (access.userId) {
+    privatePredicates.push(`(${tableAlias}.owner_id = ? AND ${tableAlias}.org_id IS NULL)`);
+    params.push(access.userId);
+    privatePredicates.push(`
+      ${tableAlias}.org_id IN (
         SELECT org_id
         FROM org_members
         WHERE user_id = ?
       )
-      OR ${tableAlias}.id IN (
+    `);
+    params.push(access.userId);
+    privatePredicates.push(`
+      ${tableAlias}.id IN (
         SELECT skill_id
         FROM skill_permissions
-        WHERE grantee_type = 'user'
-          AND grantee_id = ?
-          AND (expires_at IS NULL OR expires_at > ?)
+        WHERE (
+          (grantee_type = 'user' AND grantee_id = ?)
+          OR (
+            grantee_type = 'email'
+            AND LOWER(grantee_id) = (
+              SELECT LOWER(email) FROM user WHERE id = ? LIMIT 1
+            )
+          )
+        )
+        AND (expires_at IS NULL OR expires_at > ?)
       )
-    )`,
-    params: [access.userId, access.userId, access.userId, access.now]
+    `);
+    params.push(access.userId, access.userId, access.now);
+  }
+
+  if (access.orgId) {
+    privatePredicates.push(`${tableAlias}.org_id = ?`);
+    params.push(access.orgId);
+  }
+
+  return {
+    sql: `(${privatePredicates.join('\n      OR ')})`,
+    params,
   };
 }
 

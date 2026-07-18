@@ -53,13 +53,15 @@ beforeEach(() => {
 });
 
 describe('og route caching', () => {
-  it('serves cached pngs without touching D1 on cache hits', async () => {
+  it('checks current skill visibility before serving cached pngs', async () => {
     getCachedBinary.mockResolvedValue({
       data: new Uint8Array([9, 9, 9]),
       hit: true,
     });
 
-    const prepare = vi.fn();
+    const first = vi.fn(async () => ({ visibility: 'public' }));
+    const bind = vi.fn(() => ({ first }));
+    const prepare = vi.fn(() => ({ bind }));
     const { GET } = await import('../src/routes/og/+server');
     const response = await GET({
       url: new URL('https://skills.cat/og?type=skill&slug=acme/demo-skill&v=1712345678'),
@@ -73,7 +75,43 @@ describe('og route caching', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('x-cache')).toBe('HIT');
     expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, s-maxage=31536000, immutable');
-    expect(prepare).not.toHaveBeenCalled();
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(String(prepare.mock.calls[0]?.[0] || '')).toContain('SELECT visibility');
+    expect(bind).toHaveBeenCalledWith('acme/demo-skill');
+  });
+
+  it('does not reuse a public skill image or ETag after the skill becomes private', async () => {
+    const first = vi.fn()
+      .mockResolvedValueOnce({ visibility: 'public' })
+      .mockResolvedValueOnce({ visibility: 'private' });
+    const prepare = vi.fn(() => ({ bind: vi.fn(() => ({ first })) }));
+    const cacheKeys: string[] = [];
+    getCachedBinary.mockImplementation(async (cacheKey) => {
+      cacheKeys.push(String(cacheKey));
+      return { data: new Uint8Array([9, 9, 9]), hit: true };
+    });
+
+    const { GET } = await import('../src/routes/og/+server');
+    const url = 'https://skills.cat/og?type=skill&slug=acme/demo-skill&v=1712345678';
+    const publicResponse = await GET({
+      url: new URL(url),
+      request: new Request(url),
+      platform: { env: { DB: { prepare } }, context: { waitUntil: vi.fn() } },
+    } as never);
+    const publicEtag = publicResponse.headers.get('etag');
+
+    const privateResponse = await GET({
+      url: new URL(url),
+      request: new Request(url, { headers: { 'If-None-Match': String(publicEtag) } }),
+      platform: { env: { DB: { prepare } }, context: { waitUntil: vi.fn() } },
+    } as never);
+
+    expect(privateResponse.status).toBe(200);
+    expect(privateResponse.headers.get('etag')).not.toBe(publicEtag);
+    expect(cacheKeys).toEqual([
+      'og:image:2026-03-01:skill:acme%2Fdemo-skill:1712345678',
+      'og:image:2026-03-01:page:404:2026-03-01',
+    ]);
   });
 
   it('uses a lightweight skill query and long-lived binary cache on misses', async () => {
@@ -140,10 +178,15 @@ describe('og route caching', () => {
     expect(capturedTtl).toBe(31536000);
     expect(capturedKey).toBe('og:image:2026-03-01:skill:acme%2Fdemo-skill:1712345678');
     expect(capturedWaitUntil).toEqual(expect.any(Function));
-    expect(prepare).toHaveBeenCalledTimes(1);
-    expect(bind).toHaveBeenCalledWith('acme/demo-skill');
+    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(bind).toHaveBeenCalledTimes(2);
+    expect(bind).toHaveBeenNthCalledWith(1, 'acme/demo-skill');
+    expect(bind).toHaveBeenNthCalledWith(2, 'acme/demo-skill');
 
-    const sql = String(prepare.mock.calls[0]?.[0] || '');
+    const visibilitySql = String(prepare.mock.calls[0]?.[0] || '');
+    expect(visibilitySql).toContain('SELECT visibility');
+
+    const sql = String(prepare.mock.calls[1]?.[0] || '');
     expect(sql).toContain('FROM skills s');
     expect(sql).toContain('LEFT JOIN authors a ON a.username = s.repo_owner');
     expect(sql).not.toContain('s.*');

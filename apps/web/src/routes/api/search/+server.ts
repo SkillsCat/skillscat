@@ -2,13 +2,14 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { CATEGORIES } from '$lib/constants';
 import type { ApiResponse } from '$lib/types';
-import { getCached } from '$lib/server/cache';
+import { getCached, invalidateCache } from '$lib/server/cache';
 import {
   computeSearchScore,
   normalizeSearchText,
   SEARCH_SUGGESTION_MAX_PREFIX_LENGTH,
 } from '$lib/server/ranking/search-precompute';
 import { buildPrefixRange, type PrefixRange } from '$lib/server/text/prefix-range';
+import { getRegistrySearchCacheRevision } from '$lib/server/registry/cache';
 
 const MIN_QUERY_LENGTH = 2;
 const MAX_QUERY_LENGTH = 120;
@@ -1186,8 +1187,10 @@ export const GET: RequestHandler = async ({ url, platform }) => {
     }
 
     const db = platform?.env?.DB;
-    const { data, hit } = await getCached(
-      `api:search:${SEARCH_CACHE_KEY_VERSION}:${query}:${category || '_'}:${cacheLimit}`,
+    const revision = await getRegistrySearchCacheRevision(waitUntil);
+    const cacheKey = `api:search:${SEARCH_CACHE_KEY_VERSION}:${revision}:${query}:${category || '_'}:${cacheLimit}`;
+    const cached = await getCached(
+      cacheKey,
       async () => {
         if (!db) {
           return { skills: [], categories: [], total: 0 } satisfies SearchSuggestionsResult;
@@ -1202,6 +1205,27 @@ export const GET: RequestHandler = async ({ url, platform }) => {
       SEARCH_CACHE_TTL_SECONDS,
       { waitUntil }
     );
+    let data = cached.data;
+    let cacheStatus: 'HIT' | 'MISS' = cached.hit ? 'HIT' : 'MISS';
+    if (cached.hit && cached.data.skills.length > 0) {
+      const ids = cached.data.skills.map((skill) => skill.id);
+      const placeholders = ids.map(() => '?').join(',');
+      const current = db
+        ? await db.prepare(`
+            SELECT id
+            FROM skills
+            WHERE id IN (${placeholders}) AND visibility = 'public'
+          `).bind(...ids).all<{ id: string }>()
+        : { results: [] };
+      const currentIds = new Set((current.results || []).map((row) => row.id));
+      if (currentIds.size !== ids.length) {
+        data = db
+          ? await fetchSuggestions(db, query, cacheLimit, category)
+          : { skills: [], categories: [], total: 0 } satisfies SearchSuggestionsResult;
+        await invalidateCache(cacheKey);
+        cacheStatus = 'MISS';
+      }
+    }
     const skills = data.skills.slice(0, limit);
 
     return json({
@@ -1215,8 +1239,10 @@ export const GET: RequestHandler = async ({ url, platform }) => {
       }
     } satisfies ApiResponse<{ skills: SearchSuggestionSkill[]; categories: SearchSuggestionCategory[] }>, {
       headers: {
-        'Cache-Control': `public, max-age=${SEARCH_CACHE_TTL_SECONDS}, stale-while-revalidate=3600`,
-        'X-Cache': hit ? 'HIT' : 'MISS'
+        'Cache-Control': 'private, no-cache',
+        'CDN-Cache-Control': 'no-store',
+        Vary: 'Authorization',
+        'X-Cache': cacheStatus
       }
     });
   } catch (error) {

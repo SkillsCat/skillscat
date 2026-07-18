@@ -46,9 +46,10 @@ export async function hydrateCachedSkills(
       s.repo_name as repoName,
       COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       a.avatar_url as authorAvatar
-    FROM skills s
+    FROM skills s INDEXED BY skills_visibility_id_idx
     LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE s.id IN (${placeholders})
+    WHERE s.visibility = 'public'
+      AND s.id IN (${placeholders})
   `)
     .bind(...skillIds)
     .all<{
@@ -75,17 +76,17 @@ export async function hydrateCachedSkills(
     });
   }
 
-  return skills.map((skill) => {
+  return skills.flatMap((skill) => {
     const latest = skillMap.get(skill.id);
-    if (!latest) return skill;
+    if (!latest) return [];
 
-    return {
+    return [{
       ...skill,
       repoOwner: latest.repoOwner || skill.repoOwner,
       repoName: latest.repoName || skill.repoName,
       updatedAt: latest.updatedAt ?? skill.updatedAt,
       authorAvatar: latest.authorAvatar ?? skill.authorAvatar,
-    };
+    }];
   });
 }
 

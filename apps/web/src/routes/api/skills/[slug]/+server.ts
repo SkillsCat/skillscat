@@ -2,14 +2,21 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { ApiResponse } from '$lib/types';
 import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
-import { isSkillOwner } from '$lib/server/auth/permissions';
+import { canWriteSkill } from '$lib/server/auth/permissions';
 import { resolveSkillDetail } from '$lib/server/skill/detail';
 import { normalizeSkillSlug } from '$lib/skill-path';
-import { deleteSkillArtifactsAndInvalidateCaches } from '$lib/server/skill/delete';
+import {
+  deleteSkillArtifactsAndInvalidateCaches,
+  SkillMutationConflictError,
+} from '$lib/server/skill/delete';
 
 function responseHeaders(opts: { cacheControl: string; cacheStatus: 'HIT' | 'MISS' | 'BYPASS' }): Record<string, string> {
+  const responseCacheControl = opts.cacheControl.trim().toLowerCase().startsWith('public')
+    ? 'private, no-cache'
+    : opts.cacheControl;
   return {
-    'Cache-Control': opts.cacheControl,
+    'Cache-Control': responseCacheControl,
+    'CDN-Cache-Control': 'no-store',
     Vary: 'Authorization',
     'X-Cache': opts.cacheStatus,
   };
@@ -98,7 +105,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
   }
 
   const auth = await getAuthContext(request, locals, db);
-  if (!auth.userId) {
+  if (!auth.userId && !auth.orgId) {
     throw error(401, 'Authentication required');
   }
   requireScope(auth, 'write');
@@ -120,10 +127,12 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
     throw error(404, 'Skill not found');
   }
 
-  // Only owner can delete
-  const isOwner = await isSkillOwner(skill.id, auth.userId, db);
-  if (!isOwner) {
-    throw error(403, 'Only the owner can delete this skill');
+  const canWrite = await canWriteSkill(skill.id, {
+    userId: auth.userId,
+    orgId: auth.orgId,
+  }, db);
+  if (!canWrite) {
+    throw error(403, 'You do not have permission to delete this skill');
   }
 
   // Only allow deletion of uploaded (private) skills
@@ -131,22 +140,29 @@ export const DELETE: RequestHandler = async ({ locals, platform, request, params
     throw error(400, 'Cannot delete GitHub-sourced skills. Remove the SKILL.md from your repository instead.');
   }
 
-  await deleteSkillArtifactsAndInvalidateCaches({
-    db,
-    r2,
-    indexNow: {
-      env: platform?.env,
-      waitUntil: platform?.context?.waitUntil?.bind(platform.context),
-    },
-    skill: {
-      id: skill.id,
-      slug: skill.slug,
-      sourceType: skill.source_type,
-      repoOwner: skill.repo_owner,
-      repoName: skill.repo_name,
-      skillPath: skill.skill_path,
-    },
-  });
+  try {
+    await deleteSkillArtifactsAndInvalidateCaches({
+      db,
+      r2,
+      indexNow: {
+        env: platform?.env,
+        waitUntil: platform?.context?.waitUntil?.bind(platform.context),
+      },
+      skill: {
+        id: skill.id,
+        slug: skill.slug,
+        sourceType: skill.source_type,
+        repoOwner: skill.repo_owner,
+        repoName: skill.repo_name,
+        skillPath: skill.skill_path,
+      },
+    });
+  } catch (deleteError) {
+    if (deleteError instanceof SkillMutationConflictError) {
+      throw error(409, deleteError.message);
+    }
+    throw deleteError;
+  }
 
   return json({
     success: true,

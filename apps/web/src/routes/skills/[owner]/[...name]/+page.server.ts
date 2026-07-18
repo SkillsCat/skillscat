@@ -331,6 +331,12 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
   );
 
   const userId = locals.user?.id || null;
+  const readPrincipal = locals.authPrincipal?.scopes.includes('read')
+    ? {
+        userId: locals.authPrincipal.userId,
+        orgId: locals.authPrincipal.orgId,
+      }
+    : null;
 
   const normalizedOwner = normalizeSkillOwner(params.owner);
   const normalizedName = normalizeSkillName(params.name);
@@ -362,7 +368,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       () => getSkillBySlug(
         env,
         slug,
-        userId,
+        readPrincipal,
         (name, dur, desc) => {
           serverTimings.push({ name, dur, desc });
         },
@@ -438,7 +444,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     setPublicPageCache({
       setHeaders,
       request,
-      isAuthenticated: shouldDeferUserState ? false : Boolean(locals.user),
+      isAuthenticated: shouldDeferUserState ? false : Boolean(readPrincipal),
       sMaxAge: 300,
       staleWhileRevalidate: 1800,
       varyByLanguageHeader: false,
@@ -595,7 +601,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       recommendSkills,
       deferRecommendSkills,
       isBookmarked: shouldDeferUserState ? false : isBookmarked,
-      isAuthenticated: shouldDeferUserState ? false : !!userId,
+      isAuthenticated: shouldDeferUserState ? false : Boolean(readPrincipal),
       deferUserState: shouldDeferUserState,
       trackPublicAccessClientSide: shouldDeferUserState,
       isDotFolderSkill,

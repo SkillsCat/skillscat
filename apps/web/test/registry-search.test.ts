@@ -29,6 +29,11 @@ class SqliteD1Statement {
       results: this.db.prepare(this.sql).all(...this.params) as T[],
     };
   }
+
+  async run() {
+    const result = this.db.prepare(this.sql).run(...this.params);
+    return { meta: { changes: Number(result.changes) } };
+  }
 }
 
 class LoggingSqliteD1Database {
@@ -79,12 +84,30 @@ function createRegistrySearchDb(): DatabaseSync {
       user_id TEXT NOT NULL
     );
 
+    CREATE TABLE user (
+      id TEXT PRIMARY KEY NOT NULL,
+      email TEXT NOT NULL
+    );
+
     CREATE TABLE skill_permissions (
       skill_id TEXT NOT NULL,
       grantee_type TEXT NOT NULL,
       grantee_id TEXT NOT NULL,
       expires_at INTEGER
     );
+
+    CREATE TABLE api_tokens (
+      id TEXT PRIMARY KEY NOT NULL,
+      user_id TEXT,
+      org_id TEXT,
+      name TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      scopes TEXT NOT NULL,
+      last_used_at INTEGER,
+      expires_at INTEGER,
+      revoked_at INTEGER
+    );
+
   `);
 
   return sqlite;
@@ -134,6 +157,43 @@ describe('detectRegistrySkillPlatform', () => {
 });
 
 describe('resolveRegistrySearch', () => {
+  it('rejects include_private when an authenticated token lacks read scope', async () => {
+    const sqlite = createRegistrySearchDb();
+    const token = 'sk_publish_only';
+    const tokenHash = Array.from(new Uint8Array(
+      await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+    )).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+
+    sqlite.prepare(`
+      INSERT INTO api_tokens (id, user_id, org_id, name, token_hash, scopes)
+      VALUES (?, NULL, 'org-1', 'publish only', ?, '["publish"]')
+    `).run('token-1', tokenHash);
+    sqlite.exec(`
+      INSERT INTO skills (
+        id, name, slug, description, repo_owner, repo_name, github_url, stars,
+        trending_score, last_commit_at, updated_at, visibility, org_id
+      ) VALUES
+        ('public', 'Public', 'acme/public', '', 'acme', 'public', NULL, 1, 20, 1000, 1000, 'public', NULL),
+        ('private', 'Private', 'acme/private', '', 'acme', 'private', NULL, 1, 10, 1000, 1000, 'private', 'org-1');
+    `);
+
+    const db = new LoggingSqliteD1Database(sqlite);
+    await expect(resolveRegistrySearch({
+        db: db as never,
+        request: new Request('https://skills.cat/registry/search?include_private=true', {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        locals: {} as App.Locals,
+      }, {
+        query: '',
+        category: '',
+        limit: 10,
+        offset: 0,
+        includePrivate: true,
+      }))
+      .rejects.toMatchObject({ status: 403 });
+  });
+
   it('keeps an exact first-page total without count when loaded results prove there is no next page', async () => {
     const sqlite = createRegistrySearchDb();
     sqlite.exec(`
@@ -238,6 +298,7 @@ describe('resolveRegistrySearch', () => {
         ('other', 'Other', 'other', '', 'acme', 'other', NULL, 1, 10, 1000, 1000, 'private', 'user-2', NULL);
 
       INSERT INTO org_members (org_id, user_id) VALUES ('org-1', 'user-1');
+      INSERT INTO user (id, email) VALUES ('user-1', 'member@example.com');
       INSERT INTO skill_permissions (skill_id, grantee_type, grantee_id, expires_at) VALUES
         ('shared', 'user', 'user-1', ${Date.now() + 60_000}),
         ('expired', 'user', 'user-1', ${Date.now() - 60_000});

@@ -11,6 +11,7 @@ import {
 } from '$lib/server/cache/public-assets';
 import { getCategoryBySlug } from '$lib/constants/categories';
 import { buildSkillscatInstallCommand, splitShellCommand } from '$lib/skill-install';
+import { getCurrentSkillVisibility } from '$lib/server/skill/visibility';
 
 const WIDTH = 1200;
 const HEIGHT = 630;
@@ -642,9 +643,18 @@ function buildSvg(
 }
 
 export const GET: RequestHandler = async ({ url, platform, request }) => {
-  const type = url.searchParams.get('type') || '';
-  const slug = url.searchParams.get('slug') || '';
-  const version = url.searchParams.get('v')?.trim() || '';
+  const requestedType = url.searchParams.get('type') || '';
+  const requestedSlug = url.searchParams.get('slug') || '';
+  const requestedVersion = url.searchParams.get('v')?.trim() || '';
+  const currentVisibility = requestedType === 'skill' && requestedSlug && platform?.env?.DB
+    ? await getCurrentSkillVisibility(platform.env.DB, requestedSlug)
+    : null;
+  const useGenericSkillImage = requestedType === 'skill'
+    && currentVisibility !== 'public'
+    && currentVisibility !== 'unlisted';
+  const type = useGenericSkillImage ? 'page' : requestedType;
+  const slug = useGenericSkillImage ? '404' : requestedSlug;
+  const version = useGenericSkillImage ? OG_IMAGE_VERSION : requestedVersion;
   const hasVersion = version.length > 0;
   const cacheControl = hasVersion ? VERSIONED_CACHE_CONTROL : DEFAULT_CACHE_CONTROL;
   const cacheTtl = hasVersion ? VERSIONED_CACHE_TTL_SECONDS : DEFAULT_CACHE_TTL_SECONDS;

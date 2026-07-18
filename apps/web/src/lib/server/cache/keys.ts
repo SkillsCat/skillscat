@@ -63,6 +63,21 @@ export function getSkillSourceCacheKey(slug: string): string {
   return `${SKILL_SOURCE_CACHE_KEY_PREFIX}:${encodeCacheKeySegment(slug)}`;
 }
 
+export function getRegistrySkillCacheKey(slug: string): string {
+  return `registry:skill:v2:${encodeCacheKeySegment(slug)}`;
+}
+
+export function getRegistrySkillCacheInvalidationKeys(slug: string): string[] {
+  return [
+    getRegistrySkillCacheKey(slug),
+    `registry:skill:${slug}`,
+  ];
+}
+
+export function getRegistryRepoCacheKey(owner: string, repo: string): string {
+  return `registry-repo:${owner.toLowerCase()}:${repo.toLowerCase()}:path:*`;
+}
+
 function encodeCacheVersionToken(value: number | string | null | undefined): string {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {

@@ -26,6 +26,14 @@ export interface OpenClawCompatManifest {
 
 const OPENCLAW_MANIFEST_PREFIX = 'openclaw/manifests/';
 const OPENCLAW_VERSION_PREFIX = 'openclaw/versions/';
+const OPENCLAW_PUBLISH_LOCK_PREFIX = 'openclaw/publish-locks/';
+const OPENCLAW_PUBLISH_LOCK_TTL_MS = 2 * 60 * 1000;
+
+export interface OpenClawPublishLock {
+  key: string;
+  id: string;
+  etag: string;
+}
 
 function encodeKeySegment(value: string): string {
   return encodeURIComponent(value).replace(/%2F/g, '/');
@@ -37,6 +45,56 @@ export function buildOpenClawManifestKey(compatSlug: string): string {
 
 export function buildOpenClawVersionPrefix(compatSlug: string, version: string): string {
   return `${OPENCLAW_VERSION_PREFIX}${encodeKeySegment(compatSlug)}/${encodeKeySegment(version)}/`;
+}
+
+export function buildOpenClawVersionsPrefix(compatSlug: string): string {
+  return `${OPENCLAW_VERSION_PREFIX}${encodeKeySegment(compatSlug)}/`;
+}
+
+function buildOpenClawPublishLockKey(compatSlug: string): string {
+  return `${OPENCLAW_PUBLISH_LOCK_PREFIX}${encodeKeySegment(compatSlug)}.lock`;
+}
+
+export async function acquireOpenClawPublishLock(
+  r2: R2Bucket,
+  compatSlug: string,
+  now = Date.now()
+): Promise<OpenClawPublishLock | null> {
+  const key = buildOpenClawPublishLockKey(compatSlug);
+  const existing = await r2.head(key);
+  const existingExpiresAt = Number(existing?.customMetadata?.expiresAt || 0);
+  if (existing && Number.isFinite(existingExpiresAt) && existingExpiresAt > now) {
+    return null;
+  }
+
+  const id = crypto.randomUUID();
+  const created = await r2.put(key, null, {
+    onlyIf: existing
+      ? { etagMatches: existing.etag }
+      : { etagDoesNotMatch: '*' },
+    httpMetadata: { contentType: 'application/octet-stream' },
+    customMetadata: {
+      lockId: id,
+      expiresAt: String(now + OPENCLAW_PUBLISH_LOCK_TTL_MS),
+    },
+  });
+
+  if (!created) return null;
+  return { key, id, etag: created.etag };
+}
+
+export async function releaseOpenClawPublishLock(
+  r2: R2Bucket,
+  lock: OpenClawPublishLock
+): Promise<void> {
+  await r2.put(lock.key, null, {
+    onlyIf: { etagMatches: lock.etag },
+    httpMetadata: { contentType: 'application/octet-stream' },
+    customMetadata: {
+      lockId: lock.id,
+      expiresAt: '0',
+    },
+  });
 }
 
 async function listAllObjects(r2: R2Bucket, prefix: string): Promise<R2Object[]> {
@@ -54,7 +112,30 @@ async function listAllObjects(r2: R2Bucket, prefix: string): Promise<R2Object[]>
 
 export async function deleteOpenClawPrefix(r2: R2Bucket, prefix: string): Promise<void> {
   const objects = await listAllObjects(r2, prefix);
-  await Promise.all(objects.map((object) => r2.delete(object.key)));
+  const results = await Promise.allSettled(objects.map((object) => r2.delete(object.key)));
+  const failed = results.find((result) => result.status === 'rejected');
+  if (failed?.status === 'rejected') {
+    throw failed.reason;
+  }
+}
+
+export async function deleteOpenClawManifest(r2: R2Bucket, compatSlug: string): Promise<void> {
+  await r2.delete(buildOpenClawManifestKey(compatSlug));
+}
+
+export async function deleteOpenClawVersionFiles(
+  r2: R2Bucket,
+  compatSlug: string,
+  version: string
+): Promise<void> {
+  await deleteOpenClawPrefix(r2, buildOpenClawVersionPrefix(compatSlug, version));
+}
+
+export async function deleteOpenClawCurrentFiles(r2: R2Bucket, nativeSlug: string): Promise<void> {
+  const prefix = buildUploadSkillR2Prefix(nativeSlug);
+  if (prefix) {
+    await deleteOpenClawPrefix(r2, prefix);
+  }
 }
 
 async function listTextFilesFromPrefix(r2: R2Bucket, prefix: string): Promise<SkillFile[]> {
@@ -196,6 +277,16 @@ export async function readOpenClawVersionFiles(
 ): Promise<SkillFile[]> {
   if (!r2) return [];
   return listTextFilesFromPrefix(r2, buildOpenClawVersionPrefix(compatSlug, version));
+}
+
+export async function readOpenClawCurrentFiles(
+  r2: R2Bucket | undefined,
+  nativeSlug: string
+): Promise<SkillFile[]> {
+  if (!r2) return [];
+  const prefix = buildUploadSkillR2Prefix(nativeSlug);
+  if (!prefix) return [];
+  return listTextFilesFromPrefix(r2, prefix);
 }
 
 export async function replaceOpenClawCurrentFiles(

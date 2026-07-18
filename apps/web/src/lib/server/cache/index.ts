@@ -261,13 +261,19 @@ export async function putCachedText(
   options?: {
     waitUntil?: WaitUntilFn;
     contentType?: string;
+    awaitWrite?: boolean;
   }
 ): Promise<void> {
   try {
     const cache = caches.default;
     const cacheUrl = buildCacheRequest(getVersionedCacheKey(cacheKey));
     const response = buildTextCacheResponse(data, ttl, options?.contentType);
-    scheduleCacheWrite(cache.put(cacheUrl, response), options?.waitUntil);
+    const write = cache.put(cacheUrl, response);
+    if (options?.awaitWrite) {
+      await write;
+    } else {
+      scheduleCacheWrite(write, options?.waitUntil);
+    }
   } catch {
     // Ignore cache write errors
   }

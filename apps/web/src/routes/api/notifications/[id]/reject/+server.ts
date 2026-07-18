@@ -43,12 +43,18 @@ export const POST: RequestHandler = async ({ locals, platform, params }) => {
     throw error(400, 'This invitation has already been processed');
   }
 
-  // Mark notification as processed (rejected)
-  await db.prepare(`
-    UPDATE notifications SET processed = 1, processed_at = ?, read = 1 WHERE id = ?
+  // Claim the pending invitation atomically so accept and reject cannot both win.
+  const rejected = await db.prepare(`
+    UPDATE notifications
+    SET processed = 1, processed_at = ?, read = 1
+    WHERE id = ? AND processed = 0
   `)
     .bind(Date.now(), id)
     .run();
+
+  if (rejected.meta.changes === 0) {
+    throw error(409, 'This invitation has already been processed');
+  }
 
   return json({
     success: true,

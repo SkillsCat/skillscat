@@ -59,6 +59,11 @@ declare global {
       user: import('$lib/server/auth').User | null;
       session: import('$lib/server/auth').Session | null;
       auth: () => Promise<{ user: import('$lib/server/auth').User | null }>;
+      authPrincipal: {
+        userId: string | null;
+        orgId: string | null;
+        scopes: string[];
+      } | null;
       locale: import('$lib/i18n/config').SupportedLocale;
       localeSource: import('$lib/i18n/config').LocaleSource;
       htmlLang: string;

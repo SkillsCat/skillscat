@@ -22,10 +22,10 @@ export const PATCH: RequestHandler = async ({ locals, platform, params, request 
 
   // Verify ownership
   const notification = await db.prepare(`
-    SELECT id, user_id FROM notifications WHERE id = ?
+    SELECT id, user_id, processed FROM notifications WHERE id = ?
   `)
     .bind(id)
-    .first<{ id: string; user_id: string }>();
+    .first<{ id: string; user_id: string; processed: number }>();
 
   if (!notification) {
     throw error(404, 'Notification not found');
@@ -39,18 +39,19 @@ export const PATCH: RequestHandler = async ({ locals, platform, params, request 
   const updates: string[] = [];
   const values: (string | number)[] = [];
 
+  if (body.processed === false) {
+    throw error(400, 'Processed notifications cannot be reopened');
+  }
+
   if (body.read !== undefined) {
     updates.push('read = ?');
     values.push(body.read ? 1 : 0);
   }
 
-  if (body.processed !== undefined) {
-    updates.push('processed = ?');
-    values.push(body.processed ? 1 : 0);
-    if (body.processed) {
-      updates.push('processed_at = ?');
-      values.push(Date.now());
-    }
+  if (body.processed === true && !notification.processed) {
+    updates.push('processed = 1');
+    updates.push('processed_at = ?');
+    values.push(Date.now());
   }
 
   if (updates.length === 0) {

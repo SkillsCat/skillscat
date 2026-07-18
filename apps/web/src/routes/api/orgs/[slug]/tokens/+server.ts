@@ -16,7 +16,7 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
     throw error(500, 'Database not available');
   }
 
-  const { slug } = params;
+  const slug = params.slug?.trim().toLowerCase();
   if (!slug) {
     throw error(400, 'Organization slug is required');
   }
@@ -25,13 +25,13 @@ export const GET: RequestHandler = async ({ locals, platform, params }) => {
   const membership = await db.prepare(`
     SELECT om.role, o.id as org_id FROM org_members om
     INNER JOIN organizations o ON om.org_id = o.id
-    WHERE o.slug = ? AND om.user_id = ?
+    WHERE o.slug = ? COLLATE NOCASE AND om.user_id = ?
   `)
     .bind(slug, session.user.id)
     .first<{ role: string; org_id: string }>();
 
-  if (!membership || !['owner', 'admin'].includes(membership.role)) {
-    throw error(403, 'Only organization owners and admins can view tokens');
+  if (membership?.role !== 'owner') {
+    throw error(403, 'Only the organization owner can view tokens');
   }
 
   const tokens = await listOrgTokens(membership.org_id, db);
@@ -56,7 +56,7 @@ export const POST: RequestHandler = async ({ locals, platform, params, request }
     throw error(500, 'Database not available');
   }
 
-  const { slug } = params;
+  const slug = params.slug?.trim().toLowerCase();
   if (!slug) {
     throw error(400, 'Organization slug is required');
   }
@@ -65,24 +65,30 @@ export const POST: RequestHandler = async ({ locals, platform, params, request }
   const membership = await db.prepare(`
     SELECT om.role, o.id as org_id FROM org_members om
     INNER JOIN organizations o ON om.org_id = o.id
-    WHERE o.slug = ? AND om.user_id = ?
+    WHERE o.slug = ? COLLATE NOCASE AND om.user_id = ?
   `)
     .bind(slug, session.user.id)
     .first<{ role: string; org_id: string }>();
 
-  if (!membership || !['owner', 'admin'].includes(membership.role)) {
-    throw error(403, 'Only organization owners and admins can create tokens');
+  if (membership?.role !== 'owner') {
+    throw error(403, 'Only the organization owner can create tokens');
   }
 
-  const body = await request.json() as {
-    name?: string;
-    scopes?: string[];
-    expiresInDays?: number;
-  };
+  let rawBody: unknown;
+  try {
+    rawBody = await request.json();
+  } catch {
+    throw error(400, 'Invalid JSON body');
+  }
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    throw error(400, 'Invalid token request');
+  }
+  const body = rawBody as Record<string, unknown>;
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const scopes = body.scopes === undefined ? ['read'] : body.scopes;
+  const expiresInDays = body.expiresInDays;
 
-  const { name, scopes = ['read'], expiresInDays } = body;
-
-  if (!name || name.trim().length === 0) {
+  if (!name) {
     throw error(400, 'Token name is required');
   }
 
@@ -90,6 +96,9 @@ export const POST: RequestHandler = async ({ locals, platform, params, request }
     throw error(400, 'Token name must be 100 characters or less');
   }
 
+  if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === 'string')) {
+    throw error(400, 'scopes must be an array of strings');
+  }
   const validScopes = ['read', 'write', 'publish'];
   for (const scope of scopes) {
     if (!validScopes.includes(scope)) {
@@ -97,12 +106,19 @@ export const POST: RequestHandler = async ({ locals, platform, params, request }
     }
   }
 
+  if (
+    expiresInDays !== undefined
+    && (typeof expiresInDays !== 'number' || !Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 365)
+  ) {
+    throw error(400, 'Expiration must be between 1 and 365 days');
+  }
+
   const { token, tokenId } = await createOrgApiToken(
     membership.org_id,
-    name.trim(),
+    name,
     scopes,
     db,
-    expiresInDays
+    expiresInDays as number | undefined
   );
 
   return json({

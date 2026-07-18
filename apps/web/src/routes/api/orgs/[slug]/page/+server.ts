@@ -6,7 +6,7 @@ import { resolveOrgPagePayload } from '$lib/server/org/page';
  * GET /api/orgs/[slug]/page - Get organization page snapshot
  */
 export const GET: RequestHandler = async ({ params, platform, locals }) => {
-  const slug = params.slug?.trim();
+  const slug = params.slug?.trim().toLowerCase();
   if (!slug) {
     return json(
       {
@@ -39,7 +39,11 @@ export const GET: RequestHandler = async ({ params, platform, locals }) => {
   return json(resolved.data, {
     status: resolved.status,
     headers: {
-      'Cache-Control': resolved.cacheControl,
+      'Cache-Control': resolved.cacheControl.trim().toLowerCase().startsWith('public')
+        ? 'private, no-cache'
+        : resolved.cacheControl,
+      'CDN-Cache-Control': 'no-store',
+      Vary: 'Authorization',
       'X-Cache': resolved.cacheStatus,
     },
   });

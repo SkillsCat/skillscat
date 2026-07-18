@@ -3,6 +3,7 @@ import { buildSkillSecuritySummary } from '$lib/server/skill/security-summary';
 import { loadSkillReadmeFromR2 } from '$lib/server/db/business/readme';
 import { collectTiming, timedTask } from '$lib/server/db/shared/timing';
 import type { DbEnv, TimingCollector } from '$lib/server/db/shared/types';
+import type { SkillAccessPrincipal } from '$lib/server/auth/permissions';
 
 interface SkillDetailRow {
   id: string;
@@ -80,7 +81,7 @@ function parseFileTreeJson(fileTreeJson: unknown): SkillDetail['fileStructure'] 
 export async function getSkillBySlug(
   env: DbEnv,
   slug: string,
-  userId?: string | null,
+  principalInput?: string | null | SkillAccessPrincipal,
   timingCollector?: TimingCollector,
   skipR2Readme: boolean = false
 ): Promise<SkillDetail | null> {
@@ -176,26 +177,34 @@ export async function getSkillBySlug(
   if (!result) return null;
 
   const skillData = result;
+  const principal = typeof principalInput === 'string' || principalInput == null
+    ? { userId: principalInput ?? null, orgId: null }
+    : principalInput;
 
   // 权限检查
   if (skillData.visibility === 'private') {
-    if (!userId) {
+    if (!principal.userId && !principal.orgId) {
       return null; // 未登录用户无法访问私有 skill
     }
 
     // 检查是否是所有者
-    const isOwner = skillData.owner_id === userId;
+    const isOwner = Boolean(
+      principal.userId
+      && !skillData.org_id
+      && skillData.owner_id === principal.userId
+    );
+    const isOrgPrincipal = Boolean(principal.orgId && skillData.org_id === principal.orgId);
 
     // 检查是否是组织成员
     let isOrgMember = false;
-    if (skillData.org_id) {
+    if (skillData.org_id && principal.userId) {
       const membership = await timedTask(
         timingCollector,
         'sd_perm_org',
         () => env.DB!.prepare(`
           SELECT 1 FROM org_members WHERE org_id = ? AND user_id = ?
         `)
-          .bind(skillData.org_id, userId)
+          .bind(skillData.org_id, principal.userId)
           .first(),
         'private org membership'
       );
@@ -204,23 +213,32 @@ export async function getSkillBySlug(
 
     // 检查是否有显式权限
     let hasPermission = false;
-    if (!isOwner && !isOrgMember) {
+    if (!isOwner && !isOrgPrincipal && !isOrgMember && principal.userId) {
       const permission = await timedTask(
         timingCollector,
         'sd_perm_user',
         () => env.DB!.prepare(`
           SELECT 1 FROM skill_permissions
-          WHERE skill_id = ? AND grantee_type = 'user' AND grantee_id = ?
+          WHERE skill_id = ?
+            AND (
+              (grantee_type = 'user' AND grantee_id = ?)
+              OR (
+                grantee_type = 'email'
+                AND LOWER(grantee_id) = (
+                  SELECT LOWER(email) FROM user WHERE id = ? LIMIT 1
+                )
+              )
+            )
             AND (expires_at IS NULL OR expires_at > ?)
         `)
-          .bind(skillData.id, userId, Date.now())
+          .bind(skillData.id, principal.userId, principal.userId, Date.now())
           .first(),
         'private explicit permission'
       );
       hasPermission = !!permission;
     }
 
-    if (!isOwner && !isOrgMember && !hasPermission) {
+    if (!isOwner && !isOrgPrincipal && !isOrgMember && !hasPermission) {
       return null; // 无权限访问
     }
   }

@@ -1,6 +1,8 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getOrgByLogin, getViewerOrgMembership } from '$lib/server/github-client/rest';
+import { invalidateCache } from '$lib/server/cache';
+import { getOrgPageSnapshotCacheKey } from '$lib/server/cache/keys';
 
 /**
  * POST /api/orgs/[slug]/verify - Verify organization with GitHub
@@ -16,7 +18,7 @@ export const POST: RequestHandler = async ({ locals, platform, params }) => {
     throw error(500, 'Database not available');
   }
 
-  const { slug } = params;
+  const slug = params.slug?.trim().toLowerCase();
   if (!slug) {
     throw error(400, 'Organization slug is required');
   }
@@ -24,7 +26,7 @@ export const POST: RequestHandler = async ({ locals, platform, params }) => {
   // Check if user is owner
   const org = await db.prepare(`
     SELECT o.id, o.name, o.owner_id FROM organizations o
-    WHERE o.slug = ?
+      WHERE o.slug = ? COLLATE NOCASE
   `)
     .bind(slug)
     .first<{ id: string; name: string; owner_id: string }>();
@@ -90,13 +92,18 @@ export const POST: RequestHandler = async ({ locals, platform, params }) => {
   }
 
   // Update organization with verification
+  const verifiedAt = Date.now();
   await db.prepare(`
     UPDATE organizations
-    SET github_org_id = ?, avatar_url = ?, verified_at = ?, updated_at = ?
+    SET github_org_id = ?,
+        avatar_url = ?,
+        verified_at = ?,
+        updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
     WHERE id = ?
   `)
-    .bind(githubOrg.id, githubOrg.avatar_url, Date.now(), Date.now(), org.id)
+    .bind(githubOrg.id, githubOrg.avatar_url, verifiedAt, verifiedAt, verifiedAt, org.id)
     .run();
+  await invalidateCache(getOrgPageSnapshotCacheKey(slug));
 
   return json({
     success: true,

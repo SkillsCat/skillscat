@@ -14,6 +14,7 @@ import {
   chooseBestR2Bundle,
 } from '$lib/server/skill/r2-bundle';
 import { resolveSkillRelativePath } from '$lib/server/skill/scope';
+import { getCurrentSkillVisibility } from '$lib/server/skill/visibility';
 
 export interface SkillFile {
   path: string;
@@ -430,38 +431,47 @@ export async function resolveSkillFiles(
     throw error(503, 'Storage not available');
   }
 
+  const currentVisibility = await getCurrentSkillVisibility(db, input.slug);
+  if (!currentVisibility) {
+    throw error(404, 'Skill not found');
+  }
+
   let cachedPublic: CachedPublicSkillFiles | null = null;
   let cacheStatus: 'HIT' | 'MISS' | 'BYPASS' = 'BYPASS';
   let bypassSkill: SkillInfo | null = null;
 
-  try {
-    const cached = await getCached(
-      `api:skill-files:${input.slug}`,
-      async () => {
-        const skill = await fetchSkillInfo(db, input.slug);
-        if (!skill) {
-          throw new PublicSkillFilesCacheBypass('not_found');
-        }
-        if (skill.visibility !== 'public') {
-          throw new PublicSkillFilesCacheBypass(skill.visibility as 'private' | 'unlisted', skill);
-        }
+  if (currentVisibility === 'public') {
+    try {
+      const cached = await getCached(
+        `api:skill-files:${input.slug}`,
+        async () => {
+          const skill = await fetchSkillInfo(db, input.slug);
+          if (!skill) {
+            throw new PublicSkillFilesCacheBypass('not_found');
+          }
+          if (skill.visibility !== 'public') {
+            throw new PublicSkillFilesCacheBypass(skill.visibility as 'private' | 'unlisted', skill);
+          }
 
-        return {
-          result: await buildSkillFilesData({ skill, r2, githubToken, githubRateLimitKV, waitUntil }),
-        };
-      },
-      PUBLIC_CACHE_TTL_SECONDS,
-      { waitUntil }
-    );
+          return {
+            result: await buildSkillFilesData({ skill, r2, githubToken, githubRateLimitKV, waitUntil }),
+          };
+        },
+        PUBLIC_CACHE_TTL_SECONDS,
+        { waitUntil }
+      );
 
-    cachedPublic = cached.data;
-    cacheStatus = cached.hit ? 'HIT' : 'MISS';
-  } catch (err) {
-    if (err instanceof PublicSkillFilesCacheBypass) {
-      bypassSkill = err.skill;
-    } else {
-      throw err;
+      cachedPublic = cached.data;
+      cacheStatus = cached.hit ? 'HIT' : 'MISS';
+    } catch (err) {
+      if (err instanceof PublicSkillFilesCacheBypass) {
+        bypassSkill = err.skill;
+      } else {
+        throw err;
+      }
     }
+  } else {
+    bypassSkill = await fetchSkillInfo(db, input.slug);
   }
 
   if (cachedPublic) {
@@ -478,11 +488,14 @@ export async function resolveSkillFiles(
 
   if (bypassSkill.visibility === 'private') {
     const auth = await getAuthContext(request, locals, db);
-    if (!auth.userId) {
+    if (!auth.userId && !auth.orgId) {
       throw error(401, 'Authentication required');
     }
     requireScope(auth, 'read');
-    const hasAccess = await checkSkillAccess(bypassSkill.id, auth.userId, db);
+    const hasAccess = await checkSkillAccess(bypassSkill.id, {
+      userId: auth.userId,
+      orgId: auth.orgId,
+    }, db);
     if (!hasAccess) {
       throw error(403, 'You do not have permission to access this skill');
     }
