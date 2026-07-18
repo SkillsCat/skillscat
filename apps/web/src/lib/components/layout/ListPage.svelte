@@ -26,9 +26,18 @@
     skills: SkillCardData[];
     emptyMessage?: string;
     pagination?: PaginationData;
+    maxCrawlablePage?: number;
   }
 
-  let { title, icon: titleIcon, description, skills, emptyMessage = 'No skills found', pagination }: Props = $props();
+  let {
+    title,
+    icon: titleIcon,
+    description,
+    skills,
+    emptyMessage = 'No skills found',
+    pagination,
+    maxCrawlablePage,
+  }: Props = $props();
   let searchQuery = $state('');
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
@@ -108,6 +117,7 @@
         totalItems={pagination.totalItems}
         itemsPerPage={pagination.itemsPerPage}
         baseUrl={pagination.baseUrl}
+        {maxCrawlablePage}
       />
     {/if}
   {:else}

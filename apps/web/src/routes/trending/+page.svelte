@@ -7,7 +7,7 @@
   import type { SkillCardData } from '$lib/types';
   import { buildOgImageUrl } from '$lib/seo/og';
   import { buildCollectionPageStructuredData, buildSkillListItemElements } from '$lib/seo/schema';
-  import { SITE_URL } from '$lib/seo/constants';
+  import { MAX_INDEXABLE_COLLECTION_PAGE, SITE_URL } from '$lib/seo/constants';
 
   interface PaginationData {
     currentPage: number;
@@ -36,10 +36,11 @@
       : ''
   );
   const nextUrl = $derived(
-    data.pagination.currentPage < data.pagination.totalPages
+    data.pagination.currentPage < Math.min(data.pagination.totalPages, MAX_INDEXABLE_COLLECTION_PAGE)
       ? `/trending?page=${data.pagination.currentPage + 1}`
       : ''
   );
+  const shouldIndex = $derived(data.pagination.currentPage <= MAX_INDEXABLE_COLLECTION_PAGE);
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'trending' });
   const pageTitle = $derived(
     `${messages.lists.trendingTitle}${data.pagination.currentPage > 1 ? i18n.t(messages.common.pageSuffix, { page: data.pagination.currentPage }) : ''} - SkillsCat`
@@ -51,16 +52,14 @@
   const skillItemList = $derived(
     buildSkillListItemElements(data.skills, { startPosition: skillListStartPosition })
   );
-  const structuredData = $derived(
-    buildCollectionPageStructuredData({
-      name: pageTitle,
-      description: pageDescription,
-      url: canonicalUrl,
-      numberOfItems: data.pagination.totalItems,
-      itemListOrder: 'https://schema.org/ItemListOrderDescending',
-      itemListElement: skillItemList,
-    })
-  );
+  const structuredData = $derived(shouldIndex ? buildCollectionPageStructuredData({
+    name: pageTitle,
+    description: pageDescription,
+    url: canonicalUrl,
+    numberOfItems: data.pagination.totalItems,
+    itemListOrder: 'https://schema.org/ItemListOrderDescending',
+    itemListElement: skillItemList,
+  }) : null);
 </script>
 
 <SEO
@@ -72,6 +71,7 @@
   image={ogImageUrl}
   imageAlt={messages.legal.trendingImageAlt}
   keywords={['trending ai skills', 'ai agent skills', 'skillscat trending']}
+  noindex={!shouldIndex}
   structuredData={structuredData}
 />
 
@@ -81,6 +81,7 @@
   skills={data.skills}
   emptyMessage={messages.lists.trendingEmpty}
   pagination={data.pagination}
+  maxCrawlablePage={MAX_INDEXABLE_COLLECTION_PAGE}
 >
   {#snippet icon()}
     <HugeiconsIcon icon={Fire03Icon} strokeWidth={2} />

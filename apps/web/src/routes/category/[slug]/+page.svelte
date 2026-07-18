@@ -17,7 +17,7 @@
     buildCollectionPageStructuredData,
     buildSkillListItemElements
   } from '$lib/seo/schema';
-  import { SITE_URL } from '$lib/seo/constants';
+  import { MAX_INDEXABLE_COLLECTION_PAGE, SITE_URL } from '$lib/seo/constants';
   import {
     GitBranchIcon,
     CodeIcon,
@@ -184,7 +184,7 @@
       : ''
   );
   const nextUrl = $derived(
-    displayCategory && data.pagination && data.pagination.currentPage < data.pagination.totalPages
+    displayCategory && data.pagination && data.pagination.currentPage < Math.min(data.pagination.totalPages, MAX_INDEXABLE_COLLECTION_PAGE)
       ? `/category/${displayCategory.slug}?page=${data.pagination.currentPage + 1}`
       : ''
   );
@@ -210,7 +210,7 @@
     buildSkillListItemElements(data.skills, { startPosition: skillListStartPosition })
   );
   const categoryStructuredData = $derived(
-    displayCategory && data.shouldIndex !== false
+    displayCategory && data.shouldIndex !== false && (data.pagination?.currentPage ?? 1) <= MAX_INDEXABLE_COLLECTION_PAGE
       ? [
           buildCollectionPageStructuredData({
             name: pageTitle,
@@ -239,7 +239,8 @@
     image={ogImageUrl}
     imageAlt={i18n.t(messages.legal.categoryImageAlt, { name: displayCategory.name })}
     keywords={[`${displayCategory.name} skills`, 'ai agent skills', 'skillscat category']}
-    noindex={data.shouldIndex === false}
+    noindex={data.shouldIndex === false || (data.pagination?.currentPage ?? 1) > MAX_INDEXABLE_COLLECTION_PAGE}
+    robots={data.shouldIndex === false ? 'noindex, follow, noarchive' : ''}
     structuredData={categoryStructuredData}
   />
 {:else}
@@ -337,6 +338,7 @@
           totalItems={data.pagination.totalItems}
           itemsPerPage={data.pagination.itemsPerPage}
           baseUrl={data.pagination.baseUrl}
+          maxCrawlablePage={MAX_INDEXABLE_COLLECTION_PAGE}
         />
       {/if}
     {:else}

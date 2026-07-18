@@ -123,6 +123,66 @@ beforeEach(() => {
 });
 
 describe('recommend route crawler fallback policy', () => {
+  it('allows an organization token to read recommendations for its private skill', async () => {
+    const db = createDb([
+      {
+        id: 'skill_private_org',
+        slug: 'acme/private-skill',
+        repoOwner: 'acme',
+        visibility: 'private',
+        tier: 'warm',
+        recommendDirty: 0,
+        recommendNextUpdateAt: null,
+        recommendPrecomputedAt: Date.now(),
+        recommendAlgoVersion: 'v1',
+        recommendLastFallbackAt: null,
+      },
+    ]);
+    getAuthContext.mockResolvedValue({
+      userId: null,
+      orgId: 'org_acme',
+      scopes: ['read'],
+    });
+    checkSkillAccess.mockResolvedValue(true);
+    getRecommendedSkills.mockResolvedValue([
+      {
+        id: 'skill_related',
+        name: 'Related',
+        slug: 'acme/related',
+        description: 'related skill',
+        repoOwner: 'acme',
+        repoName: 'related',
+        stars: 1,
+        forks: 0,
+        trendingScore: 1,
+        updatedAt: Date.now(),
+        categories: [],
+      },
+    ]);
+
+    const request = createRequest();
+    const { GET } = await import('../src/routes/api/skills/[owner]/[...name]/recommend/+server');
+    const response = await GET({
+      params: { owner: 'acme', name: 'private-skill' },
+      platform: { env: { DB: db } },
+      request,
+      locals: {},
+      url: new URL(request.url),
+    } as never);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('private, no-cache');
+    expect(response.headers.get('cdn-cache-control')).toBe('no-store');
+    expect(response.headers.get('vary')).toBe('Authorization, Cookie');
+    expect(checkSkillAccess).toHaveBeenCalledWith('skill_private_org', {
+      userId: null,
+      orgId: 'org_acme',
+    }, db);
+    const payload = await response.json();
+    expect(payload.success).toBe(true);
+    expect(payload.data.recommendSkills).toHaveLength(1);
+  });
+
   it('skips realtime fallback for verified bots on cold skills without precompute', async () => {
     const db = createDb([
       {

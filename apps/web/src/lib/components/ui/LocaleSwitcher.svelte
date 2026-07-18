@@ -24,7 +24,10 @@
 </script>
 
 <Select.Root type="single" value={currentLocale} onValueChange={handleLocaleChange}>
-  <Select.Trigger class="locale-switcher-trigger" aria-label={messages.footer.language}>
+  <Select.Trigger
+    class="locale-switcher-trigger"
+    aria-label={`${messages.footer.language}: ${currentLocaleLabel}`}
+  >
     <HugeiconsIcon icon={EarthIcon} size={15} class="locale-trigger-icon" strokeWidth={1.9} />
     <span class="locale-trigger-value">{currentLocaleLabel}</span>
     <HugeiconsIcon icon={ArrowDown01Icon} size={14} class="locale-switcher-chevron" strokeWidth={2} />

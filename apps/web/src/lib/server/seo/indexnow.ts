@@ -1,4 +1,5 @@
 import { SITE_URL } from '$lib/seo/constants';
+import { isSeoIndexableSkill } from '$lib/seo/indexability';
 import { buildSkillPath } from '$lib/skill-path';
 import { createDurableObjectKvStore } from '$lib/server/state/client';
 
@@ -6,6 +7,9 @@ const DEFAULT_INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow';
 const DEFAULT_INDEXNOW_DEDUPE_TTL_SECONDS = 600;
 const INDEXNOW_DEDUPE_PREFIX = 'seo:indexnow:v1';
 const MAX_URLS_PER_REQUEST = 10_000;
+const INDEXNOW_REQUEST_TIMEOUT_MS = 5_000;
+const INDEXNOW_MAX_TRANSIENT_RETRIES = 2;
+const INDEXNOW_MAX_RETRY_DELAY_MS = 5_000;
 
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 
@@ -23,6 +27,7 @@ export interface IndexNowEnvLike {
 export interface IndexNowSkillTarget {
   slug: string;
   visibility?: string | null;
+  seoIndexable?: boolean;
   orgSlug?: string | null;
   ownerHandle?: string | null;
 }
@@ -33,6 +38,11 @@ interface LoadedSkillTargetRow {
   orgSlug: string | null;
   repoOwner: string | null;
   ownerUsername: string | null;
+  description: string | null;
+  tier: string | null;
+  indexedAt: number | null;
+  downloadCount90d: number | null;
+  accessCount30d: number | null;
 }
 
 export interface SubmitIndexNowUrlsOptions {
@@ -137,6 +147,85 @@ function chunkUrls(urls: string[]): string[][] {
   return chunks;
 }
 
+function isTransientIndexNowStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function getIndexNowRetryDelayMs(retryNumber: number, retryAfter: string | null): number {
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.min(seconds * 1000, INDEXNOW_MAX_RETRY_DELAY_MS);
+    }
+
+    const retryAt = Date.parse(retryAfter);
+    if (Number.isFinite(retryAt)) {
+      return Math.min(Math.max(0, retryAt - Date.now()), INDEXNOW_MAX_RETRY_DELAY_MS);
+    }
+  }
+
+  return Math.min(250 * (2 ** Math.max(0, retryNumber - 1)), INDEXNOW_MAX_RETRY_DELAY_MS);
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function submitIndexNowChunk(options: {
+  endpoint: string;
+  requestBody: string;
+  source: string;
+  fetchImpl: typeof fetch;
+}): Promise<void> {
+  const { endpoint, requestBody, source, fetchImpl } = options;
+  let retryNumber = 0;
+
+  while (true) {
+    let response: Response;
+    try {
+      response = await fetchImpl(endpoint, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+        },
+        body: requestBody,
+        signal: AbortSignal.timeout(INDEXNOW_REQUEST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      if (retryNumber >= INDEXNOW_MAX_TRANSIENT_RETRIES) {
+        throw new Error(
+          `IndexNow submission failed for ${source} after ${INDEXNOW_MAX_TRANSIENT_RETRIES} retries: ${error instanceof Error ? error.message : error}`
+        );
+      }
+
+      retryNumber += 1;
+      const delayMs = getIndexNowRetryDelayMs(retryNumber, null);
+      console.warn(`IndexNow network retry for ${source}: attempt=${retryNumber}, delay=${delayMs}ms`);
+      await sleep(delayMs);
+      continue;
+    }
+
+    if (response.ok) return;
+
+    if (isTransientIndexNowStatus(response.status) && retryNumber < INDEXNOW_MAX_TRANSIENT_RETRIES) {
+      retryNumber += 1;
+      const delayMs = getIndexNowRetryDelayMs(retryNumber, response.headers.get('retry-after'));
+      await response.arrayBuffer().catch(() => undefined);
+      console.warn(
+        `IndexNow HTTP retry for ${source}: status=${response.status}, attempt=${retryNumber}, delay=${delayMs}ms`
+      );
+      await sleep(delayMs);
+      continue;
+    }
+
+    const responseText = await response.text().catch(() => '');
+    throw new Error(
+      `IndexNow submission failed for ${source}: ${response.status} ${response.statusText}${responseText ? ` - ${responseText.slice(0, 200)}` : ''}`
+    );
+  }
+}
+
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
   const bytes = new Uint8Array(digest);
@@ -190,12 +279,15 @@ export function buildIndexNowSkillUrls(
   skill: IndexNowSkillTarget,
   env?: Pick<IndexNowEnvLike, 'PUBLIC_APP_URL'>
 ): string[] {
-  if (skill.visibility && skill.visibility !== 'public') {
+  if ((skill.visibility && skill.visibility !== 'public') || skill.seoIndexable === false) {
     return [];
   }
 
   const urls = new Set<string>();
   urls.add(`${getSiteOrigin(env)}${buildSkillPath(skill.slug)}`);
+  // The recent collection changes whenever a skill is indexed or updated.
+  // It is deduped by the submitter so a batch does not create extra requests.
+  urls.add(`${getSiteOrigin(env)}/recent`);
 
   if (skill.orgSlug) {
     urls.add(`${getSiteOrigin(env)}/org/${encodeURIComponent(skill.orgSlug)}`);
@@ -203,6 +295,30 @@ export function buildIndexNowSkillUrls(
     urls.add(`${getSiteOrigin(env)}/u/${encodeURIComponent(skill.ownerHandle)}`);
   }
 
+  return [...urls];
+}
+
+export function buildIndexNowSkillRemovalUrls(
+  skill: IndexNowSkillTarget,
+  env?: IndexNowEnvLike
+): string[] {
+  return buildIndexNowSkillUrls({
+    ...skill,
+    visibility: 'public',
+    seoIndexable: undefined,
+  }, env);
+}
+
+export function buildIndexNowCategoryUrls(
+  categorySlugs: Iterable<string>,
+  env?: Pick<IndexNowEnvLike, 'PUBLIC_APP_URL'>
+): string[] {
+  const urls = new Set<string>();
+  for (const slug of categorySlugs) {
+    const normalized = slug.trim();
+    if (!normalized) continue;
+    urls.add(`${getSiteOrigin(env)}/category/${encodeURIComponent(normalized)}`);
+  }
   return [...urls];
 }
 
@@ -225,7 +341,12 @@ export async function loadIndexNowSkillTarget(
       s.visibility AS visibility,
       o.slug AS orgSlug,
       s.repo_owner AS repoOwner,
-      a.username AS ownerUsername
+      a.username AS ownerUsername,
+      s.description AS description,
+      s.tier AS tier,
+      s.indexed_at AS indexedAt,
+      s.download_count_90d AS downloadCount90d,
+      s.access_count_30d AS accessCount30d
     FROM skills s
     LEFT JOIN organizations o ON o.id = s.org_id
     LEFT JOIN authors a ON a.user_id = s.owner_id
@@ -244,6 +365,14 @@ export async function loadIndexNowSkillTarget(
   return {
     slug: row.slug,
     visibility: row.visibility,
+    seoIndexable: isSeoIndexableSkill({
+      visibility: row.visibility,
+      description: row.description,
+      tier: row.tier,
+      indexedAt: row.indexedAt,
+      downloadCount90d: row.downloadCount90d,
+      accessCount30d: row.accessCount30d,
+    }),
     orgSlug: row.orgSlug,
     ownerHandle,
   };
@@ -293,25 +422,17 @@ export async function submitIndexNowUrls(
   );
 
   for (const urlChunk of chunkUrls(freshUrls)) {
-    const response = await fetchImpl(endpoint, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json; charset=utf-8',
-      },
-      body: JSON.stringify({
+    await submitIndexNowChunk({
+      endpoint,
+      source,
+      fetchImpl,
+      requestBody: JSON.stringify({
         host: getSiteHost(env),
         key,
         ...(keyLocation ? { keyLocation } : {}),
         urlList: urlChunk,
       }),
     });
-
-    if (!response.ok) {
-      const responseText = await response.text().catch(() => '');
-      throw new Error(
-        `IndexNow submission failed for ${source}: ${response.status} ${response.statusText}${responseText ? ` - ${responseText.slice(0, 200)}` : ''}`
-      );
-    }
   }
 
   await markFreshUrlsSubmitted(stateStore, dedupeKeys, ttlSeconds);

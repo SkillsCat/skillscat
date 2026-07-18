@@ -112,8 +112,6 @@
     switch (role) {
       case 'owner':
         return ui.badges.owner;
-      case 'admin':
-        return ui.badges.admin;
       default:
         return ui.badges.member;
     }

@@ -1,6 +1,7 @@
 import { LIST_CACHE_MAX_AGE_MS, PREDEFINED_CATEGORY_SLUGS } from '$lib/server/db/shared/constants';
 import { buildListCacheKeys } from '$lib/server/db/shared/cache';
 import type { DbEnv } from '$lib/server/db/shared/types';
+import { MIN_INDEXABLE_DYNAMIC_CATEGORY_SKILLS } from '$lib/seo/constants';
 
 interface CategoryCountRow {
   category_slug: string;
@@ -363,18 +364,20 @@ export async function getDynamicCategories(
 
   const result = await db.prepare(`
     SELECT
-      slug,
-      name,
-      description,
-      type,
-      skill_count AS skillCount
-    FROM categories
-    WHERE type = 'ai-suggested'
-      AND skill_count > 0
-    ORDER BY skill_count DESC, slug ASC
+      c.slug,
+      c.name,
+      c.description,
+      c.type,
+      cps.public_skill_count AS skillCount
+    FROM categories c
+    JOIN category_public_stats cps
+      ON cps.category_slug = c.slug
+    WHERE c.type = 'ai-suggested'
+      AND cps.public_skill_count >= ?
+    ORDER BY cps.public_skill_count DESC, c.slug ASC
     LIMIT ?
   `)
-    .bind(limit)
+    .bind(MIN_INDEXABLE_DYNAMIC_CATEGORY_SKILLS, limit)
     .all<DynamicCategoryStat>();
 
   return result.results || [];

@@ -54,9 +54,7 @@ export const API_CACHE_CONFIGS = [
   createConfig(/^\/api\/registry\/skill\//, 5 * 60 * 1000, 10 * 60 * 1000),
 ];
 
-export const PAGE_DATA_CACHE_CONFIGS = [
-  createConfig(/^\/skills\/.+\/__data\.json$/, 2 * 60 * 1000, 15 * 60 * 1000),
-];
+export const PAGE_DATA_CACHE_CONFIGS: Array<ApiCacheConfig & { test: (s: string) => boolean }> = [];
 
 export const PUBLIC_ASSET_CACHE_CONFIGS = [
   createConfig(/^\/avatar$/, 7 * 24 * 60 * 60 * 1000, 30 * 24 * 60 * 60 * 1000),

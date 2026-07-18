@@ -17,6 +17,8 @@ interface SkillDetailRow {
   stars: number | null;
   forks: number | null;
   trending_score: number | null;
+  download_count_90d: number | null;
+  access_count_30d: number | null;
   last_commit_at: number | null;
   updated_at: number;
   created_at: number | null;
@@ -103,6 +105,8 @@ export async function getSkillBySlug(
         s.stars,
         s.forks,
         s.trending_score,
+        s.download_count_90d,
+        s.access_count_30d,
         s.last_commit_at,
         s.updated_at,
         s.created_at,
@@ -304,6 +308,8 @@ export async function getSkillBySlug(
     stars: skillData.stars || 0,
     forks: skillData.forks || 0,
     trendingScore: skillData.trending_score || 0,
+    downloadCount90d: skillData.download_count_90d || 0,
+    accessCount30d: skillData.access_count_30d || 0,
     updatedAt: skillData.last_commit_at ?? skillData.updated_at,
     lastCommitAt: skillData.last_commit_at || null,
     createdAt: skillData.created_at || skillData.indexed_at,

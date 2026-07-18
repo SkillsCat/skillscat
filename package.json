@@ -24,6 +24,7 @@
     "db:migrate:prod": "pnpm --filter @skillscat/web db:migrate:prod",
     "category:backfill": "node scripts/category-backfill.mjs",
     "indexnow:backfill": "node scripts/indexnow-backfill.mjs",
+    "seo:check": "node scripts/seo-health-check.mjs",
     "security:backfill": "node scripts/security-backfill.mjs",
     "deploy": "node scripts/web-release.mjs deploy",
     "deploy:all": "node scripts/web-release.mjs deploy-all",

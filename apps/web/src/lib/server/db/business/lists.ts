@@ -174,7 +174,12 @@ async function getCachedFirstPage(
   if (!canServeFullPage) return null;
 
   const pageSkills = cached.data.slice(0, limit);
-  const skills = await addCategoriesToSkills(env.DB, skillCardsToRows(pageSkills));
+  const currentPublicSkills = await hydrateCachedSkills(env.DB, pageSkills);
+  if (currentPublicSkills.length !== pageSkills.length) {
+    return null;
+  }
+
+  const skills = await addCategoriesToSkills(env.DB, skillCardsToRows(currentPublicSkills));
 
   return {
     skills,

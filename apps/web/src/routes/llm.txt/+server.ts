@@ -18,6 +18,7 @@ export const GET: RequestHandler = async ({ platform }) => {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
       'Cache-Control': CACHE_CONTROL,
+      'X-Robots-Tag': 'noindex, follow, noarchive',
       'X-Cache': hit ? 'HIT' : 'MISS',
     }
   });

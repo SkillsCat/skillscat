@@ -53,8 +53,8 @@ beforeEach(() => {
   }));
 });
 
-describe('public pagination redirects', () => {
-  it('redirects out-of-range recent pages to the last valid page', async () => {
+describe('public pagination bounds', () => {
+  it('returns 404 for out-of-range recent pages', async () => {
     getRecentSkillsPaginated.mockResolvedValue({
       skills: [],
       total: 48,
@@ -67,12 +67,11 @@ describe('public pagination redirects', () => {
         ...createBaseInput('https://skills.cat/recent?page=5'),
       } as never)
     ).rejects.toMatchObject({
-      status: 302,
-      location: '/recent?page=2',
+      status: 404,
     });
   });
 
-  it('redirects out-of-range trending pages to the last valid page', async () => {
+  it('returns 404 for out-of-range trending pages', async () => {
     getTrendingSkillsPaginated.mockResolvedValue({
       skills: [],
       total: 72,
@@ -85,12 +84,11 @@ describe('public pagination redirects', () => {
         ...createBaseInput('https://skills.cat/trending?page=9'),
       } as never)
     ).rejects.toMatchObject({
-      status: 302,
-      location: '/trending?page=3',
+      status: 404,
     });
   });
 
-  it('redirects out-of-range top pages to the base url when there is only one page', async () => {
+  it('returns 404 for out-of-range top pages', async () => {
     getTopSkillsPaginated.mockResolvedValue({
       skills: [],
       total: 0,
@@ -103,12 +101,11 @@ describe('public pagination redirects', () => {
         ...createBaseInput('https://skills.cat/top?page=3'),
       } as never)
     ).rejects.toMatchObject({
-      status: 302,
-      location: '/top',
+      status: 404,
     });
   });
 
-  it('redirects out-of-range category pages to the canonical last page', async () => {
+  it('returns 404 for out-of-range category pages', async () => {
     getCategoryBySlug.mockReturnValue({
       slug: 'seo',
       name: 'SEO',
@@ -130,8 +127,87 @@ describe('public pagination redirects', () => {
         },
       } as never)
     ).rejects.toMatchObject({
-      status: 302,
-      location: '/category/seo',
+      status: 404,
+    });
+  });
+
+  it('keeps single-skill dynamic category pages crawlable but out of the index', async () => {
+    getCategoryBySlug.mockReturnValue(null);
+    getSkillsByCategoryPaginated.mockResolvedValue({
+      skills: [{ id: 'skill-1' }],
+      total: 1,
+    });
+
+    const input = createBaseInput('https://skills.cat/category/very-narrow');
+    input.platform.env.DB = {
+      prepare() {
+        return {
+          bind() {
+            return {
+              first: async () => ({
+                slug: 'very-narrow',
+                name: 'Very Narrow',
+                description: 'A narrow dynamic category',
+                type: 'ai-suggested',
+              }),
+            };
+          },
+        };
+      },
+    } as never;
+
+    const { load } = await import('../src/routes/category/[slug]/+page.server');
+    const result = await load({
+      ...input,
+      params: { slug: 'very-narrow' },
+    } as never);
+
+    expect(result).toMatchObject({
+      isDynamic: true,
+      shouldIndex: false,
+      pagination: { totalItems: 1 },
+    });
+  });
+
+  it('returns a 404 status override for empty dynamic categories', async () => {
+    getCategoryBySlug.mockReturnValue(null);
+    getSkillsByCategoryPaginated.mockResolvedValue({
+      skills: [],
+      total: 0,
+    });
+
+    const input = createBaseInput('https://skills.cat/category/empty-dynamic');
+    input.platform.env.DB = {
+      prepare() {
+        return {
+          bind() {
+            return {
+              first: async () => ({
+                slug: 'empty-dynamic',
+                name: 'Empty Dynamic',
+                description: 'An empty dynamic category',
+                type: 'ai-suggested',
+              }),
+            };
+          },
+        };
+      },
+    } as never;
+
+    const { load } = await import('../src/routes/category/[slug]/+page.server');
+    const result = await load({
+      ...input,
+      params: { slug: 'empty-dynamic' },
+    } as never);
+
+    expect(result).toMatchObject({
+      category: null,
+      skills: [],
+      pagination: null,
+      isDynamic: true,
+    });
+    expect(input.setHeaders).toHaveBeenCalledWith({
+      'X-Skillscat-Status-Override': '404',
     });
   });
 });

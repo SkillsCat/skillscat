@@ -1,9 +1,11 @@
-import { redirect } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { getCategoryBySlug, type Category } from '$lib/constants/categories';
 import { getSkillsByCategoryPaginated } from '$lib/server/db/business/lists';
-import { getCached } from '$lib/server/cache';
+import { getCategoryPageCacheKey } from '$lib/server/cache/categories';
 import { setPublicPageCache } from '$lib/server/cache/page';
+import { resolvePublicSkillDataCache } from '$lib/server/cache/public-skill-data';
+import { MIN_INDEXABLE_DYNAMIC_CATEGORY_SKILLS } from '$lib/seo/constants';
 
 const ITEMS_PER_PAGE = 24;
 
@@ -34,9 +36,10 @@ export const load: PageServerLoad = async ({ params, url, platform, setHeaders, 
     R2: platform?.env?.R2,
   };
   const page = parsePage(url.searchParams.get('page'));
-  const { data } = await getCached(
-    `page:category:v1:${params.slug}:${page}`,
-    async () => {
+  const { data } = await resolvePublicSkillDataCache({
+    db: env.DB,
+    cacheKey: getCategoryPageCacheKey(params.slug, page),
+    load: async () => {
       let category: Category | null = getCategoryBySlug(params.slug) || null;
       let isDynamic = false;
 
@@ -73,14 +76,21 @@ export const load: PageServerLoad = async ({ params, url, platform, setHeaders, 
       }
 
       const { skills, total } = await getSkillsByCategoryPaginated(env, params.slug, page, ITEMS_PER_PAGE);
+
+      if (isDynamic && total === 0) {
+        return {
+          category: null,
+          skills: [],
+          pagination: null,
+          isDynamic: true,
+        };
+      }
+
       const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
       const lastPage = Math.max(1, totalPages);
 
       if (page > lastPage) {
-        throw redirect(
-          302,
-          lastPage === 1 ? `/category/${params.slug}` : `/category/${params.slug}?page=${lastPage}`
-        );
+        throw error(404, 'Page not found');
       }
 
       return {
@@ -93,12 +103,14 @@ export const load: PageServerLoad = async ({ params, url, platform, setHeaders, 
           itemsPerPage: ITEMS_PER_PAGE,
           baseUrl: `/category/${params.slug}`,
         },
-        shouldIndex: total > 0,
+        shouldIndex: total >= (isDynamic ? MIN_INDEXABLE_DYNAMIC_CATEGORY_SKILLS : 1),
         isDynamic,
       };
     },
-    120
-  );
+    ttlSeconds: 120,
+    getSkills: (value) => value.skills,
+    waitUntil: platform?.context?.waitUntil?.bind(platform.context),
+  });
 
   if (!data.category) {
     setHeaders({ 'X-Skillscat-Status-Override': '404' });

@@ -14,9 +14,17 @@
     totalItems: number;
     itemsPerPage: number;
     baseUrl: string;
+    maxCrawlablePage?: number;
   }
 
-  let { currentPage, totalPages, totalItems, itemsPerPage, baseUrl }: Props = $props();
+  let {
+    currentPage,
+    totalPages,
+    totalItems,
+    itemsPerPage,
+    baseUrl,
+    maxCrawlablePage,
+  }: Props = $props();
 
   let gotoInput = $state('');
   const i18n = useI18n();
@@ -58,6 +66,12 @@
     return `${baseUrl}${separator}page=${page}`;
   }
 
+  function getPageRel(page: number): 'nofollow' | undefined {
+    return maxCrawlablePage !== undefined && page > maxCrawlablePage
+      ? 'nofollow'
+      : undefined;
+  }
+
   function handleGoto() {
     const page = parseInt(gotoInput, 10);
     if (!isNaN(page) && page >= 1 && page <= totalPages && page !== currentPage) {
@@ -90,6 +104,7 @@
         <a
           class="pagination-btn pagination-arrow"
           href={getPageUrl(currentPage - 1)}
+          rel={getPageRel(currentPage - 1)}
           aria-label={messages.pagination.previousPage}
         >
           <HugeiconsIcon icon={ArrowLeft01Icon} size={18} strokeWidth={2} />
@@ -123,6 +138,7 @@
             <a
               class="pagination-btn pagination-page"
               href={getPageUrl(page)}
+              rel={getPageRel(page)}
               aria-label={i18n.t(messages.pagination.page, { page })}
             >
               {page}
@@ -136,6 +152,7 @@
         <a
           class="pagination-btn pagination-arrow"
           href={getPageUrl(currentPage + 1)}
+          rel={getPageRel(currentPage + 1)}
           aria-label={messages.pagination.nextPage}
         >
           <span class="hidden sm:inline">{messages.pagination.next}</span>

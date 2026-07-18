@@ -12,6 +12,7 @@ function responseHeaders(opts: {
       : opts.cacheControl,
     'CDN-Cache-Control': 'no-store',
     Vary: 'Authorization',
+    'X-Robots-Tag': 'noindex, follow, noarchive',
   };
 
   if (opts.cacheStatus) {

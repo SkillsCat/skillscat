@@ -114,6 +114,8 @@ export const TRENDING_HTML_CACHE_KEYS = getDiscoveryHtmlCacheKeys('trending');
 export const RECENT_HTML_CACHE_KEYS = getDiscoveryHtmlCacheKeys('recent');
 export const TOP_HTML_CACHE_KEYS = getDiscoveryHtmlCacheKeys('top');
 export const CATEGORIES_HTML_CACHE_KEYS = getDiscoveryHtmlCacheKeys('categories');
+export const CATEGORIES_API_CACHE_KEY = 'api:categories:v2';
+export const CATEGORIES_PAGE_CACHE_KEY = 'page:categories:v2';
 
 export const PUBLIC_DISCOVERY_PAGE_CACHE_KEYS = [
   HOME_CRITICAL_CACHE_KEY,
@@ -125,11 +127,11 @@ export const PUBLIC_DISCOVERY_PAGE_CACHE_KEYS = [
   ...TOP_HTML_CACHE_KEYS,
   ...CATEGORIES_HTML_CACHE_KEYS,
   PUBLIC_SKILLS_STATS_CACHE_KEY,
-  'api:categories',
+  CATEGORIES_API_CACHE_KEY,
   'page:trending:v1:1',
   'page:recent:v1:1',
   'page:top:v1:1',
-  'page:categories:v1',
+  CATEGORIES_PAGE_CACHE_KEY,
 ] as const;
 
 export const PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS = [

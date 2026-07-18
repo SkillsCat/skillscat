@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { CATEGORIES, type CategoryWithCount } from '$lib/constants/categories';
 import type { ApiResponse } from '$lib/types';
 import { getCached } from '$lib/server/cache';
+import { CATEGORIES_API_CACHE_KEY } from '$lib/server/cache/keys';
 import { getCategoryStats, getDynamicCategories } from '$lib/server/db/business/stats';
 
 interface DynamicCategory {
@@ -27,7 +28,7 @@ export const GET: RequestHandler = async ({ platform }) => {
     };
 
     const { data, hit } = await getCached(
-      'api:categories',
+      CATEGORIES_API_CACHE_KEY,
       async () => {
         const categoryCounts = await getCategoryStats(env);
         const dynamicCategories = await getDynamicCategories(db) as DynamicCategory[];

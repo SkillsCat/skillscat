@@ -21,10 +21,14 @@ binding = "DB"
 database_name = "skillscat-db"
 database_id = "<your-database-id>"
 
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
 [vars]
 APP_ORIGIN = "http://localhost:3000"
 SITEMAP_REFRESH_ENABLED = "1"
-SITEMAP_REFRESH_TIMEOUT_MS = "20000"
+SITEMAP_FULL_REFRESH_HOUR_UTC = "3"
 RECOMMEND_PRECOMPUTE_ENABLED = "1"
 RECOMMEND_PRECOMPUTE_MAX_PER_RUN = "500"
 RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = "25000"
@@ -47,10 +51,15 @@ binding = "DB"
 database_name = "skillscat-db"
 database_id = "<your-production-database-id>"
 
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+remote = true
+
 [env.production.vars]
 APP_ORIGIN = "https://your-domain.com"
 SITEMAP_REFRESH_ENABLED = "1"
-SITEMAP_REFRESH_TIMEOUT_MS = "20000"
+SITEMAP_FULL_REFRESH_HOUR_UTC = "3"
 RECOMMEND_PRECOMPUTE_ENABLED = "1"
 RECOMMEND_PRECOMPUTE_MAX_PER_RUN = "500"
 RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = "25000"

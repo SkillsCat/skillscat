@@ -226,6 +226,7 @@ export async function peekCachedText(
   cacheKey: string,
   options?: {
     waitUntil?: WaitUntilFn;
+    allowLegacyFallback?: boolean;
   }
 ): Promise<string | null> {
   const versionedKey = getVersionedCacheKey(cacheKey);
@@ -240,12 +241,14 @@ export async function peekCachedText(
       return await cached.text();
     }
 
-    const legacyCached = await cache.match(legacyRequest);
-    if (legacyCached) {
-      const promoted = legacyCached.clone();
-      const data = await legacyCached.text();
-      scheduleCacheWrite(cache.put(versionedRequest, promoted), options?.waitUntil);
-      return data;
+    if (options?.allowLegacyFallback !== false) {
+      const legacyCached = await cache.match(legacyRequest);
+      if (legacyCached) {
+        const promoted = legacyCached.clone();
+        const data = await legacyCached.text();
+        scheduleCacheWrite(cache.put(versionedRequest, promoted), options?.waitUntil);
+        return data;
+      }
     }
   } catch {
     // Cache API not available or error

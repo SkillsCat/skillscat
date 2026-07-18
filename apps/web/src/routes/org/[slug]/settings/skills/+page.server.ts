@@ -1,7 +1,14 @@
 import type { PageServerLoad } from './$types';
 import { error } from '@sveltejs/kit';
 
-export const load: PageServerLoad = async ({ locals, platform, params }) => {
+const ITEMS_PER_PAGE = 20;
+
+function parsePage(raw: string | null): number {
+    const parsed = Number.parseInt(raw || '1', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export const load: PageServerLoad = async ({ locals, platform, params, url }) => {
     const session = await locals.auth?.();
     if (!session?.user) {
         throw error(401, 'Authentication required');
@@ -12,14 +19,14 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
         throw error(500, 'Database not available');
     }
 
-    const { slug } = params;
+    const slug = params.slug?.trim().toLowerCase();
     if (!slug) {
         throw error(400, 'Organization slug is required');
     }
 
     // Get org ID
     const org = await db.prepare(`
-    SELECT id FROM organizations WHERE slug = ?
+    SELECT id FROM organizations WHERE slug = ? COLLATE NOCASE
   `)
         .bind(slug)
         .first<{ id: string }>();
@@ -28,25 +35,29 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
         throw error(404, 'Organization not found');
     }
 
-    // Only owner/admin can access org settings skill list
+    // Only the owner can access the organization settings skill list.
     const membership = await db.prepare(`
     SELECT role FROM org_members WHERE org_id = ? AND user_id = ?
   `)
         .bind(org.id, session.user.id)
         .first<{ role: string }>();
 
-    if (!membership || !['owner', 'admin'].includes(membership.role)) {
-        throw error(403, 'Only organization owners and admins can view this page');
+    if (membership?.role !== 'owner') {
+        throw error(403, 'Only the organization owner can view this page');
     }
 
-    // Get skills directly owned by the org
+    const currentPage = parsePage(url.searchParams.get('page'));
+    const offset = (currentPage - 1) * ITEMS_PER_PAGE;
+    const queryLimit = offset === 0 ? ITEMS_PER_PAGE + 1 : ITEMS_PER_PAGE;
+
     const results = await db.prepare(`
     SELECT id, name, slug, description, visibility, stars
-    FROM skills
+    FROM skills INDEXED BY skills_org_stars_created_idx
     WHERE org_id = ?
-    ORDER BY created_at DESC
+    ORDER BY stars DESC, created_at DESC
+    LIMIT ? OFFSET ?
   `)
-        .bind(org.id)
+        .bind(org.id, queryLimit, offset)
         .all<{
             id: string;
             name: string;
@@ -56,11 +67,26 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
             stars: number;
         }>();
 
+    const hasMoreOnFirstPage = offset === 0 && results.results.length > ITEMS_PER_PAGE;
+    const pageRows = hasMoreOnFirstPage ? results.results.slice(0, ITEMS_PER_PAGE) : results.results;
+    let totalItems = pageRows.length;
+
+    if (offset > 0 || hasMoreOnFirstPage) {
+        const count = await db.prepare(`
+        SELECT COUNT(*) as count
+        FROM skills INDEXED BY skills_org_stars_created_idx
+        WHERE org_id = ?
+      `)
+            .bind(org.id)
+            .first<{ count: number }>();
+        totalItems = count?.count ?? 0;
+    }
+
     return {
         org: {
-            userRole: membership.role as 'owner' | 'admin',
+            userRole: 'owner' as const,
         },
-        skills: results.results.map(s => ({
+        skills: pageRows.map(s => ({
             id: s.id,
             name: s.name,
             slug: s.slug,
@@ -68,5 +94,8 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
             visibility: s.visibility as 'public' | 'private' | 'unlisted',
             stars: s.stars,
         })),
+        totalItems,
+        totalPages: Math.ceil(totalItems / ITEMS_PER_PAGE),
+        currentPage,
     };
 };

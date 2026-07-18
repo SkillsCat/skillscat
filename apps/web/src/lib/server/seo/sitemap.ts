@@ -1,10 +1,12 @@
 import { CATEGORIES } from '$lib/constants/categories';
 import { invalidateCache, peekCachedText, putCachedText } from '$lib/server/cache';
+import { buildSeoIndexableSkillWhere } from '$lib/server/seo/indexability';
+import { MIN_INDEXABLE_DYNAMIC_CATEGORY_SKILLS } from '$lib/seo/constants';
 import { encodeSkillSlugForPath } from '$lib/skill-path';
 
 export const SITE_URL = 'https://skills.cat';
 // Keep each sitemap comfortably small so bots can fetch them quickly even on cold builds.
-export const SITEMAP_URL_LIMIT = 5000;
+export const SITEMAP_URL_LIMIT = 10_000;
 
 export const SITEMAP_INDEX_BROWSER_MAX_AGE_SECONDS = 300;
 export const SITEMAP_INDEX_SHARED_MAX_AGE_SECONDS = 600;
@@ -15,19 +17,23 @@ export const SITEMAP_DYNAMIC_STALE_WHILE_REVALIDATE_SECONDS = 86400;
 export const SITEMAP_CORE_BROWSER_MAX_AGE_SECONDS = 3600;
 export const SITEMAP_CORE_SHARED_MAX_AGE_SECONDS = 86400;
 export const SITEMAP_CORE_STALE_WHILE_REVALIDATE_SECONDS = 604800;
-export const SITEMAP_INDEX_CACHE_TTL = 600;
-export const SITEMAP_DYNAMIC_CACHE_TTL = 900;
+export const SITEMAP_INDEX_CACHE_TTL = 86400;
+export const SITEMAP_DYNAMIC_CACHE_TTL = 86400;
+export const SITEMAP_RECENT_CACHE_TTL = 900;
 export const SITEMAP_CORE_CACHE_TTL = 86400;
 export const DEFAULT_SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = 3600;
 export const SITEMAP_HOT_CACHE_TTL_BUFFER_SECONDS = 300;
+export const SITEMAP_FULL_SNAPSHOT_MAX_AGE_SECONDS = 26 * 60 * 60;
 export const PUBLIC_LIST_PAGE_SIZE = 24;
 export const MAX_CORE_LIST_SITEMAP_PAGES = 10;
 export const MAX_CORE_CATEGORY_SITEMAP_PAGES = 5;
+export const MAX_CORE_DYNAMIC_CATEGORIES = 50;
 export const RECENT_SITEMAP_WINDOW_DAYS = 14;
 export const RECENT_SITEMAP_URL_LIMIT = 1000;
 
 const inflightSitemapBuilds = new Map<string, Promise<string>>();
-const SITEMAP_SNAPSHOT_PREFIX = 'cache/sitemaps/v1';
+const SITEMAP_SNAPSHOT_PREFIX = 'cache/sitemaps/v2';
+const SITEMAP_FULL_REFRESH_MARKER_KEY = `${SITEMAP_SNAPSHOT_PREFIX}/full-refresh-complete`;
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 
 type ChangeFrequency = 'hourly' | 'daily' | 'weekly' | 'monthly';
@@ -292,7 +298,6 @@ export function getCoreSitemapPages(): SitemapPage[] {
     { url: '/recent', priority: '0.9', changefreq: 'hourly' },
     { url: '/top', priority: '0.9', changefreq: 'daily' },
     { url: '/categories', priority: '0.8', changefreq: 'weekly' },
-    { url: '/llm.txt', priority: '0.5', changefreq: 'weekly' },
     { url: '/privacy', priority: '0.3', changefreq: 'monthly' },
     { url: '/terms', priority: '0.3', changefreq: 'monthly' },
   ] satisfies SitemapPage[];
@@ -331,11 +336,18 @@ export async function getExpandedCoreSitemapPages(
   const basePages = getCoreSitemapPages();
   if (!db) return basePages;
 
+  const maxCoreListItems = PUBLIC_LIST_PAGE_SIZE * MAX_CORE_LIST_SITEMAP_PAGES;
   const publicSkillsRow = await db.prepare(`
-    SELECT COUNT(*) AS count, MAX(${buildSkillFreshnessExpr()}) AS max_ts
-    FROM skills
-    WHERE visibility = 'public'
-  `).bind().first<CountAndMaxRow>();
+    WITH bounded_skills AS (
+      SELECT ${buildSkillFreshnessExpr()} AS freshness_ts
+      FROM skills s INDEXED BY skills_public_openclaw_updated_slug_idx
+      WHERE ${buildSeoIndexableSkillWhere('s')}
+      ORDER BY freshness_ts DESC
+      LIMIT ?
+    )
+    SELECT COUNT(*) AS count, MAX(freshness_ts) AS max_ts
+    FROM bounded_skills
+  `).bind(maxCoreListItems).first<CountAndMaxRow>();
 
   const publicSkillCount = Math.max(0, toNumber(publicSkillsRow?.count));
   const publicSkillLastmod = toIsoDate(publicSkillsRow?.max_ts);
@@ -384,6 +396,28 @@ export async function getExpandedCoreSitemapPages(
     .bind(...categorySlugs)
     .all<CategoryCountRow>();
 
+  const dynamicCategoryCounts = await db.prepare(`
+    SELECT
+      c.slug AS slug,
+      cps.public_skill_count AS count,
+      cps.max_freshness_ts AS max_ts
+    FROM categories c INDEXED BY categories_ai_suggested_skill_count_idx
+    JOIN category_public_stats cps
+      ON cps.category_slug = c.slug
+    WHERE c.type = 'ai-suggested'
+      AND c.skill_count > 0
+      AND c.skill_count >= ?
+      AND cps.public_skill_count >= ?
+    ORDER BY c.skill_count DESC, c.slug ASC
+    LIMIT ?
+  `)
+    .bind(
+      MIN_INDEXABLE_DYNAMIC_CATEGORY_SKILLS,
+      MIN_INDEXABLE_DYNAMIC_CATEGORY_SKILLS,
+      MAX_CORE_DYNAMIC_CATEGORIES
+    )
+    .all<CategoryCountRow>();
+
   const categoryCountMap = new Map(
     (categoryCounts.results || [])
       .filter((row): row is CategoryCountRow & { slug: string } => typeof row.slug === 'string' && row.slug.length > 0)
@@ -416,7 +450,33 @@ export async function getExpandedCoreSitemapPages(
     ];
   });
 
-  return dedupePages([...basePages, ...listPages, ...categoryPages]);
+  const dynamicCategoryPages = (dynamicCategoryCounts.results || []).flatMap((row) => {
+    if (!row.slug) return [];
+
+    const totalItems = Math.max(0, toNumber(row.count));
+    if (totalItems <= 0) return [];
+
+    const baseUrl = `/category/${encodeURIComponent(row.slug)}`;
+    const lastmod = toIsoDate(row.max_ts);
+    return [
+      {
+        url: baseUrl,
+        priority: '0.65',
+        changefreq: 'daily',
+        lastmod,
+      } satisfies SitemapPage,
+      ...buildPaginatedCollectionPages({
+        baseUrl,
+        totalItems,
+        maxPages: MAX_CORE_CATEGORY_SITEMAP_PAGES,
+        priority: '0.6',
+        changefreq: 'daily',
+        lastmod,
+      }),
+    ];
+  });
+
+  return dedupePages([...basePages, ...listPages, ...categoryPages, ...dynamicCategoryPages]);
 }
 
 function getRecentCutoffTimestamp(now = Date.now()): number {
@@ -441,7 +501,7 @@ function buildEntitySkillFreshnessCte(config: EntitySitemapQueryConfig): string 
       s.${config.matchColumn} AS entity_key,
       MAX(${buildSkillFreshnessExpr('s')}) AS skill_freshness_ts
     FROM skills s INDEXED BY ${config.indexName}
-    WHERE s.visibility = 'public'
+    WHERE ${buildSeoIndexableSkillWhere('s')}
       AND s.${config.matchColumn} IS NOT NULL
     GROUP BY s.${config.matchColumn}
   )`;
@@ -475,42 +535,6 @@ async function getDynamicEntitySitemapStats(
   return {
     count,
     pages: Math.ceil(count / SITEMAP_URL_LIMIT),
-    lastmod: toIsoDate(row?.max_ts),
-  };
-}
-
-async function getRecentEntitySitemapStats(
-  db: SitemapDb,
-  config: EntitySitemapQueryConfig,
-  recentCutoffTimestamp: number
-): Promise<RecentSitemapStats> {
-  const entityUpdatedExpr = getEntityUpdatedExpr(config.alias);
-  const entityMatchExpr = getEntityMatchExpr(config);
-  const skillFreshnessExpr = 'skill_freshness_ts';
-
-  const row = await db.prepare(`
-    WITH ${buildEntitySkillFreshnessCte(config)},
-    recent_entities AS (
-      SELECT
-        ${entityUpdatedExpr} AS updated_at,
-        sf.${skillFreshnessExpr} AS ${skillFreshnessExpr}
-      FROM ${config.table} ${config.alias}
-      JOIN skill_freshness sf ON sf.entity_key = ${entityMatchExpr}
-      WHERE ${config.baseWhere}
-        AND (
-          ${entityUpdatedExpr} >= ?
-          OR sf.${skillFreshnessExpr} >= ?
-        )
-    )
-    SELECT
-      COUNT(*) AS count,
-      MAX(${buildSkillFreshnessCase('updated_at', skillFreshnessExpr)}) AS max_ts
-    FROM recent_entities
-    WHERE ${skillFreshnessExpr} IS NOT NULL
-  `).bind(recentCutoffTimestamp, recentCutoffTimestamp).first<CountAndMaxRow>();
-
-  return {
-    count: Math.max(0, toNumber(row?.count)),
     lastmod: toIsoDate(row?.max_ts),
   };
 }
@@ -620,22 +644,20 @@ export async function getSitemapIndexStats(
   }
 
   const recentCutoffTimestamp = getRecentCutoffTimestamp(now);
-  const [skillsRow, profilesStats, orgsStats, recentSkillsRow, recentProfilesStats, recentOrgsStats] = await Promise.all([
+  const [skillsRow, profilesStats, orgsStats, recentSkillsRow] = await Promise.all([
     db.prepare(`
       SELECT COUNT(*) AS count, MAX(${buildSkillFreshnessExpr()}) AS max_ts
-      FROM skills
-      WHERE visibility = 'public'
+      FROM skills s
+      WHERE ${buildSeoIndexableSkillWhere('s')}
     `).bind().first<CountAndMaxRow>(),
     getDynamicEntitySitemapStats(db, PROFILE_SITEMAP_QUERY_CONFIG),
     getDynamicEntitySitemapStats(db, ORG_SITEMAP_QUERY_CONFIG),
     db.prepare(`
       SELECT COUNT(*) AS count, MAX(${buildSkillFreshnessExpr()}) AS max_ts
-      FROM skills
-      WHERE visibility = 'public'
-        AND ${buildSkillFreshnessExpr()} >= ?
+      FROM skills s
+      WHERE ${buildSeoIndexableSkillWhere('s')}
+        AND ${buildSkillFreshnessExpr('s')} >= ?
     `).bind(recentCutoffTimestamp).first<CountAndMaxRow>(),
-    getRecentEntitySitemapStats(db, PROFILE_SITEMAP_QUERY_CONFIG, recentCutoffTimestamp),
-    getRecentEntitySitemapStats(db, ORG_SITEMAP_QUERY_CONFIG, recentCutoffTimestamp),
   ]);
 
   const toDynamicStats = (row: CountAndMaxRow | null): DynamicSitemapStats => {
@@ -660,23 +682,28 @@ export async function getSitemapIndexStats(
     },
     recent: {
       skills: toRecentStats(recentSkillsRow),
-      profiles: recentProfilesStats,
-      orgs: recentOrgsStats,
+      profiles: { count: 0 },
+      orgs: { count: 0 },
     },
   };
 }
 
 export function buildSitemapIndexEntries(stats: SitemapIndexStats): SitemapIndexEntry[] {
-  const entries: SitemapIndexEntry[] = [{ url: '/sitemaps/core.xml' }];
+  const coreLastmod = [
+    ...Object.values(stats.dynamic),
+    ...Object.values(stats.recent),
+  ]
+    .map((entry) => entry.lastmod)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1);
+  const entries: SitemapIndexEntry[] = [{ url: '/sitemaps/core.xml', lastmod: coreLastmod }];
   const orderedKinds: DynamicSitemapKind[] = ['skills', 'profiles', 'orgs'];
 
-  for (const kind of orderedKinds) {
-    const recentStats = stats.recent[kind];
-    entries.push({
-      url: `/sitemaps/recent-${kind}.xml`,
-      lastmod: recentStats.lastmod,
-    });
-  }
+  entries.push({
+    url: '/sitemaps/recent-skills.xml',
+    lastmod: stats.recent.skills.lastmod,
+  });
 
   for (const kind of orderedKinds) {
     const { pages, lastmod } = stats.dynamic[kind];
@@ -704,8 +731,8 @@ export async function loadSkillsSitemapPage(
   const offset = (page - 1) * SITEMAP_URL_LIMIT;
   const skills = await db.prepare(`
     SELECT slug, updated_at, indexed_at, last_commit_at
-    FROM skills
-    WHERE visibility = 'public'
+    FROM skills s
+    WHERE ${buildSeoIndexableSkillWhere('s')}
     ORDER BY slug ASC
     LIMIT ? OFFSET ?
   `)
@@ -757,9 +784,9 @@ export async function loadRecentSkillsSitemapPages(
       indexed_at,
       last_commit_at,
       ${buildSkillFreshnessExpr()} AS sort_ts
-    FROM skills
-    WHERE visibility = 'public'
-      AND ${buildSkillFreshnessExpr()} >= ?
+    FROM skills s INDEXED BY skills_public_openclaw_updated_slug_idx
+    WHERE ${buildSeoIndexableSkillWhere('s')}
+      AND ${buildSkillFreshnessExpr('s')} >= ?
     ORDER BY sort_ts DESC, slug ASC
     LIMIT ?
   `)
@@ -821,6 +848,56 @@ async function readSitemapSnapshot(
   };
 }
 
+export async function hasCompletedSitemapFullRefresh(r2: R2Bucket | undefined): Promise<boolean> {
+  if (!r2) return false;
+  const object = await r2.head(SITEMAP_FULL_REFRESH_MARKER_KEY);
+  return object !== null;
+}
+
+function getSitemapFullRefreshMarkerTimestamp(object: {
+  uploaded?: Date;
+  customMetadata?: Record<string, string>;
+} | null): number | undefined {
+  if (!object) return undefined;
+
+  const generatedAt = toTimestamp(object.customMetadata?.generatedAt);
+  if (generatedAt !== undefined) return generatedAt;
+
+  const uploadedAt = object.uploaded?.getTime?.();
+  return toTimestamp(uploadedAt);
+}
+
+/**
+ * Cron normally performs the full build at one UTC hour, but an old marker
+ * must also force a retry after a failed or interrupted scheduled build.
+ */
+export async function shouldRunSitemapFullRefresh(
+  r2: R2Bucket | undefined,
+  options: {
+    now?: number;
+    scheduledHourUtc?: number;
+    maxAgeSeconds?: number;
+  } = {}
+): Promise<boolean> {
+  if (!r2) return false;
+
+  const marker = await r2.head(SITEMAP_FULL_REFRESH_MARKER_KEY);
+  if (!marker) return true;
+
+  const now = options.now ?? Date.now();
+  const scheduledHourUtc = Math.min(23, Math.max(0, Math.floor(options.scheduledHourUtc ?? 3)));
+  const maxAgeSeconds = Math.max(300, Math.floor(
+    options.maxAgeSeconds ?? SITEMAP_FULL_SNAPSHOT_MAX_AGE_SECONDS
+  ));
+  const generatedAt = getSitemapFullRefreshMarkerTimestamp(marker);
+
+  if (generatedAt === undefined || now - generatedAt >= maxAgeSeconds * 1000) {
+    return true;
+  }
+
+  return new Date(now).getUTCHours() === scheduledHourUtc;
+}
+
 async function persistSitemapSnapshot(
   r2: R2Bucket | undefined,
   cacheKey: string,
@@ -852,6 +929,24 @@ async function deleteSitemapSnapshot(
   await r2.delete(buildSitemapSnapshotKey(cacheKey));
 }
 
+function buildDynamicSitemapSnapshotPrefix(kind: DynamicSitemapKind): string {
+  return `${SITEMAP_SNAPSHOT_PREFIX}/sitemap:v2:${kind}:`;
+}
+
+export function parseDynamicSitemapSnapshotPage(
+  objectKey: string,
+  kind: DynamicSitemapKind
+): number | null {
+  const prefix = buildDynamicSitemapSnapshotPrefix(kind);
+  if (!objectKey.startsWith(prefix)) return null;
+
+  const match = /^(\d+):xml\.xml$/.exec(objectKey.slice(prefix.length));
+  if (!match) return null;
+
+  const page = Number.parseInt(match[1], 10);
+  return Number.isFinite(page) && page > 0 ? page : null;
+}
+
 async function cleanupStaleDynamicSitemapSnapshots(
   r2: R2Bucket | undefined,
   kind: DynamicSitemapKind,
@@ -861,25 +956,25 @@ async function cleanupStaleDynamicSitemapSnapshots(
 
   const removed: string[] = [];
   let cursor: string | undefined;
+  const snapshotPrefix = buildDynamicSitemapSnapshotPrefix(kind);
 
   do {
     const listing = await r2.list({
-      prefix: `${SITEMAP_SNAPSHOT_PREFIX}/sitemap:${kind}:`,
+      prefix: snapshotPrefix,
       cursor,
     });
 
     for (const object of listing.objects) {
-      const match = new RegExp(`^${SITEMAP_SNAPSHOT_PREFIX}/sitemap:${kind}:(\\d+)\\.xml$`).exec(object.key);
-      if (!match) {
+      const page = parseDynamicSitemapSnapshotPage(object.key, kind);
+      if (page === null) {
         continue;
       }
 
-      const page = Number.parseInt(match[1], 10);
-      if (!Number.isFinite(page) || page <= maxPage) {
+      if (page <= maxPage) {
         continue;
       }
 
-      const cacheKey = `sitemap:${kind}:${page}:xml`;
+      const cacheKey = `sitemap:v2:${kind}:${page}:xml`;
       await Promise.all([
         r2.delete(object.key),
         invalidateCache(cacheKey),
@@ -899,8 +994,9 @@ async function buildFreshSitemapXml(options: {
   ttl: number;
   waitUntil?: WaitUntilFn;
   r2?: R2Bucket;
+  awaitCacheWrite?: boolean;
 }): Promise<string> {
-  const { cacheKey, fetcher, ttl, waitUntil, r2 } = options;
+  const { cacheKey, fetcher, ttl, waitUntil, r2, awaitCacheWrite = false } = options;
   const existing = inflightSitemapBuilds.get(cacheKey);
   if (existing) {
     return existing;
@@ -913,6 +1009,7 @@ async function buildFreshSitemapXml(options: {
       putCachedText(cacheKey, xml, ttl, {
         waitUntil,
         contentType: 'application/xml; charset=utf-8',
+        awaitWrite: awaitCacheWrite,
       }),
     ]);
     return xml;
@@ -931,13 +1028,93 @@ export async function refreshSitemapSnapshot(options: {
   waitUntil?: WaitUntilFn;
   r2?: R2Bucket;
 }): Promise<string> {
-  return buildFreshSitemapXml(options);
+  return buildFreshSitemapXml({
+    ...options,
+    awaitCacheWrite: true,
+  });
 }
 
 export interface SitemapRefreshSummary {
   refreshed: string[];
   removed: string[];
   paths: string[];
+}
+
+export function buildSitemapPriorityPaths(): string[] {
+  return [
+    '/sitemaps/core.xml',
+    '/sitemaps/recent-skills.xml',
+  ];
+}
+
+interface SitemapRefreshInput {
+  cacheKey: string;
+  ttl: number;
+  fetcher: () => Promise<string>;
+  debugTag: string;
+}
+
+async function refreshSitemapInputs(
+  inputs: SitemapRefreshInput[],
+  options: {
+    waitUntil?: WaitUntilFn;
+    r2?: R2Bucket;
+    concurrency?: number;
+  }
+): Promise<string[]> {
+  const refreshed: string[] = [];
+  const concurrency = Math.max(1, options.concurrency ?? 4);
+
+  for (let index = 0; index < inputs.length; index += concurrency) {
+    const batch = inputs.slice(index, index + concurrency);
+    await Promise.all(batch.map(async (input) => {
+      await refreshSitemapSnapshot({
+        cacheKey: input.cacheKey,
+        ttl: input.ttl,
+        fetcher: input.fetcher,
+        waitUntil: options.waitUntil,
+        r2: options.r2,
+      });
+      refreshed.push(input.debugTag);
+    }));
+  }
+
+  return refreshed;
+}
+
+export async function refreshPrioritySitemapSnapshots(options: {
+  db: SitemapDb | undefined;
+  r2?: R2Bucket;
+  waitUntil?: WaitUntilFn;
+  refreshMinIntervalSeconds?: number;
+}): Promise<SitemapRefreshSummary> {
+  const { db, r2, waitUntil } = options;
+  const refreshMinIntervalSeconds = normalizeSitemapRefreshMinIntervalSeconds(
+    options.refreshMinIntervalSeconds
+  );
+  const recentTtl = getSitemapHotCacheTtlSeconds(SITEMAP_RECENT_CACHE_TTL, refreshMinIntervalSeconds);
+  const inputs: SitemapRefreshInput[] = [
+    {
+      cacheKey: 'sitemap:v2:core:xml',
+      ttl: getSitemapHotCacheTtlSeconds(SITEMAP_CORE_CACHE_TTL, refreshMinIntervalSeconds),
+      debugTag: 'core',
+      fetcher: async () => buildUrlSetXml(await getExpandedCoreSitemapPages(db)),
+    },
+  ];
+
+  inputs.push({
+    cacheKey: 'sitemap:v2:recent:skills:xml',
+    ttl: recentTtl,
+    debugTag: 'recent-skills',
+    fetcher: async () => buildUrlSetXml(await loadRecentSkillsSitemapPages(db)),
+  });
+
+  const refreshed = await refreshSitemapInputs(inputs, { r2, waitUntil, concurrency: 4 });
+  return {
+    refreshed,
+    removed: [],
+    paths: buildSitemapPriorityPaths(),
+  };
 }
 
 export async function refreshAllSitemapSnapshots(options: {
@@ -954,64 +1131,29 @@ export async function refreshAllSitemapSnapshots(options: {
   const refreshed: string[] = [];
   const removed: string[] = [];
 
-  const refresh = async (input: {
-    cacheKey: string;
-    ttl: number;
-    fetcher: () => Promise<string>;
-    debugTag: string;
-  }) => {
-    await refreshSitemapSnapshot({
-      cacheKey: input.cacheKey,
-      ttl: input.ttl,
-      fetcher: input.fetcher,
-      waitUntil,
-      r2,
-    });
-    refreshed.push(input.debugTag);
+  const refresh = async (input: SitemapRefreshInput) => {
+    refreshed.push(...await refreshSitemapInputs([input], { r2, waitUntil, concurrency: 1 }));
   };
 
   await refresh({
-    cacheKey: 'sitemap:index:xml',
-    ttl: getSitemapHotCacheTtlSeconds(SITEMAP_INDEX_CACHE_TTL, refreshMinIntervalSeconds),
-    debugTag: 'index',
-    fetcher: async () => buildSitemapIndexXml(buildSitemapIndexEntries(stats)),
-  });
-
-  await refresh({
-    cacheKey: 'sitemap:core:xml',
+    cacheKey: 'sitemap:v2:core:xml',
     ttl: getSitemapHotCacheTtlSeconds(SITEMAP_CORE_CACHE_TTL, refreshMinIntervalSeconds),
     debugTag: 'core',
     fetcher: async () => buildUrlSetXml(await getExpandedCoreSitemapPages(db)),
   });
 
+  await refresh({
+    cacheKey: 'sitemap:v2:recent:skills:xml',
+    ttl: getSitemapHotCacheTtlSeconds(SITEMAP_RECENT_CACHE_TTL, refreshMinIntervalSeconds),
+    debugTag: 'recent-skills',
+    fetcher: async () => buildUrlSetXml(await loadRecentSkillsSitemapPages(db)),
+  });
+
   for (const kind of ['skills', 'profiles', 'orgs'] as const) {
-    const recentCacheKey = `sitemap:recent:${kind}:xml`;
-    await refresh({
-      cacheKey: recentCacheKey,
-      ttl: getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, refreshMinIntervalSeconds),
-      debugTag: `recent-${kind}`,
-      fetcher: async () => {
-        let pages: SitemapPage[];
-
-        switch (kind) {
-          case 'skills':
-            pages = await loadRecentSkillsSitemapPages(db);
-            break;
-          case 'profiles':
-            pages = await loadRecentProfilesSitemapPages(db);
-            break;
-          case 'orgs':
-            pages = await loadRecentOrgsSitemapPages(db);
-            break;
-        }
-
-        return buildUrlSetXml(pages);
-      },
-    });
-
+    const shardInputs: SitemapRefreshInput[] = [];
     for (let page = 1; page <= stats.dynamic[kind].pages; page += 1) {
-      const cacheKey = `sitemap:${kind}:${page}:xml`;
-      await refresh({
+      const cacheKey = `sitemap:v2:${kind}:${page}:xml`;
+      shardInputs.push({
         cacheKey,
         ttl: getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, refreshMinIntervalSeconds),
         debugTag: `${kind}-${page}`,
@@ -1039,7 +1181,29 @@ export async function refreshAllSitemapSnapshots(options: {
       });
     }
 
+    refreshed.push(...await refreshSitemapInputs(shardInputs, { r2, waitUntil, concurrency: 4 }));
+
+  }
+
+  // Publish the index only after every referenced shard exists. The independent
+  // R2 marker below is written last so interrupted builds are retried.
+  await refresh({
+    cacheKey: 'sitemap:v2:index:xml',
+    ttl: getSitemapHotCacheTtlSeconds(SITEMAP_INDEX_CACHE_TTL, refreshMinIntervalSeconds),
+    debugTag: 'index',
+    fetcher: async () => buildSitemapIndexXml(buildSitemapIndexEntries(stats)),
+  });
+
+  for (const kind of ['skills', 'profiles', 'orgs'] as const) {
     removed.push(...await cleanupStaleDynamicSitemapSnapshots(r2, kind, stats.dynamic[kind].pages));
+  }
+
+  if (r2) {
+    const completedAt = Date.now();
+    await r2.put(SITEMAP_FULL_REFRESH_MARKER_KEY, String(completedAt), {
+      httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+      customMetadata: { generatedAt: String(completedAt) },
+    });
   }
 
   return {
@@ -1080,12 +1244,17 @@ export async function createCachedSitemapResponse(options: {
   waitUntil?: WaitUntilFn;
   r2?: R2Bucket;
   snapshotMaxAgeSeconds?: number;
+  refreshStaleSnapshot?: boolean;
 }): Promise<Response> {
   const { cacheKey, ttl, cacheControl, fetcher, debugTag, waitUntil, r2 } = options;
   const snapshotMaxAgeSeconds = options.snapshotMaxAgeSeconds ?? ttl;
+  const refreshStaleSnapshot = options.refreshStaleSnapshot ?? true;
 
   try {
-    const cached = await peekCachedText(cacheKey, { waitUntil });
+    const cached = await peekCachedText(cacheKey, {
+      waitUntil,
+      allowLegacyFallback: false,
+    });
     if (cached !== null) {
       return new Response(cached, {
         headers: {
@@ -1107,7 +1276,7 @@ export async function createCachedSitemapResponse(options: {
         contentType: 'application/xml; charset=utf-8',
       });
 
-      if (!isFresh) {
+      if (!isFresh && refreshStaleSnapshot) {
         const refreshPromise = buildFreshSitemapXml({
           cacheKey,
           fetcher,

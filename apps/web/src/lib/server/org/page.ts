@@ -1,5 +1,6 @@
 import { getCached, invalidateCache } from '$lib/server/cache';
 import { getOrgPageSnapshotCacheKey } from '$lib/server/cache/keys';
+import { buildSeoIndexableSkillWhere } from '$lib/server/seo/indexability';
 
 const PUBLIC_ORG_PAGE_CACHE_TTL_SECONDS = 30 * 60;
 const ORG_PAGE_SKILLS_LIMIT = 20;
@@ -18,6 +19,7 @@ export interface OrgPageOrg {
   updatedAt?: number;
   memberCount: number;
   skillCount: number;
+  seoPublicSkillCount?: number;
   userRole: string | null;
 }
 
@@ -37,6 +39,10 @@ export interface OrgPageSkill {
   visibility: 'public' | 'private' | 'unlisted';
   stars: number;
   updatedAt?: number;
+  tier?: string | null;
+  indexedAt?: number;
+  downloadCount90d?: number;
+  accessCount30d?: number;
 }
 
 export type OrgPageErrorKind = 'not_found' | 'temporary_failure';
@@ -69,6 +75,7 @@ interface OrgBaseRow {
   updated_at: number;
   member_count: number | null;
   public_skill_count: number | null;
+  seo_public_skill_count: number | null;
 }
 
 interface MemberRow {
@@ -87,6 +94,10 @@ interface SkillRow {
   visibility: 'public' | 'private' | 'unlisted';
   stars: number | null;
   updated_at: number | null;
+  tier: string | null;
+  indexed_at: number | null;
+  download_count_90d: number | null;
+  access_count_30d: number | null;
 }
 
 function buildNotFoundPayload(slug: string): OrgPagePayload {
@@ -133,7 +144,13 @@ async function fetchOrgBase(db: D1Database, slug: string): Promise<OrgBaseRow | 
         FROM skills s
         WHERE s.org_id = o.id
           AND s.visibility = 'public'
-      ) as public_skill_count
+      ) as public_skill_count,
+      (
+        SELECT COUNT(*)
+        FROM skills s
+        WHERE s.org_id = o.id
+          AND ${buildSeoIndexableSkillWhere('s')}
+      ) as seo_public_skill_count
     FROM organizations o
     WHERE o.slug = ?
     LIMIT 1
@@ -161,6 +178,10 @@ function mapSkills(rows: SkillRow[]): OrgPageSkill[] {
     visibility: skill.visibility,
     stars: Number(skill.stars || 0),
     updatedAt: skill.updated_at ?? undefined,
+    tier: skill.tier,
+    indexedAt: skill.indexed_at ?? undefined,
+    downloadCount90d: Number(skill.download_count_90d || 0),
+    accessCount30d: Number(skill.access_count_30d || 0),
   }));
 }
 
@@ -194,6 +215,10 @@ async function fetchPublicOrgSnapshot(db: D1Database, slug: string): Promise<Org
         description,
         visibility,
         stars,
+        tier,
+        indexed_at,
+        download_count_90d,
+        access_count_30d,
         CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END as updated_at
       FROM skills INDEXED BY skills_org_visibility_stars_created_idx
       WHERE org_id = ?
@@ -219,6 +244,7 @@ async function fetchPublicOrgSnapshot(db: D1Database, slug: string): Promise<Org
       updatedAt: orgRow.updated_at,
       memberCount: Number(orgRow.member_count || 0),
       skillCount: Number(orgRow.public_skill_count || 0),
+      seoPublicSkillCount: Number(orgRow.seo_public_skill_count || 0),
       userRole: null,
     },
     members: mapMembers(membersResult.results || []),
@@ -324,6 +350,10 @@ async function applyMemberOverlay(
         description,
         visibility,
         stars,
+        tier,
+        indexed_at,
+        download_count_90d,
+        access_count_30d,
         CASE WHEN last_commit_at IS NULL THEN updated_at ELSE last_commit_at END as updated_at
       FROM skills INDEXED BY skills_org_stars_created_idx
       WHERE org_id = ?

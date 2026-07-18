@@ -13,6 +13,11 @@ import {
 } from '$lib/server/openclaw/compat-store';
 import { invalidateCategoryCaches } from '$lib/server/cache/categories';
 import { syncCategoryPublicStats } from '$lib/server/db/business/stats';
+import {
+  buildIndexNowSkillUrls,
+  loadIndexNowSkillTarget,
+  scheduleIndexNowSubmission,
+} from '$lib/server/seo/indexnow';
 import { buildTouchOrganizationStatement } from '$lib/server/org/mutations';
 
 interface SkillRow {
@@ -153,6 +158,20 @@ export const POST: RequestHandler = async ({ params, platform, request, locals }
       }
     } catch (cacheError) {
       console.error(`Failed to invalidate caches for restored skill ${skill.slug}:`, cacheError);
+    }
+
+    try {
+      const indexNowTarget = await loadIndexNowSkillTarget(db, skill.id);
+      const indexNowTask = scheduleIndexNowSubmission({
+        env: platform?.env,
+        waitUntil: platform?.context?.waitUntil?.bind(platform.context),
+        urls: indexNowTarget ? buildIndexNowSkillUrls(indexNowTarget, platform?.env) : [],
+        action: 'update',
+        source: `openclaw-undelete:${skill.slug}`,
+      });
+      if (indexNowTask) await indexNowTask;
+    } catch (indexNowError) {
+      console.error(`Failed to enqueue IndexNow restore for ${skill.slug}:`, indexNowError);
     }
 
     return json(

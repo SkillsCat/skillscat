@@ -200,14 +200,17 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
 
     if (skill.visibility === 'private') {
       const auth = await getAuthContext(request, locals, db);
-      if (!auth.userId) {
+      if (!auth.userId && !auth.orgId) {
         return json({
           success: false,
           error: 'Authentication required',
         } satisfies ApiResponse<never>, { status: 401 });
       }
       requireScope(auth, 'read');
-      const hasAccess = await checkSkillAccess(skill.id, auth.userId, db);
+      const hasAccess = await checkSkillAccess(skill.id, {
+        userId: auth.userId,
+        orgId: auth.orgId,
+      }, db);
       if (!hasAccess) {
         return json({
           success: false,
@@ -521,19 +524,25 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
       }
     }
 
+    const responseHeaders: Record<string, string> = {
+      'Cache-Control': skill.visibility === 'private'
+        ? 'private, no-cache'
+        : buildPublicRecommendCacheControl(),
+      'X-Cache': 'MISS',
+      'Server-Timing': buildServerTimingHeader(),
+    };
+    if (skill.visibility === 'private') {
+      responseHeaders['CDN-Cache-Control'] = 'no-store';
+      responseHeaders.Vary = 'Authorization, Cookie';
+    }
+
     return json({
       success: true,
       data: {
         recommendSkills: recommendSkills.slice(0, RECOMMEND_RESPONSE_LIMIT),
       },
     } satisfies ApiResponse<{ recommendSkills: SkillCardData[] }>, {
-      headers: {
-        'Cache-Control': skill.visibility === 'private'
-          ? 'private, max-age=30, stale-while-revalidate=60'
-          : buildPublicRecommendCacheControl(),
-        'X-Cache': 'MISS',
-        'Server-Timing': buildServerTimingHeader(),
-      },
+      headers: responseHeaders,
     });
   } catch (err) {
     console.error('Error fetching recommend skills:', err);

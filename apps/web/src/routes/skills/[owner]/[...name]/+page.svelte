@@ -51,6 +51,7 @@
         articleTags?: string[];
         section?: string;
       };
+      seoIndexable?: boolean;
     };
   }
 
@@ -1108,11 +1109,12 @@
     author={getAuthorDisplayName()}
     publishedTime={publishedTime}
     modifiedTime={modifiedTime}
-    noindex={data.skill.visibility !== 'public'}
+    noindex={!data.seoIndexable}
+    robots={!data.seoIndexable ? 'noindex, follow, noarchive' : ''}
     keywords={skillSeoKeywords}
     tags={data.seo?.articleTags}
     section={data.seo?.section}
-    structuredData={skillStructuredData}
+    structuredData={data.seoIndexable ? skillStructuredData : null}
   />
 {:else}
   <SEO
@@ -1180,7 +1182,7 @@
     {/snippet}
 
     {#snippet renderInstallCard()}
-      <h3 class="font-semibold text-fg mb-4">{messages.common.install}</h3>
+      <h2 class="font-semibold text-fg mb-4">{messages.common.install}</h2>
 
       <div class="cli-switcher">
         {#each installOptions as option (option.id)}

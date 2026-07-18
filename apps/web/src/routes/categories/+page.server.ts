@@ -2,6 +2,7 @@ import type { PageServerLoad } from './$types';
 import { CATEGORIES, type CategoryWithCount } from '$lib/constants/categories';
 import { getCategoryStats, getDynamicCategories } from '$lib/server/db/business/stats';
 import { getCached } from '$lib/server/cache';
+import { CATEGORIES_PAGE_CACHE_KEY } from '$lib/server/cache/keys';
 import { setPublicPageCache } from '$lib/server/cache/page';
 
 interface DynamicCategory {
@@ -28,7 +29,7 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
   };
 
   const { data } = await getCached(
-    'page:categories:v1',
+    CATEGORIES_PAGE_CACHE_KEY,
     async () => {
       const stats = await getCategoryStats(env);
 

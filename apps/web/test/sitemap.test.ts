@@ -2,21 +2,26 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSitemapCacheControl,
   buildSitemapIndexEntries,
+  buildSitemapPriorityPaths,
   buildSitemapPublicPaths,
   getExpandedCoreSitemapPages,
   getSitemapHotCacheTtlSeconds,
   getSitemapSharedMaxAgeSeconds,
   MAX_CORE_CATEGORY_SITEMAP_PAGES,
+  MAX_CORE_DYNAMIC_CATEGORIES,
   MAX_CORE_LIST_SITEMAP_PAGES,
   PUBLIC_LIST_PAGE_SIZE,
   SITEMAP_DYNAMIC_BROWSER_MAX_AGE_SECONDS,
   SITEMAP_DYNAMIC_CACHE_TTL,
   SITEMAP_DYNAMIC_SHARED_MAX_AGE_SECONDS,
   SITEMAP_DYNAMIC_STALE_WHILE_REVALIDATE_SECONDS,
+  SITEMAP_RECENT_CACHE_TTL,
+  SITEMAP_URL_LIMIT,
   loadProfilesSitemapPage,
   loadRecentOrgsSitemapPages,
   loadRecentProfilesSitemapPages,
   loadRecentSkillsSitemapPages,
+  parseDynamicSitemapSnapshotPage,
 } from '../src/lib/server/seo/sitemap';
 
 interface MockRow {
@@ -28,14 +33,18 @@ interface MockRow {
 function createDbMock(rows: {
   publicSkills: MockRow;
   categoryCounts: MockRow[];
+  dynamicCategoryCounts?: MockRow[];
 }) {
+  const queries: string[] = [];
   return {
+    queries,
     prepare(query: string) {
       const normalized = query.replace(/\s+/g, ' ').trim();
+      queries.push(normalized);
 
       if (
         normalized.includes('FROM skills') &&
-        normalized.includes("WHERE visibility = 'public'") &&
+        normalized.includes('COUNT(*) AS count') &&
         !normalized.includes('GROUP BY')
       ) {
         return {
@@ -57,10 +66,40 @@ function createDbMock(rows: {
         };
       }
 
+      if (normalized.includes('FROM categories c INDEXED BY categories_ai_suggested_skill_count_idx')) {
+        return {
+          bind(minCategorySkills: number, minPublicSkills: number, limit: number) {
+            expect(minCategorySkills).toBe(2);
+            expect(minPublicSkills).toBe(2);
+            expect(limit).toBe(MAX_CORE_DYNAMIC_CATEGORIES);
+            return {
+              all: async () => ({ results: rows.dynamicCategoryCounts || [] }),
+            };
+          },
+        };
+      }
+
       throw new Error(`Unexpected query: ${normalized}`);
     },
   };
 }
+
+describe('dynamic sitemap snapshot keys', () => {
+  it('parses the versioned R2 object shape used by snapshot persistence', () => {
+    expect(parseDynamicSitemapSnapshotPage(
+      'cache/sitemaps/v2/sitemap:v2:skills:6:xml.xml',
+      'skills'
+    )).toBe(6);
+    expect(parseDynamicSitemapSnapshotPage(
+      'cache/sitemaps/v2/sitemap:v2:profiles:2:xml.xml',
+      'skills'
+    )).toBeNull();
+    expect(parseDynamicSitemapSnapshotPage(
+      'cache/sitemaps/v1/sitemap:skills:6:xml.xml',
+      'skills'
+    )).toBeNull();
+  });
+});
 
 describe('getExpandedCoreSitemapPages', () => {
   it('adds paginated collection pages for high-value public lists', async () => {
@@ -84,6 +123,8 @@ describe('getExpandedCoreSitemapPages', () => {
     expect(pages.some((page) => page.url === '/recent?page=2')).toBe(true);
     expect(pages.some((page) => page.url === '/top?page=2')).toBe(true);
     expect(pages.some((page) => page.url === '/category/seo')).toBe(false);
+    expect(db.queries[0]).toContain('INDEXED BY skills_public_openclaw_updated_slug_idx');
+    expect(db.queries[0]).toContain('LIMIT ?');
   });
 
   it('only includes predefined category pages that have public skills and caps depth', async () => {
@@ -109,6 +150,34 @@ describe('getExpandedCoreSitemapPages', () => {
     expect(pages.some((page) => page.url === `/category/seo?page=${MAX_CORE_CATEGORY_SITEMAP_PAGES + 1}`)).toBe(false);
     expect(pages.some((page) => page.url === '/category/security')).toBe(false);
   });
+
+  it('includes bounded dynamic categories from precomputed public stats', async () => {
+    const db = createDbMock({
+      publicSkills: {
+        count: PUBLIC_LIST_PAGE_SIZE,
+        max_ts: Date.parse('2026-03-10T00:00:00.000Z'),
+      },
+      categoryCounts: [],
+      dynamicCategoryCounts: [
+        {
+          slug: 'agent memory',
+          count: PUBLIC_LIST_PAGE_SIZE * 2,
+          max_ts: Date.parse('2026-03-11T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    const pages = await getExpandedCoreSitemapPages(db as never);
+
+    expect(pages).toContainEqual({
+      url: '/category/agent%20memory',
+      priority: '0.65',
+      changefreq: 'daily',
+      lastmod: '2026-03-11',
+    });
+    expect(pages.some((page) => page.url === '/category/agent%20memory?page=2')).toBe(true);
+    expect(db.queries.some((query) => query.includes('LIMIT ?'))).toBe(true);
+  });
 });
 
 describe('buildSitemapIndexEntries', () => {
@@ -129,8 +198,6 @@ describe('buildSitemapIndexEntries', () => {
     expect(entries.map((entry) => entry.url)).toEqual([
       '/sitemaps/core.xml',
       '/sitemaps/recent-skills.xml',
-      '/sitemaps/recent-profiles.xml',
-      '/sitemaps/recent-orgs.xml',
       '/sitemaps/skills-1.xml',
       '/sitemaps/skills-2.xml',
       '/sitemaps/skills-3.xml',
@@ -140,9 +207,10 @@ describe('buildSitemapIndexEntries', () => {
 });
 
 describe('sitemap cache warmup settings', () => {
-  it('keeps sitemap hot cache alive beyond the refresh interval', () => {
-    expect(getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, 3600)).toBe(3900);
-    expect(getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, 600)).toBe(900);
+  it('keeps full shards for a day while recent deltas follow the hourly refresh interval', () => {
+    expect(getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, 3600)).toBe(86400);
+    expect(getSitemapHotCacheTtlSeconds(SITEMAP_RECENT_CACHE_TTL, 3600)).toBe(3900);
+    expect(getSitemapHotCacheTtlSeconds(SITEMAP_RECENT_CACHE_TTL, 600)).toBe(900);
   });
 
   it('extends shared cache control to cover the refresh interval', () => {
@@ -176,12 +244,17 @@ describe('sitemap cache warmup settings', () => {
       '/sitemap.xml',
       '/sitemaps/core.xml',
       '/sitemaps/recent-skills.xml',
-      '/sitemaps/recent-profiles.xml',
-      '/sitemaps/recent-orgs.xml',
       '/sitemaps/skills-1.xml',
       '/sitemaps/skills-2.xml',
       '/sitemaps/skills-3.xml',
       '/sitemaps/orgs-1.xml',
+    ]);
+  });
+
+  it('prewarms only core and recent deltas during hourly refreshes', () => {
+    expect(buildSitemapPriorityPaths()).toEqual([
+      '/sitemaps/core.xml',
+      '/sitemaps/recent-skills.xml',
     ]);
   });
 });
@@ -192,7 +265,9 @@ describe('loadRecentSkillsSitemapPages', () => {
     const db = {
       prepare(query: string) {
         const normalized = query.replace(/\s+/g, ' ').trim();
-        expect(normalized).toContain("WHERE visibility = 'public'");
+        expect(normalized).toContain("s.visibility = 'public'");
+        expect(normalized).toContain("TRIM(COALESCE(s.description, '')) <> ''");
+        expect(normalized).toContain('INDEXED BY skills_public_openclaw_updated_slug_idx');
         expect(normalized).toContain('ORDER BY sort_ts DESC, slug ASC');
 
         return {
@@ -252,13 +327,14 @@ describe('profile and org sitemap freshness', () => {
         expect(normalized).toContain('SELECT a.username AS entity_label');
         expect(normalized).toContain('WITH skill_freshness AS (');
         expect(normalized).toContain('INDEXED BY skills_public_repo_owner_sitemap_freshness_idx');
-        expect(normalized).toContain("WHERE s.visibility = 'public' AND s.repo_owner IS NOT NULL");
+        expect(normalized).toContain("WHERE s.visibility = 'public' AND TRIM(COALESCE(s.description, '')) <> ''");
+        expect(normalized).toContain('s.repo_owner IS NOT NULL');
         expect(normalized).toContain('JOIN skill_freshness sf ON sf.entity_key = a.username');
         expect(normalized).toContain('ORDER BY entity_label ASC');
 
         return {
           bind(limit: number, offset: number) {
-            expect(limit).toBe(5000);
+            expect(limit).toBe(SITEMAP_URL_LIMIT);
             expect(offset).toBe(0);
 
             return {
@@ -339,7 +415,8 @@ describe('profile and org sitemap freshness', () => {
         expect(normalized).toContain('SELECT o.slug AS entity_label');
         expect(normalized).toContain('WITH skill_freshness AS (');
         expect(normalized).toContain('INDEXED BY skills_public_org_sitemap_freshness_idx');
-        expect(normalized).toContain("WHERE s.visibility = 'public' AND s.org_id IS NOT NULL");
+        expect(normalized).toContain("WHERE s.visibility = 'public' AND TRIM(COALESCE(s.description, '')) <> ''");
+        expect(normalized).toContain('s.org_id IS NOT NULL');
         expect(normalized).toContain('JOIN skill_freshness sf ON sf.entity_key = o.id');
         expect(normalized).toContain('ORDER BY freshness_ts DESC, entity_label ASC');
 

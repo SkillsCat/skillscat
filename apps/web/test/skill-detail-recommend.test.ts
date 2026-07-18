@@ -47,6 +47,120 @@ beforeEach(() => {
 });
 
 describe('resolveSkillDetail recommend fallback', () => {
+  it('does not load private recommendations before authentication succeeds', async () => {
+    const detailRow = {
+      id: 'private_1',
+      name: 'Private Skill',
+      slug: 'acme/private-skill',
+      description: 'Private',
+      repoOwner: 'acme',
+      repoName: 'private-skill',
+      githubUrl: '',
+      skillPath: '',
+      stars: 0,
+      forks: 0,
+      trendingScore: 0,
+      updatedAt: Date.now(),
+      readme: '# Private',
+      fileStructure: null,
+      lastCommitAt: null,
+      createdAt: Date.now(),
+      indexedAt: Date.now(),
+      sourceType: 'upload',
+      visibility: 'private',
+      tier: 'cold',
+      categories: null,
+      authorUsername: null,
+      authorDisplayName: null,
+      authorAvatar: null,
+      authorBio: null,
+      authorSkillsCount: null,
+      authorTotalStars: null,
+    };
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        bind: vi.fn(() => ({
+          first: vi.fn(async () => sql.includes('SELECT visibility')
+            ? { visibility: 'private' }
+            : detailRow),
+        })),
+      })),
+    };
+
+    const { resolveSkillDetail } = await import('../src/lib/server/skill/detail');
+    const result = await resolveSkillDetail({
+      db: db as never,
+      request: new Request('https://skills.cat/api/skills/acme/private-skill'),
+      locals: {} as App.Locals,
+    }, 'acme/private-skill');
+
+    expect(result.status).toBe(401);
+    expect(getCached).not.toHaveBeenCalled();
+    expect(getRecommendedSkills).not.toHaveBeenCalled();
+    expect(getLightweightRecommendedSkills).not.toHaveBeenCalled();
+  });
+
+  it('loads private recommendations only after read access succeeds', async () => {
+    const detailRow = {
+      id: 'private_1',
+      name: 'Private Skill',
+      slug: 'acme/private-skill',
+      description: 'Private',
+      repoOwner: 'acme',
+      repoName: 'private-skill',
+      githubUrl: '',
+      skillPath: '',
+      stars: 0,
+      forks: 0,
+      trendingScore: 0,
+      updatedAt: Date.now(),
+      readme: '# Private',
+      fileStructure: null,
+      lastCommitAt: null,
+      createdAt: Date.now(),
+      indexedAt: Date.now(),
+      sourceType: 'upload',
+      visibility: 'private',
+      tier: 'cold',
+      categories: null,
+      authorUsername: null,
+      authorDisplayName: null,
+      authorAvatar: null,
+      authorBio: null,
+      authorSkillsCount: null,
+      authorTotalStars: null,
+    };
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        bind: vi.fn(() => ({
+          first: vi.fn(async () => sql.includes('SELECT visibility')
+            ? { visibility: 'private' }
+            : detailRow),
+        })),
+      })),
+    };
+    getAuthContext.mockResolvedValue({
+      userId: null,
+      orgId: 'org-1',
+      scopes: ['read'],
+    });
+    checkSkillAccess.mockResolvedValue(true);
+
+    const { resolveSkillDetail } = await import('../src/lib/server/skill/detail');
+    const result = await resolveSkillDetail({
+      db: db as never,
+      request: new Request('https://skills.cat/api/skills/acme/private-skill'),
+      locals: {} as App.Locals,
+    }, 'acme/private-skill');
+
+    expect(result.status).toBe(200);
+    expect(checkSkillAccess).toHaveBeenCalled();
+    expect(getRecommendedSkills).toHaveBeenCalledTimes(1);
+    expect(checkSkillAccess.mock.invocationCallOrder[0]).toBeLessThan(
+      getRecommendedSkills.mock.invocationCallOrder[0]
+    );
+  });
+
   it('reuses lightweight recommend mode for cool public skills', async () => {
     const detailRow = {
       id: 'skill_1',

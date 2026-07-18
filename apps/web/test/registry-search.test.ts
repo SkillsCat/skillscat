@@ -108,6 +108,13 @@ function createRegistrySearchDb(): DatabaseSync {
       revoked_at INTEGER
     );
 
+    CREATE TABLE skill_search_terms (
+      skill_id TEXT NOT NULL,
+      term TEXT NOT NULL,
+      PRIMARY KEY (skill_id, term)
+    );
+
+    CREATE INDEX skill_search_terms_term_idx ON skill_search_terms (term);
   `);
 
   return sqlite;
@@ -221,6 +228,8 @@ describe('resolveRegistrySearch', () => {
     expect(resolved.data.total).toBe(2);
     expect(resolved.data.skills.map((skill) => skill.id)).toEqual(['skill-1', 'skill-2']);
     expect(db.queries.some((sql) => sql.includes('COUNT(*) as total'))).toBe(false);
+    const candidateQuery = db.queries.find((sql) => sql.includes('WITH raw_candidates AS'));
+    expect(candidateQuery?.match(/UNION ALL/g) ?? []).toHaveLength(1);
   });
 
   it('derives an exact total for a non-empty final page without an extra count query', async () => {

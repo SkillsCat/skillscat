@@ -63,7 +63,7 @@
         // Check if user has access
         if (org && !org.userRole) {
           goto(`/org/${slug}`);
-        } else if (org && !['owner', 'admin'].includes(org.userRole!)) {
+        } else if (org && org.userRole !== 'owner') {
           goto(`/org/${slug}`);
         }
       } else {

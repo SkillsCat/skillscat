@@ -24,6 +24,8 @@ import {
   SITEMAP_DYNAMIC_CACHE_TTL,
   SITEMAP_DYNAMIC_SHARED_MAX_AGE_SECONDS,
   SITEMAP_DYNAMIC_STALE_WHILE_REVALIDATE_SECONDS,
+  SITEMAP_FULL_SNAPSHOT_MAX_AGE_SECONDS,
+  SITEMAP_RECENT_CACHE_TTL,
 } from '$lib/server/seo/sitemap';
 
 const DYNAMIC_KIND_PATTERN = /^(skills|profiles|orgs)-([1-9]\d*)$/;
@@ -41,7 +43,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 
   if (slug === 'core') {
     return createCachedSitemapResponse({
-      cacheKey: 'sitemap:core:xml',
+      cacheKey: 'sitemap:v2:core:xml',
       ttl: getSitemapHotCacheTtlSeconds(SITEMAP_CORE_CACHE_TTL, refreshMinIntervalSeconds),
       cacheControl: buildSitemapCacheControl({
         browserMaxAgeSeconds: SITEMAP_CORE_BROWSER_MAX_AGE_SECONDS,
@@ -64,10 +66,14 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 
   if (recentMatch) {
     const [, kind] = recentMatch;
+    const isHourlyRecent = kind === 'skills';
 
     return createCachedSitemapResponse({
-      cacheKey: `sitemap:recent:${kind}:xml`,
-      ttl: getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, refreshMinIntervalSeconds),
+      cacheKey: `sitemap:v2:recent:${kind}:xml`,
+      ttl: getSitemapHotCacheTtlSeconds(
+        isHourlyRecent ? SITEMAP_RECENT_CACHE_TTL : SITEMAP_DYNAMIC_CACHE_TTL,
+        refreshMinIntervalSeconds
+      ),
       cacheControl: buildSitemapCacheControl({
         browserMaxAgeSeconds: SITEMAP_DYNAMIC_BROWSER_MAX_AGE_SECONDS,
         sharedMaxAgeSeconds: getSitemapSharedMaxAgeSeconds(
@@ -78,7 +84,9 @@ export const GET: RequestHandler = async ({ params, platform }) => {
       }),
       debugTag: `recent-${kind}`,
       r2,
-      snapshotMaxAgeSeconds,
+      snapshotMaxAgeSeconds: isHourlyRecent
+        ? snapshotMaxAgeSeconds
+        : SITEMAP_FULL_SNAPSHOT_MAX_AGE_SECONDS,
       waitUntil,
       fetcher: async () => {
         let pages: SitemapPage[];
@@ -110,7 +118,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
   const page = Number(pagePart);
 
   return createCachedSitemapResponse({
-    cacheKey: `sitemap:${kind}:${page}:xml`,
+    cacheKey: `sitemap:v2:${kind}:${page}:xml`,
     ttl: getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, refreshMinIntervalSeconds),
     cacheControl: buildSitemapCacheControl({
       browserMaxAgeSeconds: SITEMAP_DYNAMIC_BROWSER_MAX_AGE_SECONDS,
@@ -122,7 +130,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
     }),
     debugTag: `${kind}-${page}`,
     r2,
-    snapshotMaxAgeSeconds,
+    snapshotMaxAgeSeconds: SITEMAP_FULL_SNAPSHOT_MAX_AGE_SECONDS,
     waitUntil,
     fetcher: async () => {
       let pages: SitemapPage[];

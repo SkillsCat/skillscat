@@ -31,6 +31,8 @@ export interface SkillCardData {
   forks: number;
   trendingScore: number;
   updatedAt: number;
+  downloadCount90d?: number | null;
+  accessCount30d?: number | null;
   authorAvatar?: string | null;
   categories: string[]; // category slugs
   classificationMethod?: 'ai' | 'keyword' | 'direct' | null;

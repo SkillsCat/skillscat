@@ -11,6 +11,7 @@ import {
   resolveIndexNowOwnerHandle,
   scheduleIndexNowSubmission,
 } from '$lib/server/seo/indexnow';
+import { isSeoIndexableSkill } from '$lib/seo/indexability';
 import { syncCategoryPublicStats } from '$lib/server/db/business/stats';
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 import { buildTouchOrganizationStatement } from '$lib/server/org/mutations';
@@ -320,6 +321,14 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
       const nextIndexNowUrls = buildIndexNowSkillUrls({
         slug: skill.slug,
         visibility,
+        seoIndexable: isSeoIndexableSkill({
+          visibility,
+          description: skill.description,
+          tier: skill.tier,
+          indexedAt: becamePublic ? now : skill.indexed_at,
+          downloadCount90d: skill.download_count_90d,
+          accessCount30d: skill.access_count_30d,
+        }),
         orgSlug: skill.org_slug,
         ownerHandle: skill.org_slug ? null : resolveIndexNowOwnerHandle(skill.repo_owner, skill.owner_username),
       }, platform?.env);

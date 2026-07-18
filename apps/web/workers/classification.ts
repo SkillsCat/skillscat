@@ -50,6 +50,10 @@ import { syncCategoryPublicStats } from '../src/lib/server/db/business/stats';
 import { markRecommendDirty } from '../src/lib/server/ranking/recommend-precompute';
 import { markSearchDirty } from '../src/lib/server/ranking/search-precompute';
 import { getSkillDetailCacheKeys } from '../src/lib/server/skill/detail';
+import {
+  buildIndexNowCategoryUrls,
+  scheduleIndexNowSubmission,
+} from '../src/lib/server/seo/indexnow';
 
 const log = createLogger('Classification');
 
@@ -751,7 +755,7 @@ async function saveClassification(
   method: ClassificationMethod,
   env: ClassificationEnv,
   knownSlug?: string | null
-): Promise<void> {
+): Promise<string[]> {
   const now = Date.now();
   const previousCategories = await env.DB.prepare('SELECT category_slug FROM skill_categories WHERE skill_id = ?')
     .bind(skillId)
@@ -843,6 +847,7 @@ async function saveClassification(
 
   await markRecommendDirty(env.DB, skillId, now);
   await markSearchDirty(env.DB, skillId, now);
+  return [...affectedCategorySlugs];
 }
 
 function writeClassificationBatchMetric(
@@ -881,7 +886,7 @@ async function processMessage(
   message: ClassificationMessageWithMeta,
   env: ClassificationEnv,
   preloadedSkill: ClassificationSkillStorageLocation | null | undefined = undefined
-): Promise<ClassificationMethod | null> {
+): Promise<{ method: ClassificationMethod; affectedCategorySlugs: string[] } | null> {
   const { skillId, skillSlug, repoOwner, repoName, skillMdPath, stars = 0, tags = [], frontmatterCategories, isReclassification } = message;
   const knownSlug = skillSlug || preloadedSkill?.slug || null;
 
@@ -902,13 +907,13 @@ async function processMessage(
 
       // Save classification and return early
       try {
-        await saveClassification(skillId, directMatch, 'direct', env, knownSlug);
+        const affectedCategorySlugs = await saveClassification(skillId, directMatch, 'direct', env, knownSlug);
         log.log(`Successfully saved direct classification for skill: ${skillId}, categories: ${directMatch.categories.join(', ')}`);
+        return { method: 'direct', affectedCategorySlugs };
       } catch (saveError) {
         log.error(`Failed to save direct classification for ${skillId}:`, saveError);
         throw saveError;
       }
-      return 'direct';
     }
   }
 
@@ -943,21 +948,20 @@ async function processMessage(
   );
 
   try {
-    await saveClassification(skillId, result, method, env, knownSlug);
+    const affectedCategorySlugs = await saveClassification(skillId, result, method, env, knownSlug);
     log.log(`Successfully saved classification for skill: ${skillId}, categories: ${result.categories.join(', ')}`);
+    return { method, affectedCategorySlugs };
   } catch (saveError) {
     log.error(`Failed to save classification for ${skillId}:`, saveError);
     throw saveError;
   }
-
-  return method;
 }
 
 export default {
   async queue(
     batch: MessageBatch<ClassificationMessageWithMeta>,
     env: ClassificationEnv,
-    _ctx: ExecutionContext
+    ctx: ExecutionContext
   ): Promise<void> {
     log.log(`Processing batch of ${batch.messages.length} messages`);
     let preloadedSkillsById = new Map<string, ClassificationSkillStorageLocation>();
@@ -988,6 +992,7 @@ export default {
       ai: 0,
       keyword: 0,
     };
+    const indexNowUrls = new Set<string>();
 
     for (const message of batch.messages) {
       try {
@@ -995,12 +1000,15 @@ export default {
         const preloadedSkill = preloadedSkillsById.has(message.body.skillId)
           ? (preloadedSkillsById.get(message.body.skillId) ?? null)
           : undefined;
-        const method = await processMessage(message.body, env, preloadedSkill);
+        const result = await processMessage(message.body, env, preloadedSkill);
         batchMetricStats.succeeded += 1;
-        if (method === null) {
+        if (result === null) {
           batchMetricStats.skipped += 1;
         } else {
-          batchMetricStats[method] += 1;
+          batchMetricStats[result.method] += 1;
+          for (const url of buildIndexNowCategoryUrls(result.affectedCategorySlugs, env)) {
+            indexNowUrls.add(url);
+          }
         }
         message.ack();
         log.log(`Message acknowledged: ${message.id}`);
@@ -1017,5 +1025,15 @@ export default {
       batchMetricStats,
       preloadStatus
     );
+
+    if (indexNowUrls.size > 0) {
+      const indexNowTask = scheduleIndexNowSubmission({
+        env,
+        urls: [...indexNowUrls],
+        source: `classification:batch:${batch.messages.length}`,
+        waitUntil: ctx.waitUntil?.bind(ctx),
+      });
+      if (indexNowTask) await indexNowTask;
+    }
   },
 };
