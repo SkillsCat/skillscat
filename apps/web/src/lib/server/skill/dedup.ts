@@ -167,12 +167,12 @@ export async function computeExactBundleFingerprint(files: BundleManifestFile[])
   );
 }
 
-export async function storeSkillHashes(
+export function buildSkillHashStatements(
   db: D1Database,
   skillId: string,
-  hashes: StoredSkillHashes
-): Promise<void> {
-  const now = Date.now();
+  hashes: StoredSkillHashes,
+  now = Date.now()
+): D1PreparedStatement[] {
   const records: Array<{ hashType: string; hashValue: string | null | undefined }> = [
     { hashType: 'full', hashValue: hashes.fullHash },
     { hashType: 'normalized', hashValue: hashes.normalizedHash },
@@ -180,9 +180,25 @@ export async function storeSkillHashes(
     { hashType: 'bundle_manifest', hashValue: hashes.bundleManifestHash },
   ];
 
-  for (const record of records) {
-    if (!record.hashValue) continue;
-    await upsertSkillHash(db, skillId, record.hashType, record.hashValue, now);
+  return records
+    .filter((record): record is { hashType: string; hashValue: string } => Boolean(record.hashValue))
+    .map((record) => db.prepare(`
+      INSERT INTO content_hashes (id, skill_id, hash_type, hash_value, created_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(skill_id, hash_type) DO UPDATE SET
+        hash_value = excluded.hash_value
+    `).bind(crypto.randomUUID(), skillId, record.hashType, record.hashValue, now));
+}
+
+export async function storeSkillHashes(
+  db: D1Database,
+  skillId: string,
+  hashes: StoredSkillHashes
+): Promise<void> {
+  const statements = buildSkillHashStatements(db, skillId, hashes);
+
+  if (statements.length > 0) {
+    await db.batch(statements);
   }
 }
 

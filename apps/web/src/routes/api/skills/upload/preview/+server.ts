@@ -2,12 +2,20 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import {
-  computeStandaloneSkillBundleHashes,
   findSkillsByExactHashGroup,
 } from '$lib/server/skill/dedup';
+import {
+  collectPreviewUploadBundle,
+  computeUploadBundleMetadata,
+  MAX_UPLOAD_BUNDLE_TOTAL_BYTES,
+} from '$lib/server/skill/upload-bundle';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '$lib/server/skill/title';
+import {
+  normalizeUploadedCategorySlugs,
+  resolveUploadedSkillName,
+} from '$lib/server/skill/upload-metadata';
 
-const MAX_PREVIEW_BODY_BYTES = 180000;
+const MAX_PREVIEW_BODY_BYTES = (MAX_UPLOAD_BUNDLE_TOTAL_BYTES * 2) + (256 * 1024);
 
 /**
  * Generate a slug from username/org and skill name
@@ -32,7 +40,7 @@ interface SkillFrontmatter {
  * Parse YAML frontmatter from SKILL.md content
  */
 function parseSkillFrontmatter(content: string): { frontmatter: SkillFrontmatter | null; body: string } {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) {
     return { frontmatter: null, body: content };
   }
@@ -73,14 +81,14 @@ function extractCategories(frontmatter: SkillFrontmatter | null): string[] {
   const categories: string[] = [];
 
   if (frontmatter.category) {
-    categories.push(...frontmatter.category.split(',').map(c => c.trim().toLowerCase()));
+    categories.push(...frontmatter.category.split(','));
   }
 
   if (frontmatter.categories) {
-    categories.push(...frontmatter.categories.split(',').map(c => c.trim().toLowerCase()));
+    categories.push(...frontmatter.categories.split(','));
   }
 
-  return [...new Set(categories)].filter(Boolean);
+  return normalizeUploadedCategorySlugs(categories);
 }
 
 /**
@@ -191,7 +199,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   }
 
   const auth = await getAuthContext(request, locals, db);
-  if (!auth.userId || !auth.user) {
+  if (!auth.userId && !auth.orgId) {
     throw error(401, 'Authentication required');
   }
   requireSubmitPublishScope(auth);
@@ -199,10 +207,12 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   const payload = await readLimitedJsonBody(request, MAX_PREVIEW_BODY_BYTES) as {
     content?: string;
     org?: string;
+    name?: string;
+    files?: unknown;
   };
 
   const skillMdContent = payload.content;
-  const orgSlug = payload.org;
+  let orgSlug = payload.org;
 
   if (!skillMdContent || typeof skillMdContent !== 'string') {
     throw error(400, 'content field is required');
@@ -215,13 +225,15 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   }
 
   // Get username for slug
-  const user = await db.prepare(`
-    SELECT name FROM user WHERE id = ?
-  `)
-    .bind(auth.userId)
-    .first<{ name: string }>();
+  const user = auth.userId
+    ? await db.prepare(`
+        SELECT name FROM user WHERE id = ?
+      `)
+      .bind(auth.userId)
+      .first<{ name: string }>()
+    : null;
 
-  const username = user?.name || auth.userId.slice(0, 8);
+  const username = user?.name || auth.userId?.slice(0, 8) || null;
 
   // Determine owner context
   let slugOwner = username;
@@ -229,21 +241,36 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   // Check if org is connected to GitHub (to determine default visibility)
   let orgConnectedToGithub = false;
 
-  if (orgSlug) {
-    const org = await db.prepare(`
-      SELECT o.id, o.slug, o.github_org_id FROM organizations o
-      INNER JOIN org_members om ON o.id = om.org_id
-      WHERE o.slug = ? AND om.user_id = ?
-    `)
-      .bind(orgSlug, auth.userId)
-      .first<{ id: string; slug: string; github_org_id: number | null }>();
+  if (auth.orgId || orgSlug) {
+    const org = auth.orgId
+      ? await db.prepare(`
+          SELECT id, slug, github_org_id, verified_at FROM organizations WHERE id = ?
+        `)
+        .bind(auth.orgId)
+        .first<{ id: string; slug: string; github_org_id: number | null; verified_at: number | null }>()
+      : await db.prepare(`
+          SELECT o.id, o.slug, o.github_org_id, o.verified_at FROM organizations o
+          INNER JOIN org_members om ON o.id = om.org_id
+          WHERE o.slug = ? COLLATE NOCASE AND om.user_id = ?
+        `)
+        .bind(orgSlug, auth.userId)
+        .first<{ id: string; slug: string; github_org_id: number | null; verified_at: number | null }>();
 
     if (!org) {
       throw error(403, 'You are not a member of this organization');
     }
 
+    if (auth.orgId && orgSlug && org.slug.toLowerCase() !== orgSlug.toLowerCase()) {
+      throw error(403, 'Organization token does not match the requested organization');
+    }
+
     slugOwner = org.slug;
-    orgConnectedToGithub = org.github_org_id !== null;
+    orgSlug = org.slug;
+    orgConnectedToGithub = org.github_org_id !== null && org.verified_at !== null;
+  }
+
+  if (!slugOwner) {
+    throw error(400, 'Unable to determine skill owner');
   }
 
   // Determine suggested visibility
@@ -253,7 +280,10 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   const suggestedVisibility = orgSlug && orgConnectedToGithub ? 'public' : 'private';
 
   // Generate preview slug
-  const skillName = validation.name || 'untitled-skill';
+  const skillName = resolveUploadedSkillName(payload.name, validation.name);
+  if (!skillName) {
+    throw error(400, 'Skill name must be 200 characters or less and contain a letter or number');
+  }
   const slug = generateSlug(slugOwner, skillName);
 
   // Check for duplicate slug and existing public version
@@ -272,7 +302,8 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     canPublishPublic = false;
   }
 
-  const hashes = await computeStandaloneSkillBundleHashes(skillMdContent);
+  const bundleFiles = collectPreviewUploadBundle(payload.files, skillMdContent);
+  const { hashes } = await computeUploadBundleMetadata(bundleFiles);
   const [existingPublicByHash] = await findSkillsByExactHashGroup(
     db,
     hashes.fullHash,

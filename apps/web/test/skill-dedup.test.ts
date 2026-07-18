@@ -10,6 +10,7 @@ import {
   convertPrivateSkillToPublicGithub,
   findSkillsByExactHashGroup,
   findSkillsByHashGroup,
+  storeSkillHashes,
 } from '../src/lib/server/skill/dedup';
 
 class SqliteD1Statement {
@@ -46,6 +47,10 @@ class SqliteD1Database {
 
   prepare(sql: string) {
     return new SqliteD1Statement(this.db, sql);
+  }
+
+  async batch(statements: SqliteD1Statement[]) {
+    return Promise.all(statements.map((statement) => statement.run()));
   }
 }
 
@@ -96,6 +101,30 @@ function createHashDb() {
 }
 
 describe('skill dedup helpers', () => {
+  it('stores all available hashes in one D1 batch', async () => {
+    const sqlite = createHashDb();
+    const db = new SqliteD1Database(sqlite);
+
+    await storeSkillHashes(db as never, 'skill-1', {
+      fullHash: 'full-hash',
+      normalizedHash: 'normalized-hash',
+      bundleExactHash: 'bundle-exact-hash',
+      bundleManifestHash: 'bundle-manifest-hash',
+    });
+
+    expect(sqlite.prepare(`
+      SELECT hash_type, hash_value
+      FROM content_hashes
+      WHERE skill_id = 'skill-1'
+      ORDER BY hash_type
+    `).all()).toEqual([
+      { hash_type: 'bundle_exact', hash_value: 'bundle-exact-hash' },
+      { hash_type: 'bundle_manifest', hash_value: 'bundle-manifest-hash' },
+      { hash_type: 'full', hash_value: 'full-hash' },
+      { hash_type: 'normalized', hash_value: 'normalized-hash' },
+    ]);
+  });
+
   it('keeps the bundle hash stable when SKILL.md only differs by formatting', async () => {
     const compact = '# Agent\n\nUse the tool.\n';
     const spaced = '  # Agent\r\n\r\nUse the tool.\r\n';

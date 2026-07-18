@@ -3,6 +3,8 @@ import type { RequestHandler } from './$types';
 import { getCached } from '$lib/server/cache';
 import { getAuthContext } from '$lib/server/auth/middleware';
 import { checkSkillAccess } from '$lib/server/auth/permissions';
+import { getCurrentSkillVisibility } from '$lib/server/skill/visibility';
+import { getRegistrySkillCacheKey } from '$lib/server/cache/keys';
 import {
   buildGithubSkillR2Keys,
   buildSkillSlug,
@@ -27,6 +29,7 @@ interface RegistrySkillRow {
   skillPath: string | null;
   sourceType: string;
   readme: string | null;
+  contentHash: string | null;
   visibility: string;
   categories: string | null;
 }
@@ -50,9 +53,13 @@ function baseCorsHeaders(): Record<string, string> {
 }
 
 function responseHeaders(opts: { cacheControl: string; cacheStatus?: string }): Record<string, string> {
+  const responseCacheControl = opts.cacheControl.trim().toLowerCase().startsWith('public')
+    ? 'private, no-cache'
+    : opts.cacheControl;
   const headers: Record<string, string> = {
     ...baseCorsHeaders(),
-    'Cache-Control': opts.cacheControl,
+    'Cache-Control': responseCacheControl,
+    'CDN-Cache-Control': 'no-store',
   };
   if (opts.cacheStatus) {
     headers['X-Cache'] = opts.cacheStatus;
@@ -61,6 +68,7 @@ function responseHeaders(opts: { cacheControl: string; cacheStatus?: string }): 
 }
 
 export interface RegistrySkillItem {
+  slug: string;
   name: string;
   description: string;
   owner: string;
@@ -69,7 +77,9 @@ export interface RegistrySkillItem {
   updatedAt: number;
   categories: string[];
   content: string;
+  contentHash?: string;
   githubUrl: string;
+  skillPath: string;
   visibility: 'public' | 'private' | 'unlisted';
 }
 
@@ -102,32 +112,37 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
     let row: RegistrySkillRow | null = null;
     let skill: RegistrySkillItem | null = null;
     let cacheStatus: 'HIT' | 'MISS' | 'BYPASS' = 'BYPASS';
+    const currentVisibility = await getCurrentSkillVisibility(db, slug);
 
-    try {
-      const cached = await getCached(
-        `registry:skill:${slug}`,
-        async () => {
-          const publicRow = await fetchSkillRow(db, slug);
-          if (!publicRow) {
-            throw new PublicSkillCacheBypass('not_found');
-          }
-          if (publicRow.visibility !== 'public') {
-            throw new PublicSkillCacheBypass(publicRow.visibility as 'private' | 'unlisted', publicRow);
-          }
-          return buildRegistrySkill(publicRow, r2);
-        },
-        PUBLIC_CACHE_TTL_SECONDS,
-        { waitUntil }
-      );
+    if (currentVisibility === 'public') {
+      try {
+        const cached = await getCached(
+          getRegistrySkillCacheKey(slug),
+          async () => {
+            const publicRow = await fetchSkillRow(db, slug);
+            if (!publicRow) {
+              throw new PublicSkillCacheBypass('not_found');
+            }
+            if (publicRow.visibility !== 'public') {
+              throw new PublicSkillCacheBypass(publicRow.visibility as 'private' | 'unlisted', publicRow);
+            }
+            return buildRegistrySkill(publicRow, r2);
+          },
+          PUBLIC_CACHE_TTL_SECONDS,
+          { waitUntil }
+        );
 
-      skill = cached.data;
-      cacheStatus = cached.hit ? 'HIT' : 'MISS';
-    } catch (err) {
-      if (err instanceof PublicSkillCacheBypass) {
-        row = err.row;
-      } else {
-        throw err;
+        skill = cached.data;
+        cacheStatus = cached.hit ? 'HIT' : 'MISS';
+      } catch (err) {
+        if (err instanceof PublicSkillCacheBypass) {
+          row = err.row;
+        } else {
+          throw err;
+        }
       }
+    } else if (currentVisibility) {
+      row = await fetchSkillRow(db, slug);
     }
 
     if (skill) {
@@ -148,7 +163,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
 
     if (row.visibility === 'private') {
       const auth = await getAuthContext(request, locals, db);
-      if (!auth.userId) {
+      if (!auth.userId && !auth.orgId) {
         return json(
           { error: 'Authentication required to access this skill' },
           { status: 401, headers: responseHeaders({ cacheControl: 'no-store', cacheStatus: 'BYPASS' }) }
@@ -160,7 +175,10 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
           { status: 403, headers: responseHeaders({ cacheControl: 'no-store', cacheStatus: 'BYPASS' }) }
         );
       }
-      const hasAccess = await checkSkillAccess(row.id, auth.userId, db);
+      const hasAccess = await checkSkillAccess(row.id, {
+        userId: auth.userId,
+        orgId: auth.orgId,
+      }, db);
       if (!hasAccess) {
         return json(
           { error: 'You do not have permission to access this skill' },
@@ -201,6 +219,7 @@ async function fetchSkillRow(db: D1Database, slug: string): Promise<RegistrySkil
       s.skill_path as skillPath,
       s.source_type as sourceType,
       s.readme,
+      s.content_hash as contentHash,
       s.visibility,
       GROUP_CONCAT(sc.category_slug) as categories
     FROM skills s
@@ -217,22 +236,10 @@ async function buildRegistrySkill(row: RegistrySkillRow, r2: R2Bucket | undefine
     try {
       if (row.sourceType === 'upload') {
         const canonicalPath = buildUploadSkillR2Key(row.slug, 'SKILL.md');
-        const parsedSlug = parseSkillSlug(row.slug);
-        const candidatePaths = new Set<string>();
-
         if (canonicalPath) {
-          candidatePaths.add(canonicalPath);
-        }
-        if (parsedSlug) {
-          // Legacy fallback for previously stored upload paths.
-          candidatePaths.add(`skills/${parsedSlug.owner}/${parsedSlug.name.split('/')[0]}/SKILL.md`);
-        }
-
-        for (const key of candidatePaths) {
-          const object = await r2.get(key);
+          const object = await r2.get(canonicalPath);
           if (object) {
             content = await object.text();
-            break;
           }
         }
       } else if (row.owner && row.repo) {
@@ -255,6 +262,7 @@ async function buildRegistrySkill(row: RegistrySkillRow, r2: R2Bucket | undefine
   const parsedSlug = parseSkillSlug(row.slug);
 
   return {
+    slug: row.slug,
     name: row.name,
     description: row.description || '',
     owner: row.owner || parsedSlug?.owner || '',
@@ -263,7 +271,9 @@ async function buildRegistrySkill(row: RegistrySkillRow, r2: R2Bucket | undefine
     updatedAt: row.updatedAt,
     categories: row.categories ? row.categories.split(',') : [],
     content,
+    contentHash: row.contentHash || undefined,
     githubUrl: row.githubUrl || '',
+    skillPath: row.skillPath || '',
     visibility: row.visibility as 'public' | 'private' | 'unlisted'
   };
 }

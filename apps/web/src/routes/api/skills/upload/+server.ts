@@ -12,11 +12,19 @@ import { invalidateCategoryCaches } from '$lib/server/cache/categories';
 import { buildUploadSkillR2Key } from '$lib/skill-path';
 import { decodeBase64Utf8 } from '$lib/server/text/codec';
 import {
-  computeStandaloneSkillBundleHashes,
   findSkillsByExactHashGroup,
   storeSkillHashes,
 } from '$lib/server/skill/dedup';
+import {
+  buildUploadBundleFileTree,
+  collectMultipartUploadBundle,
+  computeUploadBundleMetadata,
+} from '$lib/server/skill/upload-bundle';
 import { normalizeExtractedSkillTitle, stripYamlInlineComment } from '$lib/server/skill/title';
+import {
+  normalizeUploadedCategorySlugs,
+  resolveUploadedSkillName,
+} from '$lib/server/skill/upload-metadata';
 import { buildSecurityContentFingerprint } from '$lib/server/security';
 import {
   buildSecurityAnalysisMessage,
@@ -28,6 +36,8 @@ import {
   buildIndexNowSkillUrls,
   scheduleIndexNowSubmission,
 } from '$lib/server/seo/indexnow';
+import { buildTouchOrganizationStatement } from '$lib/server/org/mutations';
+import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 
 /**
  * Generate a slug from username/org and skill name
@@ -48,11 +58,20 @@ interface SkillFrontmatter {
   keywords?: string;
 }
 
+function readOptionalFormText(formData: FormData, field: string): string | null {
+  const value = formData.get(field);
+  if (value === null) return null;
+  if (typeof value !== 'string') {
+    throw error(400, `${field} must be a text field`);
+  }
+  return value;
+}
+
 /**
  * Parse YAML frontmatter from SKILL.md content
  */
 function parseSkillFrontmatter(content: string): { frontmatter: SkillFrontmatter | null; body: string } {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) {
     return { frontmatter: null, body: content };
   }
@@ -93,14 +112,14 @@ function extractCategories(frontmatter: SkillFrontmatter | null): string[] {
   const categories: string[] = [];
 
   if (frontmatter.category) {
-    categories.push(...frontmatter.category.split(',').map(c => c.trim().toLowerCase()));
+    categories.push(...frontmatter.category.split(','));
   }
 
   if (frontmatter.categories) {
-    categories.push(...frontmatter.categories.split(',').map(c => c.trim().toLowerCase()));
+    categories.push(...frontmatter.categories.split(','));
   }
 
-  return [...new Set(categories)].filter(Boolean);
+  return normalizeUploadedCategorySlugs(categories);
 }
 
 /**
@@ -163,14 +182,15 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
   }
 
   const auth = await getAuthContext(request, locals, db);
-  if (!auth.userId || !auth.user) {
+  if (!auth.userId && !auth.orgId) {
     throw error(401, 'Authentication required');
   }
   requireSubmitPublishScope(auth);
 
   // Get content from query params (base64 encoded)
   const contentBase64 = url.searchParams.get('content');
-  const orgSlug = url.searchParams.get('org');
+  let orgSlug = url.searchParams.get('org');
+  const nameOverride = url.searchParams.get('name');
 
   if (!contentBase64) {
     throw error(400, 'content parameter is required (base64 encoded SKILL.md)');
@@ -196,13 +216,15 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
   }
 
   // Get username for slug
-  const user = await db.prepare(`
-    SELECT name FROM user WHERE id = ?
-  `)
-    .bind(auth.userId)
-    .first<{ name: string }>();
+  const user = auth.userId
+    ? await db.prepare(`
+        SELECT name FROM user WHERE id = ?
+      `)
+      .bind(auth.userId)
+      .first<{ name: string }>()
+    : null;
 
-  const username = user?.name || auth.userId.slice(0, 8);
+  const username = user?.name || auth.userId?.slice(0, 8) || 'user';
 
   // Determine owner context
   let slugOwner = username;
@@ -210,21 +232,32 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
   // Check if org is connected to GitHub (to determine default visibility)
   let orgConnectedToGithub = false;
 
-  if (orgSlug) {
-    const org = await db.prepare(`
-      SELECT o.id, o.slug, o.github_org_id FROM organizations o
-      INNER JOIN org_members om ON o.id = om.org_id
-      WHERE o.slug = ? AND om.user_id = ?
-    `)
-      .bind(orgSlug, auth.userId)
-      .first<{ id: string; slug: string; github_org_id: number | null }>();
+  if (auth.orgId || orgSlug) {
+    const org = auth.orgId
+      ? await db.prepare(`
+          SELECT id, slug, github_org_id, verified_at FROM organizations WHERE id = ?
+        `)
+        .bind(auth.orgId)
+        .first<{ id: string; slug: string; github_org_id: number | null; verified_at: number | null }>()
+      : await db.prepare(`
+          SELECT o.id, o.slug, o.github_org_id, o.verified_at FROM organizations o
+          INNER JOIN org_members om ON o.id = om.org_id
+          WHERE o.slug = ? COLLATE NOCASE AND om.user_id = ?
+        `)
+        .bind(orgSlug, auth.userId)
+        .first<{ id: string; slug: string; github_org_id: number | null; verified_at: number | null }>();
 
     if (!org) {
       throw error(403, 'You are not a member of this organization');
     }
 
+    if (auth.orgId && orgSlug && org.slug.toLowerCase() !== orgSlug.toLowerCase()) {
+      throw error(403, 'Organization token does not match the requested organization');
+    }
+
     slugOwner = org.slug;
-    orgConnectedToGithub = org.github_org_id !== null;
+    orgSlug = org.slug;
+    orgConnectedToGithub = org.github_org_id !== null && org.verified_at !== null;
   }
 
   // Determine suggested visibility
@@ -234,7 +267,10 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
   const suggestedVisibility = orgSlug && orgConnectedToGithub ? 'public' : 'private';
 
   // Generate preview slug
-  const skillName = validation.name || 'untitled-skill';
+  const skillName = resolveUploadedSkillName(nameOverride, validation.name);
+  if (!skillName) {
+    throw error(400, 'Skill name must be 200 characters or less and contain a letter or number');
+  }
   const slug = generateSlug(slugOwner, skillName);
 
   // Check for duplicate slug and existing public version
@@ -251,7 +287,11 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
     warnings.push(`A skill with slug ${slug} already exists. Publishing will fail.`);
   }
 
-  const hashes = await computeStandaloneSkillBundleHashes(skillMdContent);
+  const { hashes } = await computeUploadBundleMetadata([{
+    path: 'SKILL.md',
+    content: skillMdContent,
+    size: new TextEncoder().encode(skillMdContent).byteLength,
+  }]);
   const [existingPublicByHash] = await findSkillsByExactHashGroup(
     db,
     hashes.fullHash,
@@ -294,18 +334,23 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   }
 
   const auth = await getAuthContext(request, locals, db);
-  if (!auth.userId || !auth.user) {
+  if (!auth.userId && !auth.orgId) {
     throw error(401, 'Authentication required');
   }
   requireSubmitPublishScope(auth);
 
   // Parse multipart form data
-  const formData = await request.formData();
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    throw error(400, 'Invalid multipart form data');
+  }
   const skillMdFile = formData.get('skill_md');
-  const name = formData.get('name') as string | null;
-  const description = formData.get('description') as string | null;
-  const orgSlug = formData.get('org') as string | null;
-  const visibility = (formData.get('visibility') as string) || 'private';
+  const name = readOptionalFormText(formData, 'name');
+  const description = readOptionalFormText(formData, 'description');
+  let orgSlug = readOptionalFormText(formData, 'org');
+  const visibility = readOptionalFormText(formData, 'visibility') || 'private';
 
   // Validate visibility
   if (!['public', 'private', 'unlisted'].includes(visibility)) {
@@ -321,6 +366,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   } else {
     throw error(400, 'SKILL.md file is required');
   }
+  const bundleFiles = await collectMultipartUploadBundle(formData, skillMdContent);
 
   // Validate content
   const validation = validateSkillMd(skillMdContent);
@@ -329,39 +375,64 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   }
 
   // Get username for slug
-  const user = await db.prepare(`
-    SELECT name FROM user WHERE id = ?
-  `)
-    .bind(auth.userId)
-    .first<{ name: string }>();
+  const user = auth.userId
+    ? await db.prepare(`
+        SELECT name FROM user WHERE id = ?
+      `)
+      .bind(auth.userId)
+      .first<{ name: string }>()
+    : null;
 
-  const username = user?.name || auth.userId.slice(0, 8);
+  const username = user?.name || auth.userId?.slice(0, 8) || null;
 
   // Determine owner context (user or org)
   let orgId: string | null = null;
   let slugOwner = username;
+  let orgVerifiedWithGithub = false;
 
-  if (orgSlug) {
-    // Verify user is member of the org
-    const org = await db.prepare(`
-      SELECT o.id, o.slug FROM organizations o
-      INNER JOIN org_members om ON o.id = om.org_id
-      WHERE o.slug = ? AND om.user_id = ?
-    `)
-      .bind(orgSlug, auth.userId)
-      .first<{ id: string; slug: string }>();
+  if (auth.orgId || orgSlug) {
+    const org = auth.orgId
+      ? await db.prepare(`
+          SELECT id, slug, github_org_id, verified_at FROM organizations WHERE id = ?
+        `)
+        .bind(auth.orgId)
+        .first<{ id: string; slug: string; github_org_id: number | null; verified_at: number | null }>()
+      : await db.prepare(`
+          SELECT o.id, o.slug, o.github_org_id, o.verified_at FROM organizations o
+          INNER JOIN org_members om ON o.id = om.org_id
+          WHERE o.slug = ? COLLATE NOCASE AND om.user_id = ?
+        `)
+        .bind(orgSlug, auth.userId)
+        .first<{ id: string; slug: string; github_org_id: number | null; verified_at: number | null }>();
 
     if (!org) {
       throw error(403, 'You are not a member of this organization');
     }
 
+    if (auth.orgId && orgSlug && org.slug.toLowerCase() !== orgSlug.toLowerCase()) {
+      throw error(403, 'Organization token does not match the requested organization');
+    }
+
     orgId = org.id;
     slugOwner = org.slug;
+    orgSlug = org.slug;
+    orgVerifiedWithGithub = org.github_org_id !== null && org.verified_at !== null;
+  }
+
+  if (!slugOwner) {
+    throw error(400, 'Unable to determine skill owner');
+  }
+
+  if (visibility === 'public' && !orgVerifiedWithGithub) {
+    throw error(403, 'Public uploads require a verified GitHub organization');
   }
 
   // Generate skill ID and slug
   const skillId = crypto.randomUUID();
-  const skillName = name || validation.name || 'untitled-skill';
+  const skillName = resolveUploadedSkillName(name, validation.name);
+  if (!skillName) {
+    throw error(400, 'Skill name must be 200 characters or less and contain a letter or number');
+  }
   const slug = generateSlug(slugOwner, skillName);
 
   // Check for duplicate slug
@@ -376,8 +447,18 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   }
 
   // Compute content hash
-  const hashes = await computeStandaloneSkillBundleHashes(skillMdContent);
+  const bundleMetadata = await computeUploadBundleMetadata(bundleFiles);
+  const { hashes } = bundleMetadata;
   const contentHash = hashes.fullHash;
+  const categorySlugs = validation.categories || [];
+  const r2Files = bundleFiles.map((file) => ({
+    ...file,
+    key: buildUploadSkillR2Key(slug, file.path),
+  }));
+  if (r2Files.some((file) => !file.key)) {
+    throw error(400, 'Invalid skill slug');
+  }
+  const fileStructure = JSON.stringify(buildUploadBundleFileTree(bundleFiles));
   const [existingPublicByHash] = await findSkillsByExactHashGroup(
     db,
     hashes.fullHash,
@@ -399,11 +480,11 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   // Insert skill into database
   const now = Date.now();
   try {
-    await db.prepare(`
+    const insertSkillStatement = db.prepare(`
       INSERT INTO skills (
         id, name, slug, description, visibility, owner_id, org_id,
-        source_type, readme, content_hash, created_at, updated_at, indexed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'upload', ?, ?, ?, ?, ?)
+        source_type, readme, file_structure, content_hash, created_at, updated_at, indexed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'upload', ?, ?, ?, ?, ?, ?)
     `)
       .bind(
         skillId,
@@ -414,12 +495,20 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
         auth.userId,
         orgId,
         skillMdContent,
+        fileStructure,
         contentHash,
         now,
         now,
         now
-      )
-      .run();
+      );
+    if (orgId) {
+      await db.batch([
+        insertSkillStatement,
+        buildTouchOrganizationStatement(db, orgId, now),
+      ]);
+    } else {
+      await insertSkillStatement.run();
+    }
   } catch (err) {
     const message = String(err);
     if (message.includes('skills_slug_unique') || message.includes('skills.slug')) {
@@ -428,24 +517,45 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     throw err;
   }
 
-  await storeSkillHashes(db, skillId, hashes);
-
-  // Store SKILL.md in R2 after DB insert succeeds to avoid accidental overwrite
-  // during concurrent uploads that race on slug uniqueness.
-  const r2Path = buildUploadSkillR2Key(slug, 'SKILL.md');
-  if (!r2Path) {
-    throw error(400, 'Invalid skill slug');
+  try {
+    await storeSkillHashes(db, skillId, hashes);
+    if (categorySlugs.length > 0) {
+      await db.batch(categorySlugs.map((categorySlug) => db.prepare(`
+        INSERT INTO skill_categories (skill_id, category_slug)
+        VALUES (?, ?)
+        ON CONFLICT(skill_id, category_slug) DO NOTHING
+      `).bind(skillId, categorySlug)));
+    }
+  } catch (metadataError) {
+    console.error(`Failed to store upload metadata for skill ${skillId}:`, metadataError);
+    try {
+      await db.prepare('DELETE FROM skills WHERE id = ?').bind(skillId).run();
+    } catch (rollbackError) {
+      console.error(`Rollback failed for uploaded skill ${skillId}:`, rollbackError);
+    }
+    throw error(500, 'Failed to store skill metadata');
   }
 
+  // Store the complete bundle in R2 after DB metadata succeeds to avoid accidental
+  // overwrite during concurrent uploads that race on slug uniqueness.
   try {
-    await r2.put(r2Path, skillMdContent, {
-      httpMetadata: { contentType: 'text/markdown' },
+    const uploadedAt = new Date().toISOString();
+    const writes = await Promise.allSettled(r2Files.map((file) => r2.put(file.key!, file.content, {
+      httpMetadata: {
+        contentType: file.path.toLowerCase().endsWith('.md')
+          ? 'text/markdown; charset=utf-8'
+          : 'text/plain; charset=utf-8',
+      },
       customMetadata: {
         skillId,
-        uploadedBy: auth.userId,
-        uploadedAt: new Date().toISOString(),
+        uploadedBy: auth.principalId || 'unknown',
+        uploadedAt,
       },
-    });
+    })));
+    if (writes.some((result) => result.status === 'rejected')) {
+      await Promise.allSettled(r2Files.map((file) => r2.delete(file.key!)));
+      throw new Error('One or more bundle files could not be stored');
+    }
   } catch (err) {
     console.error(`Failed to write upload content to R2 for skill ${skillId}:`, err);
     // Roll back DB record so upload remains all-or-nothing.
@@ -458,12 +568,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   }
 
   try {
-    const securityFingerprint = await buildSecurityContentFingerprint([{
-      path: 'SKILL.md',
-      sha: contentHash,
-      size: new TextEncoder().encode(skillMdContent).byteLength,
-      type: 'text',
-    }]);
+    const securityFingerprint = await buildSecurityContentFingerprint(bundleMetadata.manifestFiles);
 
     await markSkillSecurityDirty(db, {
       skillId,
@@ -486,8 +591,10 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
         ...getSkillPageCacheInvalidationKeys(slug),
       ].map((cacheKey) => invalidateCache(cacheKey)));
 
-      if ((validation.categories || []).length > 0) {
-        await invalidateCategoryCaches(validation.categories || []);
+      await invalidateOpenClawSkillCaches(skillId, slug, orgSlug);
+
+      if (categorySlugs.length > 0) {
+        await invalidateCategoryCaches(categorySlugs);
       }
     } catch (cacheError) {
       console.error(`Failed to invalidate public discovery caches for uploaded skill ${skillId}:`, cacheError);
@@ -516,7 +623,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     slug,
     name: skillName,
     description: description || validation.description || null,
-    categories: validation.categories || [],
+    categories: categorySlugs,
     message: 'Skill uploaded successfully',
   });
 };

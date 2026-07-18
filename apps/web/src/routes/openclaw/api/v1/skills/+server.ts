@@ -13,6 +13,7 @@ import {
 } from '$lib/server/openclaw/registry';
 import {
   buildOpenClawBrowseListCacheKey,
+  canCacheOpenClawBrowseList,
   getOpenClawRouteCachePolicy,
   invalidateOpenClawSkillCaches,
   resolveOpenClawJsonCache,
@@ -24,9 +25,15 @@ import {
 } from '$lib/server/openclaw/clawhub-compat';
 import { resolveOpenClawVersionState } from '$lib/server/openclaw/skill-state';
 import {
+  acquireOpenClawPublishLock,
   buildOpenClawFileTree,
+  deleteOpenClawCurrentFiles,
+  deleteOpenClawManifest,
+  deleteOpenClawVersionFiles,
   findOpenClawReadme,
+  readOpenClawCurrentFiles,
   readOpenClawManifest,
+  releaseOpenClawPublishLock,
   replaceOpenClawCurrentFiles,
   snapshotOpenClawVersionFiles,
   writeOpenClawManifest,
@@ -34,16 +41,27 @@ import {
 } from '$lib/server/openclaw/compat-store';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import { canWriteSkill } from '$lib/server/auth/permissions';
+import { invalidateCache } from '$lib/server/cache';
 import { parseSkillSlug } from '$lib/skill-path';
 import { resolveOpenClawOwnerContext } from '$lib/server/openclaw/identity';
+import { getCurrentPublicSkillSlugs } from '$lib/server/skill/visibility';
 import {
   computeBundleManifestHash,
   computeExactBundleFingerprint,
   computeSha256Hex,
   computeSkillMdHashes,
+  buildSkillHashStatements,
   findSkillsByExactHashGroup,
-  storeSkillHashes,
 } from '$lib/server/skill/dedup';
+import { buildTouchOrganizationStatement } from '$lib/server/org/mutations';
+
+const MAX_OPENCLAW_PUBLISH_FILES = 128;
+const MAX_OPENCLAW_FILE_BYTES = 1024 * 1024;
+const MAX_OPENCLAW_TOTAL_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_OPENCLAW_FILE_PATH_LENGTH = 512;
+const MAX_OPENCLAW_PAYLOAD_BYTES = 64 * 1024;
+const MAX_OPENCLAW_TAGS = 32;
+const MAX_OPENCLAW_TAG_LENGTH = 64;
 
 interface SkillListRow {
   id: string;
@@ -53,6 +71,7 @@ interface SkillListRow {
   stars: number | null;
   downloadCount30d: number | null;
   downloadCount90d: number | null;
+  sourceType: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -130,7 +149,8 @@ function extractMarkdownTitle(content: string): string | null {
 }
 
 function extractMarkdownSummary(content: string): string | null {
-  const blocks = content
+  const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+  const blocks = body
     .split(/\n\s*\n/)
     .map((block) => block.trim())
     .filter(Boolean);
@@ -146,19 +166,32 @@ function extractMarkdownSummary(content: string): string | null {
 
 async function collectUploadedFiles(formData: FormData): Promise<Array<{ path: string; content: string; size: number }>> {
   const uploads = [...formData.getAll('files'), ...formData.getAll('files[]')];
+  if (uploads.length > MAX_OPENCLAW_PUBLISH_FILES) {
+    throw error(413, `A maximum of ${MAX_OPENCLAW_PUBLISH_FILES} files can be published at once`);
+  }
+
   const seen = new Set<string>();
   const files: Array<{ path: string; content: string; size: number }> = [];
+  let totalBytes = 0;
 
   for (const entry of uploads) {
     if (!(entry instanceof File)) continue;
     const path = normalizeUploadPath(entry.name);
-    if (!isValidUploadPath(path)) {
+    if (!isValidUploadPath(path) || path.length > MAX_OPENCLAW_FILE_PATH_LENGTH) {
       throw error(400, `Invalid file path: ${entry.name || '(empty)'}`);
     }
     if (seen.has(path)) {
       throw error(400, `Duplicate file path: ${path}`);
     }
     seen.add(path);
+
+    if (entry.size > MAX_OPENCLAW_FILE_BYTES) {
+      throw error(413, `File exceeds the ${MAX_OPENCLAW_FILE_BYTES} byte limit: ${path}`);
+    }
+    totalBytes += entry.size;
+    if (totalBytes > MAX_OPENCLAW_TOTAL_FILE_BYTES) {
+      throw error(413, `Published files exceed the ${MAX_OPENCLAW_TOTAL_FILE_BYTES} byte total limit`);
+    }
 
     const content = await entry.text();
     files.push({
@@ -191,6 +224,32 @@ async function computeOpenClawSkillHashes(
   };
 }
 
+async function rollbackOpenClawPublishArtifacts(input: {
+  r2: R2Bucket;
+  nativeSlug: string;
+  compatSlug: string;
+  version: string;
+  previousCurrentFiles: Array<{ path: string; content: string }>;
+  previousManifest: OpenClawCompatManifest | null;
+}): Promise<void> {
+  const currentFilesRollback = input.previousCurrentFiles.length > 0
+    ? replaceOpenClawCurrentFiles(input.r2, input.nativeSlug, input.previousCurrentFiles)
+    : deleteOpenClawCurrentFiles(input.r2, input.nativeSlug);
+  const manifestRollback = input.previousManifest
+    ? writeOpenClawManifest(input.r2, input.previousManifest)
+    : deleteOpenClawManifest(input.r2, input.compatSlug);
+
+  const results = await Promise.allSettled([
+    currentFilesRollback,
+    manifestRollback,
+    deleteOpenClawVersionFiles(input.r2, input.compatSlug, input.version),
+  ]);
+  const failed = results.find((result) => result.status === 'rejected');
+  if (failed?.status === 'rejected') {
+    throw failed.reason;
+  }
+}
+
 async function fetchOpenClawSkillListPage(input: {
   db: D1Database;
   r2: R2Bucket | undefined;
@@ -212,6 +271,7 @@ async function fetchOpenClawSkillListPage(input: {
         s.stars,
         s.download_count_30d as downloadCount30d,
         s.download_count_90d as downloadCount90d,
+        s.source_type as sourceType,
         s.created_at as createdAt,
         COALESCE(s.last_commit_at, s.updated_at) as updatedAt
       FROM skills s INDEXED BY ${indexHint}
@@ -229,8 +289,11 @@ async function fetchOpenClawSkillListPage(input: {
     items: await Promise.all(
       pageRows.map(async (row) => {
         const compatSlug = encodeClawHubCompatSlug(row.slug);
+        // GitHub-backed skills never have a ClawHub publish manifest. Avoid an
+        // R2 miss per browse result and derive their compatibility version
+        // directly from the indexed timestamps.
         const versionState = await resolveOpenClawVersionState({
-          r2: input.r2,
+          r2: row.sourceType === 'upload' ? input.r2 : undefined,
           compatSlug,
           updatedAt: row.updatedAt,
           createdAt: row.createdAt,
@@ -241,7 +304,10 @@ async function fetchOpenClawSkillListPage(input: {
           displayName: row.name,
           summary: row.description || null,
           tags: versionState.tags,
-          stats: buildOpenClawStats(row),
+          stats: buildOpenClawStats({
+            ...row,
+            versions: versionState.versions.length,
+          }),
           createdAt: row.createdAt,
           updatedAt: row.updatedAt,
           latestVersion: versionState.latestVersion,
@@ -274,13 +340,29 @@ export const GET: RequestHandler = async ({ url, platform }) => {
   const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
   const cachePolicy = getOpenClawRouteCachePolicy();
   const cacheKey = buildOpenClawBrowseListCacheKey({ sort, limit, offset });
-  const cached = await resolveOpenClawJsonCache({
+  const canCache = canCacheOpenClawBrowseList({ limit, offset });
+  let cached = await resolveOpenClawJsonCache({
     cacheKey,
     load: () => fetchOpenClawSkillListPage({ db, r2, limit, offset, sort }),
     waitUntil,
-    cacheControl: cachePolicy.cacheControl,
-    cacheStatus: 'MISS',
+    cacheControl: canCache ? cachePolicy.cacheControl : 'no-store',
+    cacheStatus: canCache ? 'MISS' : 'BYPASS',
   });
+
+  if (cached.cacheStatus === 'HIT' && cached.data.items.length > 0) {
+    const nativeSlugs = cached.data.items.map((item) => decodeClawHubCompatSlug(item.slug));
+    const currentPublicSlugs = await getCurrentPublicSkillSlugs(db, nativeSlugs);
+    if (currentPublicSlugs.size !== new Set(nativeSlugs).size) {
+      await invalidateCache(cacheKey);
+      cached = await resolveOpenClawJsonCache({
+        cacheKey,
+        load: () => fetchOpenClawSkillListPage({ db, r2, limit, offset, sort }),
+        waitUntil,
+        cacheControl: cachePolicy.cacheControl,
+        cacheStatus: 'MISS',
+      });
+    }
+  }
 
   return json(cached.data, {
     headers: cached.headers,
@@ -296,7 +378,7 @@ export const POST: RequestHandler = async ({ request, platform, locals }) => {
   }
 
   const auth = await getAuthContext(request, locals, db);
-  if (!auth.userId) {
+  if (!auth.userId && !auth.orgId) {
     throw error(401, 'Authentication required');
   }
   requireSubmitPublishScope(auth);
@@ -305,6 +387,9 @@ export const POST: RequestHandler = async ({ request, platform, locals }) => {
   const rawPayload = formData.get('payload');
   if (typeof rawPayload !== 'string') {
     throw error(400, 'Multipart field "payload" is required');
+  }
+  if (new TextEncoder().encode(rawPayload).byteLength > MAX_OPENCLAW_PAYLOAD_BYTES) {
+    throw error(413, 'Publish payload is too large');
   }
 
   let payload: PublishPayload;
@@ -320,6 +405,17 @@ export const POST: RequestHandler = async ({ request, platform, locals }) => {
   if (!isValidOpenClawSemver(payload.version)) {
     throw error(400, 'version must be a valid semver string');
   }
+  if (payload.tags !== undefined && !Array.isArray(payload.tags)) {
+    throw error(400, 'tags must be an array of strings');
+  }
+  if (
+    payload.tags?.length && (
+      payload.tags.length > MAX_OPENCLAW_TAGS
+      || payload.tags.some((tag) => typeof tag !== 'string' || tag.trim().length > MAX_OPENCLAW_TAG_LENGTH)
+    )
+  ) {
+    throw error(400, `tags must contain at most ${MAX_OPENCLAW_TAGS} values of ${MAX_OPENCLAW_TAG_LENGTH} characters or less`);
+  }
 
   const nativeSlug = decodeClawHubCompatSlug(payload.slug);
   const parsedSlug = parseSkillSlug(nativeSlug);
@@ -327,9 +423,12 @@ export const POST: RequestHandler = async ({ request, platform, locals }) => {
     throw error(400, 'slug must use the SkillsCat ClawHub compatibility format');
   }
 
-  const ownerContext = await resolveOpenClawOwnerContext(db, auth.userId, parsedSlug.owner);
+  const ownerContext = await resolveOpenClawOwnerContext(db, auth.userId, parsedSlug.owner, auth.orgId);
   if (!ownerContext) {
     throw error(403, 'You can only publish under your own handle or an organization you belong to');
+  }
+  if (ownerContext.orgId && !ownerContext.orgVerifiedWithGithub) {
+    throw error(403, 'Public organization skills require a verified GitHub organization');
   }
 
   const files = await collectUploadedFiles(formData);
@@ -353,193 +452,236 @@ export const POST: RequestHandler = async ({ request, platform, locals }) => {
     titleCaseFromSlug(repoName) ||
     repoName;
   const summary = extractMarkdownSummary(readme.content);
-  const manifest = await readOpenClawManifest(r2, compatSlug);
   const fileStructure = JSON.stringify(buildOpenClawFileTree(files));
   const hashes = await computeOpenClawSkillHashes(files, readme.content);
-
-  if (manifest?.versions.some((entry) => entry.version === payload.version)) {
-    throw error(409, `Version ${payload.version} already exists`);
+  const publishLock = await acquireOpenClawPublishLock(r2, compatSlug);
+  if (!publishLock) {
+    throw error(409, 'Another publish is already in progress for this skill');
   }
 
-  const existing = await db
-    .prepare(`
-      SELECT
-        id,
-        owner_id as ownerId,
-        org_id as orgId,
-        source_type as sourceType,
-        created_at as createdAt
-      FROM skills
-      WHERE slug = ?
-      LIMIT 1
-    `)
-    .bind(nativeSlug)
-    .first<ExistingSkillRow>();
-
-  const [existingPublicByHash] = await findSkillsByExactHashGroup(
-    db,
-    hashes.fullHash,
-    hashes.bundleExactHash,
-    {
-      visibility: 'public',
-      excludeSkillId: existing?.id,
-      limit: 1,
-    }
-  );
-
-  if (existingPublicByHash) {
-    throw error(409, `Identical content already exists as public skill ${existingPublicByHash.slug}`);
-  }
-
-  let skillId = existing?.id || crypto.randomUUID();
-  if (existing) {
-    if (existing.sourceType !== 'upload') {
-      throw error(409, 'This slug is already reserved by a non-uploaded SkillsCat skill');
+  try {
+    const manifest = await readOpenClawManifest(r2, compatSlug);
+    if (manifest?.versions.some((entry) => entry.version === payload.version)) {
+      throw error(409, `Version ${payload.version} already exists`);
     }
 
-    const canWrite = await canWriteSkill(existing.id, auth.userId, db);
-    if (!canWrite) {
-      throw error(403, 'You do not have permission to publish a new version for this skill');
-    }
-
-    await db
+    const existing = await db
       .prepare(`
-        UPDATE skills
-        SET
-          name = ?,
-          description = ?,
-          repo_owner = ?,
-          repo_name = ?,
-          skill_path = ?,
-          visibility = 'public',
-          owner_id = ?,
-          org_id = ?,
-          source_type = 'upload',
-          readme = ?,
-          file_structure = ?,
-          content_hash = ?,
-          last_commit_at = ?,
-          updated_at = ?,
-          indexed_at = ?
-        WHERE id = ?
-      `)
-      .bind(
-        displayName,
-        summary,
-        ownerContext.ownerHandle,
-        repoName,
-        skillPath,
-        auth.userId,
-        ownerContext.orgId,
-        readme.content,
-        fileStructure,
-        hashes.fullHash,
-        now,
-        now,
-        now,
-        existing.id
-      )
-      .run();
-  } else {
-    await db
-      .prepare(`
-        INSERT INTO skills (
+        SELECT
           id,
-          name,
-          slug,
-          description,
-          repo_owner,
-          repo_name,
-          skill_path,
-          github_url,
-          stars,
-          forks,
-          trending_score,
-          file_structure,
-          readme,
-          last_commit_at,
-          visibility,
-          owner_id,
-          org_id,
-          source_type,
-          content_hash,
-          created_at,
-          updated_at,
-          indexed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, 0, ?, ?, ?, 'public', ?, ?, 'upload', ?, ?, ?, ?)
+          owner_id as ownerId,
+          org_id as orgId,
+          source_type as sourceType,
+          created_at as createdAt
+        FROM skills
+        WHERE slug = ?
+        LIMIT 1
       `)
-      .bind(
-        skillId,
-        displayName,
-        nativeSlug,
-        summary,
-        ownerContext.ownerHandle,
-        repoName,
-        skillPath,
-        fileStructure,
-        readme.content,
-        now,
-        auth.userId,
-        ownerContext.orgId,
-        hashes.fullHash,
-        now,
-        now,
-        now
-      )
-      .run();
-  }
+      .bind(nativeSlug)
+      .first<ExistingSkillRow>();
 
-  await storeSkillHashes(db, skillId, hashes);
-
-  await replaceOpenClawCurrentFiles(r2, nativeSlug, files);
-  await snapshotOpenClawVersionFiles(r2, compatSlug, payload.version, files);
-
-  const nextManifest: OpenClawCompatManifest = {
-    schemaVersion: 1,
-    compatSlug,
-    nativeSlug,
-    ownerHandle: ownerContext.ownerHandle,
-    createdAt: manifest?.createdAt || existing?.createdAt || now,
-    updatedAt: now,
-    deleted: false,
-    deletedAt: null,
-    tags: {
-      ...(manifest?.tags || {}),
-      ...Object.fromEntries(
-        (payload.tags && payload.tags.length > 0 ? payload.tags : ['latest'])
-          .map((tag) => tag.trim())
-          .filter(Boolean)
-          .map((tag) => [tag, payload.version])
-      ),
-      latest: payload.version,
-    },
-    versions: [
+    const [existingPublicByHash] = await findSkillsByExactHashGroup(
+      db,
+      hashes.fullHash,
+      hashes.bundleExactHash,
       {
-        version: payload.version,
-        createdAt: now,
-        changelog: payload.changelog?.trim() || `Published from SkillsCat's ClawHub compatibility endpoint.`,
-        changelogSource: payload.changelog?.trim() ? 'user' : 'auto',
-        license: 'MIT-0',
-        fingerprint,
-      },
-      ...(manifest?.versions || []),
-    ],
-  };
+        visibility: 'public',
+        excludeSkillId: existing?.id,
+        limit: 1,
+      }
+    );
 
-  await writeOpenClawManifest(r2, nextManifest);
-  await invalidateOpenClawSkillCaches(skillId, nativeSlug);
-
-  return json(
-    {
-      ok: true,
-      skillId,
-      versionId: `${skillId}:${payload.version}`,
-    },
-    {
-      headers: buildOpenClawResponseHeaders({
-        cacheControl: 'no-store',
-        cacheStatus: 'BYPASS',
-      }),
+    if (existingPublicByHash) {
+      throw error(409, `Identical content already exists as public skill ${existingPublicByHash.slug}`);
     }
-  );
+
+    const skillId = existing?.id || crypto.randomUUID();
+    if (existing) {
+      if (existing.sourceType !== 'upload') {
+        throw error(409, 'This slug is already reserved by a non-uploaded SkillsCat skill');
+      }
+
+      const canWrite = await canWriteSkill(existing.id, {
+        userId: auth.userId,
+        orgId: auth.orgId,
+      }, db);
+      if (!canWrite) {
+        throw error(403, 'You do not have permission to publish a new version for this skill');
+      }
+    }
+
+    const previousCurrentFiles = existing
+      ? await readOpenClawCurrentFiles(r2, nativeSlug)
+      : [];
+    const nextManifest: OpenClawCompatManifest = {
+      schemaVersion: 1,
+      compatSlug,
+      nativeSlug,
+      ownerHandle: ownerContext.ownerHandle,
+      createdAt: manifest?.createdAt || existing?.createdAt || now,
+      updatedAt: now,
+      deleted: false,
+      deletedAt: null,
+      tags: {
+        ...(manifest?.tags || {}),
+        ...Object.fromEntries(
+          (payload.tags && payload.tags.length > 0 ? payload.tags : ['latest'])
+            .map((tag) => tag.trim())
+            .filter(Boolean)
+            .map((tag) => [tag, payload.version])
+        ),
+        latest: payload.version,
+      },
+      versions: [
+        {
+          version: payload.version,
+          createdAt: now,
+          changelog: payload.changelog?.trim() || `Published from SkillsCat's ClawHub compatibility endpoint.`,
+          changelogSource: payload.changelog?.trim() ? 'user' : 'auto',
+          license: 'MIT-0',
+          fingerprint,
+        },
+        ...(manifest?.versions || []),
+      ],
+    };
+
+    const skillStatement = existing
+      ? db.prepare(`
+          UPDATE skills
+          SET
+            name = ?,
+            description = ?,
+            repo_owner = ?,
+            repo_name = ?,
+            skill_path = ?,
+            visibility = 'public',
+            owner_id = ?,
+            org_id = ?,
+            source_type = 'upload',
+            readme = ?,
+            file_structure = ?,
+            content_hash = ?,
+            last_commit_at = ?,
+            updated_at = ?,
+            indexed_at = ?
+          WHERE id = ?
+        `).bind(
+          displayName,
+          summary,
+          ownerContext.ownerHandle,
+          repoName,
+          skillPath,
+          auth.userId,
+          ownerContext.orgId,
+          readme.content,
+          fileStructure,
+          hashes.fullHash,
+          now,
+          now,
+          now,
+          existing.id
+        )
+      : db.prepare(`
+          INSERT INTO skills (
+            id,
+            name,
+            slug,
+            description,
+            repo_owner,
+            repo_name,
+            skill_path,
+            github_url,
+            stars,
+            forks,
+            trending_score,
+            file_structure,
+            readme,
+            last_commit_at,
+            visibility,
+            owner_id,
+            org_id,
+            source_type,
+            content_hash,
+            created_at,
+            updated_at,
+            indexed_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, 0, ?, ?, ?, 'public', ?, ?, 'upload', ?, ?, ?, ?)
+        `).bind(
+          skillId,
+          displayName,
+          nativeSlug,
+          summary,
+          ownerContext.ownerHandle,
+          repoName,
+          skillPath,
+          fileStructure,
+          readme.content,
+          now,
+          auth.userId,
+          ownerContext.orgId,
+          hashes.fullHash,
+          now,
+          now,
+          now
+        );
+
+    try {
+      await snapshotOpenClawVersionFiles(r2, compatSlug, payload.version, files);
+      await replaceOpenClawCurrentFiles(r2, nativeSlug, files);
+      await writeOpenClawManifest(r2, nextManifest);
+      await db.batch([
+        skillStatement,
+        ...buildSkillHashStatements(db, skillId, hashes, now),
+        ...(ownerContext.orgId
+          ? [buildTouchOrganizationStatement(db, ownerContext.orgId, now)]
+          : []),
+      ]);
+    } catch (publishError) {
+      console.error(`Failed to publish OpenClaw skill ${nativeSlug}:`, publishError);
+      try {
+        await rollbackOpenClawPublishArtifacts({
+          r2,
+          nativeSlug,
+          compatSlug,
+          version: payload.version,
+          previousCurrentFiles,
+          previousManifest: manifest,
+        });
+      } catch (rollbackError) {
+        console.error(`Failed to roll back OpenClaw publish ${nativeSlug}:`, rollbackError);
+      }
+      throw error(500, 'Failed to publish skill atomically');
+    }
+
+    try {
+      await invalidateOpenClawSkillCaches(
+        skillId,
+        nativeSlug,
+        ownerContext.orgId ? ownerContext.ownerHandle : null,
+        { owner: ownerContext.ownerHandle, name: repoName }
+      );
+    } catch (cacheError) {
+      console.error(`Failed to invalidate OpenClaw caches for ${nativeSlug}:`, cacheError);
+    }
+
+    return json(
+      {
+        ok: true,
+        skillId,
+        versionId: `${skillId}:${payload.version}`,
+      },
+      {
+        headers: buildOpenClawResponseHeaders({
+          cacheControl: 'no-store',
+          cacheStatus: 'BYPASS',
+        }),
+      }
+    );
+  } finally {
+    try {
+      await releaseOpenClawPublishLock(r2, publishLock);
+    } catch (lockError) {
+      console.error(`Failed to release OpenClaw publish lock for ${nativeSlug}:`, lockError);
+    }
+  }
 };

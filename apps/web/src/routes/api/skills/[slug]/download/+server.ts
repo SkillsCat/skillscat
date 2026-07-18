@@ -11,7 +11,6 @@ import {
   buildGithubSkillR2Keys,
   buildUploadSkillR2Key,
   normalizeSkillSlug,
-  parseSkillSlug,
 } from '$lib/skill-path';
 
 const PUBLIC_DOWNLOAD_CACHE_TTL_SECONDS = 3600;
@@ -22,18 +21,7 @@ const PUBLIC_DOWNLOAD_CACHE_TTL_SECONDS = 3600;
 function buildR2Paths(skill: SkillSourceInfo): string[] {
   if (skill.source_type === 'upload') {
     const canonical = buildUploadSkillR2Key(skill.slug, 'SKILL.md');
-    const parts = parseSkillSlug(skill.slug);
-    const paths = new Set<string>();
-
-    if (canonical) {
-      paths.add(canonical);
-    }
-
-    if (parts) {
-      paths.add(`skills/${parts.owner}/${parts.name.split('/')[0]}/SKILL.md`);
-    }
-
-    return [...paths];
+    return canonical ? [canonical] : [];
   }
 
   if (!skill.repo_owner || !skill.repo_name) {
@@ -164,8 +152,10 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
       'Content-Type': 'application/zip',
       'Content-Disposition': `attachment; filename="${downloadName}.zip"`,
       'Cache-Control': skill.visibility === 'public'
-        ? `public, max-age=${PUBLIC_DOWNLOAD_CACHE_TTL_SECONDS}, stale-while-revalidate=86400`
+        ? 'private, no-cache'
         : resolved.cacheControl,
+      'CDN-Cache-Control': 'no-store',
+      Vary: 'Authorization',
       'X-Cache': skill.visibility === 'public' ? cacheStatus : resolved.cacheStatus,
     },
   });
