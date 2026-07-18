@@ -115,7 +115,9 @@ describe('marketplace route', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('private, no-cache');
+    expect(response.headers.get('cdn-cache-control')).toBe('no-store');
     expect(response.headers.get('x-cache')).toBe('MISS');
+    expect(response.headers.get('x-robots-tag')).toBe('noindex, follow, noarchive');
     await expect(response.json()).resolves.toEqual({
       name: 'SkillsCat Marketplace',
       plugins: [{ name: 'skillscat-demo', source: { source: 'github', repo: 'test/demo' } }],
@@ -141,6 +143,7 @@ describe('marketplace route', () => {
     expect(response.status).toBe(503);
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('x-cache')).toBe('BYPASS');
+    expect(response.headers.get('x-robots-tag')).toBe('noindex, follow, noarchive');
     await expect(response.json()).resolves.toEqual({
       error: 'Database not available',
     });

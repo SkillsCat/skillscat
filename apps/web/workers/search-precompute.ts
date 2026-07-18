@@ -24,13 +24,19 @@ import {
   upsertSearchStateFailure,
   upsertSearchStateSuccess,
 } from '../src/lib/server/ranking/search-precompute';
+import {
+  refreshAllSitemapSnapshots,
+  refreshPrioritySitemapSnapshots,
+  shouldRunSitemapFullRefresh,
+} from '../src/lib/server/seo/sitemap';
 
 const DEFAULT_RECOMMEND_PRECOMPUTE_MAX_PER_RUN = 500;
 const DEFAULT_RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = 25_000;
 const DEFAULT_RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS = 2_500;
 const DEFAULT_SEARCH_PRECOMPUTE_MAX_PER_RUN = 500;
 const DEFAULT_SEARCH_PRECOMPUTE_TIME_BUDGET_MS = 10_000;
-const DEFAULT_SITEMAP_REFRESH_TIMEOUT_MS = 20_000;
+const DEFAULT_SITEMAP_PREWARM_TIMEOUT_MS = 20_000;
+const DEFAULT_SITEMAP_FULL_REFRESH_HOUR_UTC = 3;
 const SITEMAP_PREWARM_CONCURRENCY = 4;
 const DEFAULT_MISSING_STATE_SCAN_HOUR_UTC = 3;
 const DEFAULT_MISSING_STATE_SCAN_LIMIT = 500;
@@ -70,13 +76,8 @@ interface SearchPrecomputeCandidate {
   algo_version: string | null;
 }
 
-interface SitemapRefreshResponsePayload {
-  skipped?: boolean;
-  paths?: unknown;
-}
-
 interface SitemapRefreshResult {
-  status: 'refreshed' | 'skipped' | 'disabled' | 'failed';
+  status: 'refreshed' | 'disabled' | 'failed';
   paths: string[];
 }
 
@@ -349,10 +350,10 @@ function isSitemapRefreshEnabled(env: SearchPrecomputeEnv): boolean {
   return (env.SITEMAP_REFRESH_ENABLED || '1').trim() !== '0';
 }
 
-function getSitemapRefreshTimeoutMs(env: SearchPrecomputeEnv): number {
-  const parsed = Number.parseInt(env.SITEMAP_REFRESH_TIMEOUT_MS || '', 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SITEMAP_REFRESH_TIMEOUT_MS;
-  return Math.min(Math.max(parsed, 1000), 120_000);
+function getSitemapFullRefreshHourUtc(env: SearchPrecomputeEnv): number {
+  const parsed = Number.parseInt(env.SITEMAP_FULL_REFRESH_HOUR_UTC || '', 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_SITEMAP_FULL_REFRESH_HOUR_UTC;
+  return Math.min(23, Math.max(0, parsed));
 }
 
 function normalizeSitemapPaths(paths: unknown): string[] {
@@ -370,47 +371,25 @@ async function refreshSitemaps(env: SearchPrecomputeEnv): Promise<SitemapRefresh
     return { status: 'disabled', paths: [] };
   }
 
-  const appOrigin = getAppOrigin(env);
-  if (!appOrigin) {
-    console.warn('Sitemap refresh enabled but APP_ORIGIN is not configured');
+  if (!env.R2) {
+    console.warn('Sitemap refresh enabled but R2 is not configured');
     return { status: 'failed', paths: [] };
   }
-
-  if (!env.WORKER_SECRET) {
-    console.warn('Sitemap refresh enabled but WORKER_SECRET is not configured');
-    return { status: 'failed', paths: [] };
-  }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), getSitemapRefreshTimeoutMs(env));
 
   try {
-    const response = await fetch(`${appOrigin}/api/admin/seo/sitemaps`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${env.WORKER_SECRET}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ scope: 'all' }),
-      signal: controller.signal,
+    const shouldRunFullRefresh = await shouldRunSitemapFullRefresh(env.R2, {
+      scheduledHourUtc: getSitemapFullRefreshHourUtc(env),
     });
-
-    if (!response.ok) {
-      const body = await response.text();
-      console.warn(`Sitemap refresh failed: ${response.status} ${body.slice(0, 200)}`);
-      return { status: 'failed', paths: [] };
-    }
-
-    const payload = await response.json().catch(() => null) as SitemapRefreshResponsePayload | null;
+    const payload = shouldRunFullRefresh
+      ? await refreshAllSitemapSnapshots({ db: env.DB, r2: env.R2 })
+      : await refreshPrioritySitemapSnapshots({ db: env.DB, r2: env.R2 });
     return {
-      status: payload?.skipped ? 'skipped' : 'refreshed',
-      paths: normalizeSitemapPaths(payload?.paths),
+      status: 'refreshed',
+      paths: normalizeSitemapPaths(payload.paths),
     };
   } catch (err) {
-    console.warn('Sitemap refresh request error:', err);
+    console.warn('Sitemap refresh error:', err);
     return { status: 'failed', paths: [] };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -428,7 +407,7 @@ async function prewarmSitemapRoutes(
     return { attempted: 0, succeeded: 0, failed: 0 };
   }
 
-  const requestTimeoutMs = getSitemapRefreshTimeoutMs(env);
+  const requestTimeoutMs = DEFAULT_SITEMAP_PREWARM_TIMEOUT_MS;
   let attempted = 0;
   let succeeded = 0;
   let failed = 0;
@@ -773,6 +752,18 @@ export default {
   ): Promise<void> {
     console.log('Search/Recommend precompute worker triggered at:', new Date().toISOString());
 
+    const sitemapRefreshResult = await refreshSitemaps(env);
+    if (sitemapRefreshResult.status === 'refreshed') {
+      console.log('Sitemap refresh completed');
+
+      const sitemapPrewarm = await prewarmSitemapRoutes(env, sitemapRefreshResult.paths);
+      if (sitemapPrewarm.attempted > 0) {
+        console.log(`Sitemap prewarm: attempted=${sitemapPrewarm.attempted}, succeeded=${sitemapPrewarm.succeeded}, failed=${sitemapPrewarm.failed}`);
+      }
+    } else if (sitemapRefreshResult.status === 'failed') {
+      console.warn('Sitemap refresh failed; continuing search/recommend precompute');
+    }
+
     const search = await processSearchPrecomputeBatch(env);
     if (search.attempted > 0 || search.skipped > 0) {
       console.log(`Search precompute: attempted=${search.attempted}, succeeded=${search.succeeded}, failed=${search.failed}, skipped=${search.skipped}`);
@@ -783,16 +774,5 @@ export default {
       console.log(`Recommend precompute: attempted=${recommend.attempted}, succeeded=${recommend.succeeded}, failed=${recommend.failed}, skipped=${recommend.skipped}`);
     }
 
-    const sitemapRefreshResult = await refreshSitemaps(env);
-    if (sitemapRefreshResult.status === 'refreshed') {
-      console.log('Sitemap refresh completed');
-
-      const sitemapPrewarm = await prewarmSitemapRoutes(env, sitemapRefreshResult.paths);
-      if (sitemapPrewarm.attempted > 0) {
-        console.log(`Sitemap prewarm: attempted=${sitemapPrewarm.attempted}, succeeded=${sitemapPrewarm.succeeded}, failed=${sitemapPrewarm.failed}`);
-      }
-    } else if (sitemapRefreshResult.status === 'skipped') {
-      console.log('Sitemap refresh skipped by minimum interval');
-    }
   },
 };

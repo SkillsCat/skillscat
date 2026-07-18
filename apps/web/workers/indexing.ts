@@ -169,6 +169,7 @@ interface IndexingBatchContext {
   latestCommitByRepoRef: Map<string, Promise<{ sha: string; branch: string } | null>>;
   repositoryTreeByRepoRef: Map<string, Promise<GitHubTreeResponse>>;
   skillCommitDatesByPath: Map<string, Promise<{ lastCommitAt: number | null; firstCommitAt: number | null }>>;
+  indexNowUrls: Set<string>;
 }
 
 function createIndexingBatchContext(): IndexingBatchContext {
@@ -177,6 +178,7 @@ function createIndexingBatchContext(): IndexingBatchContext {
     latestCommitByRepoRef: new Map(),
     repositoryTreeByRepoRef: new Map(),
     skillCommitDatesByPath: new Map(),
+    indexNowUrls: new Set(),
   };
 }
 
@@ -2986,14 +2988,12 @@ async function processMessage(
       try {
         const indexNowTarget = await loadIndexNowSkillTarget(env.DB, skillId);
         if (indexNowTarget) {
-          await scheduleIndexNowSubmission({
-            env,
-            urls: buildIndexNowSkillUrls(indexNowTarget, env),
-            source: `indexing:${indexNowTarget.slug}`,
-          });
+          for (const url of buildIndexNowSkillUrls(indexNowTarget, env)) {
+            batchContext.indexNowUrls.add(url);
+          }
         }
       } catch (indexNowError) {
-        log.error(`Failed to enqueue IndexNow update for ${skillId}`, indexNowError);
+        log.error(`Failed to prepare IndexNow update for ${skillId}`, indexNowError);
       }
     }
 
@@ -3057,7 +3057,7 @@ export default {
   async queue(
     batch: MessageBatch<IndexingMessage>,
     env: IndexingEnv,
-    _ctx: ExecutionContext
+    ctx: ExecutionContext
   ): Promise<void> {
     log.log(`Processing batch of ${batch.messages.length} messages`);
     const seenInBatch = new Map<string, { queuedAsPending: boolean }>();
@@ -3090,6 +3090,15 @@ export default {
         message.retry();
         log.log(`Message scheduled for retry: ${message.id}`);
       }
+    }
+
+    if (isIndexNowEnabled(env) && batchContext.indexNowUrls.size > 0) {
+      scheduleIndexNowSubmission({
+        env,
+        urls: [...batchContext.indexNowUrls],
+        source: `indexing:batch:${batch.messages.length}`,
+        waitUntil: ctx.waitUntil.bind(ctx),
+      });
     }
   },
 };

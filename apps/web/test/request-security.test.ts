@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { runRequestSecurity, shouldNoIndexPath } from '../src/lib/server/security/request';
+import {
+  getXRobotsTagForPath,
+  runRequestSecurity,
+  shouldNoIndexPath,
+} from '../src/lib/server/security/request';
 
 function createEvent(options: {
   pathname: string;
@@ -169,5 +173,12 @@ describe('request security', () => {
     expect(shouldNoIndexPath('/openclaw/api/v1/skills')).toBe(true);
     expect(shouldNoIndexPath('/.well-known/clawhub.json')).toBe(true);
     expect(shouldNoIndexPath('/openclaw/.well-known/clawhub.json')).toBe(true);
+  });
+
+  it('keeps search result links followable while excluding the result page', () => {
+    expect(shouldNoIndexPath('/search')).toBe(true);
+    expect(getXRobotsTagForPath('/search')).toBe('noindex, follow, noarchive');
+    expect(getXRobotsTagForPath('/api/search')).toBe('noindex, nofollow, noarchive');
+    expect(getXRobotsTagForPath('/trending')).toBeNull();
   });
 });

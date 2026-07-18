@@ -1,4 +1,4 @@
-import { redirect } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { CATEGORIES } from '$lib/constants';
 import type { SkillCardData } from '$lib/types';
@@ -10,6 +10,7 @@ import { setPublicPageCache } from '$lib/server/cache/page';
 
 const ITEMS_PER_PAGE = 50;
 const MAX_GRID_COLUMNS = 3;
+const MAX_SEARCH_PAGE = 100;
 
 interface PaginationData {
   currentPage: number;
@@ -83,9 +84,13 @@ export const load: PageServerLoad = async ({
   const page = parsePage(url.searchParams.get('page'));
   const pageSize = parsePageSize(url.searchParams.get('pageSize'));
 
+  if (page > MAX_SEARCH_PAGE) {
+    throw error(404, 'Page not found');
+  }
+
   if (!query) {
     if (page > 1) {
-      throw redirect(302, '/search');
+      throw error(404, 'Page not found');
     }
 
     return {
@@ -121,11 +126,10 @@ export const load: PageServerLoad = async ({
   );
 
   const totalItems = resolved.data.total;
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const totalPages = Math.min(MAX_SEARCH_PAGE, Math.max(1, Math.ceil(totalItems / pageSize)));
 
   if (page > totalPages) {
-    const baseUrl = buildSearchBaseUrl(query, pageSize);
-    throw redirect(302, totalPages === 1 ? baseUrl : `${baseUrl}&page=${totalPages}`);
+    throw error(404, 'Page not found');
   }
 
   const pagination: PaginationData = {

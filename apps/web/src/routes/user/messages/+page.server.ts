@@ -7,7 +7,7 @@ interface OrgInviteMetadata {
   orgName: string;
   inviterId: string;
   inviterName: string;
-  role: 'admin' | 'member';
+  role: 'member';
 }
 
 function parseOrgInviteMetadata(raw: string | null): OrgInviteMetadata | null {
@@ -25,7 +25,7 @@ function parseOrgInviteMetadata(raw: string | null): OrgInviteMetadata | null {
   }
 
   const candidate = parsed as Record<string, unknown>;
-  const role = candidate.role === 'admin' || candidate.role === 'member' ? candidate.role : null;
+  const role = candidate.role === 'admin' || candidate.role === 'member' ? 'member' : null;
 
   if (
     typeof candidate.orgId !== 'string' ||

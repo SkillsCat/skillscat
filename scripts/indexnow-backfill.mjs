@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 
+import { pathToFileURL } from 'node:url';
+
 const DEFAULT_SITE_URL = 'https://skills.cat';
 const DEFAULT_INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow';
 const MAX_URLS_PER_REQUEST = 10_000;
 const MIN_URLS_PER_REQUEST = 500;
 const DEFAULT_RETRY_AFTER_MS = 10 * 60 * 1000;
 const MAX_429_RETRIES = 6;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_TRANSIENT_RETRIES = 4;
+const MAX_TRANSIENT_RETRY_DELAY_MS = 60_000;
 
 function parseArgs(argv) {
   const options = {
@@ -114,6 +119,7 @@ async function fetchText(url) {
     headers: {
       'user-agent': 'SkillsCat-IndexNow-Backfill/1.0',
     },
+    signal: AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -129,6 +135,7 @@ async function verifyKeyFile({ keyFileUrl, key }) {
       'user-agent': 'SkillsCat-IndexNow-Backfill/1.0',
       accept: 'text/plain, */*;q=0.1',
     },
+    signal: AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -180,7 +187,7 @@ function chunkUrls(urls) {
   return chunks;
 }
 
-function parseRetryAfterMs(value) {
+export function parseRetryAfterMs(value) {
   const raw = String(value || '').trim();
   if (!raw) return DEFAULT_RETRY_AFTER_MS;
 
@@ -203,6 +210,18 @@ function sleep(ms) {
   });
 }
 
+export function isTransientStatus(status) {
+  return status === 408 || status === 425 || status >= 500;
+}
+
+export function getTransientRetryDelayMs(retryNumber, retryAfter) {
+  if (retryAfter) {
+    return Math.min(parseRetryAfterMs(retryAfter), MAX_TRANSIENT_RETRY_DELAY_MS);
+  }
+
+  return Math.min(2 ** Math.max(0, retryNumber - 1) * 1000, MAX_TRANSIENT_RETRY_DELAY_MS);
+}
+
 async function submitChunk({ endpoint, host, key, keyLocation, chunk }) {
   return fetch(endpoint, {
     method: 'POST',
@@ -215,6 +234,7 @@ async function submitChunk({ endpoint, host, key, keyLocation, chunk }) {
       ...(keyLocation ? { keyLocation } : {}),
       urlList: chunk,
     }),
+    signal: AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS),
   });
 }
 
@@ -224,6 +244,7 @@ async function submitUrls({ endpoint, host, key, keyLocation, urls, dryRun }) {
   let chunkIndex = 0;
   let batchSize = MAX_URLS_PER_REQUEST;
   let throttledRetries = 0;
+  let transientRetries = 0;
 
   while (submittedUrls < urls.length) {
     const chunk = urls.slice(submittedUrls, submittedUrls + batchSize);
@@ -235,13 +256,29 @@ async function submitUrls({ endpoint, host, key, keyLocation, urls, dryRun }) {
       continue;
     }
 
-    const response = await submitChunk({
-      endpoint,
-      host,
-      key,
-      keyLocation,
-      chunk,
-    });
+    let response;
+    try {
+      response = await submitChunk({
+        endpoint,
+        host,
+        key,
+        keyLocation,
+        chunk,
+      });
+    } catch (error) {
+      transientRetries += 1;
+      if (transientRetries > MAX_TRANSIENT_RETRIES) {
+        throw new Error(
+          `IndexNow submission failed after ${MAX_TRANSIENT_RETRIES} transient retries for chunk ${chunkIndex}: ${error instanceof Error ? error.message : error}`
+        );
+      }
+
+      const retryDelayMs = getTransientRetryDelayMs(transientRetries);
+      console.log(`IndexNow request failed temporarily. Waiting ${Math.ceil(retryDelayMs / 1000)}s before retrying chunk ${chunkIndex}.`);
+      await sleep(retryDelayMs);
+      chunkIndex -= 1;
+      continue;
+    }
 
     if (response.status === 429) {
       throttledRetries += 1;
@@ -257,12 +294,30 @@ async function submitUrls({ endpoint, host, key, keyLocation, urls, dryRun }) {
       continue;
     }
 
+    if (isTransientStatus(response.status)) {
+      transientRetries += 1;
+      if (transientRetries > MAX_TRANSIENT_RETRIES) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`IndexNow submission failed after ${MAX_TRANSIENT_RETRIES} transient retries for chunk ${chunkIndex}: ${response.status} ${response.statusText}${text ? ` - ${text.slice(0, 200)}` : ''}`);
+      }
+
+      const retryDelayMs = getTransientRetryDelayMs(
+        transientRetries,
+        response.headers.get('retry-after')
+      );
+      console.log(`IndexNow returned ${response.status}. Waiting ${Math.ceil(retryDelayMs / 1000)}s before retrying chunk ${chunkIndex}.`);
+      await sleep(retryDelayMs);
+      chunkIndex -= 1;
+      continue;
+    }
+
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       throw new Error(`IndexNow submission failed for chunk ${chunkIndex}: ${response.status} ${response.statusText}${text ? ` - ${text.slice(0, 200)}` : ''}`);
     }
 
     throttledRetries = 0;
+    transientRetries = 0;
     submittedUrls += chunk.length;
     console.log(`Submitted chunk ${chunkIndex}/${Math.max(totalChunks, chunkIndex)}: ${chunk.length} urls`);
   }
@@ -308,7 +363,9 @@ async function main() {
   console.log(options.dryRun ? 'Dry run complete.' : 'IndexNow backfill complete.');
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  });
+}

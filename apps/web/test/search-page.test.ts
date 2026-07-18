@@ -120,7 +120,7 @@ describe('/search page', () => {
     expect(result.matchedCategories.map((category) => category.slug)).toEqual(['research']);
   });
 
-  it('redirects out-of-range search pages to the last valid page', async () => {
+  it('returns 404 for out-of-range search pages', async () => {
     resolveRegistrySearch.mockResolvedValue({
       data: {
         skills: [],
@@ -135,9 +135,30 @@ describe('/search page', () => {
     await expect(
       load(createInput('https://skills.cat/search?q=web%20research&page=5') as never)
     ).rejects.toMatchObject({
-      status: 302,
-      location: '/search?q=web%20research',
+      status: 404,
     });
+  });
+
+  it('rejects absurd search pages before querying the registry', async () => {
+    const { load } = await import('../src/routes/search/+page.server');
+
+    await expect(
+      load(createInput('https://skills.cat/search?q=web%20research&page=999999') as never)
+    ).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(resolveRegistrySearch).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for pagination without a search query', async () => {
+    const { load } = await import('../src/routes/search/+page.server');
+
+    await expect(
+      load(createInput('https://skills.cat/search?page=2') as never)
+    ).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(resolveRegistrySearch).not.toHaveBeenCalled();
   });
 
   it('uses a URL page size that fills the active search grid columns', async () => {

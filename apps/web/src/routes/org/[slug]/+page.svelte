@@ -2,6 +2,8 @@
   import SEO from '$lib/components/common/SEO.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import Button from '$lib/components/ui/Button.svelte';
+  import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
+  import { toast } from '$lib/components/ui/toast-store';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
   import { useI18n } from '$lib/i18n/runtime';
   import { getProfilesCopy } from '$lib/i18n/profiles';
@@ -9,7 +11,8 @@
   import { buildSkillPath } from '$lib/skill-path';
   import { cleanSkillCardDescription } from '$lib/text/skill-card-description';
   import { buildOgImageUrl } from '$lib/seo/og';
-  import { SITE_URL } from '$lib/seo/constants';
+import { SITE_URL } from '$lib/seo/constants';
+import { isSeoIndexableSkill } from '$lib/seo/indexability';
 
   interface Org {
     id: string;
@@ -23,6 +26,7 @@
     updatedAt?: number;
     memberCount: number;
     skillCount: number;
+    seoPublicSkillCount?: number;
     userRole: string | null;
   }
 
@@ -42,6 +46,10 @@
     visibility: "public" | "private" | "unlisted";
     stars: number;
     updatedAt?: number;
+    tier?: string | null;
+    indexedAt?: number | null;
+    downloadCount90d?: number | null;
+    accessCount30d?: number | null;
   }
 
   type Tab = "skills" | "members";
@@ -70,6 +78,8 @@
   let loadedError = $state<string | null | undefined>(undefined);
   let loadedErrorKind = $state<OrgPageErrorKind | null | undefined>(undefined);
   let loading = $state(false);
+  let showLeaveConfirm = $state(false);
+  let leaving = $state(false);
   let activeSlug = $state('');
   let activeTab = $state<Tab>("skills");
 
@@ -125,8 +135,9 @@
   const isTemporaryFailure = $derived(errorKind === 'temporary_failure');
   const slug = $derived(data.slug);
   const isAdmin = $derived(
-    org?.userRole && ["owner", "admin"].includes(org.userRole),
+    org?.userRole === "owner",
   );
+  const isMember = $derived(org?.userRole === 'member');
   const orgName = $derived(org?.displayName || slug);
   const canonicalUrl = $derived(`${SITE_URL}/org/${encodeURIComponent(slug)}`);
   function getMemberProfileHref(member: Member): string {
@@ -135,7 +146,8 @@
   }
   const publicSkillsForSeo = $derived(skills.filter((skill) => skill.visibility === 'public'));
   const orgPublicSkillCountForSeo = $derived(
-    org?.userRole ? publicSkillsForSeo.length : (org?.skillCount ?? publicSkillsForSeo.length)
+    org?.seoPublicSkillCount
+      ?? publicSkillsForSeo.filter((skill) => isSeoIndexableSkill(skill)).length
   );
   const orgSeoUpdatedAt = $derived((() => {
     const latestSkillUpdate = publicSkillsForSeo.reduce((max, skill) => Math.max(max, skill.updatedAt || 0), 0);
@@ -314,6 +326,30 @@
       loading = false;
     }
   }
+
+  async function leaveOrganization() {
+    if (!org || leaving) return;
+
+    leaving = true;
+    try {
+      const response = await fetch(`/api/orgs/${slug}/members`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const result = await response.json() as { message?: string };
+      if (!response.ok) {
+        toast(result.message || copy.org.leaveFailed, 'error');
+        return;
+      }
+
+      window.location.href = '/user/organizations';
+    } catch {
+      toast(copy.org.leaveFailed, 'error');
+    } finally {
+      leaving = false;
+    }
+  }
 </script>
 
 {#if org}
@@ -326,6 +362,7 @@
     type="profile"
     keywords={orgSeoKeywords}
     noindex={orgPublicSkillCountForSeo === 0}
+    robots={orgPublicSkillCountForSeo === 0 ? 'noindex, follow, noarchive' : ''}
     structuredData={orgPublicSkillCountForSeo === 0 ? null : orgStructuredData}
   />
 {:else}
@@ -389,29 +426,35 @@
           </div>
         </div>
       </div>
-      {#if isAdmin}
+      {#if isAdmin || isMember}
         <div class="header-actions">
-          <Button variant="cute" size="sm" href="/org/{slug}/settings">
-            <svg
-              class="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-              />
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-              />
-            </svg>
-            {copy.org.settings}
-          </Button>
+          {#if isAdmin}
+            <Button variant="cute" size="sm" href="/org/{slug}/settings">
+              <svg
+                class="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                />
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                />
+              </svg>
+              {copy.org.settings}
+            </Button>
+          {:else}
+            <Button variant="danger" size="sm" onclick={() => { showLeaveConfirm = true; }}>
+              {copy.org.leaveAction}
+            </Button>
+          {/if}
         </div>
       {/if}
     </header>
@@ -527,7 +570,7 @@
                 <div class="member-info">
                   <span class="member-name">{member.name}</span>
                   <span class="member-role">
-                    {member.role === 'owner' ? ui.badges.owner : member.role === 'admin' ? ui.badges.admin : ui.badges.member}
+                    {member.role === 'owner' ? ui.badges.owner : ui.badges.member}
                   </span>
                 </div>
               </a>
@@ -556,6 +599,17 @@
     </div>
   {/if}
 </div>
+
+<ConfirmDialog
+  open={showLeaveConfirm}
+  title={copy.org.leaveTitle}
+  description={i18n.t(copy.org.leaveDescription, { name: orgName })}
+  confirmText={copy.org.leaveConfirm}
+  danger={true}
+  loading={leaving}
+  onConfirm={leaveOrganization}
+  onCancel={() => { showLeaveConfirm = false; }}
+/>
 
 <style>
   .org-page {

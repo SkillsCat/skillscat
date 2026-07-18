@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildLlmTxt } from '../src/lib/server/agent/llm-txt';
 import { getCoreSitemapPages } from '../src/lib/server/seo/sitemap';
 
@@ -29,7 +29,22 @@ describe('buildLlmTxt', () => {
 });
 
 describe('getCoreSitemapPages', () => {
-  it('includes llm.txt for discovery', () => {
-    expect(getCoreSitemapPages().some((page) => page.url === '/llm.txt')).toBe(true);
+  it('keeps the machine guide out of search-engine sitemaps', () => {
+    expect(getCoreSitemapPages().some((page) => page.url === '/llm.txt')).toBe(false);
+  });
+});
+
+describe('llm.txt route', () => {
+  it('serves the guide while excluding it from search indexes', async () => {
+    vi.doMock('../src/lib/server/cache', () => ({
+      getCachedText: async () => ({ data: 'machine guide', hit: false }),
+    }));
+
+    const { GET } = await import('../src/routes/llm.txt/+server');
+    const response = await GET({ platform: { context: {} } } as never);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-robots-tag')).toBe('noindex, follow, noarchive');
+    await expect(response.text()).resolves.toBe('machine guide');
   });
 });

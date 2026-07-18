@@ -59,6 +59,7 @@ dataset = "skillscat_classification_batches"
 AI_MODEL = "tencent/hy3:free"
 FREE_MODELS = "openrouter/free"
 CLASSIFICATION_PAID_MODEL = "tencent/hy3"
+INDEXNOW_ENABLED = "0"
 
 [env.production]
 name = "skillscat-classification-production"
@@ -96,3 +97,4 @@ dataset = "skillscat_classification_batches"
 AI_MODEL = "tencent/hy3:free"
 FREE_MODELS = "openrouter/free"
 CLASSIFICATION_PAID_MODEL = "tencent/hy3"
+INDEXNOW_ENABLED = "1"

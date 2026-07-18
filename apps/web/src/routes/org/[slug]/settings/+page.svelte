@@ -17,6 +17,7 @@
     avatarUrl: string;
     githubConnected: boolean;
     verified: boolean;
+    skillCount: number;
     userRole: string | null;
   }
 
@@ -26,6 +27,7 @@
   let showDeleteConfirm = $state(false);
   let deleteConfirmText = $state('');
   let deleting = $state(false);
+  let deleteError = $state<string | null>(null);
   let connecting = $state(false);
   let connectError = $state<string | null>(null);
   const i18n = useI18n();
@@ -87,13 +89,17 @@
     if (!org || deleteConfirmText !== org.slug) return;
 
     deleting = true;
+    deleteError = null;
     try {
       const res = await fetch(`/api/orgs/${slug}`, { method: 'DELETE' });
       if (res.ok) {
         window.location.href = '/user/organizations';
+      } else {
+        const result = await res.json() as { message?: string };
+        deleteError = result.message || copy.orgProfile.deleteFailed;
       }
     } catch {
-      // Handle error silently
+      deleteError = copy.orgProfile.deleteFailed;
     } finally {
       deleting = false;
     }
@@ -199,8 +205,16 @@
           <div class="danger-info">
             <h4>{copy.orgProfile.deleteOrganization}</h4>
             <p>{copy.orgProfile.deleteOrganizationDescription}</p>
+            {#if org.skillCount > 0}
+              <p class="delete-blocked">{copy.orgProfile.deleteRequiresNoSkills}</p>
+            {/if}
           </div>
-          <Button variant="danger" size="sm" onclick={() => showDeleteConfirm = true}>
+          <Button
+            variant="danger"
+            size="sm"
+            onclick={() => { deleteError = null; showDeleteConfirm = true; }}
+            disabled={org.skillCount > 0}
+          >
             {messages.common.delete}
           </Button>
         </div>
@@ -233,6 +247,9 @@
         class="confirm-input"
         disabled={deleting}
       />
+      {#if deleteError}
+        <p class="delete-error">{deleteError}</p>
+      {/if}
       <div class="dialog-actions">
         <Button variant="ghost" onclick={() => { showDeleteConfirm = false; deleteConfirmText = ''; }} disabled={deleting}>
           {messages.common.cancel}
@@ -427,6 +444,12 @@
     font-size: 0.8125rem;
     color: var(--muted-foreground);
     margin: 0;
+  }
+
+  .delete-blocked,
+  .delete-error {
+    color: #ef4444;
+    margin-top: 0.5rem;
   }
 
   /* Dialog */

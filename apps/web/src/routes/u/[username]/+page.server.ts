@@ -17,6 +17,10 @@ interface UserSkillRow {
   description: string | null;
   stars: number;
   updatedAt: number;
+  tier: string | null;
+  indexedAt: number;
+  downloadCount90d: number;
+  accessCount30d: number;
 }
 
 interface SkillCategoryRow {
@@ -77,7 +81,7 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
   }
 
   // Try to get from cache first
-  const cacheKey = `user-profile:${username}`;
+  const cacheKey = `user-profile:v2:${username}`;
   if (cache) {
     try {
       const cached = await cache.match(new Request(`https://cache/${cacheKey}`));
@@ -146,8 +150,12 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
         s.description,
         s.stars,
         COALESCE(s.last_commit_at, s.updated_at) as updatedAt
+        ,s.tier
+        ,s.indexed_at as indexedAt
+        ,s.download_count_90d as downloadCount90d
+        ,s.access_count_30d as accessCount30d
       FROM skills s INDEXED BY skills_owner_visibility_stars_idx
-      WHERE s.owner_id = ? AND s.visibility = 'public'
+      WHERE s.owner_id = ? AND s.org_id IS NULL AND s.visibility = 'public'
       ORDER BY s.stars DESC, COALESCE(s.last_commit_at, s.updated_at) DESC
     `)
       .bind(user.id)
@@ -174,7 +182,12 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
         name: s.name,
         slug: s.slug,
         description: s.description || '',
+        visibility: 'public' as const,
         stars: s.stars || 0,
+        tier: s.tier,
+        indexedAt: s.indexedAt,
+        downloadCount90d: s.downloadCount90d,
+        accessCount30d: s.accessCount30d,
         categories: s.categories,
         updatedAt: s.updatedAt,
       })),
@@ -246,6 +259,10 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
       s.description,
       s.stars,
       COALESCE(s.last_commit_at, s.updated_at) as updatedAt
+      ,s.tier
+      ,s.indexed_at as indexedAt
+      ,s.download_count_90d as downloadCount90d
+      ,s.access_count_30d as accessCount30d
     FROM skills s INDEXED BY skills_visibility_repo_owner_idx
     WHERE s.repo_owner = ? AND s.visibility = 'public'
     ORDER BY s.stars DESC, COALESCE(s.last_commit_at, s.updated_at) DESC
@@ -274,7 +291,12 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
       name: s.name,
       slug: s.slug,
       description: s.description || '',
+      visibility: 'public' as const,
       stars: s.stars || 0,
+      tier: s.tier,
+      indexedAt: s.indexedAt,
+      downloadCount90d: s.downloadCount90d,
+      accessCount30d: s.accessCount30d,
       categories: s.categories,
       updatedAt: s.updatedAt,
     })),

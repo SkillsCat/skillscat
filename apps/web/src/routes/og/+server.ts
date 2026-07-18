@@ -25,6 +25,9 @@ const DEFAULT_CACHE_TTL_SECONDS = 86400;
 const PUBLIC_FONT_ASSET_TTL_SECONDS = 30 * 24 * 60 * 60;
 const PUBLIC_IMAGE_ASSET_TTL_SECONDS = 7 * 24 * 60 * 60;
 const GOOGLE_TTF_USER_AGENT = 'Mozilla/5.0 (Linux; U; Android 4.4.2; en-us) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30';
+const FALLBACK_LOGO_DATA_URI = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="24" fill="#d4842a"/><path d="M32 92V36h15l17 23 17-23h15v56H80V61L64 83 48 61v31z" fill="#fff"/></svg>'
+)}`;
 
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 
@@ -507,7 +510,10 @@ async function getLogoDataUri(origin: string, waitUntil?: WaitUntilFn): Promise<
     }
   }
 
-  throw new Error('Failed to load OG logo asset');
+  // A broken logo asset must not turn every social preview into a 500.
+  // The inline fallback also avoids a self-fetch loop when the static asset
+  // binding is unavailable during a cold Worker invocation.
+  return FALLBACK_LOGO_DATA_URI;
 }
 
 function buildSvg(

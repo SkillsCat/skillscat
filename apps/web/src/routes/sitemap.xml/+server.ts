@@ -4,6 +4,7 @@ import {
   normalizeSitemapRefreshMinIntervalSeconds,
   SITEMAP_INDEX_CACHE_TTL,
   SITEMAP_INDEX_BROWSER_MAX_AGE_SECONDS,
+  SITEMAP_FULL_SNAPSHOT_MAX_AGE_SECONDS,
   SITEMAP_INDEX_SHARED_MAX_AGE_SECONDS,
   SITEMAP_INDEX_STALE_WHILE_REVALIDATE_SECONDS,
   buildSitemapIndexEntries,
@@ -21,10 +22,10 @@ export const GET: RequestHandler = async ({ platform }) => {
   const refreshMinIntervalSeconds = normalizeSitemapRefreshMinIntervalSeconds(
     platform?.env?.SITEMAP_REFRESH_MIN_INTERVAL_SECONDS
   );
-  const snapshotMaxAgeSeconds = refreshMinIntervalSeconds;
+  const snapshotMaxAgeSeconds = SITEMAP_FULL_SNAPSHOT_MAX_AGE_SECONDS;
 
   return createCachedSitemapResponse({
-    cacheKey: 'sitemap:index:xml',
+    cacheKey: 'sitemap:v2:index:xml',
     ttl: getSitemapHotCacheTtlSeconds(SITEMAP_INDEX_CACHE_TTL, refreshMinIntervalSeconds),
     cacheControl: buildSitemapCacheControl({
       browserMaxAgeSeconds: SITEMAP_INDEX_BROWSER_MAX_AGE_SECONDS,
@@ -37,6 +38,7 @@ export const GET: RequestHandler = async ({ platform }) => {
     debugTag: 'index',
     r2,
     snapshotMaxAgeSeconds,
+    refreshStaleSnapshot: false,
     waitUntil,
     fetcher: async () => {
       const stats = await getSitemapIndexStats(db);

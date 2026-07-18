@@ -5,7 +5,7 @@ import {
 } from '$lib/server/cache/keys';
 
 export function getCategoryPageCacheKey(categorySlug: string, page = 1): string {
-  return `page:category:v1:${categorySlug}:${page}`;
+  return `page:category:v2:${categorySlug}:${page}`;
 }
 
 export function getCategoryPageCacheInvalidationKeys(categorySlug: string): string[] {

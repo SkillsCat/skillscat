@@ -5,6 +5,8 @@ import { getCategoryCacheInvalidationKeys } from '$lib/server/cache/categories';
 import {
   getCategoryHtmlCacheKey,
   getDiscoveryHtmlCacheKey,
+  CATEGORIES_API_CACHE_KEY,
+  CATEGORIES_PAGE_CACHE_KEY,
   HOME_RECENT_CACHE_KEY,
   HOME_TOP_CACHE_KEY,
   PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS,
@@ -63,12 +65,14 @@ describe('public cache invalidation keys', () => {
   it('includes the homepage secondary list caches in discovery invalidation', () => {
     expect(PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS).toContain(HOME_RECENT_CACHE_KEY);
     expect(PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS).toContain(HOME_TOP_CACHE_KEY);
+    expect(PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS).toContain(CATEGORIES_API_CACHE_KEY);
+    expect(PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS).toContain(CATEGORIES_PAGE_CACHE_KEY);
   });
 
   it('includes category HTML caches for every locale', () => {
     const keys = getCategoryCacheInvalidationKeys(['seo']);
 
-    expect(keys).toContain('page:category:v1:seo:1');
+    expect(keys).toContain('page:category:v2:seo:1');
 
     for (const locale of LOCALES) {
       expect(keys).toContain(getCategoryHtmlCacheKey(locale, 'seo'));

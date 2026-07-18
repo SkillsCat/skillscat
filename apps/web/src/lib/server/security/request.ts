@@ -483,3 +483,13 @@ export function shouldNoIndexPath(pathname: string): boolean {
 
   return false;
 }
+
+export function getXRobotsTagForPath(pathname: string): string | null {
+  if (!shouldNoIndexPath(pathname)) return null;
+
+  if (pathname === '/search' || pathname.startsWith('/search/')) {
+    return 'noindex, follow, noarchive';
+  }
+
+  return SECURITY_NO_INDEX_VALUE;
+}

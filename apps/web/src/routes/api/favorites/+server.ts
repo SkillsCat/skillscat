@@ -94,7 +94,7 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
         AND (
           s.visibility = 'public'
           OR s.visibility = 'unlisted'
-          OR s.owner_id = ?
+          OR (s.owner_id = ? AND s.org_id IS NULL)
           OR EXISTS (
             SELECT 1 FROM org_members om
             WHERE om.org_id = s.org_id AND om.user_id = ?
@@ -102,15 +102,22 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
           OR EXISTS (
             SELECT 1 FROM skill_permissions sp
             WHERE sp.skill_id = s.id
-              AND sp.grantee_type = 'user'
-              AND sp.grantee_id = ?
+              AND (
+                (sp.grantee_type = 'user' AND sp.grantee_id = ?)
+                OR (
+                  sp.grantee_type = 'email'
+                  AND LOWER(sp.grantee_id) = (
+                    SELECT LOWER(email) FROM user WHERE id = ? LIMIT 1
+                  )
+                )
+              )
               AND (sp.expires_at IS NULL OR sp.expires_at > ?)
           )
         )
       ORDER BY f.created_at DESC
       LIMIT ? OFFSET ?
     `)
-      .bind(userId, userId, userId, userId, now, queryLimit, offset)
+      .bind(userId, userId, userId, userId, userId, now, queryLimit, offset)
       .all<FavoriteSkillRow>();
 
     const hasMoreOnFirstPage = offset === 0 && favorites.results.length > limit;
@@ -129,7 +136,7 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
           AND (
             s.visibility = 'public'
             OR s.visibility = 'unlisted'
-            OR s.owner_id = ?
+            OR (s.owner_id = ? AND s.org_id IS NULL)
             OR EXISTS (
               SELECT 1 FROM org_members om
               WHERE om.org_id = s.org_id AND om.user_id = ?
@@ -137,13 +144,20 @@ export const GET: RequestHandler = async ({ locals, platform, url }) => {
             OR EXISTS (
               SELECT 1 FROM skill_permissions sp
               WHERE sp.skill_id = s.id
-                AND sp.grantee_type = 'user'
-                AND sp.grantee_id = ?
+                AND (
+                  (sp.grantee_type = 'user' AND sp.grantee_id = ?)
+                  OR (
+                    sp.grantee_type = 'email'
+                    AND LOWER(sp.grantee_id) = (
+                      SELECT LOWER(email) FROM user WHERE id = ? LIMIT 1
+                    )
+                  )
+                )
                 AND (sp.expires_at IS NULL OR sp.expires_at > ?)
             )
           )
       `)
-        .bind(userId, userId, userId, userId, now)
+        .bind(userId, userId, userId, userId, userId, now)
         .first<{ total: number }>();
       total = countResult?.total || 0;
     }

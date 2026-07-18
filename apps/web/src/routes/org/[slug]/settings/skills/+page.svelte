@@ -4,9 +4,11 @@
   import CopyButton from '$lib/components/ui/CopyButton.svelte';
   import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
   import SkillsList from '$lib/components/settings/SkillsList.svelte';
+  import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
   import Pagination from '$lib/components/ui/Pagination.svelte';
   import { useI18n } from '$lib/i18n/runtime';
   import { getSettingsCopy } from '$lib/i18n/settings';
+  import type { PageData } from './$types';
 
   interface Skill {
     id: string;
@@ -19,9 +21,15 @@
 
   const ITEMS_PER_PAGE = 20;
 
+  interface Props {
+    data: PageData;
+  }
+
+  let { data }: Props = $props();
+
   let skills = $state<Skill[]>([]);
   let allSkills = $state<Skill[]>([]);
-  let loading = $state(true);
+  let loading = $state(false);
   let error = $state<string | null>(null);
   let totalItems = $state(0);
   let totalPages = $state(0);
@@ -31,7 +39,10 @@
   let isDesktop = $state(true);
   let sentinelEl = $state<HTMLDivElement | null>(null);
   let observer: IntersectionObserver | null = null;
+  let unpublishTarget = $state<Skill | null>(null);
+  let unpublishLoading = $state(false);
   const i18n = useI18n();
+  const messages = $derived(i18n.messages());
   const copy = $derived(getSettingsCopy(i18n.locale()));
 
   const slug = $derived($page.params.slug);
@@ -46,13 +57,17 @@
     return () => mql.removeEventListener('change', handler);
   });
 
-  // Load skills on slug change or page param change (desktop)
+  // Use the paginated server payload for the initial render and navigations.
+  // Client fetches are reserved for mutations and mobile continuation pages.
   $effect(() => {
-    if (slug) {
-      const pageParam = $page.url.searchParams.get('page');
-      const p = pageParam ? Math.max(1, parseInt(pageParam, 10)) : 1;
-      loadSkills(p);
-    }
+    skills = data.skills;
+    allSkills = [...data.skills];
+    totalItems = data.totalItems;
+    totalPages = data.totalPages;
+    currentPage = data.currentPage;
+    hasMore = currentPage < totalPages;
+    error = null;
+    loading = false;
   });
 
   // IntersectionObserver for mobile infinite scroll
@@ -115,6 +130,36 @@
   }
 
   const displaySkills = $derived(isDesktop ? skills : allSkills);
+
+  function handleUnpublishClick(skill: Skill) {
+    unpublishTarget = skill;
+  }
+
+  async function confirmUnpublish() {
+    if (!unpublishTarget) return;
+    unpublishLoading = true;
+    try {
+      const res = await fetch(`/api/skills/${unpublishTarget.slug}`, { method: 'DELETE' });
+      if (res.ok) {
+        unpublishTarget = null;
+        await loadSkills(currentPage);
+      }
+    } catch {
+      // Silently fail
+    } finally {
+      unpublishLoading = false;
+    }
+  }
+
+  const unpublishDescription = $derived(
+    unpublishTarget
+      ? i18n.t(copy.userSkills.unpublishDescription, { name: unpublishTarget.name })
+      : ''
+  );
+
+  function cancelUnpublish() {
+    unpublishTarget = null;
+  }
 </script>
 
 <div class="skills-page">
@@ -150,6 +195,7 @@
       emptyTitle={copy.orgSkills.emptyTitle}
       emptyDescription={copy.orgSkills.emptyDescription}
       onRetry={() => loadSkills(currentPage)}
+      onUnpublish={handleUnpublishClick}
     />
 
     <!-- Desktop: Pagination -->
@@ -177,6 +223,18 @@
     {/if}
   </SettingsSection>
 </div>
+
+<ConfirmDialog
+  open={!!unpublishTarget}
+  title={copy.userSkills.unpublishTitle}
+  description={unpublishDescription}
+  confirmText={copy.userSkills.unpublishConfirm}
+  cancelText={messages.common.cancel}
+  danger={true}
+  loading={unpublishLoading}
+  onConfirm={confirmUnpublish}
+  onCancel={cancelUnpublish}
+/>
 
 <style>
   .skills-page {

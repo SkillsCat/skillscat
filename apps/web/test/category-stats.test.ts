@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getCategoryStats,
+  getDynamicCategories,
   syncCategoryPublicStats,
 } from '../src/lib/server/db/business/stats';
 
@@ -165,6 +166,16 @@ describe('category public stats', () => {
         slug: 'custom-b',
         skill_count: 1,
         updated_at: 5000,
+      },
+    ]);
+
+    await expect(getDynamicCategories(db as never)).resolves.toEqual([
+      {
+        slug: 'custom-a',
+        name: 'Custom A',
+        description: null,
+        type: 'ai-suggested',
+        skillCount: 2,
       },
     ]);
   });

@@ -26,6 +26,11 @@ import {
   writeOpenClawManifest,
 } from '$lib/server/openclaw/compat-store';
 import { syncCategoryPublicStats } from '$lib/server/db/business/stats';
+import {
+  buildIndexNowSkillRemovalUrls,
+  loadIndexNowSkillTarget,
+  scheduleIndexNowSubmission,
+} from '$lib/server/seo/indexnow';
 import { buildTouchOrganizationStatement } from '$lib/server/org/mutations';
 
 interface SkillStatsRow {
@@ -215,6 +220,10 @@ export const DELETE: RequestHandler = async ({ params, platform, request, locals
       throw error(409, 'Only skills published through the ClawHub compatibility API can be soft-deleted.');
     }
 
+    const indexNowTarget = await loadIndexNowSkillTarget(db, skill.id);
+    const indexNowUrls = indexNowTarget
+      ? buildIndexNowSkillRemovalUrls(indexNowTarget, platform?.env)
+      : [];
     const now = Date.now();
     const categoryRows = await db.prepare(`
       SELECT category_slug FROM skill_categories WHERE skill_id = ?
@@ -275,6 +284,19 @@ export const DELETE: RequestHandler = async ({ params, platform, request, locals
       }
     } catch (cacheError) {
       console.error(`Failed to invalidate caches for deleted skill ${skill.slug}:`, cacheError);
+    }
+
+    try {
+      const indexNowTask = scheduleIndexNowSubmission({
+        env: platform?.env,
+        waitUntil: platform?.context?.waitUntil?.bind(platform.context),
+        urls: indexNowUrls,
+        action: 'delete',
+        source: `openclaw-delete:${skill.slug}`,
+      });
+      if (indexNowTask) await indexNowTask;
+    } catch (indexNowError) {
+      console.error(`Failed to enqueue IndexNow deletion for ${skill.slug}:`, indexNowError);
     }
 
     return json(

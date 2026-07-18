@@ -191,6 +191,13 @@ export function hasSessionCookie(request: Request): boolean {
 }
 
 /**
+ * Detect credentials that can make same-origin API and page responses user-specific.
+ */
+export function hasAuthCredentials(request: Request): boolean {
+  return Boolean(request.headers.get('authorization')) || hasSessionCookie(request);
+}
+
+/**
  * Cache only page responses explicitly marked as public.
  * This avoids storing personalized or private responses.
  */

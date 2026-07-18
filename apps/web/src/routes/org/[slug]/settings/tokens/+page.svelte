@@ -11,6 +11,7 @@
   import { formatRelativeTimestamp } from '$lib/i18n/relative';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Key01Icon, Delete02Icon, Tick02Icon, Copy01Icon, ArrowDown01Icon } from '@hugeicons/core-free-icons';
+  import type { PageData } from './$types';
 
   interface Token {
     id: string;
@@ -28,8 +29,14 @@
     description: string;
   }
 
-  let tokens = $state<Token[]>([]);
-  let loading = $state(true);
+  interface Props {
+    data: PageData;
+  }
+
+  let { data }: Props = $props();
+
+  let refreshedTokens = $state<Token[] | null>(null);
+  let loading = $state(false);
   let loadError = $state<string | null>(null);
   let newTokenName = $state('');
   let newTokenScopes = $state<string[]>(['read']);
@@ -47,6 +54,7 @@
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
   const copy = $derived(getSettingsCopy(i18n.locale()));
+  const tokens = $derived(refreshedTokens ?? data.tokens);
   const availableScopes = $derived<Scope[]>([
     {
       id: 'read',
@@ -74,9 +82,10 @@
   ]);
 
   $effect(() => {
-    if (slug) {
-      loadTokens();
-    }
+    data.tokens;
+    refreshedTokens = null;
+    loading = false;
+    loadError = null;
   });
 
   async function loadTokens() {
@@ -86,7 +95,7 @@
       const res = await fetch(`/api/orgs/${slug}/tokens`);
       if (res.ok) {
         const data = await res.json() as { tokens?: Token[] };
-        tokens = data.tokens || [];
+        refreshedTokens = data.tokens || [];
       } else {
         loadError = copy.tokens.failedToLoad;
       }

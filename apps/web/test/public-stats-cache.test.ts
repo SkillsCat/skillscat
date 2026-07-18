@@ -87,6 +87,22 @@ describe('public stats cache', () => {
     });
     const db = {
       prepare: vi.fn((sql: string) => {
+        if (sql.includes('FROM skills s INDEXED BY skills_visibility_id_idx')) {
+          return {
+            bind: () => ({
+              all: async () => ({
+                results: cachedSkills.map((skill) => ({
+                  id: skill.id,
+                  repoOwner: skill.repoOwner,
+                  repoName: skill.repoName,
+                  updatedAt: skill.updatedAt,
+                  authorAvatar: skill.authorAvatar,
+                })),
+              }),
+            }),
+          };
+        }
+
         if (sql.includes('FROM skill_categories')) {
           return {
             bind: () => ({
@@ -112,7 +128,70 @@ describe('public stats cache', () => {
     expect(result.total).toBe(42);
     expect(result.skills).toHaveLength(24);
     expect(result.skills[0].categories).toEqual(['automation']);
-    expect(db.prepare).toHaveBeenCalledTimes(1);
+    expect(db.prepare).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to live D1 results when an R2 item is no longer public', async () => {
+    const now = Date.now();
+    const cachedSkills = Array.from({ length: 24 }, (_, index) => createSkill(index + 1));
+    const liveRows = Array.from({ length: 25 }, (_, index) => createSkill(index + 2));
+    const r2 = createR2({
+      'cache/lists/test/top.json': JSON.stringify({
+        data: cachedSkills,
+        generatedAt: now,
+      }),
+      'cache/lists/test/stats/public.json': JSON.stringify({
+        data: { totalSkills: 42 },
+        generatedAt: now,
+      }),
+    });
+    const db = {
+      prepare: vi.fn((sql: string) => {
+        if (sql.includes('FROM skills s INDEXED BY skills_visibility_id_idx')) {
+          return {
+            bind: () => ({
+              all: async () => ({
+                results: cachedSkills.slice(1).map((skill) => ({
+                  id: skill.id,
+                  repoOwner: skill.repoOwner,
+                  repoName: skill.repoName,
+                  updatedAt: skill.updatedAt,
+                  authorAvatar: skill.authorAvatar,
+                })),
+              }),
+            }),
+          };
+        }
+
+        if (sql.includes('FROM skills INDEXED BY skills_top_public_rank_expr_idx')) {
+          return {
+            bind: () => ({
+              all: async () => ({ results: liveRows }),
+            }),
+          };
+        }
+
+        if (sql.includes('FROM skill_categories')) {
+          return {
+            bind: () => ({
+              all: async () => ({ results: [] }),
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected D1 query: ${sql}`);
+      }),
+    };
+
+    const result = await getTopSkillsPaginated(
+      { DB: db as never, R2: r2, CACHE_VERSION: 'test' },
+      1,
+      24
+    );
+
+    expect(result.skills).toHaveLength(24);
+    expect(result.skills.some((skill) => skill.id === 'skill-1')).toBe(false);
+    expect(db.prepare).toHaveBeenCalledTimes(3);
   });
 
   it('falls back to D1 when a cached first page is incomplete', async () => {

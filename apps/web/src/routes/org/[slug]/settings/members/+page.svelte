@@ -2,13 +2,14 @@
   import { page } from "$app/stores";
   import Avatar from '$lib/components/common/Avatar.svelte';
   import Button from '$lib/components/ui/Button.svelte';
+  import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
   import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
-  import { Select } from "bits-ui";
+  import { toast } from '$lib/components/ui/toast-store';
   import { useI18n } from '$lib/i18n/runtime';
   import { getSettingsCopy } from '$lib/i18n/settings';
   import { getUiCopy } from '$lib/i18n/ui';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
-  import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
+  import { Delete02Icon } from '@hugeicons/core-free-icons';
 
   interface Member {
     userId: string;
@@ -16,7 +17,7 @@
     githubUsername?: string | null;
     email: string;
     image: string;
-    role: "owner" | "admin" | "member";
+    role: "owner" | "member";
     joinedAt: number;
   }
 
@@ -50,16 +51,15 @@
   // Invite dialog state
   let showInviteDialog = $state(false);
   let inviteUsername = $state("");
-  let inviteRole = $state<"admin" | "member">("member");
   let inviting = $state(false);
   let inviteError = $state<string | null>(null);
   let inviteSuccess = $state<string | null>(null);
+  let removeTarget = $state<Member | null>(null);
+  let removing = $state(false);
 
   const slug = $derived($page.params.slug);
   const isOwner = $derived(org?.userRole === "owner");
-  const isAdmin = $derived(
-    org?.userRole === "owner" || org?.userRole === "admin",
-  );
+  const canManageMembers = $derived(org?.userRole === "owner");
   function getMemberProfileHref(member: Member): string {
     const handle = member.githubUsername?.trim() || member.name?.trim();
     return handle ? `/u/${encodeURIComponent(handle)}` : '#';
@@ -90,8 +90,6 @@
     switch (role) {
       case 'owner':
         return ui.badges.owner;
-      case 'admin':
-        return ui.badges.admin;
       default:
         return ui.badges.member;
     }
@@ -101,8 +99,6 @@
     switch (role) {
       case "owner":
         return "role-owner";
-      case "admin":
-        return "role-admin";
       default:
         return "role-member";
     }
@@ -110,7 +106,6 @@
 
   function openInviteDialog() {
     inviteUsername = "";
-    inviteRole = "member";
     inviteError = null;
     inviteSuccess = null;
     showInviteDialog = true;
@@ -119,7 +114,6 @@
   function closeInviteDialog() {
     showInviteDialog = false;
     inviteUsername = "";
-    inviteRole = "member";
     inviteError = null;
     inviteSuccess = null;
   }
@@ -137,7 +131,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           githubUsername: inviteUsername.trim(),
-          role: inviteRole,
+          role: "member",
         }),
       });
 
@@ -155,6 +149,40 @@
       inviting = false;
     }
   }
+
+  async function confirmRemoveMember() {
+    if (!removeTarget || removing) return;
+
+    removing = true;
+    try {
+      const res = await fetch(`/api/orgs/${slug}/members`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: removeTarget.userId }),
+      });
+      const result = await res.json() as { message?: string };
+      if (!res.ok) {
+        toast(result.message || copy.orgMembers.removeFailed, 'error');
+        return;
+      }
+
+      members = members.filter((member) => member.userId !== removeTarget?.userId);
+      removeTarget = null;
+      toast(copy.orgMembers.removeSuccess, 'success');
+    } catch {
+      toast(copy.orgMembers.removeFailed, 'error');
+    } finally {
+      removing = false;
+    }
+  }
+
+  const removeDescription = $derived(
+    removeTarget
+      ? i18n.t(copy.orgMembers.removeDescription, {
+          name: removeTarget.name || removeTarget.githubUsername || removeTarget.userId,
+        })
+      : ''
+  );
 </script>
 
 <div class="members-page">
@@ -163,7 +191,7 @@
       <h1>{copy.orgMembers.title}</h1>
       <p class="description">{copy.orgMembers.description}</p>
     </div>
-    {#if isAdmin}
+    {#if canManageMembers}
       <Button variant="cute" size="sm" onclick={openInviteDialog}>
         <svg
           class="w-4 h-4"
@@ -228,20 +256,14 @@
             </div>
             {#if isOwner && member.role !== "owner"}
               <div class="member-actions">
-                <Button variant="ghost" size="sm">
-                  <svg
-                    class="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z"
-                    />
-                  </svg>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onclick={() => { removeTarget = member; }}
+                  aria-label={i18n.t(copy.orgMembers.removeAction, { name: member.name })}
+                  title={i18n.t(copy.orgMembers.removeAction, { name: member.name })}
+                >
+                  <HugeiconsIcon icon={Delete02Icon} size={16} />
                 </Button>
               </div>
             {/if}
@@ -284,37 +306,6 @@
         </div>
       </div>
 
-      <div class="form-group">
-        <label for="invite-role">{copy.orgMembers.role}</label>
-        <Select.Root
-          type="single"
-          value={inviteRole}
-          onValueChange={(v) => {
-            inviteRole = v as "admin" | "member";
-          }}
-          disabled={inviting}
-        >
-          <Select.Trigger class="select-trigger">
-            <span class="select-value">
-              {inviteRole === "member" ? copy.orgMembers.roleMember : copy.orgMembers.roleAdmin}
-            </span>
-            <HugeiconsIcon
-              icon={ArrowDown01Icon}
-              size={16}
-              class="select-icon"
-            />
-          </Select.Trigger>
-          <Select.Portal>
-            <Select.Content class="select-content" sideOffset={4}>
-              <Select.Item value="member" class="select-item"
-                >{copy.orgMembers.roleMember}</Select.Item
-              >
-              <Select.Item value="admin" class="select-item">{copy.orgMembers.roleAdmin}</Select.Item>
-            </Select.Content>
-          </Select.Portal>
-        </Select.Root>
-      </div>
-
       {#if inviteError}
         <p class="invite-error">{inviteError}</p>
       {/if}
@@ -338,6 +329,17 @@
     </div>
   </div>
 {/if}
+
+<ConfirmDialog
+  open={!!removeTarget}
+  title={copy.orgMembers.removeTitle}
+  description={removeDescription}
+  confirmText={copy.orgMembers.removeConfirm}
+  danger={true}
+  loading={removing}
+  onConfirm={confirmRemoveMember}
+  onCancel={() => { removeTarget = null; }}
+/>
 
 <style>
   .members-page {
@@ -468,11 +470,6 @@
   .role-owner {
     background: var(--primary-subtle);
     color: var(--primary);
-  }
-
-  .role-admin {
-    background: rgba(59, 130, 246, 0.1);
-    color: #3b82f6;
   }
 
   .role-member {

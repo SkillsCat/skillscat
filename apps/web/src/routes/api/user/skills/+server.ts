@@ -38,7 +38,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
   const results = await db.prepare(`
     SELECT id, name, slug, description, visibility, stars, COALESCE(last_commit_at, updated_at) as updated_at
     FROM skills
-    WHERE owner_id = ?
+    WHERE owner_id = ? AND org_id IS NULL
     ORDER BY created_at DESC
     LIMIT ? OFFSET ?
   `)
@@ -60,7 +60,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
   if (offset === 0 && !hasMoreOnFirstPage) {
     total = pageRows.length;
   } else {
-    const countResult = await db.prepare(`SELECT COUNT(*) as count FROM skills WHERE owner_id = ?`)
+    const countResult = await db.prepare(`SELECT COUNT(*) as count FROM skills WHERE owner_id = ? AND org_id IS NULL`)
       .bind(auth.userId)
       .first<{ count: number }>();
     total = countResult?.count ?? 0;

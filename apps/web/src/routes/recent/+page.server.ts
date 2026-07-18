@@ -1,7 +1,7 @@
-import { redirect } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { getRecentSkillsPaginated } from '$lib/server/db/business/lists';
-import { getCached } from '$lib/server/cache';
+import { resolvePublicSkillDataCache } from '$lib/server/cache/public-skill-data';
 import { setPublicPageCache } from '$lib/server/cache/page';
 
 const ITEMS_PER_PAGE = 24;
@@ -28,17 +28,20 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
   };
 
   const page = parsePage(url.searchParams.get('page'));
-  const { data } = await getCached(
-    `page:recent:v1:${page}`,
-    () => getRecentSkillsPaginated(env, page, ITEMS_PER_PAGE),
-    60
-  );
+  const { data } = await resolvePublicSkillDataCache({
+    db: env.DB,
+    cacheKey: `page:recent:v1:${page}`,
+    load: () => getRecentSkillsPaginated(env, page, ITEMS_PER_PAGE),
+    ttlSeconds: 60,
+    getSkills: (value) => value.skills,
+    waitUntil: platform?.context?.waitUntil?.bind(platform.context),
+  });
   const { skills, total } = data;
   const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
   const lastPage = Math.max(1, totalPages);
 
   if (page > lastPage) {
-    throw redirect(302, lastPage === 1 ? '/recent' : `/recent?page=${lastPage}`);
+    throw error(404, 'Page not found');
   }
 
   return {

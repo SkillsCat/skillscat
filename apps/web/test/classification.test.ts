@@ -663,6 +663,10 @@ describe('classification queue preloading', () => {
 
   it('writes one analytics datapoint per processed batch', async () => {
     const writeDataPoint = vi.fn();
+    const originalFetch = globalThis.fetch;
+    const indexNowFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    const waitUntilTasks: Promise<unknown>[] = [];
+    vi.stubGlobal('fetch', indexNowFetch);
     const env = {
       DB: {
         prepare: (sql: string) => {
@@ -743,37 +747,47 @@ describe('classification queue preloading', () => {
         writeDataPoint,
       },
       AI_MODEL: 'openrouter/free',
+      INDEXNOW_KEY: 'secret-key',
     } as never;
 
-    await classificationWorker.queue({
-      messages: [
-        {
-          id: 'msg-direct',
-          body: {
-            type: 'classify',
-            skillId: 'skill-direct',
-            repoOwner: 'owner',
-            repoName: 'repo',
-            skillMdPath: 'skills/github/owner/repo/SKILL.md',
-            frontmatterCategories: ['automation'],
+    try {
+      await classificationWorker.queue({
+        messages: [
+          {
+            id: 'msg-direct',
+            body: {
+              type: 'classify',
+              skillId: 'skill-direct',
+              repoOwner: 'owner',
+              repoName: 'repo',
+              skillMdPath: 'skills/github/owner/repo/SKILL.md',
+              frontmatterCategories: ['automation'],
+            },
+            ack: vi.fn(),
+            retry: vi.fn(),
           },
-          ack: vi.fn(),
-          retry: vi.fn(),
-        },
-        {
-          id: 'msg-keyword',
-          body: {
-            type: 'classify',
-            skillId: 'skill-keyword',
-            repoOwner: 'owner',
-            repoName: 'repo',
-            skillMdPath: 'skills/github/owner/repo/SKILL.md',
+          {
+            id: 'msg-keyword',
+            body: {
+              type: 'classify',
+              skillId: 'skill-keyword',
+              repoOwner: 'owner',
+              repoName: 'repo',
+              skillMdPath: 'skills/github/owner/repo/SKILL.md',
+            },
+            ack: vi.fn(),
+            retry: vi.fn(),
           },
-          ack: vi.fn(),
-          retry: vi.fn(),
+        ],
+      } as never, env, {
+        waitUntil(promise: Promise<unknown>) {
+          waitUntilTasks.push(promise);
         },
-      ],
-    } as never, env, {} as never);
+      } as never);
+      await Promise.all(waitUntilTasks);
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
 
     expect(writeDataPoint).toHaveBeenCalledTimes(1);
     expect(writeDataPoint).toHaveBeenCalledWith({
@@ -781,6 +795,12 @@ describe('classification queue preloading', () => {
       doubles: [2, 2, 0, 0, 1, 0, 1],
       indexes: ['classification-batch'],
     });
+    expect(indexNowFetch).toHaveBeenCalledTimes(1);
+    const indexNowBody = JSON.parse(String(indexNowFetch.mock.calls[0]?.[1]?.body)) as {
+      urlList: string[];
+    };
+    expect(indexNowBody.urlList).toContain('https://skills.cat/category/automation');
+    expect(new Set(indexNowBody.urlList).size).toBe(indexNowBody.urlList.length);
   });
 
   it('skips storage preload for direct frontmatter matches', async () => {

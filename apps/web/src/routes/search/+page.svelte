@@ -358,6 +358,7 @@
           totalItems={data.pagination.totalItems}
           itemsPerPage={data.pagination.itemsPerPage}
           baseUrl={data.pagination.baseUrl}
+          maxCrawlablePage={1}
         />
       {/if}
     </div>

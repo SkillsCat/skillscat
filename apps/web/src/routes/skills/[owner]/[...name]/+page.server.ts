@@ -23,6 +23,7 @@ import {
 import { buildSkillPathFromOwnerAndName, buildSkillSlug, encodeSkillSlugForPath, normalizeSkillName, normalizeSkillOwner } from '$lib/skill-path';
 import type { SkillCardData, SkillDetail } from '$lib/types';
 import { buildSkillInstallData } from '$lib/skill-install';
+import { isSeoIndexableSkill } from '$lib/seo/indexability';
 
 const PUBLIC_SKILL_HTML_CACHE_HEADER = 'X-Skillscat-Public-Skill-Cache';
 const CATEGORY_BY_SLUG = new Map(CATEGORIES.map((category) => [category.slug, category] as const));
@@ -307,7 +308,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
   };
 
   const createNotFoundResult = () => ({
-    skill: null,
+      skill: null,
     recommendSkills: [] as SkillCardData[],
     error: 'Skill not found or you do not have permission to view it.',
     errorKind: 'not_found' as SkillPageErrorKind,
@@ -607,6 +608,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       isDotFolderSkill,
       hasReadme,
       seo,
+      seoIndexable: isSeoIndexableSkill(skill),
     });
   } catch (error) {
     console.error('Error loading skill:', error);

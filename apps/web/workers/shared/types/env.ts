@@ -62,10 +62,11 @@ export interface TrendingEnv extends BaseEnv {
 
 export interface SearchPrecomputeEnv {
   DB: D1Database;
+  R2: R2Bucket;
   WORKER_SECRET?: string;
   APP_ORIGIN?: string;
   SITEMAP_REFRESH_ENABLED?: string;
-  SITEMAP_REFRESH_TIMEOUT_MS?: string;
+  SITEMAP_FULL_REFRESH_HOUR_UTC?: string;
   RECOMMEND_PRECOMPUTE_ENABLED?: string;
   RECOMMEND_PRECOMPUTE_MAX_PER_RUN?: string;
   RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS?: string;

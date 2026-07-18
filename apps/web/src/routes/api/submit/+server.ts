@@ -1083,9 +1083,9 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     const anonymousCliBackgroundSubmit = isAnonymousCliBackgroundSubmit(request);
     let submitterUserId: string | null = null;
 
-    if (auth.userId && auth.user) {
+    if (auth.userId || auth.orgId) {
       requireSubmitPublishScope(auth);
-      submitterUserId = auth.userId;
+      submitterUserId = auth.userId ?? (auth.orgId ? `org:${auth.orgId}` : null);
     } else if (!anonymousCliBackgroundSubmit) {
       throw new SubmitRouteError({
         status: 401,

@@ -14,7 +14,8 @@
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
   import { buildSkillPath } from '$lib/skill-path';
   import { buildOgImageUrl } from '$lib/seo/og';
-  import { SITE_URL } from '$lib/seo/constants';
+import { SITE_URL } from '$lib/seo/constants';
+import { isSeoIndexableSkill } from '$lib/seo/indexability';
 
   interface UserProfile {
     id: string;
@@ -34,9 +35,14 @@
     name: string;
     slug: string;
     description: string;
+    visibility: 'public';
     stars: number;
     categories: string[];
     updatedAt: number;
+    tier?: string | null;
+    indexedAt?: number | null;
+    downloadCount90d?: number | null;
+    accessCount30d?: number | null;
   }
 
   interface Props {
@@ -230,7 +236,9 @@
         ]
       : null
   );
-  const profileShouldNoindex = $derived(skills.length === 0);
+  const profileShouldNoindex = $derived(
+    skills.length === 0 || !skills.some((skill) => isSeoIndexableSkill(skill))
+  );
 
   function formatDate(timestamp: number): string {
     return i18n.formatDate(timestamp, {
@@ -250,6 +258,7 @@
     type="profile"
     keywords={profileSeoKeywords}
     noindex={profileShouldNoindex}
+    robots={profileShouldNoindex ? 'noindex, follow, noarchive' : ''}
     structuredData={profileShouldNoindex ? null : profileStructuredData}
   />
 {:else}

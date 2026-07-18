@@ -152,7 +152,7 @@ const OPTIONAL_SECRETS_BY_WORKER = {
   state: [],
   'github-events': [],
   indexing: ['INDEXNOW_KEY'],
-  classification: ['OPENROUTER_API_KEY'],
+  classification: ['OPENROUTER_API_KEY', 'INDEXNOW_KEY'],
   'security-analysis': ['OPENROUTER_API_KEY'],
   metrics: [],
   trending: [],
@@ -351,7 +351,7 @@ function getSelectedProductionWorkers(selectedConfigFiles, selectedWorkerKeys) {
       .filter(Boolean)
   );
 
-  // search-precompute calls back into the web worker's internal admin route,
+  // search-precompute calls the web worker's protected recommend refresh path,
   // so both sides must share the same WORKER_SECRET in production.
   if (!selectedWorkerKeys || selectedWorkerKeys.length === 0 || selectedWorkerKeys.includes('search-precompute')) {
     const previewWorkerName = PRODUCTION_WORKER_NAMES['wrangler.preview.toml'];
@@ -897,6 +897,7 @@ script_name = "skillscat-state-production"
 AI_MODEL = "tencent/hy3:free"
 FREE_MODELS = "openrouter/free"
 CLASSIFICATION_PAID_MODEL = "tencent/hy3"
+INDEXNOW_ENABLED = "1"
 `.trim(),
   'wrangler.security-analysis.toml': `
 [env.production]
@@ -1031,7 +1032,7 @@ VT_DAILY_REQUEST_BUDGET = "300"
 VT_MINUTE_REQUEST_BUDGET = "4"
 VT_UPLOAD_MAX_BYTES = "33554432"
 `.trim(),
-  'wrangler.search-precompute.toml': `
+'wrangler.search-precompute.toml': `
 [env.production]
 name = "skillscat-search-precompute-production"
 
@@ -1043,10 +1044,14 @@ binding = "DB"
 database_name = "skillscat-db"
 database_id = "<your-production-database-id>"
 
+[[env.production.r2_buckets]]
+binding = "R2"
+bucket_name = "skillscat-storage"
+
 [env.production.vars]
 APP_ORIGIN = "https://your-domain.com"
 SITEMAP_REFRESH_ENABLED = "1"
-SITEMAP_REFRESH_TIMEOUT_MS = "20000"
+SITEMAP_FULL_REFRESH_HOUR_UTC = "3"
 RECOMMEND_PRECOMPUTE_ENABLED = "1"
 RECOMMEND_PRECOMPUTE_MAX_PER_RUN = "500"
 RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS = "25000"
@@ -1455,7 +1460,7 @@ function ensurePrecomputeWorkerEnvVars({
       upsertTomlVarsEntries('wrangler.search-precompute.toml', '[vars]', {
         APP_ORIGIN: 'http://localhost:3000',
         SITEMAP_REFRESH_ENABLED: '1',
-        SITEMAP_REFRESH_TIMEOUT_MS: '20000',
+        SITEMAP_FULL_REFRESH_HOUR_UTC: '3',
         RECOMMEND_PRECOMPUTE_ENABLED: '1',
         RECOMMEND_PRECOMPUTE_MAX_PER_RUN: '500',
         RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS: '25000',
@@ -1474,7 +1479,7 @@ function ensurePrecomputeWorkerEnvVars({
     const precomputeProductionVars = {
       APP_ORIGIN: productionAppUrl || 'https://your-domain.com',
       SITEMAP_REFRESH_ENABLED: '1',
-      SITEMAP_REFRESH_TIMEOUT_MS: '20000',
+      SITEMAP_FULL_REFRESH_HOUR_UTC: '3',
       RECOMMEND_PRECOMPUTE_ENABLED: '1',
       RECOMMEND_PRECOMPUTE_MAX_PER_RUN: '500',
       RECOMMEND_PRECOMPUTE_TIME_BUDGET_MS: '25000',
@@ -1520,6 +1525,7 @@ function ensureIndexNowEnvVars({
   includeProductionVars = true,
   includePreview = true,
   includeIndexing = true,
+  includeClassification = true,
 } = {}) {
   const results = [];
 
@@ -1549,6 +1555,22 @@ function ensureIndexNowEnvVars({
     if (includeProductionVars) {
       results.push(
         upsertTomlVarsEntries('wrangler.indexing.toml', '[env.production.vars]', {
+          INDEXNOW_ENABLED: '1',
+        }),
+      );
+    }
+  }
+
+  if (includeClassification) {
+    results.push(
+      upsertTomlVarsEntries('wrangler.classification.toml', '[vars]', {
+        INDEXNOW_ENABLED: '0',
+      }),
+    );
+
+    if (includeProductionVars) {
+      results.push(
+        upsertTomlVarsEntries('wrangler.classification.toml', '[env.production.vars]', {
           INDEXNOW_ENABLED: '1',
         }),
       );
@@ -2138,6 +2160,7 @@ async function main() {
   const needsIndexNowKey = optionalSecretKeys.has('INDEXNOW_KEY');
   const includePreviewWorker = !hasWorkerSelection || selectedWorkerKeys.includes('preview');
   const includeIndexingWorker = !hasWorkerSelection || selectedWorkerKeys.includes('indexing');
+  const includeClassificationWorker = !hasWorkerSelection || selectedWorkerKeys.includes('classification');
   const includeSearchPrecomputeWorker = !hasWorkerSelection || selectedWorkerKeys.includes('search-precompute');
   const needsProductionAppUrl = includePreviewWorker
     || includeSearchPrecomputeWorker
@@ -2331,6 +2354,7 @@ ${colors.cyan}╔═════════════════════
       includeProductionVars: false,
       includePreview: includePreviewWorker,
       includeIndexing: includeIndexingWorker,
+      includeClassification: includeClassificationWorker,
     });
     const localIndexNowVarsUpdated = localIndexNowEnvUpdates.some((result) => result.exists && result.updated);
     if (localIndexNowVarsUpdated) {
@@ -2574,6 +2598,7 @@ ${colors.cyan}╔═════════════════════
           productionAppUrl,
           includePreview: includePreviewWorker,
           includeIndexing: includeIndexingWorker,
+          includeClassification: includeClassificationWorker,
         });
         const rateLimitEnvUpdates = ensureRequestRateLimitEnvVars({
           includePreview: includePreviewWorker,

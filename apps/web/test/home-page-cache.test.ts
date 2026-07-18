@@ -16,6 +16,11 @@ const getStats = vi.fn();
 
 vi.mock('$lib/server/cache', () => ({
   getCached,
+  invalidateCache: vi.fn(),
+}));
+
+vi.mock('$lib/server/skill/visibility', () => ({
+  getCurrentPublicSkillIds: vi.fn(async () => new Set()),
 }));
 
 vi.mock('$lib/server/cache/page', () => ({
@@ -69,17 +74,20 @@ describe('home page caching', () => {
     expect(getCached).toHaveBeenCalledWith(
       HOME_CRITICAL_CACHE_KEY,
       expect.any(Function),
-      30
+      30,
+      { waitUntil: undefined }
     );
     expect(getCached).toHaveBeenCalledWith(
       HOME_RECENT_CACHE_KEY,
       expect.any(Function),
-      30
+      30,
+      { waitUntil: undefined }
     );
     expect(getCached).toHaveBeenCalledWith(
       HOME_TOP_CACHE_KEY,
       expect.any(Function),
-      30
+      30,
+      { waitUntil: undefined }
     );
     expect(getCached).toHaveBeenCalledWith(
       PUBLIC_SKILLS_STATS_CACHE_KEY,

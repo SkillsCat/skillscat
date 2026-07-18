@@ -22,7 +22,7 @@
     orgName: string;
     inviterId: string;
     inviterName: string;
-    role: "admin" | "member";
+    role: "member";
   }
 
   interface Notification {

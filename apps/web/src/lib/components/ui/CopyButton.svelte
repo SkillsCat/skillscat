@@ -29,6 +29,7 @@
   type="button"
   onclick={copyToClipboard}
   class="copy-button copy-button-{size} {copied ? 'copied' : ''} {className}"
+  aria-label={copied ? messages.common.copied : messages.common.copy}
 >
   <span class="icon-wrapper {copied ? 'wiggle' : ''}">
     {#if copied}

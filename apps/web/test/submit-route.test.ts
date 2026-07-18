@@ -98,6 +98,35 @@ afterEach(() => {
 });
 
 describe('submit route', () => {
+  it('accepts an organization token with publish scope for repository submission', async () => {
+    const requireSubmitPublishScope = vi.fn();
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: null,
+        orgId: 'org_acme',
+        user: null,
+        scopes: ['publish'],
+      })),
+      requireSubmitPublishScope,
+    }));
+
+    const { POST } = await import('../src/routes/api/submit/+server');
+    const response = await POST({
+      locals: { locale: 'en' },
+      platform: { env: { DB: {} } },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'not-a-github-url' }),
+      }),
+    } as never);
+
+    expect(response.status).toBe(400);
+    expect(requireSubmitPublishScope).toHaveBeenCalledTimes(1);
+    const payload = await response.json() as { code: string };
+    expect(payload.code).toBe('invalid_repository_url');
+  });
+
   it('supports repository-only submit checks without scanning skill files', async () => {
     const githubRequest = vi.fn(async (url: string) => {
       if (url === 'https://api.github.com/repos/forker/toolbox') {
@@ -1644,7 +1673,7 @@ describe('submit route', () => {
     expect(queue.send).toHaveBeenCalledTimes(1);
   });
 
-  it('trims whitespace around repository URLs during submit', async () => {
+  it('submits with an organization principal and trims whitespace around repository URLs', async () => {
     const queue = {
       send: vi.fn(async () => undefined),
     };
@@ -1673,8 +1702,10 @@ describe('submit route', () => {
     vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
     vi.doMock('../src/lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({
-        userId: 'user_1',
-        user: { id: 'user_1' },
+        userId: null,
+        orgId: 'org_acme',
+        user: null,
+        scopes: ['publish'],
       })),
       requireSubmitPublishScope: vi.fn(),
     }));
@@ -1717,6 +1748,7 @@ describe('submit route', () => {
       repoOwner: 'forker',
       repoName: 'toolbox',
       skillPath: '',
+      submittedBy: 'org:org_acme',
     }));
   });
 

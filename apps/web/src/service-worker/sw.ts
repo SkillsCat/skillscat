@@ -9,7 +9,7 @@ import {
   isNavigationRequest,
   isSvelteKitDataRequest,
   isExplicitlyPublicResponse,
-  hasSessionCookie,
+  hasAuthCredentials,
   getApiCacheConfig,
   getPageDataCacheConfig,
   getPublicAssetCacheConfig,
@@ -50,12 +50,23 @@ self.addEventListener('fetch', (event) => {
 
   const isSameOrigin = url.origin === self.location.origin;
   const isAuthenticatedDocumentRequest = isSameOrigin
-    && hasSessionCookie(request)
+    && hasAuthCredentials(request)
     && (isNavigationRequest(request) || isSvelteKitDataRequest(url));
 
   if (isAuthenticatedDocumentRequest) {
     // Authenticated page shells and __data.json can differ from the anonymous version,
     // so bypass both the browser HTTP cache and the SW page caches.
+    event.respondWith(fetch(request, { cache: 'no-store' }));
+    return;
+  }
+
+  if (
+    isSameOrigin
+    && url.pathname.startsWith('/api/')
+    && hasAuthCredentials(request)
+  ) {
+    // An authenticated API response may differ from the anonymous response at
+    // the same URL, so never serve or update a shared SW cache entry for it.
     event.respondWith(fetch(request, { cache: 'no-store' }));
     return;
   }
@@ -114,6 +125,7 @@ self.addEventListener('fetch', (event) => {
 
     if (config) {
       event.respondWith(staleWhileRevalidate(request, config, {
+        shouldCacheResponse: isExplicitlyPublicResponse,
         waitUntil: event.waitUntil.bind(event),
       }));
       return;
