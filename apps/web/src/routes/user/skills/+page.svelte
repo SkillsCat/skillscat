@@ -35,6 +35,20 @@
 
   const pageSkills = $derived(data.skills as Skill[]);
   const pagination = $derived(data.pagination);
+  const isSubmittedView = $derived(data.view === 'submitted');
+  const totalSubmitted = $derived(data.totalSubmitted as number);
+  const sectionTitle = $derived(
+    isSubmittedView ? copy.userSkills.submittedSectionTitle : copy.userSkills.sectionTitle
+  );
+  const sectionDescription = $derived(
+    isSubmittedView ? copy.userSkills.submittedSectionDescription : copy.userSkills.sectionDescription
+  );
+  const emptyTitle = $derived(
+    isSubmittedView ? copy.userSkills.submittedEmptyTitle : copy.userSkills.emptyTitle
+  );
+  const emptyDescription = $derived(
+    isSubmittedView ? copy.userSkills.submittedEmptyDescription : copy.userSkills.emptyDescription
+  );
 
   // Infinite scroll state (mobile)
   let allSkills = $state<Skill[]>([]);
@@ -44,11 +58,12 @@
   let isDesktop = $state(true);
   let sentinelEl = $state<HTMLDivElement | null>(null);
   let observer: IntersectionObserver | null = null;
+  let pageLoadController: AbortController | null = null;
 
   // Detect desktop vs mobile
   $effect(() => {
     if (!browser) return;
-    const mql = window.matchMedia('(min-width: 768px)');
+    const mql = window.matchMedia('(min-width: 769px)');
     isDesktop = mql.matches;
     const handler = (e: MediaQueryListEvent) => { isDesktop = e.matches; };
     mql.addEventListener('change', handler);
@@ -57,9 +72,14 @@
 
   // Reset allSkills when SSR data changes (desktop page navigation)
   $effect(() => {
+    pageLoadController?.abort();
+    pageLoadController = null;
+    loadingMore = false;
     allSkills = [...pageSkills];
     currentMobilePage = pagination.currentPage;
     hasMore = pagination.currentPage < pagination.totalPages;
+
+    return () => pageLoadController?.abort();
   });
 
   // IntersectionObserver for mobile infinite scroll
@@ -80,11 +100,23 @@
   async function loadNextPage() {
     if (loadingMore || !hasMore) return;
     loadingMore = true;
+    const controller = new AbortController();
+    pageLoadController = controller;
     try {
       const nextPage = currentMobilePage + 1;
-      const res = await fetch(`/api/user/skills?page=${nextPage}&limit=20`);
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        limit: '20',
+      });
+      if (isSubmittedView) {
+        params.set('view', 'submitted');
+      }
+      const res = await fetch(`/api/user/skills?${params.toString()}`, {
+        signal: controller.signal,
+      });
       if (res.ok) {
         const result = await res.json() as { skills: Skill[]; totalPages: number };
+        if (controller.signal.aborted) return;
         allSkills = [...allSkills, ...result.skills];
         currentMobilePage = nextPage;
         hasMore = nextPage < result.totalPages;
@@ -92,7 +124,10 @@
     } catch {
       // Silently fail
     } finally {
-      loadingMore = false;
+      if (pageLoadController === controller) {
+        pageLoadController = null;
+        loadingMore = false;
+      }
     }
   }
 
@@ -140,14 +175,32 @@
 
 <div class="skills-page">
   <div class="page-header">
-    <div>
+    <div class="page-heading">
       <h1>{copy.userSkills.title}</h1>
       <p class="description">{copy.userSkills.description}</p>
     </div>
+    <nav class="view-switcher" aria-label={copy.userSkills.viewSwitcherLabel}>
+      <a
+        href="/user/skills"
+        class:active={!isSubmittedView}
+        aria-current={!isSubmittedView ? 'page' : undefined}
+      >
+        {copy.userSkills.publishedTab}
+      </a>
+      <a
+        href="/user/skills?view=submitted"
+        class:active={isSubmittedView}
+        aria-current={isSubmittedView ? 'page' : undefined}
+        aria-label={i18n.t(copy.userSkills.submittedTabLabel, { count: totalSubmitted })}
+      >
+        {copy.userSkills.submittedTab}
+        <span class="submitted-count" aria-hidden="true">{totalSubmitted}</span>
+      </a>
+    </nav>
   </div>
 
   <!-- CLI Upload Hint (only show when no skills) -->
-  {#if displaySkills.length === 0 && pagination.totalItems === 0}
+  {#if !isSubmittedView && displaySkills.length === 0 && pagination.totalItems === 0}
     <div class="cli-hint">
       <div class="cli-hint-icon">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -165,14 +218,15 @@
     </div>
   {/if}
 
-  <SettingsSection title={copy.userSkills.sectionTitle} description={copy.userSkills.sectionDescription}>
+  <SettingsSection title={sectionTitle} description={sectionDescription}>
     <SkillsList
       skills={displaySkills}
       loading={false}
       error={null}
-      emptyTitle={copy.userSkills.emptyTitle}
-      emptyDescription={copy.userSkills.emptyDescription}
-      onUnpublish={handleUnpublishClick}
+      layout="grid"
+      {emptyTitle}
+      {emptyDescription}
+      onUnpublish={isSubmittedView ? undefined : handleUnpublishClick}
     />
 
     <!-- Desktop: Pagination -->
@@ -221,15 +275,77 @@
   .page-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     gap: 1rem;
     margin-bottom: 1.5rem;
+  }
+
+  .page-heading {
+    flex: 1;
+    min-width: 0;
   }
 
   h1 {
     font-size: 1.75rem;
     font-weight: 700;
-    margin-bottom: 0.25rem;
+    margin: 0 0 0.25rem;
+  }
+
+  .view-switcher {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.125rem;
+    padding: 0.1875rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .view-switcher a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    min-height: 2rem;
+    padding: 0.375rem 0.625rem;
+    border-radius: calc(var(--radius-md) - 2px);
+    color: var(--muted-foreground);
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .view-switcher a:hover {
+    color: var(--foreground);
+  }
+
+  .view-switcher a.active {
+    color: var(--foreground);
+    background: var(--background);
+    box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground) 12%, transparent);
+  }
+
+  .submitted-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25rem;
+    height: 1.25rem;
+    padding: 0 0.3125rem;
+    border-radius: var(--radius-full);
+    color: var(--muted-foreground);
+    background: var(--background);
+    font-size: 0.6875rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .view-switcher a.active .submitted-count {
+    color: var(--foreground);
+    background: var(--primary-subtle);
   }
 
   .description {
@@ -294,6 +410,10 @@
     .page-header {
       flex-direction: column;
       align-items: stretch;
+    }
+
+    .view-switcher {
+      align-self: flex-start;
     }
 
     h1 {

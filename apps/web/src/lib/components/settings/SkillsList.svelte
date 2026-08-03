@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Grid from '$lib/components/layout/Grid.svelte';
   import VisibilityBadge from '$lib/components/ui/VisibilityBadge.svelte';
   import { useI18n } from '$lib/i18n/runtime';
   import { getSettingsCopy } from '$lib/i18n/settings';
@@ -16,6 +17,7 @@
 
   interface Props {
     skills: Skill[];
+    layout?: 'list' | 'grid';
     loading?: boolean;
     error?: string | null;
     emptyTitle?: string;
@@ -26,6 +28,7 @@
 
   let {
     skills,
+    layout = 'list',
     loading = false,
     error = null,
     emptyTitle = 'No skills yet',
@@ -45,6 +48,55 @@
     )
   );
 </script>
+
+{#snippet skillItems()}
+  {#each filteredSkills as skill (skill.id)}
+    {@const displayDescription = cleanSkillCardDescription(skill.description)}
+    <div
+      class="skill-card"
+      class:skill-card-grid={layout === 'grid'}
+    >
+      <a href={buildSkillPath(skill.slug)} class="skill-link">
+        <div class="skill-info">
+          <div class="skill-header">
+            <h3 class="skill-name" title={layout === 'grid' ? skill.name : undefined}>{skill.name}</h3>
+            <VisibilityBadge visibility={skill.visibility} />
+          </div>
+          {#if displayDescription}
+            <p class="skill-description">{displayDescription}</p>
+          {/if}
+          {#if skill.visibility !== 'private'}
+            <div class="skill-meta">
+              <span class="stars">
+                <svg class="star-icon" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 .587l3.668 7.568 8.332 1.151-6.064 5.828 1.48 8.279-7.416-3.967-7.417 3.967 1.481-8.279-6.064-5.828 8.332-1.151z"/>
+                </svg>
+                {skill.stars}
+              </span>
+            </div>
+          {/if}
+        </div>
+        {#if !(skill.visibility === 'private' && onUnpublish)}
+          <svg class="chevron" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        {/if}
+      </a>
+      {#if skill.visibility === 'private' && onUnpublish}
+        <button
+          class="unpublish-btn"
+          title={copy.skillsList.unpublishSkill}
+          aria-label={copy.skillsList.unpublishSkill}
+          onclick={() => onUnpublish(skill)}
+        >
+          <svg class="trash-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </button>
+      {/if}
+    </div>
+  {/each}
+{/snippet}
 
 {#if loading}
   <div class="loading-state">
@@ -76,52 +128,21 @@
       type="text"
       bind:value={searchQuery}
       placeholder={copy.skillsList.searchPlaceholder}
+      aria-label={copy.skillsList.searchPlaceholder}
       class="search-input"
     />
   </div>
 
   {#if filteredSkills.length > 0}
-    <div class="skills-list">
-      {#each filteredSkills as skill (skill.id)}
-        {@const displayDescription = cleanSkillCardDescription(skill.description)}
-        <a href={buildSkillPath(skill.slug)} class="skill-card">
-          <div class="skill-info">
-            <div class="skill-header">
-              <h3 class="skill-name">{skill.name}</h3>
-              <VisibilityBadge visibility={skill.visibility} />
-            </div>
-            {#if displayDescription}
-              <p class="skill-description">{displayDescription}</p>
-            {/if}
-            {#if skill.visibility !== 'private'}
-              <div class="skill-meta">
-                <span class="stars">
-                  <svg class="star-icon" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 .587l3.668 7.568 8.332 1.151-6.064 5.828 1.48 8.279-7.416-3.967-7.417 3.967 1.481-8.279-6.064-5.828 8.332-1.151z"/>
-                  </svg>
-                  {skill.stars}
-                </span>
-              </div>
-            {/if}
-          </div>
-          {#if skill.visibility === 'private' && onUnpublish}
-            <button
-              class="unpublish-btn"
-              title={copy.skillsList.unpublishSkill}
-              onclick={(e) => { e.preventDefault(); e.stopPropagation(); onUnpublish(skill); }}
-            >
-              <svg class="trash-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            </button>
-          {:else}
-            <svg class="chevron" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          {/if}
-        </a>
-      {/each}
-    </div>
+    {#if layout === 'grid'}
+      <Grid cols={2} gap="sm">
+        {@render skillItems()}
+      </Grid>
+    {:else}
+      <div class="skills-list">
+        {@render skillItems()}
+      </div>
+    {/if}
   {:else}
     <div class="empty-search">
       <p>{i18n.t(copy.skillsList.noMatches, { query: searchQuery })}</p>
@@ -156,7 +177,7 @@
     color: var(--foreground);
     font-size: 0.875rem;
     box-shadow: 0 3px 0 0 var(--border);
-    transition: all 0.15s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   }
 
   .search-input:focus {
@@ -181,13 +202,49 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 0.5rem;
     padding: 1rem;
     background: var(--background);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     text-decoration: none;
     color: inherit;
-    transition: all 0.15s ease;
+    transition: border-color 0.15s ease;
+  }
+
+  .skill-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 1;
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .skill-card-grid {
+    min-width: 0;
+    min-height: 5.625rem;
+    height: 100%;
+    padding: 0.75rem;
+  }
+
+  .skill-card-grid .skill-header {
+    gap: 0.5rem;
+    margin-bottom: 0.125rem;
+    min-width: 0;
+  }
+
+  .skill-card-grid .skill-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .skill-card-grid .skill-description {
+    margin-bottom: 0.375rem;
   }
 
   .skill-card:hover {
@@ -262,7 +319,7 @@
     cursor: pointer;
     flex-shrink: 0;
     box-shadow: 0 3px 0 0 var(--border);
-    transition: all 0.15s ease;
+    transition: color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   }
 
   .unpublish-btn:hover {
@@ -324,7 +381,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: border-color 0.15s ease, color 0.15s ease;
   }
 
   .retry-btn:hover {

@@ -8,6 +8,7 @@ export interface IndexingMessage {
   skillPath?: string;
   submittedBy?: string;
   submittedAt?: string;
+  submissionUserId?: string;
   forceReindex?: boolean;
   queuedAsPending?: boolean;
   discoverySource?: 'github-events' | 'github-code-search';
