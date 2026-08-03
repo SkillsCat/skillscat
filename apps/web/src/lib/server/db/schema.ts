@@ -280,6 +280,19 @@ export const skills = sqliteTable('skills', {
   )
 ]);
 
+// Skills that a user submitted and that were subsequently persisted in the
+// public registry. The composite key keeps the submitted list duplicate-free.
+export const skillSubmissions = sqliteTable('skill_submissions', {
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  submittedAt: integer('submitted_at', { mode: 'timestamp_ms' }).notNull(),
+  indexedAt: integer('indexed_at', { mode: 'timestamp_ms' }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.skillId] }),
+  index('skill_submissions_user_indexed_idx').on(table.userId, table.indexedAt, table.skillId),
+  index('skill_submissions_skill_idx').on(table.skillId),
+]);
+
 export const skillSources = sqliteTable('skill_sources', {
   id: text('id').primaryKey(),
   repoOwner: text('repo_owner').notNull(),
@@ -794,6 +807,8 @@ export type OrgMember = typeof orgMembers.$inferSelect;
 export type NewOrgMember = typeof orgMembers.$inferInsert;
 export type Skill = typeof skills.$inferSelect;
 export type NewSkill = typeof skills.$inferInsert;
+export type SkillSubmission = typeof skillSubmissions.$inferSelect;
+export type NewSkillSubmission = typeof skillSubmissions.$inferInsert;
 export type SkillSource = typeof skillSources.$inferSelect;
 export type NewSkillSource = typeof skillSources.$inferInsert;
 export type SkillSnapshot = typeof skillSnapshots.$inferSelect;

@@ -911,6 +911,7 @@ describe('submit route', () => {
       repoOwner: 'forker',
       repoName: 'toolbox',
       skillPath: 'skills/alpha',
+      submissionUserId: 'user_1',
     }), expect.anything());
     expect(
       db.prepare.mock.calls.filter(([sql]) => sql.includes("COALESCE(skill_path, '') IN ("))
@@ -1750,6 +1751,7 @@ describe('submit route', () => {
       skillPath: '',
       submittedBy: 'org:org_acme',
     }));
+    expect(queue.send.mock.calls[0]?.[0]).not.toHaveProperty('submissionUserId');
   });
 
   it('accepts dot-folder skills during submit precheck', async () => {
@@ -1879,6 +1881,7 @@ describe('submit route', () => {
       repoOwner: 'forker',
       repoName: 'toolbox',
       skillPath: '.claude',
+      submissionUserId: 'user_1',
     }));
   });
 });

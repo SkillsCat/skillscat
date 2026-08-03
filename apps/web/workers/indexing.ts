@@ -93,6 +93,91 @@ const MAX_TOTAL_SIZE = 5 * 1024 * 1024; // 总大小最大 5MB
 const MAX_DISCOVERED_SKILLS_PER_REPO = 100;
 const INDEXING_PROCESSED_TTL_SECONDS = 30 * 24 * 60 * 60;
 const INDEXING_PENDING_TTL_SECONDS = 6 * 60 * 60;
+const NON_USER_SUBMITTERS = new Set(['anonymous_cli', 'security-analysis-backfill']);
+
+interface UserSubmissionContext {
+  userId: string;
+  submittedAt: number;
+}
+
+export function getUserSubmissionContext(message: IndexingMessage): UserSubmissionContext | null {
+  const explicitUserId = message.submissionUserId?.trim();
+  const legacySubmitter = message.submittedBy?.trim();
+  const userId = explicitUserId || (
+    legacySubmitter
+    && !legacySubmitter.startsWith('org:')
+    && !NON_USER_SUBMITTERS.has(legacySubmitter)
+      ? legacySubmitter
+      : null
+  );
+  const submittedAt = message.submittedAt ? Date.parse(message.submittedAt) : Number.NaN;
+
+  if (!userId || !Number.isFinite(submittedAt)) {
+    return null;
+  }
+
+  return { userId, submittedAt };
+}
+
+export async function recordPersistedUserSubmission(
+  db: IndexingEnv['DB'],
+  message: IndexingMessage,
+  skillId: string
+): Promise<void> {
+  const submission = getUserSubmissionContext(message);
+  if (!submission) return;
+
+  await db.prepare(`
+    INSERT OR IGNORE INTO skill_submissions (user_id, skill_id, submitted_at, indexed_at)
+    SELECT ?, s.id, ?, s.created_at
+    FROM skills s
+    WHERE s.id = ?
+      AND s.created_at >= ?
+      AND EXISTS (SELECT 1 FROM user WHERE id = ?)
+    LIMIT 1
+  `)
+    .bind(
+      submission.userId,
+      submission.submittedAt,
+      skillId,
+      submission.submittedAt,
+      submission.userId
+    )
+    .run();
+}
+
+async function recordPersistedUserSubmissionForSource(
+  db: IndexingEnv['DB'],
+  message: IndexingMessage,
+  owner: string,
+  repo: string,
+  skillPath: string | null
+): Promise<void> {
+  const submission = getUserSubmissionContext(message);
+  if (!submission) return;
+
+  await db.prepare(`
+    INSERT OR IGNORE INTO skill_submissions (user_id, skill_id, submitted_at, indexed_at)
+    SELECT ?, s.id, ?, s.created_at
+    FROM skills s
+    WHERE s.repo_owner = ?
+      AND s.repo_name = ?
+      AND COALESCE(s.skill_path, '') = ?
+      AND s.created_at >= ?
+      AND EXISTS (SELECT 1 FROM user WHERE id = ?)
+    LIMIT 1
+  `)
+    .bind(
+      submission.userId,
+      submission.submittedAt,
+      owner,
+      repo,
+      skillPath || '',
+      submission.submittedAt,
+      submission.userId
+    )
+    .run();
+}
 
 async function invalidatePublicDiscoveryCaches(reason: string): Promise<void> {
   try {
@@ -2209,11 +2294,12 @@ export function extractFrontmatterCategories(frontmatter: SkillFrontmatter | nul
   return [...new Set(categories)].filter(Boolean);
 }
 
-function getMessageDedupKey(message: IndexingMessage): string {
+export function getMessageDedupKey(message: IndexingMessage): string {
   const owner = message.repoOwner.toLowerCase();
   const repo = message.repoName.toLowerCase();
   const path = (message.skillPath || '').toLowerCase();
-  return `${owner}/${repo}:${path}`;
+  const submissionUserId = getUserSubmissionContext(message)?.userId;
+  return `${owner}/${repo}:${path}${submissionUserId ? `:user:${submissionUserId}` : ''}`;
 }
 
 function shouldProcessDuplicateBatchMessage(
@@ -2248,9 +2334,12 @@ function buildPendingCandidateKey(
   owner: string,
   repo: string,
   skillPath: string | null | undefined,
-  headSha: string
+  headSha: string,
+  message: IndexingMessage
 ): string {
-  return `indexing:pending:${owner.toLowerCase()}/${repo.toLowerCase()}:${(skillPath || '').toLowerCase()}:${headSha.toLowerCase()}`;
+  const submissionUserId = getUserSubmissionContext(message)?.userId;
+  const submissionScope = submissionUserId ? `:user:${submissionUserId}` : '';
+  return `indexing:pending:${owner.toLowerCase()}/${repo.toLowerCase()}:${(skillPath || '').toLowerCase()}:${headSha.toLowerCase()}${submissionScope}`;
 }
 
 function buildRepoMetricsSyncedKey(
@@ -2312,11 +2401,18 @@ export async function queueDiscoveredSkillPaths(
     if (!discoveredSkillPath) continue;
 
     const processedKey = buildProcessedCandidateKey(owner, repo, discoveredSkillPath, headSha);
-    const pendingKey = buildPendingCandidateKey(owner, repo, discoveredSkillPath, headSha);
-    if (shouldUsePendingMarker && (
-      await wasCandidateProcessed(env, processedKey)
-      || await wasCandidatePending(env, pendingKey)
-    )) {
+    const pendingKey = buildPendingCandidateKey(owner, repo, discoveredSkillPath, headSha, message);
+    if (shouldUsePendingMarker && await wasCandidateProcessed(env, processedKey)) {
+      await recordPersistedUserSubmissionForSource(
+        env.DB,
+        message,
+        owner,
+        repo,
+        discoveredSkillPath
+      );
+      continue;
+    }
+    if (shouldUsePendingMarker && await wasCandidatePending(env, pendingKey)) {
       continue;
     }
 
@@ -2332,6 +2428,7 @@ export async function queueDiscoveredSkillPaths(
         skillPath: discoveredSkillPath,
         submittedBy: message.submittedBy,
         submittedAt: message.submittedAt,
+        submissionUserId: message.submissionUserId,
         forceReindex: message.forceReindex,
         queuedAsPending: shouldUsePendingMarker,
         discoverySource: message.discoverySource,
@@ -2408,9 +2505,17 @@ async function processMessage(
     canonicalRepoOwner,
     canonicalRepoName,
     skillPath || null,
-    latestCommit.sha
+    latestCommit.sha,
+    message
   );
   if (!forceReindex && await wasCandidateProcessed(env, processedCandidateKey)) {
+    await recordPersistedUserSubmissionForSource(
+      env.DB,
+      message,
+      canonicalRepoOwner,
+      canonicalRepoName,
+      skillPath || null
+    );
     if (message.queuedAsPending) {
       await clearCandidatePending(env, pendingCandidateKey);
     }
@@ -2495,6 +2600,7 @@ async function processMessage(
         );
         if (updatedId) {
           log.log(`Updated stars/forks only for skill: ${updatedId}`);
+          await recordPersistedUserSubmission(env.DB, message, updatedId);
         }
       }
 
@@ -2902,6 +3008,7 @@ async function processMessage(
       canonicalCommitSha: latestCommit.sha,
       canonicalCommitAt: mergedPersistenceMetadata.skillMdFirstCommitAt,
     });
+    await recordPersistedUserSubmission(env.DB, message, skillId);
 
     if (
       snapshotState.canonicalSourceId

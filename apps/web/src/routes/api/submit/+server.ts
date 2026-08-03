@@ -297,6 +297,8 @@ function buildSubmitQueueMessage(
   skillPath: string,
   userId: string | null
 ) {
+  const submissionUserId = userId && !userId.startsWith('org:') ? userId : null;
+
   return {
     type: 'check_skill' as const,
     repoOwner: owner,
@@ -304,6 +306,7 @@ function buildSubmitQueueMessage(
     skillPath,
     submittedBy: userId ?? ANON_CLI_SUBMIT_SENTINEL,
     submittedAt: new Date().toISOString(),
+    ...(submissionUserId ? { submissionUserId } : {}),
   };
 }
 
