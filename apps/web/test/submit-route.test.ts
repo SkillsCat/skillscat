@@ -1,3 +1,4 @@
+import { strToU8, zipSync } from 'fflate';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 function jsonResponse(body: unknown, status: number = 200): Response {
@@ -92,6 +93,7 @@ function buildDbMock(existingByPath: Record<string, MockExistingSkill> = {}) {
 afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
   vi.doUnmock('../src/lib/server/github-client/request');
   vi.doUnmock('../src/lib/server/auth/middleware');
   vi.doUnmock('../src/lib/server/skill/resurrection');
@@ -176,6 +178,138 @@ describe('submit route', () => {
       stars: 42,
     });
     expect(githubRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('deduplicates public ZIP discoveries before queueing when GitHub API is rate limited', async () => {
+    const commitSha = '0123456789abcdef0123456789abcdef01234567';
+    const queue = {
+      send: vi.fn(async () => undefined),
+    };
+    const db = buildDbMock();
+    const githubRequest = vi.fn(async () => new Response('rate limited', {
+      status: 429,
+      headers: {
+        'retry-after': '60',
+        'x-ratelimit-remaining': '0',
+      },
+    }));
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const repositoryHtml = `<script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({
+      payload: {
+        codeViewRepoRoute: {
+          refInfo: {
+            name: 'main',
+            refType: 'branch',
+            currentOid: commitSha,
+          },
+          tree: {
+            items: [
+              { path: 'SKILL.md', contentType: 'file' },
+              { path: 'skill.md', contentType: 'file' },
+              { path: 'skills', contentType: 'directory' },
+            ],
+            totalCount: 3,
+          },
+        },
+        codeViewLayoutRoute: {
+          repo: {
+            id: 123,
+            name: 'toolbox',
+            ownerLogin: 'forker',
+            defaultBranch: 'main',
+            createdAt: '2026-01-02T03:04:05Z',
+            private: false,
+            public: true,
+            isOrgOwned: false,
+            isFork: false,
+          },
+        },
+        sidebarAbout: {
+          repoName: 'toolbox',
+          ownerLogin: 'forker',
+          stargazerCount: 42,
+          forksCount: 3,
+          repo: {
+            ownerId: 456,
+            ownerAvatarUrl: 'https://avatars.githubusercontent.com/u/456?v=4',
+            isPrivate: false,
+            isFork: false,
+          },
+        },
+      },
+    })}</script>`;
+    const archive = zipSync({
+      [`toolbox-${commitSha}/SKILL.md`]: strToU8('# Root\n'),
+      [`toolbox-${commitSha}/skill.md`]: strToU8('# Duplicate root casing\n'),
+      [`toolbox-${commitSha}/skills/alpha/SKILL.md`]: strToU8('# Alpha\n'),
+    });
+    const publicFetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const requestUrl = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      const headers = new Headers(init?.headers);
+      expect(headers.has('Authorization')).toBe(false);
+      expect(headers.has('Cookie')).toBe(false);
+
+      if (requestUrl === 'https://github.com/forker/toolbox') {
+        return new Response(repositoryHtml);
+      }
+      if (requestUrl === `https://codeload.github.com/forker/toolbox/zip/${commitSha}`) {
+        return new Response(Uint8Array.from(archive).buffer);
+      }
+      throw new Error(`Unexpected public GitHub request: ${requestUrl}`);
+    });
+    vi.stubGlobal('fetch', publicFetch);
+
+    const { POST } = await import('../src/routes/api/submit/+server');
+    const response = await POST({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: db,
+          GITHUB_TOKEN: 'test-token',
+          GITHUB_HTML_SUBMIT_FALLBACK_ENABLED: '1',
+          INDEXING_QUEUE: queue,
+        },
+      },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://github.com/forker/toolbox' }),
+      }),
+    } as never);
+    const payload = await response.json() as {
+      success: boolean;
+      submitted: number;
+      results: Array<{ path: string; status: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ success: true, submitted: 2 });
+    expect(payload.results).toHaveLength(2);
+    expect(queue.send).toHaveBeenCalledTimes(2);
+    expect(queue.send.mock.calls.map(([message]) => message)).toEqual([
+      expect.objectContaining({ repoOwner: 'forker', repoName: 'toolbox', skillPath: '' }),
+      expect.objectContaining({ repoOwner: 'forker', repoName: 'toolbox', skillPath: 'skills/alpha' }),
+    ]);
+    const prefetchCallIndex = db.prepare.mock.calls.findIndex(([sql]) =>
+      sql.includes("COALESCE(skill_path, '') IN (")
+    );
+    expect(prefetchCallIndex).toBeGreaterThanOrEqual(0);
+    expect(db.prepare.mock.invocationCallOrder[prefetchCallIndex]).toBeLessThan(
+      queue.send.mock.invocationCallOrder[0]
+    );
+    expect(publicFetch).toHaveBeenCalledTimes(2);
   });
 
   it('returns localized fork errors for submit precheck', async () => {

@@ -56,6 +56,7 @@ queue = "skillscat-security-analysis"
 
 [vars]
 GITHUB_API_VERSION = "2022-11-28"
+GITHUB_HTML_INDEXING_FALLBACK_ENABLED = "1"
 INDEXNOW_ENABLED = "0"
 
 [env.production]
@@ -96,4 +97,5 @@ queue = "skillscat-security-analysis"
 
 [env.production.vars]
 GITHUB_API_VERSION = "2022-11-28"
+GITHUB_HTML_INDEXING_FALLBACK_ENABLED = "1"
 INDEXNOW_ENABLED = "1"

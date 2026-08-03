@@ -74,6 +74,15 @@ import {
   buildGithubSkillR2Prefix,
 } from '../src/lib/skill-path';
 import { canonicalizeCategorySlug } from './shared/classification/categories';
+import {
+  isGitHubPublicFallbackEnabled,
+  PublicGitHubRepositoryReader,
+  PublicRepositoryFileTooLargeError,
+  type PublicGitHubRepositoryMetadata,
+  type PublicRepositoryCaptureOptions,
+  type PublicRepositoryFile,
+  type PublicRepositorySnapshot,
+} from '../src/lib/server/github-client/public-web';
 
 const log = createLogger('Indexing');
 
@@ -252,9 +261,14 @@ interface ResolvedSkillMetadata {
 interface IndexingBatchContext {
   repoInfoByRepo: Map<string, Promise<GitHubRepo | null>>;
   latestCommitByRepoRef: Map<string, Promise<{ sha: string; branch: string } | null>>;
-  repositoryTreeByRepoRef: Map<string, Promise<GitHubTreeResponse>>;
+  repositoryTreeByRepoRef: Map<string, Promise<RepositoryTreeData>>;
   skillCommitDatesByPath: Map<string, Promise<{ lastCommitAt: number | null; firstCommitAt: number | null }>>;
+  publicRepositoryReaders: Map<string, PublicGitHubRepositoryReader>;
   indexNowUrls: Set<string>;
+}
+
+interface RepositoryTreeData extends GitHubTreeResponse {
+  publicSnapshot?: PublicRepositorySnapshot;
 }
 
 function createIndexingBatchContext(): IndexingBatchContext {
@@ -263,6 +277,7 @@ function createIndexingBatchContext(): IndexingBatchContext {
     latestCommitByRepoRef: new Map(),
     repositoryTreeByRepoRef: new Map(),
     skillCommitDatesByPath: new Map(),
+    publicRepositoryReaders: new Map(),
     indexNowUrls: new Set(),
   };
 }
@@ -277,6 +292,66 @@ function getRepoRefCacheKey(owner: string, repo: string, ref: string): string {
 
 function getSkillCommitDatesCacheKey(owner: string, repo: string, skillMdPath: string): string {
   return `${getRepoCacheKey(owner, repo)}:${skillMdPath.toLowerCase()}`;
+}
+
+function getPublicRepositoryReader(
+  owner: string,
+  repo: string,
+  env: IndexingEnv,
+  batchContext: IndexingBatchContext,
+  expectedHeadSha?: string
+): PublicGitHubRepositoryReader | undefined {
+  if (!isGitHubPublicFallbackEnabled(env.GITHUB_HTML_INDEXING_FALLBACK_ENABLED)) {
+    return undefined;
+  }
+  if (expectedHeadSha && !/^[a-f0-9]{40,64}$/i.test(expectedHeadSha)) {
+    return undefined;
+  }
+
+  const key = `${getRepoCacheKey(owner, repo)}@${expectedHeadSha?.toLowerCase() || 'head'}`;
+  const existing = batchContext.publicRepositoryReaders.get(key);
+  if (existing) return existing;
+
+  const reader = new PublicGitHubRepositoryReader(owner, repo, { expectedHeadSha });
+  batchContext.publicRepositoryReaders.set(key, reader);
+  return reader;
+}
+
+function publicRepoToGitHubRepo(metadata: PublicGitHubRepositoryMetadata): GitHubRepo {
+  return {
+    id: metadata.id,
+    name: metadata.name,
+    full_name: `${metadata.ownerLogin}/${metadata.name}`,
+    owner: {
+      login: metadata.ownerLogin,
+      id: metadata.ownerId,
+      avatar_url: metadata.ownerAvatarUrl,
+      type: metadata.ownerType,
+    },
+    html_url: metadata.htmlUrl,
+    description: metadata.description,
+    fork: metadata.isFork,
+    created_at: metadata.createdAt,
+    updated_at: metadata.createdAt,
+    pushed_at: metadata.createdAt,
+    homepage: null,
+    stargazers_count: metadata.stars,
+    watchers_count: metadata.stars,
+    forks_count: metadata.forks,
+    language: null,
+    license: null,
+    topics: metadata.topics,
+    default_branch: metadata.defaultBranch,
+  };
+}
+
+function publicCaptureOptions(basePath: string | null): PublicRepositoryCaptureOptions {
+  return {
+    basePath,
+    maxFiles: MAX_FILES,
+    maxFileBytes: MAX_FILE_SIZE,
+    maxTotalBytes: MAX_TOTAL_SIZE,
+  };
 }
 
 function getOrCreateBatchPromise<T>(
@@ -689,25 +764,45 @@ async function checkAndConvertPrivateSkill(
 /**
  * Get the latest commit SHA from GitHub repository
  */
-async function getLatestCommitSha(
+export async function getLatestCommitSha(
   owner: string,
   name: string,
   env: IndexingEnv,
-  defaultBranch?: string
+  defaultBranch?: string,
+  publicReader?: PublicGitHubRepositoryReader
 ): Promise<{ sha: string; branch: string } | null> {
   const branch = defaultBranch || 'main';
+  let apiError: unknown = null;
 
-  // Get latest commit
-  const commitUrl = `https://api.github.com/repos/${owner}/${name}/commits/${branch}`;
-  const commitInfo = await githubFetch<{ sha: string }>(commitUrl, {
-    ...getGitHubRequestAuthFromEnv(env),
-    apiVersion: env.GITHUB_API_VERSION,
-    userAgent: 'SkillsCat-Indexing-Worker/1.0',
-  });
+  try {
+    const commitUrl = `https://api.github.com/repos/${owner}/${name}/commits/${encodeURIComponent(branch)}`;
+    const commitInfo = await githubFetch<{ sha: string }>(commitUrl, {
+      ...getGitHubRequestAuthFromEnv(env),
+      apiVersion: env.GITHUB_API_VERSION,
+      userAgent: 'SkillsCat-Indexing-Worker/1.0',
+    });
 
-  if (!commitInfo) return null;
+    if (commitInfo?.sha) return { sha: commitInfo.sha, branch };
+  } catch (error) {
+    if (!publicReader) throw error;
+    apiError = error;
+    log.warn(`Latest commit API unavailable for ${owner}/${name}; using public repository HTML metadata`, error);
+  }
 
-  return { sha: commitInfo.sha, branch };
+  if (!publicReader) return null;
+  let metadata: PublicGitHubRepositoryMetadata | null;
+  try {
+    metadata = await publicReader.getMetadata();
+  } catch (error) {
+    log.warn(`Public latest commit fallback failed for ${owner}/${name}`, error);
+    if (apiError) throw error;
+    return null;
+  }
+  if (metadata) {
+    return { sha: metadata.headSha, branch: metadata.defaultBranch };
+  }
+  if (apiError) throw apiError;
+  return null;
 }
 
 /**
@@ -763,18 +858,27 @@ function getGitHubPathCommitUpdatedAt(commit: GitHubPathCommit | null | undefine
 /**
  * Get the newest activity time and the earliest authored time for SKILL.md.
  */
-async function getSkillCommitDates(
+export async function getSkillCommitDates(
   owner: string,
   name: string,
   skillMdPath: string,
-  env: IndexingEnv
+  commitSha: string,
+  env: IndexingEnv,
+  publicReader?: PublicGitHubRepositoryReader
 ): Promise<{ lastCommitAt: number | null; firstCommitAt: number | null }> {
-  const commitsUrl = `https://api.github.com/repos/${owner}/${name}/commits?per_page=1&path=${encodeURIComponent(skillMdPath)}`;
-  const newestResponse = await githubRequest(commitsUrl, {
-    ...getGitHubRequestAuthFromEnv(env),
-    apiVersion: env.GITHUB_API_VERSION,
-    userAgent: 'SkillsCat-Indexing-Worker/1.0',
-  });
+  const commitsUrl = `https://api.github.com/repos/${owner}/${name}/commits?sha=${encodeURIComponent(commitSha)}&per_page=1&path=${encodeURIComponent(skillMdPath)}`;
+  let newestResponse: Response;
+  try {
+    newestResponse = await githubRequest(commitsUrl, {
+      ...getGitHubRequestAuthFromEnv(env),
+      apiVersion: env.GITHUB_API_VERSION,
+      userAgent: 'SkillsCat-Indexing-Worker/1.0',
+    });
+  } catch (error) {
+    if (!publicReader) throw error;
+    const lastCommitAt = await publicReader.getLatestCommitAt(skillMdPath);
+    return { lastCommitAt, firstCommitAt: null };
+  }
 
   if (newestResponse.status === 404) {
     log.log(`No commits found for path: ${skillMdPath}`);
@@ -782,6 +886,10 @@ async function getSkillCommitDates(
   }
 
   if (!newestResponse.ok) {
+    if (publicReader && (newestResponse.status === 401 || newestResponse.status === 403 || newestResponse.status === 429 || newestResponse.status >= 500)) {
+      const lastCommitAt = await publicReader.getLatestCommitAt(skillMdPath);
+      return { lastCommitAt, firstCommitAt: null };
+    }
     throw new Error(`Failed to fetch commit history for ${owner}/${name}/${skillMdPath}: ${newestResponse.status}`);
   }
 
@@ -793,7 +901,10 @@ async function getSkillCommitDates(
   }
 
   const lastCommitAt = getGitHubPathCommitUpdatedAt(newestCommits[0]);
-  let firstCommitAt = getGitHubPathCommitCreatedAt(newestCommits[0]) ?? lastCommitAt;
+  const graphqlFallback = newestResponse.headers.get('x-skillscat-github-fallback') === 'graphql';
+  let firstCommitAt = graphqlFallback
+    ? null
+    : (getGitHubPathCommitCreatedAt(newestCommits[0]) ?? lastCommitAt);
 
   const lastPageUrl = extractLastLinkUrl(newestResponse.headers.get('link'));
   if (lastPageUrl) {
@@ -825,37 +936,57 @@ function getSkillPathFromSkillMdPath(path: string): string | null {
   return skillPath || null;
 }
 
-async function getRepositoryTree(
+export async function getRepositoryTree(
   owner: string,
   name: string,
-  branch: string,
-  env: IndexingEnv
-): Promise<GitHubTreeResponse> {
-  const treeUrl = `https://api.github.com/repos/${owner}/${name}/git/trees/${branch}?recursive=1`;
-  const treeData = await githubFetch<GitHubTreeResponse>(treeUrl, {
-    ...getGitHubRequestAuthFromEnv(env),
-    apiVersion: env.GITHUB_API_VERSION,
-    userAgent: 'SkillsCat-Indexing-Worker/1.0',
-  });
+  commitSha: string,
+  env: IndexingEnv,
+  publicReader?: PublicGitHubRepositoryReader,
+  captureBasePath?: string | null
+): Promise<RepositoryTreeData> {
+  try {
+    const treeUrl = `https://api.github.com/repos/${owner}/${name}/git/trees/${encodeURIComponent(commitSha)}?recursive=1`;
+    const treeData = await githubFetch<GitHubTreeResponse>(treeUrl, {
+      ...getGitHubRequestAuthFromEnv(env),
+      apiVersion: env.GITHUB_API_VERSION,
+      userAgent: 'SkillsCat-Indexing-Worker/1.0',
+    });
 
-  if (!treeData) {
+    if (treeData) return treeData;
     throw new Error('Failed to fetch repository tree for skill path scan');
+  } catch (error) {
+    if (!publicReader) throw error;
+    const snapshot = await publicReader.getSnapshot(
+      captureBasePath === undefined ? undefined : publicCaptureOptions(captureBasePath ?? null)
+    );
+    return {
+      sha: snapshot.metadata.headSha,
+      tree: snapshot.entries.map((entry) => ({
+        path: entry.path,
+        type: entry.type,
+        sha: entry.sha || '',
+        mode: entry.type === 'tree' ? '040000' : '100644',
+        ...(entry.size === undefined ? {} : { size: entry.size }),
+      })),
+      truncated: snapshot.truncated,
+      publicSnapshot: snapshot,
+    };
   }
-
-  return treeData;
 }
 
 async function getRepositoryTreeCached(
   owner: string,
   name: string,
-  branch: string,
+  commitSha: string,
   env: IndexingEnv,
-  batchContext: IndexingBatchContext
-): Promise<GitHubTreeResponse> {
+  batchContext: IndexingBatchContext,
+  publicReader?: PublicGitHubRepositoryReader,
+  captureBasePath?: string | null
+): Promise<RepositoryTreeData> {
   return getOrCreateBatchPromise(
     batchContext.repositoryTreeByRepoRef,
-    getRepoRefCacheKey(owner, name, branch),
-    () => getRepositoryTree(owner, name, branch, env)
+    getRepoRefCacheKey(owner, name, commitSha),
+    () => getRepositoryTree(owner, name, commitSha, env, publicReader, captureBasePath)
   );
 }
 
@@ -883,11 +1014,21 @@ function scanRepositorySkillPathsFromTree(treeData: GitHubTreeResponse): string[
 async function scanRepositorySkillPaths(
   owner: string,
   name: string,
-  branch: string,
+  commitSha: string,
   env: IndexingEnv,
-  batchContext: IndexingBatchContext
+  batchContext: IndexingBatchContext,
+  publicReader?: PublicGitHubRepositoryReader,
+  captureBasePath?: string | null
 ): Promise<string[]> {
-  const treeData = await getRepositoryTreeCached(owner, name, branch, env, batchContext);
+  const treeData = await getRepositoryTreeCached(
+    owner,
+    name,
+    commitSha,
+    env,
+    batchContext,
+    publicReader,
+    captureBasePath
+  );
   return scanRepositorySkillPathsFromTree(treeData);
 }
 
@@ -1756,9 +1897,10 @@ async function fetchDirectoryFiles(
   owner: string,
   name: string,
   skillPath: string | null,
-  treeData: GitHubTreeResponse,
+  treeData: RepositoryTreeData,
   env: IndexingEnv,
-  previousFileShas?: Map<string, string>
+  previousFileShas?: Map<string, string>,
+  publicReader?: PublicGitHubRepositoryReader
 ): Promise<{ files: DirectoryFile[]; textContents: Map<string, string> }> {
   const files: DirectoryFile[] = [];
   const textContents = new Map<string, string>();
@@ -1779,7 +1921,10 @@ async function fetchDirectoryFiles(
     const relativePath = resolveSkillRelativePath(item.path, skillPath);
     if (!relativePath) continue;
 
-    const fileSize = item.size || 0;
+    const capturedFile = treeData.publicSnapshot?.capturedFiles.get(item.path) ?? null;
+    let publicFile: PublicRepositoryFile | null = capturedFile;
+    let fileSize = capturedFile?.size ?? item.size ?? 0;
+    let fileSha = capturedFile?.blobSha || item.sha;
 
     // Skip files larger than max size
     if (fileSize > MAX_FILE_SIZE) {
@@ -1794,10 +1939,70 @@ async function fetchDirectoryFiles(
     }
 
     const isText = isTextFile(relativePath);
+    const previousSha = previousFileShas?.get(relativePath);
+
+    // A cached ZIP snapshot can retain blob SHAs even though captured bytes
+    // are not stored in Cache API. Reuse R2 before issuing a raw file request.
+    if (isText && fileSha && previousSha === fileSha) {
+      for (const candidateKey of buildGithubSkillR2Keys(owner, name, skillPath, relativePath)) {
+        const cachedObject = await env.R2.get(candidateKey);
+        if (!cachedObject) continue;
+        textContents.set(relativePath, await cachedObject.text());
+        reusedFromR2++;
+        break;
+      }
+
+      if (textContents.has(relativePath)) {
+        files.push({
+          path: relativePath,
+          sha: fileSha,
+          size: fileSize,
+          type: 'text',
+        });
+        fileCount++;
+        totalSize += fileSize;
+        continue;
+      }
+    }
+
+    // A ZIP/HTML tree has no usable blob SHA for uncaptured files. Hydrate
+    // missing SHAs and any text content that was not reusable from R2.
+    if (
+      treeData.publicSnapshot
+      && publicReader
+      && !publicFile
+      && (!fileSha || isText)
+    ) {
+      try {
+        publicFile = await publicReader.getFile(item.path, MAX_FILE_SIZE);
+      } catch (error) {
+        if (error instanceof PublicRepositoryFileTooLargeError) {
+          log.log(`Skipping large public fallback file: ${relativePath}`);
+          continue;
+        }
+        throw error;
+      }
+      if (!publicFile) continue;
+      fileSize = publicFile.size;
+      fileSha = publicFile.blobSha;
+      if (fileSize > MAX_FILE_SIZE) {
+        log.log(`Skipping large file: ${relativePath} (${fileSize} bytes)`);
+        continue;
+      }
+      if (totalSize + fileSize > MAX_TOTAL_SIZE) {
+        log.log(`Reached total size limit (${MAX_TOTAL_SIZE})`);
+        break;
+      }
+    }
+
+    if (!fileSha) {
+      log.log(`Skipping file without a blob SHA: ${relativePath}`);
+      continue;
+    }
 
     const fileInfo: DirectoryFile = {
       path: relativePath,
-      sha: item.sha,
+      sha: fileSha,
       size: fileSize,
       type: isText ? 'text' : 'binary',
     };
@@ -1806,24 +2011,15 @@ async function fetchDirectoryFiles(
     fileCount++;
     totalSize += fileSize;
 
-    // Fetch content for text files only
+    // Fetch content for text files only. Public fallback bytes are already
+    // pinned and authenticated-free; API responses retain the old path.
     if (isText) {
-      const previousSha = previousFileShas?.get(relativePath);
-      if (previousSha && previousSha === item.sha) {
-        for (const candidateKey of buildGithubSkillR2Keys(owner, name, skillPath, relativePath)) {
-          const cachedObject = await env.R2.get(candidateKey);
-          if (!cachedObject) continue;
-          textContents.set(relativePath, await cachedObject.text());
-          reusedFromR2++;
-          break;
-        }
-
-        if (textContents.has(relativePath)) {
-          continue;
-        }
+      if (publicFile) {
+        textContents.set(relativePath, new TextDecoder().decode(publicFile.bytes));
+        continue;
       }
 
-      const blobUrl = `https://api.github.com/repos/${owner}/${name}/git/blobs/${item.sha}`;
+      const blobUrl = `https://api.github.com/repos/${owner}/${name}/git/blobs/${fileSha}`;
       const blobData = await githubFetch<{ content: string; encoding: string }>(blobUrl, {
         ...getGitHubRequestAuthFromEnv(env),
         apiVersion: env.GITHUB_API_VERSION,
@@ -1832,7 +2028,11 @@ async function fetchDirectoryFiles(
 
       if (blobData && blobData.content) {
         try {
-          const content = decodeBase64ToUtf8(blobData.content);
+          const content = decodeLimitedGitHubBase64Text(
+            blobData.content,
+            relativePath,
+            MAX_FILE_SIZE
+          );
           textContents.set(relativePath, content);
         } catch (err) {
           log.warn(`Failed to decode content for ${relativePath}:`, err);
@@ -1914,46 +2114,120 @@ async function updateSkillMetadata(
 async function getRepoInfo(
   owner: string,
   name: string,
-  env: IndexingEnv
+  env: IndexingEnv,
+  publicReader?: PublicGitHubRepositoryReader
 ): Promise<GitHubRepo | null> {
-  return githubFetch<GitHubRepo>(getRepoApiUrl(owner, name), {
-    ...getGitHubRequestAuthFromEnv(env),
-    apiVersion: env.GITHUB_API_VERSION,
-    userAgent: 'SkillsCat-Indexing-Worker/1.0',
-  });
+  try {
+    return await githubFetch<GitHubRepo>(getRepoApiUrl(owner, name), {
+      ...getGitHubRequestAuthFromEnv(env),
+      apiVersion: env.GITHUB_API_VERSION,
+      userAgent: 'SkillsCat-Indexing-Worker/1.0',
+    });
+  } catch (error) {
+    if (!publicReader) throw error;
+    const metadata = await publicReader.getMetadata();
+    return metadata ? publicRepoToGitHubRepo(metadata) : null;
+  }
 }
 
 async function getRepoInfoCached(
   owner: string,
   name: string,
   env: IndexingEnv,
-  batchContext: IndexingBatchContext
+  batchContext: IndexingBatchContext,
+  publicReader?: PublicGitHubRepositoryReader
 ): Promise<GitHubRepo | null> {
   return getOrCreateBatchPromise(
     batchContext.repoInfoByRepo,
     getRepoCacheKey(owner, name),
-    () => getRepoInfo(owner, name, env)
+    () => getRepoInfo(owner, name, env, publicReader)
   );
 }
 
-async function getSkillMd(
+function encodeBytesBase64(bytes: Uint8Array): string {
+  let result = '';
+  // Keep intermediate chunks divisible by three so concatenated base64 has
+  // padding only on the final chunk.
+  const chunkSize = 0x7ffe;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize));
+    let binary = '';
+    for (const byte of chunk) binary += String.fromCharCode(byte);
+    result += btoa(binary);
+  }
+  return result;
+}
+
+function publicFileToGitHubContent(
   owner: string,
   name: string,
+  commitSha: string,
+  file: PublicRepositoryFile
+): GitHubContent {
+  const encodedPath = file.path.split('/').map(encodeURIComponent).join('/');
+  return {
+    name: file.path.split('/').pop() || file.path,
+    path: file.path,
+    sha: file.blobSha,
+    size: file.size,
+    url: `https://api.github.com/repos/${owner}/${name}/contents/${encodedPath}?ref=${encodeURIComponent(commitSha)}`,
+    html_url: `https://github.com/${owner}/${name}/blob/${encodeURIComponent(commitSha)}/${encodedPath}`,
+    git_url: `https://api.github.com/repos/${owner}/${name}/git/blobs/${file.blobSha}`,
+    download_url: `https://raw.githubusercontent.com/${owner}/${name}/${encodeURIComponent(commitSha)}/${encodedPath}`,
+    type: 'file',
+    content: encodeBytesBase64(file.bytes),
+    encoding: 'base64',
+  };
+}
+
+function decodeLimitedGitHubBase64Text(
+  content: string,
+  path: string,
+  maxBytes: number
+): string {
+  const encoded = content.replace(/\s/g, '');
+  const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
+  const decodedBytes = Math.max(0, Math.floor(encoded.length * 3 / 4) - padding);
+  if (decodedBytes > maxBytes) {
+    throw new Error(`GitHub blob exceeds ${maxBytes} bytes: ${path}`);
+  }
+  return decodeBase64ToUtf8(encoded);
+}
+
+export async function getSkillMd(
+  owner: string,
+  name: string,
+  commitSha: string,
   env: IndexingEnv,
-  skillPath?: string
+  skillPath?: string,
+  publicReader?: PublicGitHubRepositoryReader
 ): Promise<GitHubContent | null> {
   const basePath = skillPath ? `${skillPath}/` : '';
   const paths = [`${basePath}SKILL.md`, `${basePath}skill.md`];
 
   for (const path of paths) {
-    const content = await githubFetch<GitHubContent>(
-      getContentsApiUrl(owner, name, path),
-      {
-        ...getGitHubRequestAuthFromEnv(env),
-        apiVersion: env.GITHUB_API_VERSION,
-        userAgent: 'SkillsCat-Indexing-Worker/1.0',
-      }
-    );
+    let content: GitHubContent | null;
+    try {
+      content = await githubFetch<GitHubContent>(
+        `${getContentsApiUrl(owner, name, path)}?ref=${encodeURIComponent(commitSha)}`,
+        {
+          ...getGitHubRequestAuthFromEnv(env),
+          apiVersion: env.GITHUB_API_VERSION,
+          userAgent: 'SkillsCat-Indexing-Worker/1.0',
+        }
+      );
+    } catch (error) {
+      if (!publicReader) throw error;
+      const snapshot = await publicReader.getSnapshot(publicCaptureOptions(skillPath || null));
+      const publicPath = paths.find((candidatePath) => snapshot.entries.some(
+        (entry) => entry.type === 'blob' && entry.path === candidatePath
+      ));
+      if (!publicPath) return null;
+      const publicFile = await publicReader.getFile(publicPath, MAX_FILE_SIZE);
+      return publicFile
+        ? publicFileToGitHubContent(owner, name, commitSha, publicFile)
+        : null;
+    }
     if (content && content.type === 'file') {
       return content;
     }
@@ -2456,8 +2730,21 @@ async function processMessage(
 
   log.log(`Processing repo: ${repoOwner}/${repoName} (source: ${source}, skillPath: ${skillPath || 'root'})`, JSON.stringify(message));
 
-  // Step 1: Get repository info
-  const repo = await getRepoInfoCached(repoOwner, repoName, env, batchContext);
+  // Step 1: Get repository info. The public reader is request-scoped and is
+  // only used when the authenticated GitHub path is unavailable.
+  const requestedPublicReader = getPublicRepositoryReader(
+    repoOwner,
+    repoName,
+    env,
+    batchContext
+  );
+  const repo = await getRepoInfoCached(
+    repoOwner,
+    repoName,
+    env,
+    batchContext,
+    requestedPublicReader
+  );
   if (!repo) {
     log.log(`Repo not found: ${repoOwner}/${repoName}`);
     return;
@@ -2470,6 +2757,12 @@ async function processMessage(
 
   const canonicalRepoOwner = repo.owner?.login || repoOwner;
   const canonicalRepoName = repo.name || repoName;
+  const publicHeadReader = getPublicRepositoryReader(
+    canonicalRepoOwner,
+    canonicalRepoName,
+    env,
+    batchContext
+  );
 
   if (canonicalRepoOwner !== repoOwner || canonicalRepoName !== repoName) {
     log.log(`Canonicalized repository identity: ${repoOwner}/${repoName} -> ${canonicalRepoOwner}/${canonicalRepoName}`);
@@ -2485,7 +2778,8 @@ async function processMessage(
       canonicalRepoOwner,
       canonicalRepoName,
       env,
-      repo.default_branch
+      repo.default_branch,
+      publicHeadReader
     )
   );
   if (!latestCommit) {
@@ -2494,6 +2788,13 @@ async function processMessage(
   }
 
   log.log(`Latest commit: ${latestCommit.sha} (branch: ${latestCommit.branch})`);
+  const publicReader = getPublicRepositoryReader(
+    canonicalRepoOwner,
+    canonicalRepoName,
+    env,
+    batchContext,
+    latestCommit.sha
+  );
 
   const processedCandidateKey = buildProcessedCandidateKey(
     canonicalRepoOwner,
@@ -2525,7 +2826,7 @@ async function processMessage(
 
   let shouldMarkProcessed = false;
   let discoveredRepositorySkillPaths: string[] | null = null;
-  let repositoryTree: GitHubTreeResponse | null = null;
+  let repositoryTree: RepositoryTreeData | null = null;
 
   try {
     if (!skillPath) {
@@ -2533,9 +2834,11 @@ async function processMessage(
         repositoryTree = await getRepositoryTreeCached(
           canonicalRepoOwner,
           canonicalRepoName,
-          latestCommit.branch,
+          latestCommit.sha,
           env,
-          batchContext
+          batchContext,
+          publicReader,
+          null
         );
         discoveredRepositorySkillPaths = scanRepositorySkillPathsFromTree(repositoryTree);
         const queuedDiscoveredPaths = await queueDiscoveredSkillPaths(
@@ -2620,14 +2923,23 @@ async function processMessage(
     }
 
     // Step 4: Verify SKILL.md exists for the requested path.
-    let skillMd = await getSkillMd(canonicalRepoOwner, canonicalRepoName, env, skillPath);
+    let skillMd = await getSkillMd(
+      canonicalRepoOwner,
+      canonicalRepoName,
+      latestCommit.sha,
+      env,
+      skillPath,
+      publicReader
+    );
     if (!skillMd && !skillPath) {
       const repositorySkillPaths = discoveredRepositorySkillPaths || await scanRepositorySkillPaths(
         canonicalRepoOwner,
         canonicalRepoName,
-        latestCommit.branch,
+        latestCommit.sha,
         env,
-        batchContext
+        batchContext,
+        publicReader,
+        null
       );
       const discoveredSkillPaths = repositorySkillPaths.filter((candidatePath) => candidatePath);
 
@@ -2678,9 +2990,11 @@ async function processMessage(
       const treeForDirectory = repositoryTree || await getRepositoryTreeCached(
         canonicalRepoOwner,
         canonicalRepoName,
-        latestCommit.branch,
+        latestCommit.sha,
         env,
-        batchContext
+        batchContext,
+        publicReader,
+        skillPath || null
       );
       const result = await fetchDirectoryFiles(
         canonicalRepoOwner,
@@ -2688,7 +3002,8 @@ async function processMessage(
         skillPath || null,
         treeForDirectory,
         env,
-        previousFileShas
+        previousFileShas,
+        publicReader
       );
       directoryFiles = result.files;
       textContents = result.textContents;
@@ -2697,20 +3012,58 @@ async function processMessage(
       // Fallback: just use SKILL.md content
       let skillMdContent = '';
       if (skillMd.content) {
-        skillMdContent = decodeBase64ToUtf8(skillMd.content);
-      } else if (skillMd.download_url) {
-        const response = await githubRequest(skillMd.download_url, {
-          ...getGitHubRequestAuthFromEnv(env),
-          apiVersion: env.GITHUB_API_VERSION,
-          userAgent: 'SkillsCat-Worker/1.0',
-        });
-        skillMdContent = await response.text();
+        skillMdContent = decodeLimitedGitHubBase64Text(
+          skillMd.content,
+          skillMd.path,
+          MAX_FILE_SIZE
+        );
+      } else {
+        if (publicReader) {
+          try {
+            const publicFile = await publicReader.getFile(skillMd.path, MAX_FILE_SIZE);
+            if (publicFile) {
+              skillMdContent = new TextDecoder().decode(publicFile.bytes);
+            }
+          } catch (publicError) {
+            log.warn(`Public SKILL.md fallback failed for ${skillMd.path}`, publicError);
+          }
+        }
+
+        if (!skillMdContent && skillMd.sha) {
+          if (skillMd.size > MAX_FILE_SIZE) {
+            throw new Error(`GitHub blob exceeds ${MAX_FILE_SIZE} bytes: ${skillMd.path}`);
+          }
+          const blobData = await githubFetch<{ content: string; encoding: string }>(
+            `https://api.github.com/repos/${canonicalRepoOwner}/${canonicalRepoName}/git/blobs/${encodeURIComponent(skillMd.sha)}`,
+            {
+              ...getGitHubRequestAuthFromEnv(env),
+              apiVersion: env.GITHUB_API_VERSION,
+              userAgent: 'SkillsCat-Indexing-Worker/1.0',
+            }
+          );
+          if (blobData?.content && blobData.encoding === 'base64') {
+            skillMdContent = decodeLimitedGitHubBase64Text(
+              blobData.content,
+              skillMd.path,
+              MAX_FILE_SIZE
+            );
+          }
+        }
       }
-      textContents.set('SKILL.md', skillMdContent);
+      if (!skillMdContent) {
+        throw new Error(`SKILL.md content is unavailable: ${skillMd.path}`);
+      }
+      const fallbackFileSize = new TextEncoder().encode(skillMdContent).byteLength;
+      if (fallbackFileSize > MAX_FILE_SIZE) {
+        throw new Error(`SKILL.md exceeds ${MAX_FILE_SIZE} bytes: ${skillMd.path}`);
+      }
+      const fallbackFileName = skillMd.path.split('/').pop();
+      const fallbackRelativePath = fallbackFileName === 'skill.md' ? 'skill.md' : 'SKILL.md';
+      textContents.set(fallbackRelativePath, skillMdContent);
       directoryFiles = [{
-        path: 'SKILL.md',
+        path: fallbackRelativePath,
         sha: skillMd.sha,
-        size: skillMdContent.length,
+        size: fallbackFileSize,
         type: 'text',
       }];
     }
@@ -2743,7 +3096,9 @@ async function processMessage(
         canonicalRepoOwner,
         canonicalRepoName,
         skillMd.path,
-        env
+        latestCommit.sha,
+        env,
+        publicReader
       )
     );
     const persistenceMetadata: SkillPersistenceMetadata = {
