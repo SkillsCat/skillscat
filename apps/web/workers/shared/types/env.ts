@@ -9,6 +9,8 @@ export interface BaseEnv {
   PUBLIC_APP_URL?: string;
   GITHUB_TOKEN?: string;
   GITHUB_TOKENS?: string;
+  /** Enables public ZIP-first, HTML-recursive GitHub fallback for indexing. */
+  GITHUB_HTML_INDEXING_FALLBACK_ENABLED?: string;
   WORKER_SECRET?: string;
   CACHE_VERSION?: string;
   INDEXNOW_ENABLED?: string;

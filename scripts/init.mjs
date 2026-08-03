@@ -773,6 +773,7 @@ queue = "skillscat-metrics"
 [env.production.vars]
 PUBLIC_APP_URL = "https://your-domain.com"
 CACHE_VERSION = "v1"
+GITHUB_HTML_SUBMIT_FALLBACK_ENABLED = "1"
 SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
 RECOMMEND_ALGO_VERSION = "v1"
 INDEXNOW_ENABLED = "1"
@@ -862,6 +863,7 @@ queue = "skillscat-security-analysis"
 
 [env.production.vars]
 GITHUB_API_VERSION = "2022-11-28"
+GITHUB_HTML_INDEXING_FALLBACK_ENABLED = "1"
 INDEXNOW_ENABLED = "1"
 `.trim(),
   'wrangler.classification.toml': `

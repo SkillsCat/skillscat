@@ -14,6 +14,11 @@ import { getCached } from '$lib/server/cache';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import { isImmediateRefreshNextUpdateAt } from '$lib/server/db/business/access';
 import { restoreArchivedSkillFromR2 } from '$lib/server/skill/resurrection';
+import {
+  isGitHubPublicFallbackEnabled,
+  PublicGitHubRepositoryReader,
+  type PublicRepositoryEntry,
+} from '$lib/server/github-client/public-web';
 
 const log = createLogger('Submit');
 
@@ -414,6 +419,24 @@ function toGitHubUpstreamError(response: Response, context: string): GitHubUpstr
   });
 }
 
+function isPublicFallbackResponse(response: Response): boolean {
+  return response.status === 401
+    || response.status === 403
+    || response.status === 429
+    || response.status >= 500;
+}
+
+function createSubmitPublicReader(
+  owner: string,
+  repo: string,
+  platform: App.Platform | undefined
+): PublicGitHubRepositoryReader | undefined {
+  if (!isGitHubPublicFallbackEnabled(platform?.env?.GITHUB_HTML_SUBMIT_FALLBACK_ENABLED)) {
+    return undefined;
+  }
+  return new PublicGitHubRepositoryReader(owner, repo);
+}
+
 function buildGitHubUpstreamResponse(
   locale: App.Locals['locale'],
   err: GitHubUpstreamError,
@@ -592,6 +615,17 @@ function getSkillPath(skillMdPath: string): string {
   return parts.join('/');
 }
 
+function dedupeSkillMdLocations(skills: SkillMdLocation[]): SkillMdLocation[] {
+  const uniqueBySkillPath = new Map<string, SkillMdLocation>();
+  for (const skill of skills) {
+    const key = skill.skillPath || '';
+    if (!uniqueBySkillPath.has(key)) {
+      uniqueBySkillPath.set(key, skill);
+    }
+  }
+  return [...uniqueBySkillPath.values()];
+}
+
 interface GitHubTreeItem {
   path: string;
   mode: string;
@@ -606,6 +640,76 @@ interface GitHubTreeResponse {
   truncated: boolean;
 }
 
+function scanPublicEntriesForSkillMd(
+  entries: PublicRepositoryEntry[],
+  basePath: string,
+  maxDepth: number,
+  maxSkills: number,
+  truncatedBySource: boolean
+): ScanResult {
+  const normalizedBasePath = basePath ? basePath.replace(/\/$/, '') : '';
+  const found: SkillMdLocation[] = [];
+
+  for (const item of entries) {
+    if (item.type !== 'blob') continue;
+    const fileName = item.path.split('/').pop() || '';
+    if (fileName.toLowerCase() !== 'skill.md') continue;
+
+    if (
+      normalizedBasePath
+      && !item.path.startsWith(`${normalizedBasePath}/`)
+      && item.path !== `${normalizedBasePath}/SKILL.md`
+    ) {
+      continue;
+    }
+
+    const relativePath = normalizedBasePath
+      ? item.path.slice(normalizedBasePath.length + 1)
+      : item.path;
+    const depth = getPathDepth(relativePath);
+    if (depth > maxDepth) continue;
+
+    found.push({
+      path: item.path,
+      skillPath: getSkillPath(item.path),
+      depth,
+    });
+  }
+
+  found.sort((left, right) => {
+    if (left.depth !== right.depth) return left.depth - right.depth;
+    return left.path.localeCompare(right.path);
+  });
+  const uniqueFound = dedupeSkillMdLocations(found);
+
+  return {
+    found: uniqueFound.slice(0, maxSkills),
+    truncated: truncatedBySource || uniqueFound.length > maxSkills,
+  };
+}
+
+async function tryScanPublicRepository(
+  reader: PublicGitHubRepositoryReader | undefined,
+  basePath: string,
+  maxDepth: number,
+  maxSkills: number
+): Promise<ScanResult | null> {
+  if (!reader) return null;
+  try {
+    const snapshot = await reader.getSnapshot();
+    return scanPublicEntriesForSkillMd(
+      snapshot.entries,
+      basePath,
+      maxDepth,
+      maxSkills,
+      snapshot.truncated
+    );
+  } catch (error) {
+    log.warn('Public GitHub repository fallback unavailable:', error);
+    return null;
+  }
+}
+
 /**
  * Scan repository for SKILL.md files using Git Trees API
  * @param basePath - If provided, only scan within this path scope
@@ -617,7 +721,8 @@ async function scanRepoForSkillMd(
   basePath: string = '',
   maxDepth: number = MAX_DEPTH,
   mode: GitHubRequestMode = 'default',
-  maxSkills: number = MAX_SKILLS_TO_SUBMIT
+  maxSkills: number = MAX_SKILLS_TO_SUBMIT,
+  publicReader?: PublicGitHubRepositoryReader
 ): Promise<ScanResult> {
   try {
     // Use Git Trees API with recursive flag
@@ -670,8 +775,9 @@ async function scanRepoForSkillMd(
       });
 
       // Limit results for safety
-      const truncated = found.length > maxSkills || data.truncated;
-      const limited = found.slice(0, maxSkills);
+      const uniqueFound = dedupeSkillMdLocations(found);
+      const truncated = uniqueFound.length > maxSkills || data.truncated;
+      const limited = uniqueFound.slice(0, maxSkills);
 
       return { found: limited, truncated };
     }
@@ -680,20 +786,24 @@ async function scanRepoForSkillMd(
       throw toGitHubUpstreamError(response, `scanning repository tree for ${owner}/${repo}`);
     }
 
-    if (response.status >= 500 || response.status === 401 || response.status === 403) {
+    if (isPublicFallbackResponse(response)) {
+      const publicResult = await tryScanPublicRepository(publicReader, basePath, maxDepth, maxSkills);
+      if (publicResult) return publicResult;
       throw toGitHubUpstreamError(response, `scanning repository tree for ${owner}/${repo}`);
     }
 
     log.warn(`Trees API failed (${response.status}) for ${owner}/${repo}, falling back to Search API`);
   } catch (err) {
     if (err instanceof GitHubUpstreamError) {
+      const publicResult = await tryScanPublicRepository(publicReader, basePath, maxDepth, maxSkills);
+      if (publicResult) return publicResult;
       throw err;
     }
     log.warn('Error scanning repo with Trees API, falling back to Search API:', err);
   }
 
   // Fallback to search API
-  return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, mode, maxSkills);
+  return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, mode, maxSkills, publicReader);
 }
 
 interface GitHubSearchItem {
@@ -721,7 +831,8 @@ async function searchRepoForSkillMd(
   basePath: string = '',
   maxDepth: number = MAX_DEPTH,
   mode: GitHubRequestMode = 'default',
-  maxSkills: number = MAX_SKILLS_TO_SUBMIT
+  maxSkills: number = MAX_SKILLS_TO_SUBMIT,
+  publicReader?: PublicGitHubRepositoryReader
 ): Promise<ScanResult> {
   try {
     const query = encodeURIComponent(`filename:SKILL.md repo:${owner}/${repo}`);
@@ -732,6 +843,10 @@ async function searchRepoForSkillMd(
     );
 
     if (!response.ok) {
+      if (isPublicFallbackResponse(response)) {
+        const publicResult = await tryScanPublicRepository(publicReader, basePath, maxDepth, maxSkills);
+        if (publicResult) return publicResult;
+      }
       throw toGitHubUpstreamError(response, `searching SKILL.md files in ${owner}/${repo}`);
     }
 
@@ -770,12 +885,15 @@ async function searchRepoForSkillMd(
     });
 
     // Limit results for safety
-    const truncated = found.length > maxSkills || data.incomplete_results;
-    const limited = found.slice(0, maxSkills);
+    const uniqueFound = dedupeSkillMdLocations(found);
+    const truncated = uniqueFound.length > maxSkills || data.incomplete_results;
+    const limited = uniqueFound.slice(0, maxSkills);
 
     return { found: limited, truncated };
   } catch (err) {
     if (err instanceof GitHubUpstreamError) {
+      const publicResult = await tryScanPublicRepository(publicReader, basePath, maxDepth, maxSkills);
+      if (publicResult) return publicResult;
       throw err;
     }
 
@@ -811,6 +929,21 @@ interface RepoInfo {
   stars?: number;
   fork?: boolean;
   parent?: ForkParentInfo | null;
+}
+
+function repoInfoFromPublicMetadata(
+  metadata: import('$lib/server/github-client/public-web').PublicGitHubRepositoryMetadata
+): RepoInfo {
+  return {
+    owner: metadata.ownerLogin,
+    repo: metadata.name,
+    defaultBranch: metadata.defaultBranch,
+    name: metadata.name,
+    description: metadata.description || undefined,
+    stars: metadata.stars,
+    fork: metadata.isFork,
+    parent: null,
+  };
 }
 
 interface ForkCompareInfo {
@@ -896,16 +1029,38 @@ async function fetchGitHubRepo(
   owner: string,
   repo: string,
   token?: string,
-  mode: GitHubRequestMode = 'default'
+  mode: GitHubRequestMode = 'default',
+  publicReader?: PublicGitHubRepositoryReader
 ): Promise<RepoInfo | null> {
-  const response = await githubRequestForSubmit(
-    `${GITHUB_API_BASE}/repos/${owner}/${repo}`,
-    token,
-    mode
-  );
+  let response: Response;
+  try {
+    response = await githubRequestForSubmit(
+      `${GITHUB_API_BASE}/repos/${owner}/${repo}`,
+      token,
+      mode
+    );
+  } catch (error) {
+    if (publicReader && error instanceof GitHubUpstreamError) {
+      try {
+        const metadata = await publicReader.getMetadata();
+        return metadata ? repoInfoFromPublicMetadata(metadata) : null;
+      } catch (fallbackError) {
+        log.warn(`Public repository metadata fallback failed for ${owner}/${repo}:`, fallbackError);
+      }
+    }
+    throw error;
+  }
 
   if (response.status === 404) return null;
   if (!response.ok) {
+    if (publicReader && isPublicFallbackResponse(response)) {
+      try {
+        const metadata = await publicReader.getMetadata();
+        return metadata ? repoInfoFromPublicMetadata(metadata) : null;
+      } catch (fallbackError) {
+        log.warn(`Public repository metadata fallback failed for ${owner}/${repo}:`, fallbackError);
+      }
+    }
     throw toGitHubUpstreamError(response, `looking up repository ${owner}/${repo}`);
   }
 
@@ -1040,21 +1195,41 @@ async function checkGitHubSkillMd(
   repo: string,
   path: string,
   token?: string,
-  mode: GitHubRequestMode = 'default'
+  mode: GitHubRequestMode = 'default',
+  publicReader?: PublicGitHubRepositoryReader
 ): Promise<boolean> {
   const skillPaths = [
     path ? `${path}/SKILL.md` : 'SKILL.md',
   ];
 
   for (const checkPath of skillPaths) {
-    const response = await githubRequestForSubmit(
-      `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${checkPath}`,
-      token,
-      mode
-    );
+    let response: Response;
+    try {
+      response = await githubRequestForSubmit(
+        `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${checkPath}`,
+        token,
+        mode
+      );
+    } catch (error) {
+      if (publicReader && error instanceof GitHubUpstreamError) {
+        try {
+          const snapshot = await publicReader.getSnapshot();
+          return snapshot.entries.some((entry) => entry.type === 'blob' && entry.path === checkPath);
+        } catch (fallbackError) {
+          log.warn(`Public SKILL.md fallback failed for ${owner}/${repo}/${checkPath}:`, fallbackError);
+        }
+      }
+      throw error;
+    }
 
     if (response.ok) return true;
     if (response.status !== 404) {
+      if (publicReader && isPublicFallbackResponse(response)) {
+        const publicResult = await tryScanPublicRepository(publicReader, path, MAX_DEPTH, MAX_SKILLS_TO_SUBMIT);
+        if (publicResult) {
+          return publicResult.found.some((skill) => skill.path === checkPath);
+        }
+      }
       throw toGitHubUpstreamError(response, `checking ${checkPath} in ${owner}/${repo}`);
     }
   }
@@ -1122,9 +1297,10 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     }
 
     const { owner, repo } = repoInfo;
+    const publicReader = createSubmitPublicReader(owner, repo, platform);
 
     // Fetch repository info first
-    const repoData = await fetchGitHubRepo(owner, repo, githubToken, githubRequestMode);
+    const repoData = await fetchGitHubRepo(owner, repo, githubToken, githubRequestMode, publicReader);
     if (!repoData) {
       throw new SubmitRouteError({
         status: 404,
@@ -1147,7 +1323,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     const path = explicitSkillPath !== undefined ? explicitSkillPath : resolvedPath.path;
 
     // First, check if SKILL.md exists at the submitted path (or root if no path)
-    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, githubRequestMode);
+    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, githubRequestMode, publicReader);
 
     if (hasSkillMd) {
       if (!path) {
@@ -1159,7 +1335,8 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
             path,
             ROOT_SUBMIT_SCAN_MAX_DEPTH,
             githubRequestMode,
-            ROOT_SUBMIT_SCAN_MAX_SKILLS
+            ROOT_SUBMIT_SCAN_MAX_SKILLS,
+            publicReader
           );
           if (scanResult.found.length > 1) {
             return await submitMultipleSkills({
@@ -1193,7 +1370,16 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     }
 
     // No SKILL.md at submitted path - scan for SKILL.md files as fallback
-    const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, githubRequestMode);
+    const scanResult = await scanRepoForSkillMd(
+      owner,
+      repo,
+      githubToken,
+      path,
+      MAX_DEPTH,
+      githubRequestMode,
+      MAX_SKILLS_TO_SUBMIT,
+      publicReader
+    );
 
     if (scanResult.found.length === 0) {
       throw new SubmitRouteError({
@@ -1268,6 +1454,7 @@ async function submitMultipleSkills({
   locale: App.Locals['locale'];
 }): Promise<Response> {
   const results: SubmitResultEntry[] = [];
+  const uniqueSkills = dedupeSkillMdLocations(skills);
   const now = Date.now();
   let existingByPath: Map<string, ExistingSkillState> | null = null;
 
@@ -1277,15 +1464,15 @@ async function submitMultipleSkills({
         db,
         owner,
         repo,
-        skills.map((skill) => skill.skillPath || '')
+        uniqueSkills.map((skill) => skill.skillPath || '')
       );
     } catch (err) {
       log.error(`Failed to prefetch existing skill states: ${owner}/${repo}`, err);
     }
   }
 
-  for (let i = 0; i < skills.length; i++) {
-    const skill = skills[i];
+  for (let i = 0; i < uniqueSkills.length; i++) {
+    const skill = uniqueSkills[i];
     const skillPath = skill.skillPath;
 
     try {
@@ -1357,7 +1544,7 @@ async function submitMultipleSkills({
       await queue.send(buildSubmitQueueMessage(owner, repo, skillPath, userId), { delaySeconds });
 
       results.push({ path: skill.path, status: 'queued' });
-      log.log(`Queued skill ${i + 1}/${skills.length}: ${owner}/${repo}/${skillPath || '(root)'}`);
+      log.log(`Queued skill ${i + 1}/${uniqueSkills.length}: ${owner}/${repo}/${skillPath || '(root)'}`);
     } catch (err) {
       log.error(`Failed to queue skill: ${owner}/${repo}/${skillPath}`, err);
       results.push({ path: skill.path, status: 'failed' });
@@ -1650,12 +1837,13 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
         }
 
         const { owner, repo } = repoInfo;
+        const publicReader = createSubmitPublicReader(owner, repo, platform);
 
         const db = platform?.env?.DB;
         const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
 
         // Fetch repository info first
-        const repoData = await fetchGitHubRepo(owner, repo, githubToken, 'submit_fast_fail');
+        const repoData = await fetchGitHubRepo(owner, repo, githubToken, 'submit_fast_fail', publicReader);
         if (!repoData) {
           return {
             valid: false,
@@ -1696,7 +1884,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
         const path = resolvedPath.path;
 
         // First, check if SKILL.md exists at the submitted path (or root if no path)
-        const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, 'submit_fast_fail');
+        const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, 'submit_fast_fail', publicReader);
 
         if (hasSkillMd) {
           // SKILL.md found at the submitted path - check if already exists in DB
@@ -1753,7 +1941,16 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
         }
 
         // No SKILL.md at submitted path - scan for SKILL.md files as fallback
-        const scanResult = await scanRepoForSkillMd(owner, repo, githubToken, path, MAX_DEPTH, 'submit_fast_fail');
+        const scanResult = await scanRepoForSkillMd(
+          owner,
+          repo,
+          githubToken,
+          path,
+          MAX_DEPTH,
+          'submit_fast_fail',
+          MAX_SKILLS_TO_SUBMIT,
+          publicReader
+        );
 
         if (scanResult.found.length === 0) {
           return {

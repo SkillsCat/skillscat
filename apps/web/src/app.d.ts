@@ -22,6 +22,8 @@ declare global {
         VIRUSTOTAL_API_KEY?: string;
         GITHUB_TOKEN?: string;
         GITHUB_TOKENS?: string;
+        /** Enables public ZIP-first, HTML-recursive GitHub fallback for submit. */
+        GITHUB_HTML_SUBMIT_FALLBACK_ENABLED?: string;
         WORKER_SECRET?: string;
         CACHE_VERSION?: string;
         SITEMAP_REFRESH_MIN_INTERVAL_SECONDS?: string;
