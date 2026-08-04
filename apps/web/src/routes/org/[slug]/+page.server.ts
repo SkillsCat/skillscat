@@ -1,42 +1,15 @@
 import type { PageServerLoad } from './$types';
 import { setPublicPageCache } from '$lib/server/cache/page';
+import {
+  resolveOrgPagePayload,
+  type OrgPageErrorKind,
+  type OrgPageMember,
+  type OrgPageOrg,
+  type OrgPageSkill,
+} from '$lib/server/org/page';
 import { redirect } from '@sveltejs/kit';
 
-interface Org {
-  id: string;
-  name: string;
-  slug: string;
-  displayName: string | null;
-  description: string | null;
-  avatarUrl: string | null;
-  verified: boolean;
-  createdAt?: number;
-  updatedAt?: number;
-  memberCount: number;
-  skillCount: number;
-  userRole: string | null;
-}
-
-interface Member {
-  userId: string;
-  name: string | null;
-  image: string | null;
-  role: string;
-}
-
-interface Skill {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  visibility: 'public' | 'private' | 'unlisted';
-  stars: number;
-  updatedAt?: number;
-}
-
-type OrgPageErrorKind = 'not_found' | 'temporary_failure';
-
-export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, request }) => {
+export const load: PageServerLoad = async ({ params, platform, setHeaders, locals, request }) => {
   setPublicPageCache({
     setHeaders,
     request,
@@ -59,29 +32,28 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
   }
   const fallback = {
     slug,
-    org: null as Org | null,
-    members: [] as Member[],
-    skills: [] as Skill[],
+    org: null as OrgPageOrg | null,
+    members: [] as OrgPageMember[],
+    skills: [] as OrgPageSkill[],
     error: 'Failed to load organization',
     errorKind: 'temporary_failure' as OrgPageErrorKind,
   };
 
   try {
-    const response = await fetch(`/api/orgs/${slug}/page`);
-    let data = fallback;
+    // Resolve the payload in-process instead of issuing an internal HTTP
+    // subrequest to /api/orgs/[slug]/page. The API route calls the same
+    // resolver, so the page and the API share one code path.
+    const resolved = await resolveOrgPagePayload(
+      {
+        db: platform?.env?.DB,
+        locals,
+        waitUntil: platform?.context?.waitUntil?.bind(platform.context),
+      },
+      slug
+    );
 
-    try {
-      data = await response.json() as typeof fallback;
-    } catch {
-      data = {
-        ...fallback,
-        error: response.status === 404 ? 'Organization not found' : fallback.error,
-        errorKind: response.status === 404 ? 'not_found' : fallback.errorKind,
-      };
-    }
-
-    if (!response.ok) {
-      if (response.status === 404) {
+    if (resolved.status !== 200) {
+      if (resolved.status === 404) {
         setHeaders({ 'X-Skillscat-Status-Override': '404' });
       } else {
         setHeaders({
@@ -91,6 +63,7 @@ export const load: PageServerLoad = async ({ params, fetch, setHeaders, locals, 
       }
     }
 
+    const data = resolved.data;
     return {
       slug,
       org: data.org ?? null,

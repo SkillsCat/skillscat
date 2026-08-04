@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const setPublicPageCache = vi.fn();
+const resolveOrgPagePayload = vi.fn();
 const getSkillBySlug = vi.fn();
 const getRecommendedSkills = vi.fn();
 const getLightweightRecommendedSkills = vi.fn();
@@ -13,6 +14,10 @@ const shouldRefreshPrecomputedRecommend = vi.fn();
 
 vi.mock('$lib/server/cache/page', () => ({
   setPublicPageCache,
+}));
+
+vi.mock('$lib/server/org/page', () => ({
+  resolveOrgPagePayload,
 }));
 
 vi.mock('$lib/server/db/business/detail', () => ({
@@ -95,7 +100,20 @@ afterAll(() => {
 describe('public detail status overrides', () => {
   it('returns a rendered org fallback with 500 override on temporary upstream failures', async () => {
     const { headers, setHeaders } = createHeadersRecorder();
-    const fetch = vi.fn(async () => new Response(null, { status: 502 }));
+    const fetch = vi.fn();
+    resolveOrgPagePayload.mockResolvedValue({
+      status: 503,
+      cacheControl: 'no-store',
+      cacheStatus: 'BYPASS',
+      data: {
+        slug: 'acme',
+        org: null,
+        members: [],
+        skills: [],
+        error: 'Failed to load organization',
+        errorKind: 'temporary_failure',
+      },
+    });
     const { load } = await import('../src/routes/org/[slug]/+page.server');
 
     const result = await load({
@@ -115,11 +133,25 @@ describe('public detail status overrides', () => {
     });
     expect(headers.get('X-Skillscat-Status-Override')).toBe('500');
     expect(headers.get('Cache-Control')).toBe('no-store');
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('keeps org not-found responses as 404 overrides', async () => {
     const { headers, setHeaders } = createHeadersRecorder();
-    const fetch = vi.fn(async () => new Response(null, { status: 404 }));
+    const fetch = vi.fn();
+    resolveOrgPagePayload.mockResolvedValue({
+      status: 404,
+      cacheControl: 'no-store',
+      cacheStatus: 'BYPASS',
+      data: {
+        slug: 'missing-org',
+        org: null,
+        members: [],
+        skills: [],
+        error: 'Organization not found',
+        errorKind: 'not_found',
+      },
+    });
     const { load } = await import('../src/routes/org/[slug]/+page.server');
 
     const result = await load({
@@ -139,6 +171,104 @@ describe('public detail status overrides', () => {
     });
     expect(headers.get('X-Skillscat-Status-Override')).toBe('404');
     expect(headers.get('Cache-Control')).toBe('no-store');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('resolves the org page payload in-process through the shared resolver', async () => {
+    const { headers, setHeaders } = createHeadersRecorder();
+    const fetch = vi.fn();
+    const db = { prepare: vi.fn() };
+    const platform = {
+      ...createPlatform(),
+      env: { ...createPlatform().env, DB: db },
+    };
+    const locals = { user: null };
+    resolveOrgPagePayload.mockResolvedValue({
+      status: 200,
+      cacheControl: 'private, no-cache',
+      cacheStatus: 'MISS',
+      data: {
+        slug: 'acme',
+        org: {
+          id: 'org-1',
+          name: 'acme',
+          slug: 'acme',
+          displayName: 'Acme',
+          description: null,
+          avatarUrl: null,
+          verified: false,
+          memberCount: 1,
+          skillCount: 1,
+          userRole: null,
+        },
+        members: [{ userId: 'user-1', name: 'Ada', image: null, role: 'owner' }],
+        skills: [{
+          id: 'skill-1',
+          name: 'Demo Skill',
+          slug: 'acme/demo-skill',
+          description: null,
+          visibility: 'public',
+          stars: 3,
+        }],
+        error: null,
+        errorKind: null,
+      },
+    });
+    const { load } = await import('../src/routes/org/[slug]/+page.server');
+
+    const result = await load({
+      params: { slug: 'acme' },
+      fetch,
+      setHeaders,
+      locals,
+      request: new Request('https://skills.cat/org/acme'),
+      platform,
+    } as never);
+
+    expect(resolveOrgPagePayload).toHaveBeenCalledWith(
+      {
+        db,
+        locals,
+        waitUntil: expect.any(Function),
+      },
+      'acme'
+    );
+    expect(result).toMatchObject({
+      slug: 'acme',
+      org: { id: 'org-1', slug: 'acme' },
+      members: [{ userId: 'user-1', role: 'owner' }],
+      skills: [{ id: 'skill-1', slug: 'acme/demo-skill' }],
+      error: null,
+      errorKind: null,
+    });
+    expect(headers.has('X-Skillscat-Status-Override')).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a 500 override when the org page resolver throws', async () => {
+    const { headers, setHeaders } = createHeadersRecorder();
+    const fetch = vi.fn();
+    resolveOrgPagePayload.mockRejectedValue(new Error('D1 unavailable'));
+    const { load } = await import('../src/routes/org/[slug]/+page.server');
+
+    const result = await load({
+      params: { slug: 'acme' },
+      fetch,
+      setHeaders,
+      locals: { user: null },
+      request: new Request('https://skills.cat/org/acme'),
+      platform: createPlatform(),
+    } as never);
+
+    expect(result).toMatchObject({
+      slug: 'acme',
+      org: null,
+      errorKind: 'temporary_failure',
+      error: 'Failed to load organization',
+    });
+    expect(headers.get('X-Skillscat-Status-Override')).toBe('500');
+    expect(headers.get('Cache-Control')).toBe('no-store');
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('returns a rendered skill fallback with 500 override on temporary detail failures', async () => {
