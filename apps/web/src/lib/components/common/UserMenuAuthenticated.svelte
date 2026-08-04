@@ -1,7 +1,6 @@
 <script lang="ts">
   import { DropdownMenu } from 'bits-ui';
   import { goto } from '$app/navigation';
-  import { signOut } from '$lib/auth-client';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import { useI18n } from '$lib/i18n/runtime';
   import type { CurrentUser } from '$lib/types';
@@ -28,6 +27,8 @@
   const messages = $derived(i18n.messages());
 
   async function handleSignOut() {
+    // Load the auth client on demand so anonymous visitors never pay for it.
+    const { signOut } = await import('$lib/auth-client');
     await signOut();
     await goto('/', { invalidateAll: true });
   }

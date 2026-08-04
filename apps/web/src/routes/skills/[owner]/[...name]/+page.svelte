@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import SEO from '$lib/components/common/SEO.svelte';
   import CopyButton from '$lib/components/ui/CopyButton.svelte';
   import DeferredSkillResourcesPanel from '$lib/components/skill/DeferredSkillResourcesPanel.svelte';
@@ -13,7 +13,7 @@
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
   import { splitShellCommand } from '$lib/skill-install';
   import { encodeSkillSlugForPath } from '$lib/skill-path';
-  import { useSession } from '$lib/auth-client';
+  import { createLazyAuthSession } from '$lib/auth-session';
   import type {
     SkillDetail,
     SkillCardData,
@@ -58,7 +58,7 @@
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
   const copy = $derived(getSkillPageCopy(i18n.locale()));
-  const session = useSession();
+  const { session, start: startAuthSession } = createLazyAuthSession();
   const securitySummary = $derived(data.skill?.security ?? null);
   const shouldShowDerivedFromCallout = $derived(
     Boolean(data.skill?.originSlug && data.skill.originRelationType === 'modified_from')
@@ -184,6 +184,13 @@
   let shareMenuRoot = $state<HTMLDivElement | null>(null);
   let shareMenuTrigger = $state<HTMLButtonElement | null>(null);
   let shareMenuCloseTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
+
+  onMount(() => {
+    // Resolve the auth session only when there is evidence of one (server-side
+    // isAuthenticated flag or a better-auth cookie); anonymous visitors never
+    // load the better-auth client bundle.
+    return startAuthSession(Boolean(data.isAuthenticated));
+  });
 
   $effect(() => {
     data.skill?.id;

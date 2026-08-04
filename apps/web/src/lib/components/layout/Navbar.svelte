@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { signOut } from '$lib/auth-client';
   import Logo from '$lib/components/common/Logo.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
   import DeferredNavbarCategoriesMenu from '$lib/components/layout/DeferredNavbarCategoriesMenu.svelte';
@@ -56,6 +55,8 @@
 
   async function handleSignOut() {
     mobileMenuOpen = false;
+    // Load the auth client on demand so anonymous visitors never pay for it.
+    const { signOut } = await import('$lib/auth-client');
     await signOut();
     await goto('/', { invalidateAll: true });
   }
