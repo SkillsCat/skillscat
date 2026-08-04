@@ -13,6 +13,10 @@
     border?: boolean;
     shadow?: boolean;
     class?: string;
+    /** Image loading strategy (default: "lazy") */
+    loading?: "lazy" | "eager";
+    /** Image fetch priority hint (default: "auto") */
+    fetchpriority?: "high" | "auto";
     /** Whether to use GitHub avatar as fallback when src is null (default: false) */
     useGithubFallback?: boolean;
   }
@@ -26,6 +30,8 @@
     border = false,
     shadow = false,
     class: className = "",
+    loading = "lazy",
+    fetchpriority = "auto",
     useGithubFallback = false,
   }: Props = $props();
 
@@ -69,7 +75,8 @@
     <img
       src={imageUrl}
       {alt}
-      loading="lazy"
+      {loading}
+      {fetchpriority}
       decoding="async"
       width={sizeMap[size].px}
       height={sizeMap[size].px}

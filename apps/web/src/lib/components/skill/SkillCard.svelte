@@ -22,9 +22,11 @@
       categories?: string[];
     };
     hideAvatar?: boolean;
+    /** Eager-load the avatar for above-the-fold cards (e.g. first row of a list) */
+    priority?: boolean;
   }
 
-  let { skill, hideAvatar = false }: Props = $props();
+  let { skill, hideAvatar = false, priority = false }: Props = $props();
   let titleEl: HTMLHeadingElement | null = $state(null);
   let titleTruncated = $state(false);
   let resizeObserver: ResizeObserver | null = null;
@@ -111,6 +113,7 @@
           fallback={skill.repoOwner}
           alt={skill.repoOwner}
           size="md"
+          loading={priority ? 'eager' : 'lazy'}
           useGithubFallback
         />
       </div>
