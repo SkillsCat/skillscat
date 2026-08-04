@@ -3,6 +3,7 @@
   import Avatar from '$lib/components/common/Avatar.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
+  import Tabs from '$lib/components/ui/Tabs.svelte';
   import { toast } from '$lib/components/ui/toast-store';
   import ErrorState from '$lib/components/feedback/ErrorState.svelte';
   import { useI18n } from '$lib/i18n/runtime';
@@ -460,49 +461,58 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
     </header>
 
     <!-- Tab Navigation -->
-    <div class="tabs">
-      <button
-        class="tab"
-        class:active={activeTab === "skills"}
-        onclick={() => (activeTab = "skills")}
+    {#snippet skillsTabIcon()}
+      <svg
+        class="w-4 h-4"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        stroke-width="2"
+        aria-hidden="true"
       >
-        <svg
-          class="w-4 h-4"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-          />
-        </svg>
-        {copy.org.skillsTab}
-        <span class="tab-count">{skills.length}</span>
-      </button>
-      <button
-        class="tab"
-        class:active={activeTab === "members"}
-        onclick={() => (activeTab = "members")}
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+        />
+      </svg>
+    {/snippet}
+    {#snippet membersTabIcon()}
+      <svg
+        class="w-4 h-4"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        stroke-width="2"
+        aria-hidden="true"
       >
-        <svg
-          class="w-4 h-4"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-          />
-        </svg>
-        {copy.org.membersTab}
-        <span class="tab-count">{members.length}</span>
-      </button>
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+        />
+      </svg>
+    {/snippet}
+    <div class="tabs-row">
+      <Tabs
+        ariaLabel={copy.org.tabsLabel}
+        items={[
+          {
+            label: copy.org.skillsTab,
+            icon: skillsTabIcon,
+            active: activeTab === "skills",
+            count: skills.length,
+            onclick: () => (activeTab = "skills"),
+          },
+          {
+            label: copy.org.membersTab,
+            icon: membersTabIcon,
+            active: activeTab === "members",
+            count: members.length,
+            onclick: () => (activeTab = "members"),
+          },
+        ]}
+      />
     </div>
 
     <!-- Tab Content -->
@@ -683,62 +693,11 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
     flex-shrink: 0;
   }
 
-  /* Tabs - Cute Style */
-  .tabs {
-    display: flex;
-    gap: 0.75rem;
+  /* Tab Content */
+  .tabs-row {
     margin-bottom: 1.5rem;
   }
 
-  .tabs button {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.75rem 1.25rem;
-    font-size: 0.9375rem;
-    font-weight: 600;
-    color: var(--muted-foreground);
-    background: var(--card);
-    border: 2px solid var(--border);
-    border-radius: var(--radius-lg);
-    cursor: pointer;
-    box-shadow: 0 3px 0 0 oklch(75% 0.02 85);
-    transition: all 0.15s ease;
-    transform: translateY(0);
-  }
-
-  :global(.dark) .tabs button {
-    box-shadow: 0 3px 0 0 oklch(25% 0.02 85);
-  }
-
-  .tabs button:hover {
-    color: var(--foreground);
-    border-color: var(--primary);
-  }
-
-  .tabs button.active {
-    color: var(--primary);
-    border-color: var(--primary);
-    background: var(--primary-subtle);
-    box-shadow: 0 1px 0 0 var(--primary);
-    transform: translateY(2px);
-  }
-
-  .tab-count {
-    font-size: 0.75rem;
-    font-weight: 600;
-    padding: 0.125rem 0.5rem;
-    background: var(--muted);
-    border-radius: var(--radius-full);
-    transition: all 0.15s ease;
-  }
-
-  .tabs button.active .tab-count {
-    background: var(--primary);
-    color: white;
-  }
-
-  /* Tab Content */
   .tab-content {
     min-height: 200px;
   }
@@ -959,19 +918,6 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
     .header-actions :global(button) {
       width: 100%;
       justify-content: center;
-    }
-
-    .tabs {
-      gap: 0.5rem;
-    }
-
-    .tabs button {
-      flex: 1;
-      justify-content: center;
-      padding: 0.625rem 0.75rem;
-      font-size: 0.875rem;
-      white-space: nowrap;
-      min-height: 2.75rem;
     }
 
     .skills-grid {
