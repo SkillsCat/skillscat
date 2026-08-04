@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick, untrack } from 'svelte';
+  import { tick } from 'svelte';
   import SEO from '$lib/components/common/SEO.svelte';
   import CopyButton from '$lib/components/ui/CopyButton.svelte';
   import DeferredSkillResourcesPanel from '$lib/components/skill/DeferredSkillResourcesPanel.svelte';
@@ -13,7 +13,6 @@
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
   import { splitShellCommand } from '$lib/skill-install';
   import { encodeSkillSlugForPath } from '$lib/skill-path';
-  import { ensureClientShikiLanguage, getClientShikiHighlighter } from '$lib/shiki-client';
   import { useSession } from '$lib/auth-client';
   import type {
     SkillDetail,
@@ -517,27 +516,9 @@
     }
   }
 
-  // Shiki highlighter (lazy loaded)
-  let highlighter = $state<Awaited<ReturnType<typeof getClientShikiHighlighter>> | null>(null);
-  let highlightedReadme = $state('');
-  let isLoadingShiki = $state(false);
-  let activeReadmeHighlightId = 0;
-  let lastReadmeHighlightSkillId: string | null = null;
-  let lastReadmeHighlightHtml = '';
+  // README HTML arrives fully highlighted from the server; no client re-highlighting.
   let deferredRecommendSkills = $state<SkillCardData[] | null>(null);
   let deferredRecommendSkillsError = $state<string | null>(null);
-
-  // Reset highlighted HTML whenever server-rendered markdown changes.
-  $effect(() => {
-    const currentSkillId = data.skill?.id ?? null;
-    const renderedReadme = data.renderedReadme ?? '';
-    if (currentSkillId === lastReadmeHighlightSkillId && renderedReadme === lastReadmeHighlightHtml) return;
-
-    lastReadmeHighlightSkillId = currentSkillId;
-    lastReadmeHighlightHtml = renderedReadme;
-    activeReadmeHighlightId += 1;
-    highlightedReadme = '';
-  });
 
   // For client-side navigations, recommend skills are fetched lazily to keep __data.json fast.
   $effect(() => {
@@ -590,36 +571,6 @@
     return () => controller.abort();
   });
 
-  // Lazy-load shiki during idle time so it doesn't compete with first paint.
-  $effect(() => {
-    if (!data.renderedReadme || highlighter || isLoadingShiki) return;
-
-    const run = () => {
-      void loadShiki();
-    };
-
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      (
-        window as Window & {
-          requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
-        }
-      ).requestIdleCallback(run, { timeout: 1200 });
-      return;
-    }
-
-    setTimeout(run, 250);
-  });
-
-  // If shiki is already available (client-side navigation), highlight immediately.
-  $effect(() => {
-    const renderedReadme = data.renderedReadme;
-    if (!highlighter || !renderedReadme || highlightedReadme) return;
-
-    untrack(() => {
-      void highlightReadmeHtml(renderedReadme, activeReadmeHighlightId);
-    });
-  });
-
   // Handle clicks on relative file links in markdown content
   let requestedResourceFilePath = $state('');
   let requestedResourceFilePathVersion = $state(0);
@@ -644,23 +595,6 @@
     };
   });
 
-  async function loadShiki() {
-    if (highlighter || isLoadingShiki) return;
-    isLoadingShiki = true;
-
-    try {
-      highlighter = await getClientShikiHighlighter();
-      const renderedReadme = data.renderedReadme;
-      if (renderedReadme) {
-        await highlightReadmeHtml(renderedReadme, activeReadmeHighlightId);
-      }
-    } catch (e) {
-      console.error('Failed to load shiki:', e);
-    } finally {
-      isLoadingShiki = false;
-    }
-  }
-
   function escapeHtml(value: string): string {
     return value
       .replace(/&/g, '&amp;')
@@ -668,81 +602,6 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
-  }
-
-  function escapeCssSelectorValue(value: string): string {
-    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-      return CSS.escape(value);
-    }
-    return value.replace(/["\\\]]/g, '\\$&');
-  }
-
-  function getCodeLanguage(node: HTMLElement): string {
-    const dataLanguage = node.dataset.language?.trim().toLowerCase();
-    if (dataLanguage) return dataLanguage;
-
-    for (const className of node.classList) {
-      if (className.startsWith('language-')) {
-        const fromClass = className.slice('language-'.length).trim().toLowerCase();
-        if (fromClass) return fromClass;
-      }
-    }
-
-    return 'plaintext';
-  }
-
-  async function highlightReadmeHtml(renderedReadme: string, highlightId: number) {
-    if (!highlighter || !renderedReadme) return;
-
-    const container = document.createElement('div');
-    container.innerHTML = renderedReadme;
-
-    const codeBlocks = Array.from(container.querySelectorAll('pre > code')) as HTMLElement[];
-    if (codeBlocks.length === 0) {
-      if (highlightId === activeReadmeHighlightId) {
-        highlightedReadme = renderedReadme;
-      }
-      return;
-    }
-
-    const BATCH_SIZE = 6;
-
-    for (let i = 0; i < codeBlocks.length; i++) {
-      const codeBlock = codeBlocks[i];
-      const pre = codeBlock.closest('pre');
-      if (!pre || !pre.parentNode) continue;
-
-      const language = await ensureClientShikiLanguage(highlighter, getCodeLanguage(codeBlock));
-      if (highlightId !== activeReadmeHighlightId) {
-        return;
-      }
-
-      try {
-        const codeHtml = highlighter.codeToHtml(codeBlock.textContent || '', {
-          lang: language,
-          themes: { light: 'github-light', dark: 'github-dark' }
-        });
-        const template = document.createElement('template');
-        template.innerHTML = codeHtml.trim();
-        const shikiNode = template.content.firstElementChild;
-        if (shikiNode) {
-          pre.parentNode.replaceChild(shikiNode, pre);
-        }
-      } catch {
-        // Keep server-rendered <pre><code> output if highlighting fails.
-      }
-
-      if ((i + 1) % BATCH_SIZE === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        if (highlightId !== activeReadmeHighlightId) {
-          return;
-        }
-      }
-    }
-
-    if (highlightId === activeReadmeHighlightId) {
-      highlightedReadme = container.innerHTML;
-    }
   }
 
   const encodedApiSkillSlug = $derived(data.skill ? encodeURIComponent(data.skill.slug) : '');
@@ -859,8 +718,8 @@
     window.location.href = `/api/skills/${encodedApiSkillSlug}/download`;
   }
 
-  // Use delayed-highlighted version if available, otherwise server-rendered HTML.
-  const renderedReadme = $derived(highlightedReadme || data.renderedReadme || '');
+  // Server-rendered README HTML, already syntax highlighted.
+  const renderedReadme = $derived(data.renderedReadme || '');
 
   // Binary file extensions that cannot be previewed
   const BINARY_EXTENSIONS = new Set([

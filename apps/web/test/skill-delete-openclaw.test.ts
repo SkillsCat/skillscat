@@ -98,10 +98,12 @@ describe('hard deleting an OpenClaw-published skill', () => {
     expect(listedPrefixes).toEqual(expect.arrayContaining([
       'skills/acme/demo/',
       'openclaw/versions/acme~demo/',
+      'derived/readme-html/v1/skill-1/',
     ]));
     expect(deletedKeys).toEqual(expect.arrayContaining([
       'openclaw/manifests/acme~demo.json',
       'openclaw/versions/acme~demo/1.0.0/SKILL.md',
+      'derived/readme-html/v1/skill-1/SKILL.md',
     ]));
     expect(events.indexOf('db-delete')).toBeGreaterThan(
       Math.max(...events.map((event, index) => event.startsWith('r2-delete:') ? index : -1))
