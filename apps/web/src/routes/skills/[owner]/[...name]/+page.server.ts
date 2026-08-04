@@ -4,7 +4,8 @@ import { getSkillBySlug } from '$lib/server/db/business/detail';
 import { getLightweightRecommendedSkills, getRecommendedSkills } from '$lib/server/db/business/recommend';
 import { loadSkillReadmeFromR2 } from '$lib/server/db/business/readme';
 import { getCached } from '$lib/server/cache';
-import { renderReadmeMarkdown } from '$lib/server/text/markdown';
+import { renderHighlightedReadmeMarkdown } from '$lib/server/text/highlight';
+import { getOrRenderHighlightedReadme } from '$lib/server/skill/highlighted-readme';
 import { setPublicPageCache } from '$lib/server/cache/page';
 import { CATEGORIES } from '$lib/constants/categories';
 import type { Category } from '$lib/constants/categories';
@@ -536,19 +537,31 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     const renderedReadmePromise = timed(
       'readme_html',
       async (): Promise<string> => {
+        const loadRawReadme = async () => skill.readme ?? await loadSkillReadmeFromR2(env, skill);
+
         if (skill.visibility !== 'public') {
-          const rawReadme = skill.readme ?? await loadSkillReadmeFromR2(env, skill);
-          return rawReadme ? renderReadmeMarkdown(rawReadme) : '';
+          // Private skills never touch shared caches; highlight per request.
+          const rawReadme = await loadRawReadme();
+          return rawReadme ? renderHighlightedReadmeMarkdown(rawReadme) : '';
         }
 
+        // Version-keyed (updatedAt/indexedAt) so entries are immutable after a
+        // skill update: colo-local Cache API in front of the R2 derived object.
         const readmeVersion = skill.updatedAt ?? skill.indexedAt ?? 0;
         const { data } = await getCached(
-          `readme:html:${skill.id}:${readmeVersion}`,
-          async () => {
-            const rawReadme = skill.readme ?? await loadSkillReadmeFromR2(env, skill);
-            return rawReadme ? renderReadmeMarkdown(rawReadme) : '';
-          },
-          README_HTML_CACHE_TTL
+          `readme:html:hl:${skill.id}:${readmeVersion}`,
+          () => getOrRenderHighlightedReadme({
+            r2: env.R2,
+            skillId: skill.id,
+            readmeVersion,
+            waitUntil,
+            render: async () => {
+              const rawReadme = await loadRawReadme();
+              return rawReadme ? renderHighlightedReadmeMarkdown(rawReadme) : '';
+            },
+          }),
+          README_HTML_CACHE_TTL,
+          { waitUntil }
         );
         return data;
       },

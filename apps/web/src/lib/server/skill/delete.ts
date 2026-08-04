@@ -6,6 +6,7 @@ import {
 } from '$lib/skill-path';
 import { invalidateCache } from '$lib/server/cache';
 import { getCategoryPageCacheInvalidationKeys } from '$lib/server/cache/categories';
+import { buildHighlightedReadmeR2Prefix } from '$lib/server/skill/highlighted-readme';
 import { invalidateOpenClawSkillCaches } from '$lib/server/openclaw/cache';
 import {
   acquireOpenClawPublishLock,
@@ -249,6 +250,8 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
     // publishes, preventing old cleanup from deleting a newly recreated skill.
     const cleanupResults = await Promise.allSettled([
       deleteR2Artifacts(r2, buildSkillR2DeletePlan(skill, skillRow?.file_structure || null)),
+      // Derived highlighted README HTML (all versions) for this skill.
+      deleteR2Artifacts(r2, { prefixes: [buildHighlightedReadmeR2Prefix(skill.id)], keys: [] }),
       ...(skill.sourceType === 'upload' ? [deleteOpenClawArtifacts(r2, skill.slug)] : []),
     ]);
     let cleanupFailure: unknown = null;
