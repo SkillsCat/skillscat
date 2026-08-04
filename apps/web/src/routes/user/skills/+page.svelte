@@ -4,6 +4,7 @@
   import SkillsList from '$lib/components/settings/SkillsList.svelte';
   import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
   import Pagination from '$lib/components/ui/Pagination.svelte';
+  import Tabs from '$lib/components/ui/Tabs.svelte';
   import { invalidateAll } from '$app/navigation';
   import { browser } from '$app/environment';
   import { useI18n } from '$lib/i18n/runtime';
@@ -38,21 +39,37 @@
   const isSubmittedView = $derived(data.view === 'submitted');
   const totalSubmitted = $derived(data.totalSubmitted as number);
   const sectionTitle = $derived(
-    isSubmittedView ? copy.userSkills.submittedSectionTitle : copy.userSkills.sectionTitle
+    isSubmittedView ? copy.userSkills.indexedSectionTitle : copy.userSkills.sectionTitle
   );
   const sectionDescription = $derived(
-    isSubmittedView ? copy.userSkills.submittedSectionDescription : copy.userSkills.sectionDescription
+    isSubmittedView ? copy.userSkills.indexedSectionDescription : copy.userSkills.sectionDescription
   );
   const emptyTitle = $derived(
-    isSubmittedView ? copy.userSkills.submittedEmptyTitle : copy.userSkills.emptyTitle
+    isSubmittedView ? copy.userSkills.indexedEmptyTitle : copy.userSkills.emptyTitle
   );
   const emptyDescription = $derived(
-    isSubmittedView ? copy.userSkills.submittedEmptyDescription : copy.userSkills.emptyDescription
+    isSubmittedView ? copy.userSkills.indexedEmptyDescription : copy.userSkills.emptyDescription
   );
+  const emptyHint = $derived(isSubmittedView ? copy.userSkills.indexedEmptyHint : undefined);
+  const viewTabs = $derived([
+    {
+      label: copy.userSkills.publishedTab,
+      href: '/user/skills',
+      active: !isSubmittedView,
+    },
+    {
+      label: copy.userSkills.indexedTab,
+      href: '/user/skills?view=submitted',
+      active: isSubmittedView,
+      count: totalSubmitted,
+      ariaLabel: i18n.t(copy.userSkills.indexedTabLabel, { count: totalSubmitted }),
+    },
+  ]);
 
   // Infinite scroll state (mobile)
   let allSkills = $state<Skill[]>([]);
   let loadingMore = $state(false);
+  let loadMoreError = $state(false);
   let currentMobilePage = $state(1);
   let hasMore = $state(true);
   let isDesktop = $state(true);
@@ -75,6 +92,7 @@
     pageLoadController?.abort();
     pageLoadController = null;
     loadingMore = false;
+    loadMoreError = false;
     allSkills = [...pageSkills];
     currentMobilePage = pagination.currentPage;
     hasMore = pagination.currentPage < pagination.totalPages;
@@ -87,7 +105,7 @@
     if (!browser || isDesktop || !sentinelEl) return;
     observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && hasMore && !loadingMore) {
+        if (entries[0]?.isIntersecting && hasMore && !loadingMore && !loadMoreError) {
           loadNextPage();
         }
       },
@@ -100,6 +118,7 @@
   async function loadNextPage() {
     if (loadingMore || !hasMore) return;
     loadingMore = true;
+    loadMoreError = false;
     const controller = new AbortController();
     pageLoadController = controller;
     try {
@@ -120,15 +139,24 @@
         allSkills = [...allSkills, ...result.skills];
         currentMobilePage = nextPage;
         hasMore = nextPage < result.totalPages;
+      } else if (!controller.signal.aborted) {
+        loadMoreError = true;
       }
     } catch {
-      // Silently fail
+      if (!controller.signal.aborted) {
+        loadMoreError = true;
+      }
     } finally {
       if (pageLoadController === controller) {
         pageLoadController = null;
         loadingMore = false;
       }
     }
+  }
+
+  function retryLoadMore() {
+    loadMoreError = false;
+    void loadNextPage();
   }
 
   const displaySkills = $derived(isDesktop ? pageSkills : allSkills);
@@ -179,24 +207,7 @@
       <h1>{copy.userSkills.title}</h1>
       <p class="description">{copy.userSkills.description}</p>
     </div>
-    <nav class="view-switcher" aria-label={copy.userSkills.viewSwitcherLabel}>
-      <a
-        href="/user/skills"
-        class:active={!isSubmittedView}
-        aria-current={!isSubmittedView ? 'page' : undefined}
-      >
-        {copy.userSkills.publishedTab}
-      </a>
-      <a
-        href="/user/skills?view=submitted"
-        class:active={isSubmittedView}
-        aria-current={isSubmittedView ? 'page' : undefined}
-        aria-label={i18n.t(copy.userSkills.submittedTabLabel, { count: totalSubmitted })}
-      >
-        {copy.userSkills.submittedTab}
-        <span class="submitted-count" aria-hidden="true">{totalSubmitted}</span>
-      </a>
-    </nav>
+    <Tabs items={viewTabs} ariaLabel={copy.userSkills.viewSwitcherLabel} />
   </div>
 
   <!-- CLI Upload Hint (only show when no skills) -->
@@ -226,6 +237,7 @@
       layout="grid"
       {emptyTitle}
       {emptyDescription}
+      {emptyHint}
       onUnpublish={isSubmittedView ? undefined : handleUnpublishClick}
     />
 
@@ -248,6 +260,13 @@
         {#if loadingMore}
           <div class="loading-more">
             <div class="loading-spinner"></div>
+          </div>
+        {:else if loadMoreError}
+          <div class="load-more-error">
+            <p>{copy.skillsList.loadMoreFailed}</p>
+            <button type="button" class="load-more-retry" onclick={retryLoadMore}>
+              {copy.skillsList.retry}
+            </button>
           </div>
         {/if}
       </div>
@@ -289,63 +308,6 @@
     font-size: 1.75rem;
     font-weight: 700;
     margin: 0 0 0.25rem;
-  }
-
-  .view-switcher {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.125rem;
-    padding: 0.1875rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--muted);
-    flex-shrink: 0;
-  }
-
-  .view-switcher a {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.375rem;
-    min-height: 2rem;
-    padding: 0.375rem 0.625rem;
-    border-radius: calc(var(--radius-md) - 2px);
-    color: var(--muted-foreground);
-    font-size: 0.75rem;
-    font-weight: 600;
-    line-height: 1;
-    text-decoration: none;
-    white-space: nowrap;
-    transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
-  }
-
-  .view-switcher a:hover {
-    color: var(--foreground);
-  }
-
-  .view-switcher a.active {
-    color: var(--foreground);
-    background: var(--background);
-    box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground) 12%, transparent);
-  }
-
-  .submitted-count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 1.25rem;
-    height: 1.25rem;
-    padding: 0 0.3125rem;
-    border-radius: var(--radius-full);
-    color: var(--muted-foreground);
-    background: var(--background);
-    font-size: 0.6875rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .view-switcher a.active .submitted-count {
-    color: var(--foreground);
-    background: var(--primary-subtle);
   }
 
   .description {
@@ -412,10 +374,6 @@
       align-items: stretch;
     }
 
-    .view-switcher {
-      align-self: flex-start;
-    }
-
     h1 {
       font-size: 1.375rem;
     }
@@ -441,6 +399,42 @@
     display: flex;
     justify-content: center;
     padding: 1.5rem 0;
+  }
+
+  .load-more-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 0;
+    color: var(--muted-foreground);
+    font-size: 0.875rem;
+  }
+
+  .load-more-error p {
+    margin: 0;
+  }
+
+  .load-more-retry {
+    padding: 0.375rem 0.875rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--foreground);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+
+  .load-more-retry:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+
+  .load-more-retry:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--primary-subtle);
   }
 
   .loading-spinner {

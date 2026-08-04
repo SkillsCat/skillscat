@@ -22,6 +22,7 @@
     error?: string | null;
     emptyTitle?: string;
     emptyDescription?: string;
+    emptyHint?: string;
     onRetry?: () => void;
     onUnpublish?: (skill: Skill) => void;
   }
@@ -33,6 +34,7 @@
     error = null,
     emptyTitle = 'No skills yet',
     emptyDescription = 'No skills have been published.',
+    emptyHint,
     onRetry,
     onUnpublish,
   }: Props = $props();
@@ -63,12 +65,12 @@
             <VisibilityBadge visibility={skill.visibility} />
           </div>
           {#if displayDescription}
-            <p class="skill-description">{displayDescription}</p>
+            <p class="skill-description" title={displayDescription}>{displayDescription}</p>
           {/if}
           {#if skill.visibility !== 'private'}
             <div class="skill-meta">
               <span class="stars">
-                <svg class="star-icon" fill="currentColor" viewBox="0 0 24 24">
+                <svg class="star-icon" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M12 .587l3.668 7.568 8.332 1.151-6.064 5.828 1.48 8.279-7.416-3.967-7.417 3.967 1.481-8.279-6.064-5.828 8.332-1.151z"/>
                 </svg>
                 {skill.stars}
@@ -77,7 +79,7 @@
           {/if}
         </div>
         {#if !(skill.visibility === 'private' && onUnpublish)}
-          <svg class="chevron" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="chevron" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
           </svg>
         {/if}
@@ -89,7 +91,7 @@
           aria-label={copy.skillsList.unpublishSkill}
           onclick={() => onUnpublish(skill)}
         >
-          <svg class="trash-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="trash-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
           </svg>
         </button>
@@ -112,16 +114,19 @@
   </div>
 {:else if skills.length === 0}
   <div class="empty-state">
-    <svg class="empty-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+    <svg class="empty-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
       <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
     </svg>
     <h3>{emptyTitle}</h3>
     <p>{emptyDescription}</p>
+    {#if emptyHint}
+      <p class="empty-hint">{emptyHint}</p>
+    {/if}
   </div>
 {:else}
   <!-- Search Box -->
   <div class="search-box">
-    <svg class="search-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+    <svg class="search-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
       <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
     </svg>
     <input
@@ -146,6 +151,7 @@
   {:else}
     <div class="empty-search">
       <p>{i18n.t(copy.skillsList.noMatches, { query: searchQuery })}</p>
+      <p class="search-scope-hint">{copy.skillsList.searchScopeHint}</p>
     </div>
   {/if}
 {/if}
@@ -203,7 +209,6 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
-    padding: 1rem;
     background: var(--background);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -218,14 +223,24 @@
     justify-content: space-between;
     flex: 1;
     min-width: 0;
+    padding: 1rem;
+    border-radius: calc(var(--radius-md) - 1px);
     color: inherit;
     text-decoration: none;
+  }
+
+  .skill-link:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--primary-subtle);
   }
 
   .skill-card-grid {
     min-width: 0;
     min-height: 5.625rem;
     height: 100%;
+  }
+
+  .skill-card-grid .skill-link {
     padding: 0.75rem;
   }
 
@@ -312,6 +327,7 @@
     justify-content: center;
     width: 2rem;
     height: 2rem;
+    margin-right: 1rem;
     border: 2px solid var(--border);
     border-radius: var(--radius-full);
     background: var(--background);
@@ -322,16 +338,26 @@
     transition: color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   }
 
+  .skill-card-grid .unpublish-btn {
+    margin-right: 0.75rem;
+  }
+
   .unpublish-btn:hover {
-    color: #ef4444;
-    border-color: #ef4444;
-    box-shadow: 0 4px 0 0 oklch(45% 0.20 25);
+    color: var(--destructive);
+    border-color: var(--destructive);
+    box-shadow: 0 4px 0 0 color-mix(in oklch, var(--destructive) 75%, black);
     transform: translateY(-1px);
   }
 
   .unpublish-btn:active {
-    box-shadow: 0 1px 0 0 oklch(45% 0.20 25);
+    box-shadow: 0 1px 0 0 color-mix(in oklch, var(--destructive) 75%, black);
     transform: translateY(2px);
+  }
+
+  .unpublish-btn:focus-visible {
+    outline: none;
+    border-color: var(--destructive);
+    box-shadow: 0 0 0 3px var(--primary-subtle);
   }
 
   .trash-icon {
@@ -409,11 +435,21 @@
     color: var(--muted-foreground);
   }
 
+  .empty-hint {
+    margin-top: 0.5rem;
+  }
+
   .empty-search {
     padding: 2rem;
     text-align: center;
     color: var(--muted-foreground);
     background: var(--background);
     border-radius: var(--radius-md);
+  }
+
+  .search-scope-hint {
+    margin-top: 0.375rem;
+    font-size: 0.8125rem;
+    opacity: 0.8;
   }
 </style>
