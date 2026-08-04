@@ -38,7 +38,13 @@ const AUTHOR_LINK_COOKIE = 'sc-author-linked';
 const AUTHOR_LINK_COOKIE_TTL_SECONDS = 24 * 60 * 60;
 const PUBLIC_SKILL_HTML_CACHE_HEADER = 'X-Skillscat-Public-Skill-Cache';
 const SKILL_HTML_CACHE_TTL_SECONDS = 5 * 60;
-const SKILL_PUBLIC_HINT_CACHE_TTL_SECONDS = 60 * 30;
+// The public hint now carries the authoritative visibility, so keep its TTL
+// short: Cache API deletes only apply to the local data center, and a short
+// TTL bounds how long a remote edge can serve stale visibility after a
+// public-to-private transition.
+const SKILL_PUBLIC_HINT_CACHE_TTL_SECONDS = 60;
+const HOME_HTML_CACHE_TTL_SECONDS = 60;
+const DISCOVERY_HTML_CACHE_TTL_SECONDS = 5 * 60;
 const OPENCLAW_HOME_CACHE_KEY = 'ua:openclaw:home:v1';
 const OPENCLAW_HOME_CACHE_TTL_SECONDS = 3600;
 const OPENCLAW_SKILL_CACHE_TTL_SECONDS = 300;
@@ -147,12 +153,6 @@ function isHomeRouteRequest(event: Parameters<Handle>[0]['event']): boolean {
   return event.route.id === '/' && ['GET', 'HEAD'].includes(event.request.method);
 }
 
-function isHomeHtmlCacheableRequest(event: Parameters<Handle>[0]['event']): boolean {
-  return event.request.method === 'GET'
-    && !event.isDataRequest
-    && event.url.pathname === '/';
-}
-
 function isSkillRouteRequest(event: Parameters<Handle>[0]['event']): boolean {
   return event.route.id === '/skills/[owner]/[...name]'
     && ['GET', 'HEAD'].includes(event.request.method);
@@ -228,6 +228,65 @@ function isHtmlResponse(response: Response): boolean {
   return (response.headers.get('content-type') || '').includes('text/html');
 }
 
+type SkillPageVisibility = 'public' | 'private' | 'unlisted' | null;
+
+// Per-request memo so the HTML cache peek and the auth-skip check share one
+// visibility resolution instead of each issuing their own lookup.
+const skillPageVisibilityByEvent = new WeakMap<object, Promise<SkillPageVisibility>>();
+
+function parseSkillPublicHint(hint: string | null): SkillPageVisibility | undefined {
+  if (hint === null) {
+    return undefined;
+  }
+  // Legacy entries only recorded that the skill was public.
+  if (hint === '1' || hint === 'public') {
+    return 'public';
+  }
+  if (hint === 'private' || hint === 'unlisted') {
+    return hint;
+  }
+  return undefined;
+}
+
+function resolveSkillPageVisibility(
+  event: Parameters<Handle>[0]['event'],
+  slug: string
+): Promise<SkillPageVisibility> {
+  const pending = skillPageVisibilityByEvent.get(event);
+  if (pending) {
+    return pending;
+  }
+
+  const resolution = (async (): Promise<SkillPageVisibility> => {
+    const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+    const hintKey = getSkillPublicHintCacheKey(slug);
+    const cached = parseSkillPublicHint(await peekCachedText(hintKey, { waitUntil }));
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const db = event.platform?.env?.DB;
+    if (!db) {
+      return null;
+    }
+
+    const visibility = await getCurrentSkillVisibility(db, slug);
+    if (visibility) {
+      // Visibility mutations invalidate this key through
+      // getSkillPageCacheInvalidationKeys, so caching it is safe; the short
+      // TTL bounds cross-datacenter staleness.
+      await putCachedText(hintKey, visibility, SKILL_PUBLIC_HINT_CACHE_TTL_SECONDS, {
+        waitUntil,
+        contentType: 'text/plain; charset=utf-8',
+      });
+    }
+    return visibility;
+  })();
+
+  skillPageVisibilityByEvent.set(event, resolution);
+  return resolution;
+}
+
 async function maybeRespondWithCachedSkillHtml(
   event: Parameters<Handle>[0]['event']
 ): Promise<Response | null> {
@@ -240,8 +299,7 @@ async function maybeRespondWithCachedSkillHtml(
     return null;
   }
 
-  const db = event.platform?.env?.DB;
-  if (!db || await getCurrentSkillVisibility(db, slug) !== 'public') {
+  if (await resolveSkillPageVisibility(event, slug) !== 'public') {
     return null;
   }
 
@@ -274,14 +332,83 @@ async function shouldSkipAuthForSharedSkillHtml(
     return false;
   }
 
-  const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
-  const publicHint = await peekCachedText(getSkillPublicHintCacheKey(slug), { waitUntil });
-  if (publicHint !== '1') {
-    return false;
+  return await resolveSkillPageVisibility(event, slug) === 'public';
+}
+
+async function maybeRespondWithCachedDiscoveryHtml(
+  event: Parameters<Handle>[0]['event']
+): Promise<Response | null> {
+  if (event.request.method !== 'GET' || event.isDataRequest) {
+    return null;
   }
 
-  const db = event.platform?.env?.DB;
-  return Boolean(db && await getCurrentSkillVisibility(db, slug) === 'public');
+  const cacheKey = resolvePublicDiscoveryHtmlCacheKey(event);
+  if (!cacheKey) {
+    return null;
+  }
+
+  const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+  const cachedHtml = await peekCachedText(cacheKey, { waitUntil });
+  if (!cachedHtml) {
+    return null;
+  }
+
+  return applySharedPublicHtmlCacheHeaders(
+    new Response(cachedHtml, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+      },
+    }),
+    event.locals.locale,
+    'HIT'
+  );
+}
+
+function maybeWriteDiscoveryHtmlCache(
+  event: Parameters<Handle>[0]['event'],
+  response: Response
+): void {
+  if (!isPublicDiscoveryHtmlCacheableRequest(event)) {
+    return;
+  }
+
+  if (!response.ok || !isHtmlResponse(response)) {
+    return;
+  }
+
+  // These routes render anonymously, but never let a personalized response
+  // into the shared cache.
+  if (response.headers.has('set-cookie')) {
+    return;
+  }
+
+  const cacheKey = resolvePublicDiscoveryHtmlCacheKey(event);
+  if (!cacheKey) {
+    return;
+  }
+
+  const ttlSeconds = event.route.id === '/'
+    ? HOME_HTML_CACHE_TTL_SECONDS
+    : DISCOVERY_HTML_CACHE_TTL_SECONDS;
+  const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+  const cacheWrite = (async () => {
+    const html = await response.text();
+    if (!html) {
+      return;
+    }
+
+    await putCachedText(cacheKey, html, ttlSeconds, {
+      waitUntil,
+      contentType: 'text/html; charset=utf-8',
+    });
+  })();
+
+  if (waitUntil) {
+    waitUntil(cacheWrite);
+    return;
+  }
+
+  void cacheWrite;
 }
 
 function maybeWriteSkillHtmlCache(
@@ -329,7 +456,7 @@ function maybeWriteSkillHtmlCache(
       ),
       putCachedText(
         getSkillPublicHintCacheKey(slug),
-        '1',
+        'public',
         SKILL_PUBLIC_HINT_CACHE_TTL_SECONDS,
         { waitUntil, contentType: 'text/plain; charset=utf-8' }
       ),
@@ -636,6 +763,11 @@ export const handle: Handle = async ({ event, resolve }) => {
     return applyResponseSecurityHeaders(event.url.pathname, cachedSkillResponse);
   }
 
+  const cachedDiscoveryResponse = await maybeRespondWithCachedDiscoveryHtml(event);
+  if (cachedDiscoveryResponse) {
+    return applyResponseSecurityHeaders(event.url.pathname, cachedDiscoveryResponse);
+  }
+
   if (env?.DB) {
     const skillOwner = getSkillOwnerFromPathname(event.url.pathname);
     if (skillOwner) {
@@ -665,9 +797,11 @@ export const handle: Handle = async ({ event, resolve }) => {
     event.locals.authPrincipal = null;
     const response = await resolve(event, withHtmlLangTransform(event.locals.htmlLang));
     const skillCacheWriteCandidate = isSkillHtmlCacheableRequest(event) ? response.clone() : null;
-    const shouldApplySharedPublicHtmlOptimization = (
-      isHomeHtmlCacheableRequest(event) || isPublicDiscoveryHtmlCacheableRequest(event)
-    ) && isHtmlResponse(response);
+    const shouldApplySharedPublicHtmlOptimization = isPublicDiscoveryHtmlCacheableRequest(event)
+      && isHtmlResponse(response);
+    const discoveryCacheWriteCandidate = shouldApplySharedPublicHtmlOptimization
+      ? response.clone()
+      : null;
     const shouldApplySkillHtmlOptimization = response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) === '1'
       && isHtmlResponse(response);
     const optimizedResponse = shouldApplySharedPublicHtmlOptimization
@@ -680,6 +814,10 @@ export const handle: Handle = async ({ event, resolve }) => {
 
     if (skillCacheWriteCandidate) {
       maybeWriteSkillHtmlCache(event, skillCacheWriteCandidate);
+    }
+
+    if (discoveryCacheWriteCandidate) {
+      maybeWriteDiscoveryHtmlCache(event, discoveryCacheWriteCandidate);
     }
 
     return applyResponseSecurityHeaders(event.url.pathname, optimizedResponse);
