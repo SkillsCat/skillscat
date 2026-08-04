@@ -5,6 +5,7 @@ packages:
 overrides:
   '@esbuild-kit/core-utils>esbuild': ^0.25.12
   cookie: ^0.7.2
+  'miniflare>undici': 7.29.0
 
 minimumReleaseAge: 0
 

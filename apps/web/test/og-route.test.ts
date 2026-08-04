@@ -30,6 +30,10 @@ vi.mock('$lib/constants/categories', async (importOriginal) => {
 
 vi.mock('@cf-wasm/resvg', () => ({
   Resvg: class MockResvg {
+    static async async() {
+      return new MockResvg();
+    }
+
     render() {
       return {
         asPng: () => new Uint8Array([1, 2, 3, 4]),
