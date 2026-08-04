@@ -3,7 +3,7 @@ import { getTrendingSkills, getRecentSkills, getTopSkills } from '$lib/server/db
 import { getStats } from '$lib/server/db/business/stats';
 import { getCached, invalidateCache } from '$lib/server/cache';
 import { setPublicPageCache } from '$lib/server/cache/page';
-import { getCurrentPublicSkillIds } from '$lib/server/skill/visibility';
+import { schedulePublicSkillVisibilityRecheck } from '$lib/server/skill/visibility';
 import {
   HOME_CRITICAL_CACHE_KEY,
   HOME_RECENT_CACHE_KEY,
@@ -55,42 +55,37 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
     getCached(HOME_TOP_CACHE_KEY, loadTop, HOME_LIST_CACHE_TTL_SECONDS, { waitUntil }),
   ]);
 
-  let critical = criticalCached.data;
-  let recent = recentCached.data;
-  let top = topCached.data;
+  const critical = criticalCached.data;
+  const recent = recentCached.data;
+  const top = topCached.data;
 
+  // Cached payloads are served as-is. Visibility is re-confirmed off the
+  // critical path: a stale entry is invalidated so the next request reloads.
   if (env.DB) {
-    const cachedLists = [
-      ...(criticalCached.hit ? critical.trending : []),
-      ...(recentCached.hit ? recent : []),
-      ...(topCached.hit ? top : []),
-    ];
-    const cachedIds = cachedLists.map((skill) => skill.id);
-    const currentPublicIds = await getCurrentPublicSkillIds(env.DB, cachedIds);
-
-    const refreshes: Promise<void>[] = [];
-    if (
-      criticalCached.hit
-      && critical.trending.some((skill) => !currentPublicIds.has(skill.id))
-    ) {
-      refreshes.push((async () => {
-        await invalidateCache(HOME_CRITICAL_CACHE_KEY);
-        critical = await loadCritical();
-      })());
-    }
-    if (recentCached.hit && recent.some((skill) => !currentPublicIds.has(skill.id))) {
-      refreshes.push((async () => {
-        await invalidateCache(HOME_RECENT_CACHE_KEY);
-        recent = await loadRecent();
-      })());
-    }
-    if (topCached.hit && top.some((skill) => !currentPublicIds.has(skill.id))) {
-      refreshes.push((async () => {
-        await invalidateCache(HOME_TOP_CACHE_KEY);
-        top = await loadTop();
-      })());
-    }
-    await Promise.all(refreshes);
+    schedulePublicSkillVisibilityRecheck({
+      db: env.DB,
+      waitUntil,
+      entries: [
+        ...(criticalCached.hit
+          ? [{
+            ids: critical.trending.map((skill) => skill.id),
+            invalidate: () => invalidateCache(HOME_CRITICAL_CACHE_KEY),
+          }]
+          : []),
+        ...(recentCached.hit
+          ? [{
+            ids: recent.map((skill) => skill.id),
+            invalidate: () => invalidateCache(HOME_RECENT_CACHE_KEY),
+          }]
+          : []),
+        ...(topCached.hit
+          ? [{
+            ids: top.map((skill) => skill.id),
+            invalidate: () => invalidateCache(HOME_TOP_CACHE_KEY),
+          }]
+          : []),
+      ],
+    });
   }
 
   return {

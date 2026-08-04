@@ -51,6 +51,53 @@ export async function getCurrentPublicSkillSlugs(
   return new Set((result.results || []).map((row) => row.slug));
 }
 
+type WaitUntilFn = (promise: Promise<unknown>) => void;
+
+/**
+ * Schedule a best-effort async visibility recheck for cached public skill
+ * lists. Cached data is served immediately; this runs off the critical path
+ * (via waitUntil) and invalidates the affected cache entries when a skill has
+ * since become non-public or been deleted, so the next request reloads fresh
+ * data. Failures are swallowed: they must never affect the response or cause
+ * an unhandled rejection.
+ */
+export function schedulePublicSkillVisibilityRecheck(input: {
+  db: D1Database;
+  entries: Array<{
+    ids: string[];
+    invalidate: () => Promise<unknown>;
+  }>;
+  waitUntil?: WaitUntilFn;
+}): void {
+  const entries = input.entries.filter((entry) => entry.ids.length > 0);
+  if (entries.length === 0) {
+    return;
+  }
+
+  const allIds = Array.from(new Set(entries.flatMap((entry) => entry.ids)));
+  const task = (async () => {
+    try {
+      const currentPublicIds = await getCurrentPublicSkillIds(input.db, allIds);
+      await Promise.all(
+        entries.map(async (entry) => {
+          if (entry.ids.some((id) => !currentPublicIds.has(id))) {
+            await entry.invalidate();
+          }
+        })
+      );
+    } catch (error) {
+      console.warn('Async public skill visibility recheck failed:', error);
+    }
+  })();
+
+  if (input.waitUntil) {
+    input.waitUntil(task);
+    return;
+  }
+
+  void task;
+}
+
 export async function getCurrentPublicSkillIds(
   db: D1Database,
   ids: string[]

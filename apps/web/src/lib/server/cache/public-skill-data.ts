@@ -1,6 +1,6 @@
 import type { SkillCardData } from '$lib/types';
 import { getCached, invalidateCache } from '$lib/server/cache';
-import { getCurrentPublicSkillIds } from '$lib/server/skill/visibility';
+import { schedulePublicSkillVisibilityRecheck } from '$lib/server/skill/visibility';
 
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 
@@ -24,15 +24,16 @@ export async function resolvePublicSkillDataCache<T>(input: {
     return cached;
   }
 
-  const skillIds = skills.map((skill) => skill.id);
-  const currentPublicIds = await getCurrentPublicSkillIds(input.db, skillIds);
-  if (currentPublicIds.size === new Set(skillIds).size) {
-    return cached;
-  }
+  // Serve the cached payload immediately and re-confirm visibility off the
+  // critical path. A stale entry is invalidated so the next request reloads.
+  schedulePublicSkillVisibilityRecheck({
+    db: input.db,
+    waitUntil: input.waitUntil,
+    entries: [{
+      ids: skills.map((skill) => skill.id),
+      invalidate: () => invalidateCache(input.cacheKey),
+    }],
+  });
 
-  await invalidateCache(input.cacheKey);
-  return {
-    data: await input.load(),
-    hit: false,
-  };
+  return cached;
 }
