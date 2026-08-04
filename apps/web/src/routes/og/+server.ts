@@ -713,7 +713,7 @@ export const GET: RequestHandler = async ({ url, platform, request }) => {
 
       const svg = buildSvg(title, subtitle, tag, author, data.stars, data.installCommand, showSubtitle, fontData.dataUri, logo, avatar);
 
-      const resvg = new Resvg(svg, {
+      const resvg = await Resvg.async(svg, {
         fitTo: { mode: 'width', value: 1200 },
         font: { fontBuffers: [fontData.buffer] },
       });
