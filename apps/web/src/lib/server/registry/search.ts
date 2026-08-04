@@ -3,6 +3,7 @@ import { getAuthContext, requireScope } from '$lib/server/auth/middleware';
 import { normalizeSearchText } from '$lib/server/ranking/search-precompute';
 import { buildPrefixRange, type PrefixRange } from '$lib/server/text/prefix-range';
 import { getRegistrySearchCacheRevision } from '$lib/server/registry/cache';
+import { schedulePublicSkillVisibilityRecheck } from '$lib/server/skill/visibility';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -262,30 +263,20 @@ export async function resolveRegistrySearch(
       REGISTRY_SEARCH_CACHE_TTL_SECONDS,
       { waitUntil }
     );
-    let data = cached.data;
-    let cacheStatus: ResolvedRegistrySearch['cacheStatus'] = cached.hit ? 'HIT' : 'MISS';
+    const data = cached.data;
+    const cacheStatus: ResolvedRegistrySearch['cacheStatus'] = cached.hit ? 'HIT' : 'MISS';
 
-    if (cached.hit && cached.data.skills.length > 0) {
-      const ids = cached.data.skills.map((skill) => skill.id);
-      const placeholders = ids.map(() => '?').join(',');
-      const current = await db.prepare(`
-        SELECT id
-        FROM skills
-        WHERE id IN (${placeholders}) AND visibility = 'public'
-      `)
-        .bind(...ids)
-        .all<{ id: string }>();
-      const currentIds = new Set((current.results || []).map((row) => row.id));
-
-      if (currentIds.size !== ids.length) {
-        data = await fetchSearchResults(
-          db,
-          { ...input, limit: cacheLimit },
-          { userId: null, orgId: null, now: Date.now() }
-        );
-        await invalidateCache(cacheKey);
-        cacheStatus = 'MISS';
-      }
+    // Serve the cached payload immediately and re-confirm visibility off the
+    // critical path. A stale entry is invalidated so the next request reloads.
+    if (cached.hit && data.skills.length > 0) {
+      schedulePublicSkillVisibilityRecheck({
+        db,
+        waitUntil,
+        entries: [{
+          ids: data.skills.map((skill) => skill.id),
+          invalidate: () => invalidateCache(cacheKey),
+        }],
+      });
     }
 
     const skills = data.skills.slice(0, input.limit);
@@ -296,7 +287,7 @@ export async function resolveRegistrySearch(
         skills,
       },
       // The Worker Cache API owns shared caching. Generic edge caches cannot
-      // follow the mutation revision or enforce the visibility recheck.
+      // follow the mutation revision or the async visibility recheck.
       cacheControl: 'private, no-cache',
       cacheStatus,
     };
