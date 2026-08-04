@@ -123,4 +123,65 @@ describe('user skill list', () => {
     expect(details).toContain('skill_submissions_user_indexed_idx');
     expect(details).not.toContain('USE TEMP B-TREE');
   });
+
+  it('drops skills that turned private or unlisted from the submitted list', async () => {
+    const sqlite = createDatabase();
+    sqlite.exec(`
+      UPDATE skills SET visibility = 'private' WHERE id = 'skill-b';
+      UPDATE skills SET visibility = 'unlisted' WHERE id = 'skill-c';
+    `);
+    const db = new SqliteD1Database(sqlite) as never;
+
+    const page = await loadUserSkillsPage(db, 'user-1', {
+      page: 1,
+      limit: 20,
+      view: 'submitted',
+    });
+
+    expect(page.skills.map((skill) => skill.id)).toEqual(['skill-a']);
+    // The badge, pagination, and the listing share one visible-only total.
+    expect(page.totalSubmitted).toBe(1);
+    expect(page.pagination.totalItems).toBe(1);
+    expect(page.pagination.totalPages).toBe(1);
+  });
+
+  it('keeps later pages non-empty when some submitted skills turned private', async () => {
+    const sqlite = createDatabase();
+    sqlite.exec(`
+      INSERT INTO skills (
+        id, name, slug, description, visibility, stars, last_commit_at,
+        updated_at, created_at, owner_id, org_id
+      ) VALUES
+        ('skill-d', 'Delta', 'owner/delta', 'Delta skill', 'public', 4, NULL, 60, 60, NULL, NULL),
+        ('skill-e', 'Echo', 'owner/echo', 'Echo skill', 'public', 5, NULL, 70, 70, NULL, NULL);
+      INSERT INTO skill_submissions (user_id, skill_id, submitted_at, indexed_at) VALUES
+        ('user-1', 'skill-d', 140, 350),
+        ('user-1', 'skill-e', 150, 500);
+      UPDATE skills SET visibility = 'private' WHERE id IN ('skill-b', 'skill-d');
+    `);
+    const db = new SqliteD1Database(sqlite) as never;
+
+    // 5 submission records, 3 still public: visible total > page size.
+    const firstPage = await loadUserSkillsPage(db, 'user-1', {
+      page: 1,
+      limit: 2,
+      view: 'submitted',
+    });
+    const secondPage = await loadUserSkillsPage(db, 'user-1', {
+      page: 2,
+      limit: 2,
+      view: 'submitted',
+    });
+
+    expect(firstPage.skills.map((skill) => skill.id)).toEqual(['skill-e', 'skill-c']);
+    expect(secondPage.skills.map((skill) => skill.id)).toEqual(['skill-a']);
+    expect(firstPage.totalSubmitted).toBe(3);
+    expect(firstPage.pagination).toEqual({
+      currentPage: 1,
+      totalPages: 2,
+      totalItems: 3,
+      itemsPerPage: 2,
+    });
+    expect(secondPage.pagination.totalPages).toBe(2);
+  });
 });

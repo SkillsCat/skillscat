@@ -131,10 +131,34 @@ export function getUserSubmissionContext(message: IndexingMessage): UserSubmissi
 export async function recordPersistedUserSubmission(
   db: IndexingEnv['DB'],
   message: IndexingMessage,
-  skillId: string
+  skillId: string,
+  options: { allowPreviouslyCreatedSkill?: boolean } = {}
 ): Promise<void> {
   const submission = getUserSubmissionContext(message);
   if (!submission) return;
+
+  // indexed_at stores skills.created_at (the time the skill was first
+  // persisted), not the time this submission row was written.
+  if (options.allowPreviouslyCreatedSkill) {
+    // Private→public curation conversion reuses a skill row created before
+    // this submission, so the created_at guard would never match.
+    await db.prepare(`
+      INSERT OR IGNORE INTO skill_submissions (user_id, skill_id, submitted_at, indexed_at)
+      SELECT ?, s.id, ?, s.created_at
+      FROM skills s
+      WHERE s.id = ?
+        AND EXISTS (SELECT 1 FROM user WHERE id = ?)
+      LIMIT 1
+    `)
+      .bind(
+        submission.userId,
+        submission.submittedAt,
+        skillId,
+        submission.userId
+      )
+      .run();
+    return;
+  }
 
   await db.prepare(`
     INSERT OR IGNORE INTO skill_submissions (user_id, skill_id, submitted_at, indexed_at)
@@ -265,6 +289,7 @@ interface IndexingBatchContext {
   skillCommitDatesByPath: Map<string, Promise<{ lastCommitAt: number | null; firstCommitAt: number | null }>>;
   publicRepositoryReaders: Map<string, PublicGitHubRepositoryReader>;
   indexNowUrls: Set<string>;
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 interface RepositoryTreeData extends GitHubTreeResponse {
@@ -312,7 +337,10 @@ function getPublicRepositoryReader(
   const existing = batchContext.publicRepositoryReaders.get(key);
   if (existing) return existing;
 
-  const reader = new PublicGitHubRepositoryReader(owner, repo, { expectedHeadSha });
+  const reader = new PublicGitHubRepositoryReader(owner, repo, {
+    expectedHeadSha,
+    waitUntil: batchContext.waitUntil,
+  });
   batchContext.publicRepositoryReaders.set(key, reader);
   return reader;
 }
@@ -332,8 +360,13 @@ function publicRepoToGitHubRepo(metadata: PublicGitHubRepositoryMetadata): GitHu
     description: metadata.description,
     fork: metadata.isFork,
     created_at: metadata.createdAt,
-    updated_at: metadata.createdAt,
-    pushed_at: metadata.createdAt,
+    // The public HTML payload carries no pushed/updated timestamps. Keep
+    // them null instead of fabricating createdAt: the fallback simply has
+    // no real value here, and a fabricated one would risk misleading any
+    // future reader (GitHubRepo.pushed_at is currently write-only —
+    // trending/resurrection consume GraphQL pushedAt instead).
+    updated_at: null,
+    pushed_at: null,
     homepage: null,
     stargazers_count: metadata.stars,
     watchers_count: metadata.stars,
@@ -983,9 +1016,16 @@ async function getRepositoryTreeCached(
   publicReader?: PublicGitHubRepositoryReader,
   captureBasePath?: string | null
 ): Promise<RepositoryTreeData> {
+  // The public fallback snapshot captures file bytes per basePath, so trees
+  // loaded with different capture scopes must not share a batch entry. On
+  // the fallback path each distinct capture scope costs a full ZIP archive
+  // download (up to MAX_DISCOVERED_SKILLS_PER_REPO scopes per repo), not
+  // just an extra Trees API call; that is still cheaper than hydrating a
+  // whole skill directory file-by-file when the fallback path is taken.
+  const captureScope = captureBasePath === undefined ? '' : `@capture:${captureBasePath ?? ''}`;
   return getOrCreateBatchPromise(
     batchContext.repositoryTreeByRepoRef,
-    getRepoRefCacheKey(owner, name, commitSha),
+    `${getRepoRefCacheKey(owner, name, commitSha)}${captureScope}`,
     () => getRepositoryTree(owner, name, commitSha, env, publicReader, captureBasePath)
   );
 }
@@ -3270,6 +3310,11 @@ async function processMessage(
         skillSlug = curationResult.slug || null;
         log.log(`Curation: Converted private skill to public canonical skill: ${skillSlug || skillId}`);
         await invalidatePublicDiscoveryCaches(`curation publish ${skillSlug || skillId}`);
+        // The converted skill predates this submission, so attribute it with
+        // the created_at guard relaxed.
+        await recordPersistedUserSubmission(env.DB, message, curationResult.skillId, {
+          allowPreviouslyCreatedSkill: true,
+        });
       } else {
         const authorId = await upsertAuthor(repo, env);
         log.log(`Author upserted: ${authorId}`);
@@ -3524,6 +3569,7 @@ export default {
     log.log(`Processing batch of ${batch.messages.length} messages`);
     const seenInBatch = new Map<string, { queuedAsPending: boolean }>();
     const batchContext = createIndexingBatchContext();
+    batchContext.waitUntil = ctx?.waitUntil?.bind(ctx);
 
     for (const message of batch.messages) {
       const dedupKey = getMessageDedupKey(message.body);

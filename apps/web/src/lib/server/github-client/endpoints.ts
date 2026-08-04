@@ -628,9 +628,27 @@ async function fallbackCommitsList(ctx: GitHubRestFallbackContext): Promise<Resp
   if (!path) return null;
   if (perPage && perPage !== '1') return null;
   if (ctx.url.searchParams.has('page')) return null;
-  if (ctx.url.searchParams.has('sha')) return null;
+  const sha = ctx.url.searchParams.get('sha');
 
-  const query = `query($owner: String!, $name: String!, $path: String!) {
+  // A sha-pinned request reads history from that commit instead of the
+  // default branch so the fallback preserves the caller's commit pinning.
+  const query = sha
+    ? `query($owner: String!, $name: String!, $path: String!, $oid: GitObjectID!) {
+    repository(owner: $owner, name: $name) {
+      object(oid: $oid) {
+        __typename
+        ... on Commit {
+          history(first: 1, path: $path) {
+            nodes {
+              oid
+              committedDate
+            }
+          }
+        }
+      }
+    }
+  }`
+    : `query($owner: String!, $name: String!, $path: String!) {
     repository(owner: $owner, name: $name) {
       defaultBranchRef {
         name
@@ -649,18 +667,21 @@ async function fallbackCommitsList(ctx: GitHubRestFallbackContext): Promise<Resp
     }
   }`;
 
+  interface CommitHistoryTarget {
+    __typename: string;
+    history?: {
+      nodes: Array<{ oid: string; committedDate: string }>;
+    } | null;
+  }
+
   const { data } = await githubGraphqlRequest<{
     repository: {
-      defaultBranchRef: {
-        target: {
-          __typename: string;
-          history?: {
-            nodes: Array<{ oid: string; committedDate: string }>;
-          } | null;
-        } | null;
+      object?: CommitHistoryTarget | null;
+      defaultBranchRef?: {
+        target: CommitHistoryTarget | null;
       } | null;
     } | null;
-  }>(query, { owner: repoInfo.owner, name: repoInfo.repo, path }, {
+  }>(query, { owner: repoInfo.owner, name: repoInfo.repo, path, ...(sha ? { oid: sha } : {}) }, {
     token: ctx.options.token,
     userAgent: ctx.options.userAgent,
     apiVersion: ctx.options.apiVersion,
@@ -669,8 +690,16 @@ async function fallbackCommitsList(ctx: GitHubRestFallbackContext): Promise<Resp
     rateLimitKeyPrefix: ctx.options.rateLimitKeyPrefix,
   });
 
-  const nodes = data.repository?.defaultBranchRef?.target && data.repository.defaultBranchRef.target.__typename === 'Commit'
-    ? data.repository.defaultBranchRef.target.history?.nodes || []
+  // When the sha cannot be resolved, the GraphQL object comes back null and
+  // this fallback answers 200 with an empty history, where the REST endpoint
+  // would return 422. Callers currently only pass full 40-character commit
+  // SHAs, so this divergence is low-risk; revisit if ref names are ever
+  // accepted here.
+  const target = sha
+    ? data.repository?.object
+    : data.repository?.defaultBranchRef?.target;
+  const nodes = target && target.__typename === 'Commit'
+    ? target.history?.nodes || []
     : [];
 
   const body = nodes.slice(0, 1).map((node) => ({
