@@ -314,8 +314,8 @@
 
       <!-- Skills Grid -->
       <Grid cols={3}>
-        {#each filteredSkills as skill (skill.id)}
-          <SkillCard {skill} />
+        {#each filteredSkills as skill, i (skill.id)}
+          <SkillCard {skill} priority={i < 3} />
         {/each}
       </Grid>
 

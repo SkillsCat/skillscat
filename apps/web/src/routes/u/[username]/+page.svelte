@@ -290,6 +290,8 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
           alt={profile.name}
           size="xl"
           shadow
+          loading="eager"
+          fetchpriority="high"
           useGithubFallback
         />
       </div>

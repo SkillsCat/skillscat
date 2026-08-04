@@ -404,6 +404,8 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
           fallback={org.slug}
           size="lg"
           shadow
+          loading="eager"
+          fetchpriority="high"
         />
         <div class="header-info">
           <div class="header-title-row">
