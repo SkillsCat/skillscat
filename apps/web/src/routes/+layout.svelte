@@ -2,7 +2,7 @@
   import '../app.css';
   import { browser } from '$app/environment';
   import type { LayoutData } from './$types';
-  import { useSession } from '$lib/auth-client';
+  import { createLazyAuthSession } from '$lib/auth-session';
   import Navbar from '$lib/components/layout/Navbar.svelte';
   import Footer from '$lib/components/layout/Footer.svelte';
   import { toasts } from '$lib/components/ui/toast-store';
@@ -18,7 +18,7 @@
   let { children, data }: Props = $props();
   let selectedLocale = $state<LayoutData['locale'] | null>(null);
   const locale = $derived(selectedLocale ?? data.locale);
-  const session = useSession();
+  const { session, start: startAuthSession } = createLazyAuthSession();
   const currentUser = $derived.by(() => {
     if ($session.isPending) {
       return data.currentUser;
@@ -161,6 +161,11 @@
   });
 
   onMount(() => {
+    // Resolve the auth session only when there is evidence of one (server-side
+    // currentUser or a better-auth cookie); anonymous visitors never load the
+    // better-auth client bundle.
+    const stopAuthSession = startAuthSession(Boolean(data.currentUser));
+
     const enableLavaBackground = () => {
       showLavaBackground = true;
     };
@@ -240,6 +245,7 @@
     }
 
     return () => {
+      stopAuthSession();
       window.removeEventListener('scroll', handleScroll);
       if (rafId) {
         cancelAnimationFrame(rafId);
