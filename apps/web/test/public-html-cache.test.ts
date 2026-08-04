@@ -5,6 +5,9 @@ import { getCategoryCacheInvalidationKeys } from '$lib/server/cache/categories';
 import {
   getCategoryHtmlCacheKey,
   getDiscoveryHtmlCacheKey,
+  getHomeHtmlCacheKey,
+  getSkillPageCacheInvalidationKeys,
+  getSkillPublicHintCacheKey,
   CATEGORIES_API_CACHE_KEY,
   CATEGORIES_PAGE_CACHE_KEY,
   HOME_RECENT_CACHE_KEY,
@@ -14,6 +17,24 @@ import {
 import { getPublicDiscoveryHtmlCacheKey } from '$lib/server/cache/public-html';
 
 describe('getPublicDiscoveryHtmlCacheKey', () => {
+  it('maps the homepage route to the locale-aware home cache key', () => {
+    expect(
+      getPublicDiscoveryHtmlCacheKey({
+        routeId: '/',
+        locale: 'en',
+        searchParams: new URL('https://skills.cat/').searchParams,
+      })
+    ).toBe(getHomeHtmlCacheKey('en'));
+
+    expect(
+      getPublicDiscoveryHtmlCacheKey({
+        routeId: '/',
+        locale: 'zh-CN',
+        searchParams: new URL('https://skills.cat/?utm_source=x').searchParams,
+      })
+    ).toBe(getHomeHtmlCacheKey('zh-CN'));
+  });
+
   it('returns a shared cache key for the first page of discovery routes', () => {
     expect(
       getPublicDiscoveryHtmlCacheKey({
@@ -77,5 +98,11 @@ describe('public cache invalidation keys', () => {
     for (const locale of LOCALES) {
       expect(keys).toContain(getCategoryHtmlCacheKey(locale, 'seo'));
     }
+  });
+
+  it('invalidates the skill public hint together with the skill HTML caches', () => {
+    const keys = getSkillPageCacheInvalidationKeys('alice/demo');
+
+    expect(keys).toContain(getSkillPublicHintCacheKey('alice/demo'));
   });
 });

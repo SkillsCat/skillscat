@@ -2,6 +2,7 @@ import type { SupportedLocale } from '$lib/i18n/config';
 import {
   getCategoryHtmlCacheKey,
   getDiscoveryHtmlCacheKey,
+  getHomeHtmlCacheKey,
 } from '$lib/server/cache/keys';
 
 interface PublicDiscoveryHtmlCacheInput {
@@ -25,6 +26,8 @@ export function getPublicDiscoveryHtmlCacheKey(
   input: PublicDiscoveryHtmlCacheInput
 ): string | null {
   switch (input.routeId) {
+    case '/':
+      return getHomeHtmlCacheKey(input.locale);
     case '/trending':
       return parsePage(input.searchParams.get('page')) === 1
         ? getDiscoveryHtmlCacheKey(input.locale, 'trending')
