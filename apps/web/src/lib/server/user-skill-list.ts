@@ -65,10 +65,14 @@ function mapSkillRow(row: UserSkillRow): UserSkillListItem {
 }
 
 async function loadSubmittedCount(db: D1Database, userId: string): Promise<number> {
+  // Count with the same JOIN + visibility filter as the submitted list so
+  // the tab badge, pagination, and infinite scroll share one total.
   const result = await db.prepare(`
     SELECT COUNT(*) AS count
-    FROM skill_submissions
-    WHERE user_id = ?
+    FROM skill_submissions ss
+    INNER JOIN skills s ON s.id = ss.skill_id
+    WHERE ss.user_id = ?
+      AND s.visibility = 'public'
   `)
     .bind(userId)
     .first<{ count: number }>();
@@ -90,6 +94,8 @@ export async function loadUserSkillsPage(
 
   if (view === 'submitted') {
     const [results, totalSubmitted] = await Promise.all([
+      // Only public skills stay listed; skills turned private/unlisted drop
+      // out of the submitter's history.
       db.prepare(`
         SELECT
           s.id,
@@ -102,6 +108,7 @@ export async function loadUserSkillsPage(
         FROM skill_submissions ss
         INNER JOIN skills s ON s.id = ss.skill_id
         WHERE ss.user_id = ?
+          AND s.visibility = 'public'
         ORDER BY ss.indexed_at DESC, ss.skill_id DESC
         LIMIT ? OFFSET ?
       `)

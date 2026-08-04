@@ -269,4 +269,57 @@ describe('indexing user submission attribution', () => {
       indexed_at: 1_100,
     }]);
   });
+
+  it('records curation-converted private skills created before the submission', async () => {
+    const sqlite = new DatabaseSync(':memory:');
+    sqlite.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE user (
+        id TEXT PRIMARY KEY NOT NULL
+      );
+      CREATE TABLE skills (
+        id TEXT PRIMARY KEY NOT NULL,
+        repo_owner TEXT,
+        repo_name TEXT,
+        skill_path TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE skill_submissions (
+        user_id TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+        skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+        submitted_at INTEGER NOT NULL,
+        indexed_at INTEGER NOT NULL,
+        PRIMARY KEY (user_id, skill_id)
+      );
+      INSERT INTO user (id) VALUES ('user-1');
+      INSERT INTO skills (id, repo_owner, repo_name, skill_path, created_at) VALUES
+        ('skill-converted', 'owner', 'repo', '', 900);
+    `);
+
+    const db = new SqliteD1Database(sqlite);
+    const message = createMessage();
+
+    // The default guard refuses skills that predate the submission...
+    await recordPersistedUserSubmission(db as never, message, 'skill-converted');
+    expect(sqlite.prepare(`SELECT COUNT(*) AS count FROM skill_submissions`).get())
+      .toEqual({ count: 0 });
+
+    // ...while the conversion path relaxes it exactly once, idempotently.
+    await recordPersistedUserSubmission(db as never, message, 'skill-converted', {
+      allowPreviouslyCreatedSkill: true,
+    });
+    await recordPersistedUserSubmission(db as never, message, 'skill-converted', {
+      allowPreviouslyCreatedSkill: true,
+    });
+
+    expect(sqlite.prepare(`
+      SELECT user_id, skill_id, submitted_at, indexed_at
+      FROM skill_submissions
+    `).all()).toEqual([{
+      user_id: 'user-1',
+      skill_id: 'skill-converted',
+      submitted_at: 1_000,
+      indexed_at: 900,
+    }]);
+  });
 });

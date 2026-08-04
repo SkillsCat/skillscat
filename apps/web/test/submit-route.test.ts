@@ -310,6 +310,370 @@ describe('submit route', () => {
       queue.send.mock.invocationCallOrder[0]
     );
     expect(publicFetch).toHaveBeenCalledTimes(2);
+    // The first 429 marks the request as rate limited; later call sites
+    // short-circuit to the public fallback instead of re-hitting the API.
+    expect(githubRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses fork submissions when rate limiting leaves only the public fallback', async () => {
+    const commitSha = '0123456789abcdef0123456789abcdef01234567';
+    const githubRequest = vi.fn(async () => new Response('rate limited', {
+      status: 429,
+      headers: {
+        'retry-after': '60',
+        'x-ratelimit-remaining': '0',
+      },
+    }));
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const forkRepositoryHtml = `<script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({
+      payload: {
+        codeViewRepoRoute: {
+          refInfo: {
+            name: 'main',
+            refType: 'branch',
+            currentOid: commitSha,
+          },
+          tree: {
+            items: [{ path: 'SKILL.md', contentType: 'file' }],
+            totalCount: 1,
+          },
+        },
+        codeViewLayoutRoute: {
+          repo: {
+            id: 123,
+            name: 'toolbox',
+            ownerLogin: 'forker',
+            defaultBranch: 'main',
+            createdAt: '2026-01-02T03:04:05Z',
+            private: false,
+            public: true,
+            isOrgOwned: false,
+            isFork: true,
+          },
+        },
+        sidebarAbout: {
+          repoName: 'toolbox',
+          ownerLogin: 'forker',
+          stargazerCount: 42,
+          forksCount: 3,
+          repo: {
+            ownerId: 456,
+            ownerAvatarUrl: 'https://avatars.githubusercontent.com/u/456?v=4',
+            isPrivate: false,
+            isFork: true,
+          },
+        },
+      },
+    })}</script>`;
+    const publicFetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const requestUrl = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      if (requestUrl === 'https://github.com/forker/toolbox') {
+        return new Response(forkRepositoryHtml);
+      }
+      throw new Error(`Unexpected public GitHub request: ${requestUrl}`);
+    });
+    vi.stubGlobal('fetch', publicFetch);
+
+    const { POST } = await import('../src/routes/api/submit/+server');
+    const response = await POST({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: buildDbMock(),
+          GITHUB_TOKEN: 'test-token',
+          GITHUB_HTML_SUBMIT_FALLBACK_ENABLED: '1',
+          INDEXING_QUEUE: { send: vi.fn(async () => undefined) },
+        },
+      },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://github.com/forker/toolbox' }),
+      }),
+    } as never);
+    const payload = await response.json() as { code: string };
+
+    // The public fallback cannot see the fork parent, so the submission is
+    // refused closed instead of skipping upstream verification.
+    expect(response.status).toBe(503);
+    expect(payload.code).toBe('fork_verification_failed');
+    expect(publicFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks SKILL.md through the public snapshot when the contents request fails', async () => {
+    const commitSha = '0123456789abcdef0123456789abcdef01234567';
+    const queue = {
+      send: vi.fn(async () => undefined),
+    };
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          default_branch: 'main',
+          fork: false,
+        });
+      }
+      throw new Error(`Network failure for ${url}`);
+    });
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const repositoryHtml = `<script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({
+      payload: {
+        codeViewRepoRoute: {
+          refInfo: {
+            name: 'main',
+            refType: 'branch',
+            currentOid: commitSha,
+          },
+          tree: {
+            items: [{ path: 'skills', contentType: 'directory' }],
+            totalCount: 1,
+          },
+        },
+        codeViewLayoutRoute: {
+          repo: {
+            id: 123,
+            name: 'toolbox',
+            ownerLogin: 'forker',
+            defaultBranch: 'main',
+            createdAt: '2026-01-02T03:04:05Z',
+            private: false,
+            public: true,
+            isOrgOwned: false,
+            isFork: false,
+          },
+        },
+        sidebarAbout: {
+          repoName: 'toolbox',
+          ownerLogin: 'forker',
+          stargazerCount: 42,
+          forksCount: 3,
+          repo: {
+            ownerId: 456,
+            ownerAvatarUrl: 'https://avatars.githubusercontent.com/u/456?v=4',
+            isPrivate: false,
+            isFork: false,
+          },
+        },
+      },
+    })}</script>`;
+    const archive = zipSync({
+      [`toolbox-${commitSha}/skills/alpha/SKILL.md`]: strToU8('# Alpha\n'),
+    });
+    const publicFetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const requestUrl = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      if (requestUrl === 'https://github.com/forker/toolbox') {
+        return new Response(repositoryHtml);
+      }
+      if (requestUrl === `https://codeload.github.com/forker/toolbox/zip/${commitSha}`) {
+        return new Response(Uint8Array.from(archive).buffer);
+      }
+      throw new Error(`Unexpected public GitHub request: ${requestUrl}`);
+    });
+    vi.stubGlobal('fetch', publicFetch);
+
+    const { POST } = await import('../src/routes/api/submit/+server');
+    const response = await POST({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: buildDbMock(),
+          GITHUB_TOKEN: 'test-token',
+          GITHUB_HTML_SUBMIT_FALLBACK_ENABLED: '1',
+          INDEXING_QUEUE: queue,
+        },
+      },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          url: 'https://github.com/forker/toolbox',
+          skillPath: 'skills/alpha',
+        }),
+      }),
+    } as never);
+    const payload = await response.json() as { success: boolean };
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(queue.send).toHaveBeenCalledTimes(1);
+    expect(queue.send.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ repoOwner: 'forker', repoName: 'toolbox', skillPath: 'skills/alpha' })
+    );
+  });
+
+  it('treats a truncated public scan without matches as inconclusive instead of no_skill_md_found', async () => {
+    const commitSha = '0123456789abcdef0123456789abcdef01234567';
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          default_branch: 'main',
+          fork: false,
+        });
+      }
+      if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
+        return new Response('not found', { status: 404 });
+      }
+      if (url === 'https://api.github.com/repos/forker/toolbox/git/trees/HEAD?recursive=1') {
+        return new Response('rate limited', {
+          status: 429,
+          headers: {
+            'retry-after': '60',
+            'x-ratelimit-remaining': '0',
+          },
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    // The HTML tree claims more entries than it lists and the ZIP is
+    // unavailable, so the public snapshot is truncated: SKILL.md files may
+    // exist beyond what the fallback could enumerate.
+    const repositoryHtml = `<script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({
+      payload: {
+        codeViewRepoRoute: {
+          refInfo: {
+            name: 'main',
+            refType: 'branch',
+            currentOid: commitSha,
+          },
+          tree: {
+            items: [{ path: 'README.md', contentType: 'file' }],
+            totalCount: 100,
+          },
+        },
+        codeViewLayoutRoute: {
+          repo: {
+            id: 123,
+            name: 'toolbox',
+            ownerLogin: 'forker',
+            defaultBranch: 'main',
+            createdAt: '2026-01-02T03:04:05Z',
+            private: false,
+            public: true,
+            isOrgOwned: false,
+            isFork: false,
+          },
+        },
+        sidebarAbout: {
+          repoName: 'toolbox',
+          ownerLogin: 'forker',
+          stargazerCount: 42,
+          forksCount: 3,
+          repo: {
+            ownerId: 456,
+            ownerAvatarUrl: 'https://avatars.githubusercontent.com/u/456?v=4',
+            isPrivate: false,
+            isFork: false,
+          },
+        },
+      },
+    })}</script>`;
+    const publicFetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const requestUrl = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      if (requestUrl === 'https://github.com/forker/toolbox') {
+        return new Response(repositoryHtml);
+      }
+      if (requestUrl === `https://codeload.github.com/forker/toolbox/zip/${commitSha}`) {
+        return new Response('not found', { status: 404 });
+      }
+      throw new Error(`Unexpected public GitHub request: ${requestUrl}`);
+    });
+    vi.stubGlobal('fetch', publicFetch);
+
+    const { POST } = await import('../src/routes/api/submit/+server');
+    const response = await POST({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: buildDbMock(),
+          GITHUB_TOKEN: 'test-token',
+          GITHUB_HTML_SUBMIT_FALLBACK_ENABLED: '1',
+          INDEXING_QUEUE: { send: vi.fn(async () => undefined) },
+        },
+      },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://github.com/forker/toolbox' }),
+      }),
+    } as never);
+    const payload = await response.json() as { code: string };
+
+    // A truncated snapshot cannot prove absence, so the request must surface
+    // the upstream rate limit instead of a false no_skill_md_found verdict.
+    expect(response.status).toBe(429);
+    expect(payload.code).toBe('github_rate_limited');
+  });
+
+  it('never issues public fallback requests from the anonymous submit precheck', async () => {
+    const githubRequest = vi.fn(async () => new Response('rate limited', {
+      status: 429,
+      headers: {
+        'retry-after': '60',
+        'x-ratelimit-remaining': '0',
+      },
+    }));
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+
+    const publicFetch = vi.fn(async () => {
+      throw new Error('Public fallback must not run during precheck');
+    });
+    vi.stubGlobal('fetch', publicFetch);
+
+    const { GET } = await import('../src/routes/api/submit/+server');
+    const response = await GET({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          GITHUB_TOKEN: 'test-token',
+          GITHUB_HTML_SUBMIT_FALLBACK_ENABLED: '1',
+        },
+      },
+      request: new Request('https://skills.cat/api/submit?url=https://github.com/forker/toolbox'),
+      url: new URL('https://skills.cat/api/submit?url=https://github.com/forker/toolbox'),
+    } as never);
+    const payload = await response.json() as { valid: boolean; code: string };
+
+    expect(response.status).toBe(429);
+    expect(payload).toMatchObject({ valid: false, code: 'github_rate_limited' });
+    expect(publicFetch).not.toHaveBeenCalled();
   });
 
   it('returns localized fork errors for submit precheck', async () => {

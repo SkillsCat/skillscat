@@ -457,4 +457,152 @@ describe('public GitHub repository reader', () => {
     await expect(reader.getMetadata()).rejects.toMatchObject({ reason: 'request_failed' });
     expect(aborted).toBe(true);
   });
+
+  it('memoizes snapshots per capture scope so different basePaths capture independently', async () => {
+    const archive = zipSync({
+      [`${REPO}-${COMMIT_SHA}/skills/alpha/SKILL.md`]: strToU8('# Alpha\n'),
+      [`${REPO}-${COMMIT_SHA}/skills/beta/SKILL.md`]: strToU8('# Beta\n'),
+    });
+    let zipDownloads = 0;
+    const fetchImpl = createFetch((url) => {
+      if (url === `https://github.com/${OWNER}/${REPO}`) {
+        return new Response(repositoryHtml([{ path: 'skills', type: 'tree' }]));
+      }
+      if (url === `https://codeload.github.com/${OWNER}/${REPO}/zip/${COMMIT_SHA}`) {
+        zipDownloads++;
+        return new Response(toArrayBuffer(archive));
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    const reader = new PublicGitHubRepositoryReader(OWNER, REPO, {
+      fetch: fetchImpl,
+      cache: false,
+    });
+    const capture = (basePath: string) => ({
+      basePath,
+      maxFiles: 10,
+      maxFileBytes: 1024,
+      maxTotalBytes: 4096,
+    });
+
+    const alphaSnapshot = await reader.getSnapshot(capture('skills/alpha'));
+    const betaSnapshot = await reader.getSnapshot(capture('skills/beta'));
+    const alphaAgain = await reader.getSnapshot(capture('skills/alpha'));
+
+    expect(alphaSnapshot.capturedFiles.has('skills/alpha/SKILL.md')).toBe(true);
+    expect(alphaSnapshot.capturedFiles.has('skills/beta/SKILL.md')).toBe(false);
+    expect(betaSnapshot.capturedFiles.has('skills/beta/SKILL.md')).toBe(true);
+    expect(alphaAgain).toBe(alphaSnapshot);
+    expect(zipDownloads).toBe(2);
+
+    // getFile sees bytes captured under any earlier capture scope.
+    const betaFile = await reader.getFile('skills/beta/SKILL.md', 1024);
+    expect(betaFile?.bytes).toEqual(strToU8('# Beta\n'));
+    expect(zipDownloads).toBe(2);
+  });
+
+  it('keeps no-capture and whole-repo capture snapshots under distinct keys', async () => {
+    const archive = zipSync({
+      [`${REPO}-${COMMIT_SHA}/SKILL.md`]: strToU8('# Demo\n'),
+    });
+    let zipDownloads = 0;
+    const fetchImpl = createFetch((url) => {
+      if (url === `https://github.com/${OWNER}/${REPO}`) {
+        return new Response(repositoryHtml([{ path: 'SKILL.md', type: 'blob' }]));
+      }
+      if (url === `https://codeload.github.com/${OWNER}/${REPO}/zip/${COMMIT_SHA}`) {
+        zipDownloads++;
+        return new Response(toArrayBuffer(archive));
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    const reader = new PublicGitHubRepositoryReader(OWNER, REPO, {
+      fetch: fetchImpl,
+      cache: false,
+    });
+    const wholeRepoCapture = {
+      basePath: null,
+      maxFiles: 10,
+      maxFileBytes: 1024,
+      maxTotalBytes: 4096,
+    };
+
+    const plainSnapshot = await reader.getSnapshot();
+    const capturedSnapshot = await reader.getSnapshot(wholeRepoCapture);
+
+    // undefined (no capture) and { basePath: null } (capture everything)
+    // are different scopes and must not share a memoized snapshot.
+    expect(capturedSnapshot).not.toBe(plainSnapshot);
+    expect(plainSnapshot.capturedFiles.size).toBe(0);
+    expect(capturedSnapshot.capturedFiles.has('SKILL.md')).toBe(true);
+    expect(zipDownloads).toBe(2);
+
+    // Each scope still memoizes on its own key.
+    expect(await reader.getSnapshot()).toBe(plainSnapshot);
+    expect(await reader.getSnapshot(wholeRepoCapture)).toBe(capturedSnapshot);
+    expect(zipDownloads).toBe(2);
+  });
+
+  it('abandons in-flight captures without hanging when the ZIP stream is cut short', async () => {
+    const archive = zipSync({
+      [`${REPO}-${COMMIT_SHA}/SKILL.md`]: strToU8('# Demo\n'),
+    });
+    const zipBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let offset = 0; offset < archive.byteLength; offset += 32) {
+          controller.enqueue(archive.subarray(offset, offset + 32));
+        }
+        controller.close();
+      },
+    });
+    const fetchImpl = createFetch((url) => {
+      if (url === `https://github.com/${OWNER}/${REPO}`) {
+        return new Response(repositoryHtml([{ path: 'SKILL.md', type: 'blob' }]));
+      }
+      if (url.includes('codeload.github.com')) {
+        return new Response(zipBody);
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    const reader = new PublicGitHubRepositoryReader(OWNER, REPO, {
+      fetch: fetchImpl,
+      cache: false,
+      // The local header fits in the first chunks, so the SKILL.md capture is
+      // already in flight when the stream crosses the byte limit.
+      maxZipBytes: 96,
+    });
+
+    const snapshot = await reader.getSnapshot({
+      basePath: null,
+      maxFiles: 10,
+      maxFileBytes: 1024,
+      maxTotalBytes: 4096,
+    });
+
+    expect(snapshot.source).toBe('html');
+    expect(snapshot.diagnostics.zipFallbackReason).toBe('zip_too_large');
+  });
+
+  it('offloads cache writes to waitUntil when an execution context is provided', async () => {
+    const pending: Promise<unknown>[] = [];
+    const fetchImpl = createFetch((url) => {
+      if (url === `https://github.com/${OWNER}/${REPO}`) {
+        return new Response(repositoryHtml([{ path: 'SKILL.md', type: 'blob' }]));
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    const reader = new PublicGitHubRepositoryReader(OWNER, REPO, {
+      fetch: fetchImpl,
+      waitUntil: (promise) => {
+        pending.push(promise);
+      },
+    });
+
+    const metadata = await reader.getMetadata();
+
+    expect(metadata?.name).toBe(REPO);
+    expect(pending).toHaveLength(1);
+    // The detached cache write must settle without rejecting.
+    await expect(pending[0]).resolves.toBeUndefined();
+  });
 });

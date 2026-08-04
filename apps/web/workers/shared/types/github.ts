@@ -56,8 +56,8 @@ export interface GitHubRepo {
   description: string | null;
   fork: boolean;
   created_at: string;
-  updated_at: string;
-  pushed_at: string;
+  updated_at: string | null;
+  pushed_at: string | null;
   homepage: string | null;
   stargazers_count: number;
   watchers_count: number;

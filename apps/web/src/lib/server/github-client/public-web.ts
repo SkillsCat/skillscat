@@ -117,6 +117,8 @@ export interface PublicRepositoryCaptureOptions {
 export interface PublicGitHubRepositoryReaderOptions {
   fetch?: typeof fetch;
   cache?: boolean;
+  /** Offloads cache writes off the critical path (e.g. ExecutionContext.waitUntil). */
+  waitUntil?: (promise: Promise<unknown>) => void;
   maxZipBytes?: number;
   maxEntries?: number;
   maxHtmlPages?: number;
@@ -690,8 +692,12 @@ export class PublicGitHubRepositoryReader {
   private readonly maxHtmlBytes: number;
   private readonly fetchTimeoutMs: number;
   private readonly expectedHeadSha: string | null;
+  private readonly waitUntil: ((promise: Promise<unknown>) => void) | null;
   private metadataPromise: Promise<PublicGitHubRepositoryMetadata | null> | null = null;
-  private snapshotPromise: Promise<PublicRepositorySnapshot> | null = null;
+  // Snapshots are memoized per capture scope: entries are capture-independent,
+  // but capturedFiles only cover the requested basePath, so distinct capture
+  // scopes must not share a single snapshot promise.
+  private readonly snapshotPromises = new Map<string, Promise<PublicRepositorySnapshot>>();
   private readonly filePromises = new Map<string, Promise<PublicRepositoryFile | null>>();
 
   constructor(
@@ -710,6 +716,7 @@ export class PublicGitHubRepositoryReader {
     ));
     this.maxHtmlBytes = options.maxHtmlBytes ?? MAX_HTML_BYTES;
     this.fetchTimeoutMs = options.fetchTimeoutMs ?? FETCH_TIMEOUT_MS;
+    this.waitUntil = options.waitUntil ?? null;
     this.expectedHeadSha = options.expectedHeadSha?.toLowerCase() ?? null;
     if (this.expectedHeadSha && !isCommitSha(this.expectedHeadSha)) {
       throw new PublicRepositoryFallbackError(
@@ -729,23 +736,37 @@ export class PublicGitHubRepositoryReader {
   async getSnapshot(
     capture?: PublicRepositoryCaptureOptions
   ): Promise<PublicRepositorySnapshot> {
-    if (!this.snapshotPromise) {
-      this.snapshotPromise = this.loadSnapshot(capture);
+    // Distinguish "no capture" (undefined) from a whole-repo capture
+    // (basePath: null); both would otherwise collapse into the '' key even
+    // though they produce different capturedFiles.
+    const captureKey = capture === undefined ? '' : `@c:${capture.basePath ?? ''}`;
+    let promise = this.snapshotPromises.get(captureKey);
+    if (!promise) {
+      promise = this.loadSnapshot(capture);
+      this.snapshotPromises.set(captureKey, promise);
     }
-    return this.snapshotPromise;
+    return promise;
   }
 
   async getFile(path: string, maxBytes: number): Promise<PublicRepositoryFile | null> {
     const normalizedPath = normalizeRepositoryPath(path);
     if (!normalizedPath) return null;
 
-    const snapshot = this.snapshotPromise ? await this.snapshotPromise : null;
-    const captured = snapshot?.capturedFiles.get(normalizedPath);
-    if (captured) {
-      if (captured.size > maxBytes) {
-        throw new PublicRepositoryFileTooLargeError(normalizedPath, maxBytes);
+    for (const snapshotPromise of this.snapshotPromises.values()) {
+      let snapshot: PublicRepositorySnapshot;
+      try {
+        snapshot = await snapshotPromise;
+      } catch {
+        // A failed snapshot for another capture scope must not block raw reads.
+        continue;
       }
-      return captured;
+      const captured = snapshot.capturedFiles.get(normalizedPath);
+      if (captured) {
+        if (captured.size > maxBytes) {
+          throw new PublicRepositoryFileTooLargeError(normalizedPath, maxBytes);
+        }
+        return captured;
+      }
     }
 
     const key = `${normalizedPath}:${maxBytes}`;
@@ -755,6 +776,26 @@ export class PublicGitHubRepositoryReader {
       this.filePromises.set(key, promise);
     }
     return promise;
+  }
+
+  /**
+   * Write to Cache API without blocking the caller when an execution context
+   * is available; writeJsonCache swallows its own errors, so the detached
+   * promise cannot produce unhandled rejections.
+   */
+  private scheduleCacheWrite(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+    const write = writeJsonCache(key, value, ttlSeconds);
+    if (!this.waitUntil) return write;
+    try {
+      this.waitUntil(write);
+    } catch {
+      // waitUntil throws when the execution context is already closed; cache
+      // writes are best-effort, so fall back to the write promise itself
+      // (writeJsonCache swallows its own errors) instead of breaking the
+      // main path.
+      return write;
+    }
+    return Promise.resolve();
   }
 
   async getLatestCommitAt(path: string): Promise<number | null> {
@@ -803,7 +844,7 @@ export class PublicGitHubRepositoryReader {
       }
 
       if (this.useCache) {
-        await writeJsonCache(cacheKey, { timestamp }, COMMIT_CACHE_TTL_SECONDS);
+        await this.scheduleCacheWrite(cacheKey, { timestamp }, COMMIT_CACHE_TTL_SECONDS);
       }
       return timestamp;
     } finally {
@@ -893,7 +934,7 @@ export class PublicGitHubRepositoryReader {
       );
       this.assertExpectedHeadSha(metadata);
       if (this.useCache) {
-        await writeJsonCache(cacheKey, metadata, REPO_CACHE_TTL_SECONDS);
+        await this.scheduleCacheWrite(cacheKey, metadata, REPO_CACHE_TTL_SECONDS);
       }
       return metadata;
     } finally {
@@ -953,7 +994,7 @@ export class PublicGitHubRepositoryReader {
           zipFallbackReason: snapshot.diagnostics.zipFallbackReason,
         },
       };
-      await writeJsonCache(cacheKey, cached, SNAPSHOT_CACHE_TTL_SECONDS);
+      await this.scheduleCacheWrite(cacheKey, cached, SNAPSHOT_CACHE_TTL_SECONDS);
     }
     return snapshot;
   }
@@ -1076,6 +1117,10 @@ export class PublicGitHubRepositoryReader {
       } catch {
         // The connection may already be closed.
       }
+      // In-flight captures never settle once the stream is abandoned; subscribe
+      // without awaiting so a late inflate rejection cannot surface as an
+      // unhandled rejection.
+      void Promise.allSettled(pendingCaptures);
       if (cause instanceof PublicRepositoryFallbackError) throw cause;
       throw new PublicRepositoryFallbackError('zip_invalid', 'GitHub ZIP could not be parsed', { cause });
     }

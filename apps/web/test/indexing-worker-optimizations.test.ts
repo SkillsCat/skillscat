@@ -379,6 +379,151 @@ describe('indexing worker commit pinning', () => {
       publicReader
     )).rejects.toMatchObject({ reason: 'request_failed' });
   });
+
+  it('serves sha-pinned commit history through the GraphQL fallback when REST is rate limited', async () => {
+    const commitSha = '0123456789abcdef0123456789abcdef01234567';
+    const calls: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      calls.push(url);
+
+      if (url === 'https://api.github.com/graphql') {
+        return new Response(JSON.stringify({
+          data: {
+            repository: {
+              object: {
+                __typename: 'Commit',
+                history: {
+                  nodes: [{ oid: commitSha, committedDate: '2026-02-03T04:05:06Z' }],
+                },
+              },
+            },
+          },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ message: 'rate limited' }), {
+        status: 429,
+        headers: {
+          'content-type': 'application/json',
+          'retry-after': '60',
+          'x-ratelimit-remaining': '0',
+        },
+      });
+    });
+
+    const result = await getSkillCommitDates(
+      'octocat',
+      'skills',
+      'demo/SKILL.md',
+      commitSha,
+      { GITHUB_TOKEN: 'test-token' } as never
+    );
+
+    expect(calls).toEqual([
+      `https://api.github.com/repos/octocat/skills/commits?sha=${commitSha}&per_page=1&path=demo%2FSKILL.md`,
+      'https://api.github.com/graphql',
+    ]);
+    // The GraphQL fallback only exposes the committer date, so the first
+    // commit timestamp stays unknown instead of being guessed.
+    expect(result).toEqual({
+      lastCommitAt: Date.parse('2026-02-03T04:05:06Z'),
+      firstCommitAt: null,
+    });
+  });
+
+  it('captures ZIP contents per basePath when one reader serves multiple skill paths', async () => {
+    const commitSha = '0123456789abcdef0123456789abcdef01234567';
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(
+      JSON.stringify({ message: 'rate limited' }),
+      {
+        status: 429,
+        headers: {
+          'content-type': 'application/json',
+          'retry-after': '60',
+          'x-ratelimit-remaining': '0',
+        },
+      }
+    ));
+
+    const repositoryHtml = `<script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({
+      payload: {
+        codeViewRepoRoute: {
+          refInfo: { name: 'main', refType: 'branch', currentOid: commitSha },
+          tree: {
+            items: [{ path: 'skills', contentType: 'directory' }],
+            totalCount: 1,
+          },
+        },
+        codeViewLayoutRoute: {
+          repo: {
+            id: 123,
+            name: 'skills',
+            ownerLogin: 'octocat',
+            defaultBranch: 'main',
+            createdAt: '2026-01-02T03:04:05Z',
+            private: false,
+            public: true,
+            isOrgOwned: false,
+            isFork: false,
+          },
+        },
+        sidebarAbout: {
+          repoName: 'skills',
+          ownerLogin: 'octocat',
+          stargazerCount: 0,
+          forksCount: 0,
+          repo: {
+            ownerId: 456,
+            ownerAvatarUrl: 'https://avatars.githubusercontent.com/u/456?v=4',
+            isPrivate: false,
+            isFork: false,
+          },
+        },
+      },
+    })}</script>`;
+    const archive = zipSync({
+      [`skills-${commitSha}/skills/alpha/SKILL.md`]: strToU8('# Alpha\n'),
+      [`skills-${commitSha}/skills/beta/SKILL.md`]: strToU8('# Beta\n'),
+    });
+    const publicCalls: string[] = [];
+    const publicReader = new PublicGitHubRepositoryReader('octocat', 'skills', {
+      cache: false,
+      expectedHeadSha: commitSha,
+      fetch: vi.fn(async (input) => {
+        const url = typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+        publicCalls.push(url);
+        if (url === 'https://github.com/octocat/skills') {
+          return new Response(repositoryHtml);
+        }
+        if (url === `https://codeload.github.com/octocat/skills/zip/${commitSha}`) {
+          return new Response(Uint8Array.from(archive).buffer);
+        }
+        throw new Error(`Unexpected public GitHub request: ${url}`);
+      }) as typeof fetch,
+    });
+
+    const env = { GITHUB_TOKEN: 'test-token' } as never;
+    const alphaTree = await getRepositoryTree('octocat', 'skills', commitSha, env, publicReader, 'skills/alpha');
+    const betaTree = await getRepositoryTree('octocat', 'skills', commitSha, env, publicReader, 'skills/beta');
+
+    expect(alphaTree.publicSnapshot?.capturedFiles.has('skills/alpha/SKILL.md')).toBe(true);
+    expect(alphaTree.publicSnapshot?.capturedFiles.has('skills/beta/SKILL.md')).toBe(false);
+    expect(betaTree.publicSnapshot?.capturedFiles.has('skills/beta/SKILL.md')).toBe(true);
+    // One metadata page plus one ZIP download per capture scope.
+    expect(publicCalls).toEqual([
+      'https://github.com/octocat/skills',
+      `https://codeload.github.com/octocat/skills/zip/${commitSha}`,
+      `https://codeload.github.com/octocat/skills/zip/${commitSha}`,
+    ]);
+  });
 });
 
 describe('indexing worker persistence metadata merge', () => {

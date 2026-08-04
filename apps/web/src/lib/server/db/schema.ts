@@ -282,6 +282,8 @@ export const skills = sqliteTable('skills', {
 
 // Skills that a user submitted and that were subsequently persisted in the
 // public registry. The composite key keeps the submitted list duplicate-free.
+// Note: indexed_at stores skills.created_at (when the skill was first
+// persisted in the registry), not when this submission row was recorded.
 export const skillSubmissions = sqliteTable('skill_submissions', {
   userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),

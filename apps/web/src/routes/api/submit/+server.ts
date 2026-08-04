@@ -434,7 +434,22 @@ function createSubmitPublicReader(
   if (!isGitHubPublicFallbackEnabled(platform?.env?.GITHUB_HTML_SUBMIT_FALLBACK_ENABLED)) {
     return undefined;
   }
-  return new PublicGitHubRepositoryReader(owner, repo);
+  return new PublicGitHubRepositoryReader(owner, repo, {
+    waitUntil: platform?.context?.waitUntil?.bind(platform.context),
+  });
+}
+
+/**
+ * Per-request marker that short-circuits GitHub API calls once a rate limit
+ * has been observed, so later call sites fall back immediately instead of
+ * issuing requests that are guaranteed to fail.
+ */
+interface SubmitGitHubRateLimitState {
+  rateLimited: boolean;
+}
+
+function createSubmitGitHubRateLimitState(): SubmitGitHubRateLimitState {
+  return { rateLimited: false };
 }
 
 function buildGitHubUpstreamResponse(
@@ -486,8 +501,19 @@ function buildGitHubUpstreamResponse(
 async function githubRequestForSubmit(
   url: string,
   token: string | undefined,
-  mode: GitHubRequestMode = 'default'
+  mode: GitHubRequestMode = 'default',
+  rateLimitState?: SubmitGitHubRateLimitState
 ): Promise<Response> {
+  if (rateLimitState?.rateLimited) {
+    // An earlier call in this request already hit the GitHub rate limit.
+    // Return a synthetic 429 so callers take their fallback/error path
+    // immediately instead of burning another doomed API request.
+    return new Response('GitHub rate limit already hit in this request', {
+      status: 429,
+      headers: { 'x-ratelimit-remaining': '0' },
+    });
+  }
+
   const requestOptions: Parameters<typeof githubRequest>[1] = {
     token,
     userAgent: 'SkillsCat/1.0',
@@ -499,7 +525,11 @@ async function githubRequestForSubmit(
   }
 
   try {
-    return await githubRequest(url, requestOptions);
+    const response = await githubRequest(url, requestOptions);
+    if (rateLimitState && isGitHubRateLimited(response)) {
+      rateLimitState.rateLimited = true;
+    }
+    return response;
   } catch (cause) {
     log.error('GitHub request network failure:', { url, cause });
     throw new GitHubUpstreamError({
@@ -697,13 +727,18 @@ async function tryScanPublicRepository(
   if (!reader) return null;
   try {
     const snapshot = await reader.getSnapshot();
-    return scanPublicEntriesForSkillMd(
+    const result = scanPublicEntriesForSkillMd(
       snapshot.entries,
       basePath,
       maxDepth,
       maxSkills,
       snapshot.truncated
     );
+    // A truncated snapshot without a match cannot prove absence; return
+    // null (same contract as tryCheckPublicSkillMd) so callers treat the
+    // fallback as inconclusive instead of reporting no_skill_md_found.
+    if (result.found.length === 0 && result.truncated) return null;
+    return result;
   } catch (error) {
     log.warn('Public GitHub repository fallback unavailable:', error);
     return null;
@@ -722,14 +757,16 @@ async function scanRepoForSkillMd(
   maxDepth: number = MAX_DEPTH,
   mode: GitHubRequestMode = 'default',
   maxSkills: number = MAX_SKILLS_TO_SUBMIT,
-  publicReader?: PublicGitHubRepositoryReader
+  publicReader?: PublicGitHubRepositoryReader,
+  rateLimitState?: SubmitGitHubRateLimitState
 ): Promise<ScanResult> {
   try {
     // Use Git Trees API with recursive flag
     const response = await githubRequestForSubmit(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`,
       token,
-      mode
+      mode,
+      rateLimitState
     );
 
     if (response.ok) {
@@ -803,7 +840,7 @@ async function scanRepoForSkillMd(
   }
 
   // Fallback to search API
-  return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, mode, maxSkills, publicReader);
+  return await searchRepoForSkillMd(owner, repo, token, basePath, maxDepth, mode, maxSkills, publicReader, rateLimitState);
 }
 
 interface GitHubSearchItem {
@@ -832,14 +869,16 @@ async function searchRepoForSkillMd(
   maxDepth: number = MAX_DEPTH,
   mode: GitHubRequestMode = 'default',
   maxSkills: number = MAX_SKILLS_TO_SUBMIT,
-  publicReader?: PublicGitHubRepositoryReader
+  publicReader?: PublicGitHubRepositoryReader,
+  rateLimitState?: SubmitGitHubRateLimitState
 ): Promise<ScanResult> {
   try {
     const query = encodeURIComponent(`filename:SKILL.md repo:${owner}/${repo}`);
     const response = await githubRequestForSubmit(
       `${GITHUB_API_BASE}/search/code?q=${query}&per_page=100`,
       token,
-      mode
+      mode,
+      rateLimitState
     );
 
     if (!response.ok) {
@@ -1030,14 +1069,16 @@ async function fetchGitHubRepo(
   repo: string,
   token?: string,
   mode: GitHubRequestMode = 'default',
-  publicReader?: PublicGitHubRepositoryReader
+  publicReader?: PublicGitHubRepositoryReader,
+  rateLimitState?: SubmitGitHubRateLimitState
 ): Promise<RepoInfo | null> {
   let response: Response;
   try {
     response = await githubRequestForSubmit(
       `${GITHUB_API_BASE}/repos/${owner}/${repo}`,
       token,
-      mode
+      mode,
+      rateLimitState
     );
   } catch (error) {
     if (publicReader && error instanceof GitHubUpstreamError) {
@@ -1105,7 +1146,8 @@ async function fetchGitHubRepo(
 async function fetchForkCompareInfo(
   repo: RepoInfo,
   token?: string,
-  mode: GitHubRequestMode = 'default'
+  mode: GitHubRequestMode = 'default',
+  rateLimitState?: SubmitGitHubRateLimitState
 ): Promise<ForkCompareInfo | null> {
   if (!repo.parent) {
     return null;
@@ -1115,7 +1157,8 @@ async function fetchForkCompareInfo(
   const response = await githubRequestForSubmit(
     `${GITHUB_API_BASE}/repos/${repo.parent.owner}/${repo.parent.repo}/compare/${encodeURIComponent(basehead)}`,
     token,
-    mode
+    mode,
+    rateLimitState
   );
 
   if (response.status === 404) {
@@ -1142,14 +1185,23 @@ async function fetchForkCompareInfo(
 async function validateForkSubmission(
   repo: RepoInfo,
   token?: string,
-  mode: GitHubRequestMode = 'default'
+  mode: GitHubRequestMode = 'default',
+  rateLimitState?: SubmitGitHubRateLimitState
 ): Promise<SubmitValidationFailure | null> {
   if (!repo.fork) {
     return null;
   }
 
-  const compareInfo = await fetchForkCompareInfo(repo, token, mode);
+  const compareInfo = await fetchForkCompareInfo(repo, token, mode, rateLimitState);
   if (!compareInfo || !repo.parent) {
+    // A missing parent means repo metadata came from the public HTML
+    // fallback (rate-limit degraded path) — an availability issue, not a
+    // failed upstream comparison. Fail closed either way.
+    if (!repo.parent) {
+      log.warn(`Fork parent metadata unavailable for ${repo.owner}/${repo.repo} (degraded path); refusing fork submission without upstream verification`);
+    } else {
+      log.warn(`Fork upstream comparison unavailable for ${repo.owner}/${repo.repo}`);
+    }
     return {
       status: 503,
       code: 'fork_verification_failed',
@@ -1188,6 +1240,30 @@ async function validateForkSubmission(
 }
 
 /**
+ * Exact SKILL.md existence check against the public fallback snapshot.
+ * Returns null when the fallback cannot give a definitive answer: no reader,
+ * snapshot failure, or a truncated snapshot without a match (truncation
+ * cannot prove absence).
+ */
+async function tryCheckPublicSkillMd(
+  reader: PublicGitHubRepositoryReader | undefined,
+  checkPath: string
+): Promise<boolean | null> {
+  if (!reader) return null;
+  try {
+    const snapshot = await reader.getSnapshot();
+    const found = snapshot.entries.some(
+      (entry) => entry.type === 'blob' && entry.path === checkPath
+    );
+    if (!found && snapshot.truncated) return null;
+    return found;
+  } catch (error) {
+    log.warn(`Public SKILL.md check failed for ${checkPath}:`, error);
+    return null;
+  }
+}
+
+/**
  * Check if SKILL.md exists in GitHub repo at the requested path
  */
 async function checkGitHubSkillMd(
@@ -1196,7 +1272,8 @@ async function checkGitHubSkillMd(
   path: string,
   token?: string,
   mode: GitHubRequestMode = 'default',
-  publicReader?: PublicGitHubRepositoryReader
+  publicReader?: PublicGitHubRepositoryReader,
+  rateLimitState?: SubmitGitHubRateLimitState
 ): Promise<boolean> {
   const skillPaths = [
     path ? `${path}/SKILL.md` : 'SKILL.md',
@@ -1208,27 +1285,22 @@ async function checkGitHubSkillMd(
       response = await githubRequestForSubmit(
         `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${checkPath}`,
         token,
-        mode
+        mode,
+        rateLimitState
       );
     } catch (error) {
-      if (publicReader && error instanceof GitHubUpstreamError) {
-        try {
-          const snapshot = await publicReader.getSnapshot();
-          return snapshot.entries.some((entry) => entry.type === 'blob' && entry.path === checkPath);
-        } catch (fallbackError) {
-          log.warn(`Public SKILL.md fallback failed for ${owner}/${repo}/${checkPath}:`, fallbackError);
-        }
+      if (error instanceof GitHubUpstreamError) {
+        const publicResult = await tryCheckPublicSkillMd(publicReader, checkPath);
+        if (publicResult !== null) return publicResult;
       }
       throw error;
     }
 
     if (response.ok) return true;
     if (response.status !== 404) {
-      if (publicReader && isPublicFallbackResponse(response)) {
-        const publicResult = await tryScanPublicRepository(publicReader, path, MAX_DEPTH, MAX_SKILLS_TO_SUBMIT);
-        if (publicResult) {
-          return publicResult.found.some((skill) => skill.path === checkPath);
-        }
+      if (isPublicFallbackResponse(response)) {
+        const publicResult = await tryCheckPublicSkillMd(publicReader, checkPath);
+        if (publicResult !== null) return publicResult;
       }
       throw toGitHubUpstreamError(response, `checking ${checkPath} in ${owner}/${repo}`);
     }
@@ -1298,9 +1370,10 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 
     const { owner, repo } = repoInfo;
     const publicReader = createSubmitPublicReader(owner, repo, platform);
+    const rateLimitState = createSubmitGitHubRateLimitState();
 
     // Fetch repository info first
-    const repoData = await fetchGitHubRepo(owner, repo, githubToken, githubRequestMode, publicReader);
+    const repoData = await fetchGitHubRepo(owner, repo, githubToken, githubRequestMode, publicReader, rateLimitState);
     if (!repoData) {
       throw new SubmitRouteError({
         status: 404,
@@ -1309,7 +1382,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       });
     }
 
-    const forkValidation = await validateForkSubmission(repoData, githubToken, githubRequestMode);
+    const forkValidation = await validateForkSubmission(repoData, githubToken, githubRequestMode, rateLimitState);
     if (forkValidation) {
       throw new SubmitRouteError(forkValidation);
     }
@@ -1323,7 +1396,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     const path = explicitSkillPath !== undefined ? explicitSkillPath : resolvedPath.path;
 
     // First, check if SKILL.md exists at the submitted path (or root if no path)
-    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, githubRequestMode, publicReader);
+    const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, githubRequestMode, publicReader, rateLimitState);
 
     if (hasSkillMd) {
       if (!path) {
@@ -1336,7 +1409,8 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
             ROOT_SUBMIT_SCAN_MAX_DEPTH,
             githubRequestMode,
             ROOT_SUBMIT_SCAN_MAX_SKILLS,
-            publicReader
+            publicReader,
+            rateLimitState
           );
           if (scanResult.found.length > 1) {
             return await submitMultipleSkills({
@@ -1378,7 +1452,8 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       MAX_DEPTH,
       githubRequestMode,
       MAX_SKILLS_TO_SUBMIT,
-      publicReader
+      publicReader,
+      rateLimitState
     );
 
     if (scanResult.found.length === 0) {
@@ -1837,13 +1912,16 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
         }
 
         const { owner, repo } = repoInfo;
-        const publicReader = createSubmitPublicReader(owner, repo, platform);
+        // The anonymous precheck endpoint must not trigger the public
+        // fallback: without auth, a ZIP/HTML crawl per uncached URL would be
+        // an outbound amplification vector. POST keeps the fallback.
+        const rateLimitState = createSubmitGitHubRateLimitState();
 
         const db = platform?.env?.DB;
         const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
 
         // Fetch repository info first
-        const repoData = await fetchGitHubRepo(owner, repo, githubToken, 'submit_fast_fail', publicReader);
+        const repoData = await fetchGitHubRepo(owner, repo, githubToken, 'submit_fast_fail', undefined, rateLimitState);
         if (!repoData) {
           return {
             valid: false,
@@ -1863,7 +1941,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
           } satisfies SubmitCheckPayload;
         }
 
-        const forkValidation = await validateForkSubmission(repoData, githubToken, 'submit_fast_fail');
+        const forkValidation = await validateForkSubmission(repoData, githubToken, 'submit_fast_fail', rateLimitState);
         if (forkValidation) {
           return {
             valid: false,
@@ -1884,7 +1962,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
         const path = resolvedPath.path;
 
         // First, check if SKILL.md exists at the submitted path (or root if no path)
-        const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, 'submit_fast_fail', publicReader);
+        const hasSkillMd = await checkGitHubSkillMd(owner, repo, path, githubToken, 'submit_fast_fail', undefined, rateLimitState);
 
         if (hasSkillMd) {
           // SKILL.md found at the submitted path - check if already exists in DB
@@ -1949,7 +2027,8 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
           MAX_DEPTH,
           'submit_fast_fail',
           MAX_SKILLS_TO_SUBMIT,
-          publicReader
+          undefined,
+          rateLimitState
         );
 
         if (scanResult.found.length === 0) {
