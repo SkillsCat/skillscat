@@ -20,6 +20,11 @@
     publishedTime?: string;
     modifiedTime?: string;
     author?: string;
+    /**
+     * @deprecated `<meta name="keywords">` is no longer rendered (ignored by
+     * Google, keyword-stuffing signal). Kept in the props type only so existing
+     * callers keep type-checking; the value is ignored.
+     */
     keywords?: string[];
     tags?: string[];
     section?: string;
@@ -40,7 +45,6 @@
     publishedTime,
     modifiedTime,
     author,
-    keywords = [],
     tags = [],
     section,
     noindex = false,
@@ -84,21 +88,15 @@
       : 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'
   );
 
-  // Default structured data for the website
+  // Default structured data for the website. The WebSite node intentionally
+  // has no SearchAction potentialAction: /search is noindex and Google
+  // deprecated the sitelinks searchbox.
   const defaultStructuredData = $derived({
     '@context': 'https://schema.org',
     '@type': 'WebSite',
     name: siteName,
     url: siteUrl,
     description,
-    potentialAction: {
-      '@type': 'SearchAction',
-      target: {
-        '@type': 'EntryPoint',
-        urlTemplate: `${siteUrl}/search?q={search_term_string}`,
-      },
-      'query-input': 'required name=search_term_string',
-    },
   });
 
   const jsonLd = $derived(
@@ -116,9 +114,6 @@
   <meta name="description" content={description} />
   {#if author}
     <meta name="author" content={author} />
-  {/if}
-  {#if keywords.length > 0}
-    <meta name="keywords" content={keywords.join(', ')} />
   {/if}
   <meta name="robots" content={robotsContent} />
 

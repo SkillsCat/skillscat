@@ -7,8 +7,7 @@ import { getCached } from '$lib/server/cache';
 import { renderHighlightedReadmeMarkdown } from '$lib/server/text/highlight';
 import { getOrRenderHighlightedReadme } from '$lib/server/skill/highlighted-readme';
 import { setPublicPageCache } from '$lib/server/cache/page';
-import { CATEGORIES } from '$lib/constants/categories';
-import type { Category } from '$lib/constants/categories';
+import { buildSkillSeoPayload } from '$lib/seo/skill-seo';
 import { normalizeRecommendAlgoVersion } from '$lib/server/ranking/recommend-precompute';
 import {
   readCachedRecommendSkills,
@@ -27,230 +26,13 @@ import { buildSkillInstallData } from '$lib/skill-install';
 import { isSeoIndexableSkill } from '$lib/seo/indexability';
 
 const PUBLIC_SKILL_HTML_CACHE_HEADER = 'X-Skillscat-Public-Skill-Cache';
-const CATEGORY_BY_SLUG = new Map(CATEGORIES.map((category) => [category.slug, category] as const));
-const SEO_DESCRIPTION_STOP_WORDS = new Set([
-  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'how',
-  'in', 'is', 'it', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'with',
-  'you', 'your', 'ai', 'agent', 'skill', 'skills'
-]);
-const MAX_SEO_DESCRIPTION_SCAN_CHARS = 500;
-const MAX_SEO_TITLE_LENGTH = 68;
-const MAX_SEO_DESCRIPTION_LENGTH = 160;
 // Keyed by skill ID + readme version, so entries are immutable after a skill update.
 const README_HTML_CACHE_TTL = 60 * 60 * 24 * 30;
-
-interface SkillSeoPayload {
-  title: string;
-  description: string;
-  keywords: string[];
-  articleTags: string[];
-  section?: string;
-}
 
 type SkillPageErrorKind = 'not_found' | 'temporary_failure';
 
 function hasNonEmptyRecommendSkills(recommendSkills: SkillCardData[] | null | undefined): recommendSkills is SkillCardData[] {
   return Array.isArray(recommendSkills) && recommendSkills.length > 0;
-}
-
-function normalizeKeywordValue(keyword: string): string {
-  return keyword.trim().toLowerCase().replace(/\s+/g, ' ');
-}
-
-function appendKeyword(target: string[], seen: Set<string>, keyword: string): void {
-  const value = keyword.trim();
-  const normalized = normalizeKeywordValue(value);
-  if (!normalized || normalized.length < 2 || seen.has(normalized)) {
-    return;
-  }
-  seen.add(normalized);
-  target.push(value);
-}
-
-function isCategory(value: Category | undefined): value is Category {
-  return Boolean(value);
-}
-
-function extractDescriptionKeywords(description: string | null | undefined): string[] {
-  if (!description) return [];
-
-  const scanText = description.slice(0, MAX_SEO_DESCRIPTION_SCAN_CHARS).toLowerCase();
-  const tokens = scanText.match(/[a-z0-9][a-z0-9+#.-]*/g) || [];
-  const frequency = new Map<string, number>();
-
-  for (const token of tokens) {
-    if (token.length < 3) continue;
-    if (/^\d+$/.test(token)) continue;
-    if (SEO_DESCRIPTION_STOP_WORDS.has(token)) continue;
-    frequency.set(token, (frequency.get(token) ?? 0) + 1);
-  }
-
-  return [...frequency.entries()]
-    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
-    .slice(0, 4)
-    .map(([token]) => token);
-}
-
-function trimToLength(value: string, maxLength: number): string {
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= maxLength) return normalized;
-  const sliced = normalized.slice(0, maxLength - 1);
-  const cut = sliced.lastIndexOf(' ');
-  return `${(cut > Math.floor(maxLength * 0.6) ? sliced.slice(0, cut) : sliced).trim()}…`;
-}
-
-function cleanDescriptionText(description: string | null | undefined): string | null {
-  if (!description) return null;
-  const text = description
-    .replace(/\s+/g, ' ')
-    .replace(/[`*_#]/g, '')
-    .trim();
-  if (!text) return null;
-  return /[.!?]$/.test(text) ? text : `${text}.`;
-}
-
-function buildGroundedSeoDescription(skill: SkillDetail): string {
-  // `skill.description` is the canonical summary extracted from SKILL.md during indexing.
-  const fromSkillDescription = cleanDescriptionText(skill.description);
-  if (fromSkillDescription) {
-    return trimToLength(fromSkillDescription, MAX_SEO_DESCRIPTION_LENGTH);
-  }
-
-  return trimToLength(`Discover ${skill.name} on SkillsCat.`, MAX_SEO_DESCRIPTION_LENGTH);
-}
-
-function getSeoRelevantCategories(skill: SkillDetail): Category[] {
-  const categories = (skill.categories ?? [])
-    .map((slug) => CATEGORY_BY_SLUG.get(slug))
-    .filter(isCategory);
-
-  if (categories.length === 0) {
-    return [];
-  }
-
-  if (skill.classificationMethod !== 'keyword') {
-    return categories;
-  }
-
-  const primaryCategory = categories[0];
-  if (!primaryCategory) {
-    return [];
-  }
-
-  const evidenceText = `${skill.name} ${skill.description ?? ''}`
-    .toLowerCase()
-    .replace(/[-_/]+/g, ' ');
-  const hasPrimaryCategoryEvidence =
-    evidenceText.includes(primaryCategory.name.toLowerCase()) ||
-    evidenceText.includes(primaryCategory.slug.replace(/-/g, ' ')) ||
-    primaryCategory.keywords.some((keyword) => evidenceText.includes(keyword.toLowerCase()));
-
-  return hasPrimaryCategoryEvidence ? [primaryCategory] : [];
-}
-
-function buildSkillSeoKeywords(skill: SkillDetail): string[] {
-  const keywords: string[] = [];
-  const seen = new Set<string>();
-  const categories = getSeoRelevantCategories(skill);
-  const descriptionKeywords = extractDescriptionKeywords(skill.description);
-  const primaryCategory = categories[0];
-  const primaryCategoryName = primaryCategory?.name?.toLowerCase();
-
-  appendKeyword(keywords, seen, skill.name);
-  appendKeyword(keywords, seen, `${skill.name} skill`);
-  appendKeyword(keywords, seen, `${skill.name} ai agent skill`);
-  appendKeyword(keywords, seen, skill.slug);
-
-  if (skill.repoOwner && skill.repoName) {
-    appendKeyword(keywords, seen, `${skill.repoOwner}/${skill.repoName}`);
-    appendKeyword(keywords, seen, `${skill.repoOwner} ${skill.repoName}`);
-    appendKeyword(keywords, seen, `${skill.repoOwner}/${skill.repoName} skill`);
-  } else if (skill.repoOwner) {
-    appendKeyword(keywords, seen, skill.repoOwner);
-  }
-
-  for (const category of categories) {
-    appendKeyword(keywords, seen, category.name);
-    appendKeyword(keywords, seen, `${category.name} skill`);
-    appendKeyword(keywords, seen, `${category.name} automation skill`);
-    appendKeyword(keywords, seen, `${category.name} ai agent skill`);
-    for (const keyword of category.keywords.slice(0, 3)) {
-      appendKeyword(keywords, seen, keyword);
-      appendKeyword(keywords, seen, `${keyword} automation skill`);
-      if (primaryCategoryName) {
-        appendKeyword(keywords, seen, `${keyword} ${primaryCategoryName} workflow`);
-      }
-    }
-  }
-
-  for (const keyword of descriptionKeywords) {
-    appendKeyword(keywords, seen, keyword);
-    appendKeyword(keywords, seen, `${keyword} skill`);
-    appendKeyword(keywords, seen, `${keyword} automation`);
-  }
-
-  if (descriptionKeywords.length >= 2) {
-    appendKeyword(keywords, seen, `${descriptionKeywords[0]} ${descriptionKeywords[1]} skill`);
-    appendKeyword(keywords, seen, `${descriptionKeywords[0]} ${descriptionKeywords[1]} workflow`);
-  }
-
-  if (primaryCategoryName && descriptionKeywords[0]) {
-    appendKeyword(keywords, seen, `${descriptionKeywords[0]} ${primaryCategoryName} skill`);
-  }
-
-  appendKeyword(keywords, seen, skill.sourceType === 'upload' ? 'uploaded ai skill' : 'github ai skill');
-  appendKeyword(keywords, seen, 'ai agent skill');
-  appendKeyword(keywords, seen, 'skillscat');
-
-  return keywords.slice(0, 24);
-}
-
-function buildSkillSeoPayload(skill: SkillDetail): SkillSeoPayload {
-  const categories = getSeoRelevantCategories(skill);
-  const primaryCategory = categories[0];
-  const primaryCategoryName = primaryCategory?.name;
-  const descriptionKeywords = extractDescriptionKeywords(skill.description);
-  const keywords = buildSkillSeoKeywords(skill);
-
-  const titleParts = [skill.name];
-  if (primaryCategoryName) {
-    titleParts.push(`${primaryCategoryName} AI Agent Skill`);
-  } else {
-    titleParts.push('AI Agent Skill');
-  }
-  titleParts.push('SkillsCat');
-  const rawTitle = titleParts.join(' | ');
-  const title = trimToLength(rawTitle, MAX_SEO_TITLE_LENGTH);
-
-  const description = buildGroundedSeoDescription(skill);
-
-  const articleTags: string[] = [];
-  const articleTagSeen = new Set<string>();
-  const pushArticleTag = (value: string) => {
-    const normalized = normalizeKeywordValue(value);
-    if (!normalized || articleTagSeen.has(normalized)) return;
-    articleTagSeen.add(normalized);
-    articleTags.push(value);
-  };
-
-  if (primaryCategoryName) pushArticleTag(primaryCategoryName);
-  for (const category of categories.slice(0, 3)) {
-    pushArticleTag(category.name);
-    for (const keyword of category.keywords.slice(0, 2)) {
-      pushArticleTag(keyword);
-    }
-  }
-  for (const keyword of descriptionKeywords.slice(0, 3)) {
-    pushArticleTag(keyword);
-  }
-
-  return {
-    title,
-    description,
-    keywords,
-    articleTags: articleTags.slice(0, 10),
-    section: primaryCategoryName,
-  };
 }
 
 /**
@@ -457,82 +239,58 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       setHeaders({ [PUBLIC_SKILL_HTML_CACHE_HEADER]: '1' });
     }
 
-    const deferRecommendSkills = skill.visibility === 'public' && usableCachedRecommendSkills === null;
-    const recommendSkillsPromise = deferRecommendSkills
-      ? Promise.resolve<SkillCardData[]>([])
-      : timed(
-        'recommend',
-        async () => {
-          if (usableCachedRecommendSkills !== null) {
-            return usableCachedRecommendSkills;
-          }
+    // Recommendations always resolve server-side so they are part of the SSR
+    // HTML (unique content + internal links for crawlers). On a precomputed
+    // cache miss we fall back to the realtime query inline instead of
+    // deferring to a client-side fetch of /api/skills/<slug>/recommend.
+    const recommendSkillsPromise = timed(
+      'recommend',
+      async () => {
+        if (usableCachedRecommendSkills !== null) {
+          return usableCachedRecommendSkills;
+        }
 
-          if (skill.visibility === 'public') {
-            if (encodedSlug) {
-              try {
-                const response = await fetch(`/api/skills/${encodedSlug}/recommend`, {
-                  headers: { accept: 'application/json' }
-                });
-                if (response.ok) {
-                  const payload = await response.json() as {
-                    success?: boolean;
-                    data?: { recommendSkills?: SkillCardData[] };
-                  };
-                  if (payload.success) {
-                    return payload.data?.recommendSkills || [];
-                  }
-                }
-              } catch (recommendApiError) {
-                console.warn('SSR recommend API fetch failed, fallback to DB query:', recommendApiError);
-              }
-            }
-          }
-
-          const realtimeRecommendMode = getRealtimeRecommendMode(skill.visibility, skill.tier, false);
-          if (realtimeRecommendMode === 'lightweight') {
-            const { data } = await getCached(
-              buildOnlineRecommendCacheKey(skill.id, realtimeRecommendMode),
-              () => getLightweightRecommendedSkills(
-                env,
-                skill.id,
-                skill.categories || [],
-                skill.repoOwner || '',
-                10,
-                (name, dur, desc) => {
-                  serverTimings.push({ name, dur, desc });
-                },
-                false
-              ),
-              RECOMMEND_ONLINE_CACHE_TTL_SECONDS
-            );
-            return data;
-          }
-
-          const shouldUseRecommendSignals = shouldLoadRecommendSignals(realtimeRecommendMode);
+        const realtimeRecommendMode = getRealtimeRecommendMode(skill.visibility, skill.tier, false);
+        if (realtimeRecommendMode === 'lightweight') {
           const { data } = await getCached(
             buildOnlineRecommendCacheKey(skill.id, realtimeRecommendMode),
-            () => getRecommendedSkills(
+            () => getLightweightRecommendedSkills(
               env,
               skill.id,
-              shouldUseRecommendSignals ? (skill.categories || []) : [],
+              skill.categories || [],
               skill.repoOwner || '',
               10,
               (name, dur, desc) => {
                 serverTimings.push({ name, dur, desc });
               },
-              false,
-              shouldUseRecommendSignals ? null : []
+              false
             ),
             RECOMMEND_ONLINE_CACHE_TTL_SECONDS
           );
           return data;
-        },
-        'secondary'
-      );
+        }
 
-    if (deferRecommendSkills) {
-      serverTimings.push({ name: 'recommend', dur: 0, desc: 'deferred' });
-    }
+        const shouldUseRecommendSignals = shouldLoadRecommendSignals(realtimeRecommendMode);
+        const { data } = await getCached(
+          buildOnlineRecommendCacheKey(skill.id, realtimeRecommendMode),
+          () => getRecommendedSkills(
+            env,
+            skill.id,
+            shouldUseRecommendSignals ? (skill.categories || []) : [],
+            skill.repoOwner || '',
+            10,
+            (name, dur, desc) => {
+              serverTimings.push({ name, dur, desc });
+            },
+            false,
+            shouldUseRecommendSignals ? null : []
+          ),
+          RECOMMEND_ONLINE_CACHE_TTL_SECONDS
+        );
+        return data;
+      },
+      'secondary'
+    );
 
     const renderedReadmePromise = timed(
       'readme_html',
@@ -613,7 +371,6 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       install,
       renderedReadme,
       recommendSkills,
-      deferRecommendSkills,
       isBookmarked: shouldDeferUserState ? false : isBookmarked,
       isAuthenticated: shouldDeferUserState ? false : Boolean(readPrincipal),
       deferUserState: shouldDeferUserState,

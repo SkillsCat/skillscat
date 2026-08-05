@@ -32,7 +32,6 @@
       skill: SkillDetail | null;
       install?: SkillInstallData;
       recommendSkills: SkillCardData[];
-      deferRecommendSkills?: boolean;
       error?: string;
       errorKind?: SkillPageErrorKind;
       isOwner?: boolean;
@@ -524,59 +523,6 @@
   }
 
   // README HTML arrives fully highlighted from the server; no client re-highlighting.
-  let deferredRecommendSkills = $state<SkillCardData[] | null>(null);
-  let deferredRecommendSkillsError = $state<string | null>(null);
-
-  // For client-side navigations, recommend skills are fetched lazily to keep __data.json fast.
-  $effect(() => {
-    const skill = data.skill;
-    const shouldDefer = Boolean(data.deferRecommendSkills && skill);
-
-    deferredRecommendSkills = null;
-    deferredRecommendSkillsError = null;
-
-    if (!shouldDefer || !skill) return;
-
-    const controller = new AbortController();
-
-    void (async () => {
-      try {
-        const query = new URLSearchParams();
-        for (const category of skill.categories.slice(0, 3)) {
-          query.append('category', category);
-        }
-
-        const recommendEndpoint = `/api/skills/${encodeSkillSlugForPath(skill.slug)}/recommend${query.size > 0 ? `?${query.toString()}` : ''}`;
-        const response = await fetch(recommendEndpoint, {
-          signal: controller.signal,
-          headers: { accept: 'application/json' }
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const payload = await response.json() as {
-          success?: boolean;
-          error?: string;
-          data?: { recommendSkills?: SkillCardData[] };
-        };
-
-        if (!payload.success) {
-          throw new Error(payload.error || copy.recommendFailed);
-        }
-
-        deferredRecommendSkills = payload.data?.recommendSkills || [];
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        console.error('Deferred recommend skills load failed:', err);
-        deferredRecommendSkillsError = copy.recommendFailed;
-        deferredRecommendSkills = [];
-      }
-    })();
-
-    return () => controller.abort();
-  });
 
   // Handle clicks on relative file links in markdown content
   let requestedResourceFilePath = $state('');
@@ -902,13 +848,8 @@
     toIsoTimestamp(data.skill?.lastCommitAt ?? data.skill?.updatedAt)
   );
   const skillSeoKeywords = $derived(data.seo?.keywords ?? ['ai agent skill', 'skillscat']);
-  const displayRecommendSkills = $derived(deferredRecommendSkills ?? data.recommendSkills ?? []);
-  const showRecommendSkillsLoading = $derived(
-    Boolean(data.deferRecommendSkills && data.skill && deferredRecommendSkills === null && !deferredRecommendSkillsError)
-  );
-  const showRecommendSkillsCard = $derived(
-    displayRecommendSkills.length > 0 || showRecommendSkillsLoading || Boolean(deferredRecommendSkillsError)
-  );
+  const displayRecommendSkills = $derived(data.recommendSkills ?? []);
+  const showRecommendSkillsCard = $derived(displayRecommendSkills.length > 0);
   const skillStructuredData = $derived(
     data.skill && data.skill.visibility === 'public'
       ? [
@@ -977,7 +918,6 @@
     modifiedTime={modifiedTime}
     noindex={!data.seoIndexable}
     robots={!data.seoIndexable ? 'noindex, follow, noarchive' : ''}
-    keywords={skillSeoKeywords}
     tags={data.seo?.articleTags}
     section={data.seo?.section}
     structuredData={data.seoIndexable ? skillStructuredData : null}
@@ -1432,6 +1372,20 @@
           </div>
         </div>
 
+        <!-- AI summary (shown above SKILL.md when available) -->
+        {#if data.skill.summary}
+          <div class="card skill-summary-card">
+            <div class="skill-content-header">
+              <svg class="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span class="skill-content-title">{copy.summaryTitle}</span>
+            </div>
+            <div class="skill-content-divider"></div>
+            <p class="skill-summary-text">{data.skill.summary}</p>
+          </div>
+        {/if}
+
         <!-- SKILL.md Content -->
         {#if data.hasReadme ?? Boolean(data.skill.readme)}
           <div class="card skill-content-card">
@@ -1566,14 +1520,6 @@
                   </a>
                 {/each}
               </div>
-            {:else if showRecommendSkillsLoading}
-              <div class="space-y-3" aria-busy="true" aria-live="polite">
-                <div class="h-20 rounded-lg border border-border bg-bg-muted/40 animate-pulse"></div>
-                <div class="h-20 rounded-lg border border-border bg-bg-muted/40 animate-pulse"></div>
-                <div class="h-20 rounded-lg border border-border bg-bg-muted/40 animate-pulse"></div>
-              </div>
-            {:else}
-              <p class="text-sm text-fg-muted">{copy.recommendUnavailable}</p>
             {/if}
           </div>
         {/if}
@@ -2695,6 +2641,13 @@
     background: linear-gradient(90deg, var(--primary) 0%, transparent 100%);
     margin-bottom: 1.5rem;
     border-radius: 1px;
+  }
+
+  .skill-summary-text {
+    font-size: 0.9375rem;
+    color: var(--fg-muted);
+    line-height: 1.7;
+    margin: 0;
   }
 
   .skill-detail-container {
