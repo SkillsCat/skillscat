@@ -708,7 +708,7 @@ async function maybeRespondWithOpenClawSkillMarkdown(
   );
 }
 
-export const handle: Handle = async ({ event, resolve }) => {
+const baseHandle: Handle = async ({ event, resolve }) => {
   const shouldForceDefaultLocale = shouldForceDefaultLocaleForPublicPage(
     event.url.pathname,
     event.request.method
@@ -941,3 +941,48 @@ export const handle: Handle = async ({ event, resolve }) => {
 
   return applyResponseSecurityHeaders(event.url.pathname, optimizedResponse);
 };
+
+/**
+ * JS-readable presence marker for the better-auth session cookie.
+ *
+ * better-auth marks every cookie (session_token and the session_data cookie
+ * cache) as HttpOnly, so client code cannot see them via document.cookie.
+ * The lazy auth session loader (lib/auth-session.ts) needs a signal to
+ * decide whether loading the auth client is worthwhile; this mirrors the
+ * session cookie's presence into a non-HttpOnly hint cookie.
+ *
+ * Applied per response (never baked into shared HTML caches): attached only
+ * to HTML responses and skipped for /api/auth/*, which better-auth owns.
+ */
+export const AUTH_HINT_COOKIE_NAME = 'sc_auth_hint';
+const SESSION_REQUEST_COOKIE_PATTERN = /(?:^|;\s*)(?:__Secure-)?better-auth\.session_token=/;
+const AUTH_HINT_SET_VALUE = `${AUTH_HINT_COOKIE_NAME}=1; Path=/; Max-Age=${60 * 60 * 24 * 30}; Secure; SameSite=Lax`;
+const AUTH_HINT_DELETE_VALUE = `${AUTH_HINT_COOKIE_NAME}=; Path=/; Max-Age=0; Secure; SameSite=Lax`;
+
+export function withAuthHintCookie(request: Request, pathname: string, response: Response): Response {
+  if (pathname.startsWith('/api/auth')) {
+    return response;
+  }
+  if (!isHtmlResponse(response)) {
+    return response;
+  }
+
+  const hasSessionCookie = SESSION_REQUEST_COOKIE_PATTERN.test(request.headers.get('cookie') ?? '');
+  const headers = new Headers(response.headers);
+  if (hasSessionCookie) {
+    headers.append('set-cookie', AUTH_HINT_SET_VALUE);
+  } else {
+    headers.append('set-cookie', AUTH_HINT_DELETE_VALUE);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+export const handle: Handle = async (input) => withAuthHintCookie(
+  input.event.request,
+  input.event.url.pathname,
+  await baseHandle(input)
+);

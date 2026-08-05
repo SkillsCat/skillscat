@@ -33,9 +33,10 @@ export interface AuthSessionState {
 const PENDING_STATE: AuthSessionState = { data: null, isPending: true, error: null };
 const ANONYMOUS_STATE: AuthSessionState = { data: null, isPending: false, error: null };
 
-// better-auth cookies use the `better-auth.` prefix and additionally carry
-// the `__Secure-` prefix on HTTPS origins.
-const SESSION_COOKIE_PATTERN = /(?:^|;\s*)(?:__Secure-)?better-auth\./;
+// better-auth cookies are all HttpOnly, so document.cookie cannot see them.
+// The server mirrors their presence into a JS-readable marker cookie
+// (see withAuthHintCookie in hooks.server.ts), which is what we test here.
+const SESSION_COOKIE_PATTERN = /(?:^|;\s*)sc_auth_hint=1(?:;|$)/;
 
 export function hasSessionCookieHint(cookieHeader: string): boolean {
   return SESSION_COOKIE_PATTERN.test(cookieHeader);
