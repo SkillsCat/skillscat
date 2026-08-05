@@ -70,6 +70,10 @@ const DESIGN_STRONG_SIGNAL_THRESHOLD = 2;
 const DESIGN_DIRECTION_BONUS = 4;
 const SPARSE_SIGNAL_BOOST = 2;
 const SPARSE_SIGNAL_THRESHOLD = 2;
+const SUMMARY_SKILL_MD_EXCERPT_CHARS = 2000;
+const SUMMARY_MAX_OUTPUT_TOKENS = 220;
+const SUMMARY_MAX_STORED_CHARS = 600;
+const SUMMARY_MIN_OUTPUT_CHARS = 24;
 
 const DESIGN_DIRECTION_SIGNALS = [
   'ui/ux',
@@ -441,6 +445,226 @@ Example response with suggested category:
 Respond ONLY with the JSON object, no other text.`;
 }
 
+/**
+ * Build the prompt for the per-skill functional summary.
+ * Input is capped to keep token spend flat regardless of SKILL.md size.
+ */
+export function buildSkillSummaryPrompt(skillMdContent: string, description?: string | null): string {
+  const trimmedDescription = (description || '').trim();
+
+  return `You are summarizing an AI agent skill for a public software directory.
+${trimmedDescription ? `\nAuthor-provided short description: ${trimmedDescription.slice(0, 300)}\n` : ''}
+SKILL.md excerpt:
+---
+${skillMdContent.slice(0, SUMMARY_SKILL_MD_EXCERPT_CHARS)}
+---
+
+Write a 2-3 sentence plain-text summary in English that objectively explains:
+- what this skill does
+- what problem it solves
+- when an agent or developer should use it
+
+Rules:
+- Objective, factual tone only: no marketing language, no superlatives, no calls to action
+- Natural prose, no keyword stuffing, no bullet points, no headings, no markdown formatting
+- Do not wrap the answer in quotes
+- At most 60 words
+
+Respond with ONLY the summary text.`;
+}
+
+/**
+ * Normalize raw model output into a storable one-line summary.
+ * Returns null when the output is unusable.
+ */
+export function sanitizeSkillSummary(raw: string | null | undefined): string | null {
+  if (!raw) {
+    return null;
+  }
+
+  let text = raw.replace(/\s+/g, ' ').trim();
+  // Strip wrapping quotes some models add despite the prompt.
+  text = text.replace(/^["'`]+/, '').replace(/["'`]+$/, '').trim();
+
+  if (text.length < SUMMARY_MIN_OUTPUT_CHARS) {
+    return null;
+  }
+
+  if (text.length > SUMMARY_MAX_STORED_CHARS) {
+    const cut = text.slice(0, SUMMARY_MAX_STORED_CHARS);
+    const lastSentenceEnd = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+    text = lastSentenceEnd > SUMMARY_MIN_OUTPUT_CHARS ? cut.slice(0, lastSentenceEnd + 1) : cut;
+  }
+
+  return text;
+}
+
+/**
+ * Plain-text variant of callOpenRouter for summary generation.
+ * Shares the same endpoint, headers, and error semantics, but skips the JSON
+ * response format so models answer in prose.
+ */
+async function callOpenRouterText(
+  prompt: string,
+  model: string,
+  apiKey: string
+): Promise<string> {
+  const response = await fetch(OPENROUTER_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'HTTP-Referer': 'https://skills.cat',
+      'X-Title': 'SkillsCat Classification Worker',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      temperature: 0.3,
+      max_tokens: SUMMARY_MAX_OUTPUT_TOKENS,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new OpenRouterApiError({
+      model,
+      status: response.status,
+      retryAfterMs: parseOpenRouterRetryAfterMs(response.headers),
+      message: `OpenRouter API error: ${response.status} - ${error}`,
+    });
+  }
+
+  const data = await response.json() as unknown as OpenRouterResponse;
+  const content = data.choices?.[0]?.message?.content;
+
+  if (!content) {
+    throw new Error('No content in OpenRouter response');
+  }
+
+  return content;
+}
+
+/**
+ * Generate the functional summary with the same cost policy as classification:
+ * DeepSeek V4 Flash and the OpenRouter free router first (respecting the shared pause store),
+ * paid DeepSeek V4 Flash as the fallback. Returns null when no provider succeeds.
+ */
+export async function generateSkillSummary(
+  skillMdContent: string,
+  description: string | null,
+  env: ClassificationEnv
+): Promise<string | null> {
+  if (!env.OPENROUTER_API_KEY) {
+    return null;
+  }
+
+  const prompt = buildSkillSummaryPrompt(skillMdContent, description);
+  const freeModels = getFreeModelCandidates(env);
+  const openRouterPauseStore = getOpenRouterFreePauseStore(env);
+  const freePausedUntil = await getOpenRouterFreePauseUntil(openRouterPauseStore, Date.now());
+
+  if (freeModels.length > 0 && !freePausedUntil) {
+    for (const model of freeModels) {
+      try {
+        const summary = sanitizeSkillSummary(await callOpenRouterText(prompt, model, env.OPENROUTER_API_KEY));
+        if (summary) {
+          return summary;
+        }
+      } catch (error) {
+        console.error(`[OpenRouter] Free summary model failed (${model}):`, error);
+        if (isOpenRouterFreePauseError(error)) {
+          await pauseOpenRouterFreeModels(openRouterPauseStore, {
+            retryAfterMs: error.retryAfterMs,
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  try {
+    const paidModel = getClassificationPaidModel(env);
+    return sanitizeSkillSummary(await callOpenRouterText(prompt, paidModel, env.OPENROUTER_API_KEY));
+  } catch (error) {
+    console.error('[OpenRouter] Paid summary model failed:', error);
+    return null;
+  }
+}
+
+interface EnsureSkillSummaryParams {
+  skillId: string;
+  skillSlug?: string | null;
+  skillMdPath?: string;
+  skillMdContent?: string | null;
+  preloadedSkill?: ClassificationSkillStorageLocation | null;
+}
+
+/**
+ * Best-effort summary backfill inside the classification flow.
+ * Skips skills that already have a summary, never throws, and never blocks
+ * classification: any failure just leaves summary NULL for a later pass.
+ */
+export async function ensureSkillSummary(
+  env: ClassificationEnv,
+  params: EnsureSkillSummaryParams
+): Promise<string | null> {
+  try {
+    const row = await env.DB.prepare('SELECT summary, description FROM skills WHERE id = ? LIMIT 1')
+      .bind(params.skillId)
+      .first<{ summary: string | null; description: string | null }>();
+
+    if (!row || (row.summary && row.summary.trim().length > 0)) {
+      return null;
+    }
+
+    if (!env.OPENROUTER_API_KEY) {
+      return null;
+    }
+
+    const skillMdContent = params.skillMdContent
+      ?? (params.skillMdPath
+        ? await loadSkillMdForClassification(env, params.skillId, params.skillMdPath, params.preloadedSkill)
+        : null);
+
+    if (!skillMdContent) {
+      return null;
+    }
+
+    const summary = await generateSkillSummary(skillMdContent, row.description, env);
+    if (!summary) {
+      return null;
+    }
+
+    // Deliberately do not bump updated_at: the summary is derived metadata and
+    // must not masquerade as a skill content update. Caches are invalidated
+    // explicitly below instead.
+    await env.DB.prepare(`
+      UPDATE skills SET summary = ? WHERE id = ? AND (summary IS NULL OR summary = '')
+    `)
+      .bind(summary, params.skillId)
+      .run();
+
+    log.log(`Generated summary for skill: ${params.skillId} (${summary.length} chars)`);
+
+    try {
+      await invalidateSkillCaches(params.skillId, env, params.skillSlug);
+    } catch (cacheError) {
+      log.error(`Failed to invalidate skill caches after summary update for ${params.skillId}:`, cacheError);
+    }
+
+    return summary;
+  } catch (error) {
+    log.error(`Failed to ensure summary for ${params.skillId}:`, error);
+    return null;
+  }
+}
+
 async function callOpenRouter(
   prompt: string,
   model: string,
@@ -560,7 +784,7 @@ function parseClassificationResult(content: string): ExtendedClassificationResul
 
 /**
  * Get ordered free model candidates for classification.
- * HY3 Free and the OpenRouter free router always lead the pool; custom free
+ * DeepSeek V4 Flash and the OpenRouter free router always lead the pool; custom free
  * candidates are appended for compatibility without changing the cost policy.
  */
 export function getFreeModelCandidates(env: ClassificationEnv): string[] {
@@ -673,9 +897,9 @@ export function classifyByKeywords(content: string, tags?: string[]): Classifica
 
 /**
  * Classify skill using AI with multi-model fallback strategy:
- * 1. Try HY3 Free and retry it once for transient errors
+ * 1. Try DeepSeek V4 Flash and retry it once for transient errors
  * 2. Try the OpenRouter free router
- * 3. Try paid HY3
+ * 3. Try paid DeepSeek V4 Flash
  * 4. Fall back to keyword classification
  */
 export async function classifyWithAI(
@@ -730,7 +954,7 @@ export async function classifyWithAI(
     console.log(`[OpenRouter] Free classification models paused until ${new Date(freePausedUntil).toISOString()}`);
   }
 
-  // 2. Use paid HY3 only after the ordered free pool is unavailable or exhausted.
+  // 2. Use paid DeepSeek V4 Flash only after the ordered free pool is unavailable or exhausted.
   if (env.OPENROUTER_API_KEY) {
     try {
       console.log(`[OpenRouter] Trying paid classification model: ${paidModel}`);
@@ -909,6 +1133,8 @@ async function processMessage(
       try {
         const affectedCategorySlugs = await saveClassification(skillId, directMatch, 'direct', env, knownSlug);
         log.log(`Successfully saved direct classification for skill: ${skillId}, categories: ${directMatch.categories.join(', ')}`);
+        // Best-effort summary generation; never blocks the ack.
+        await ensureSkillSummary(env, { skillId, skillSlug: knownSlug, skillMdPath });
         return { method: 'direct', affectedCategorySlugs };
       } catch (saveError) {
         log.error(`Failed to save direct classification for ${skillId}:`, saveError);
@@ -950,6 +1176,8 @@ async function processMessage(
   try {
     const affectedCategorySlugs = await saveClassification(skillId, result, method, env, knownSlug);
     log.log(`Successfully saved classification for skill: ${skillId}, categories: ${result.categories.join(', ')}`);
+    // Best-effort summary generation reusing the already-loaded SKILL.md; never blocks the ack.
+    await ensureSkillSummary(env, { skillId, skillSlug: knownSlug, skillMdContent });
     return { method, affectedCategorySlugs };
   } catch (saveError) {
     log.error(`Failed to save classification for ${skillId}:`, saveError);

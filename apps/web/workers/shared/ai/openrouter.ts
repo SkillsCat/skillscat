@@ -2,9 +2,9 @@ import { createDurableObjectKvStore } from '../../../src/lib/server/state/client
 
 const OPENROUTER_FREE_PAUSE_KEY = 'openrouter:free:paused_until';
 const DEFAULT_OPENROUTER_FREE_PAUSE_MS = 15 * 60 * 1000;
-export const OPENROUTER_HY3_FREE_MODEL = 'tencent/hy3:free';
 export const OPENROUTER_FREE_ROUTER_MODEL = 'openrouter/free';
-export const DEFAULT_OPENROUTER_PAID_MODEL = 'tencent/hy3';
+export const DEFAULT_OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash';
+export const DEFAULT_OPENROUTER_PAID_MODEL = 'deepseek/deepseek-v4-flash';
 
 type OpenRouterJsonTask = 'classification' | 'security';
 
@@ -58,17 +58,16 @@ export function isOpenRouterFreeModel(model: string): boolean {
 export function normalizeOpenRouterModelId(model: string): string {
   const normalized = model.trim();
   if (normalized === 'openrouter:free') return OPENROUTER_FREE_ROUTER_MODEL;
-  if (normalized === 'hy3:free') return OPENROUTER_HY3_FREE_MODEL;
-  if (normalized === 'hy3') return DEFAULT_OPENROUTER_PAID_MODEL;
+  if (normalized === 'deepseek-v4-flash') return DEFAULT_OPENROUTER_MODEL;
   return normalized;
 }
 
 export function getDefaultOpenRouterFreeModel(): string {
-  return OPENROUTER_HY3_FREE_MODEL;
+  return DEFAULT_OPENROUTER_MODEL;
 }
 
 export function getDefaultOpenRouterFreeModels(): string[] {
-  return [OPENROUTER_HY3_FREE_MODEL, OPENROUTER_FREE_ROUTER_MODEL];
+  return [DEFAULT_OPENROUTER_MODEL, OPENROUTER_FREE_ROUTER_MODEL];
 }
 
 export function parseOpenRouterRetryAfterMs(headers: Headers): number | null {

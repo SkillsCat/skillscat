@@ -3,10 +3,10 @@
 # 消费 classification 队列，使用 AI 对 skill 进行分类
 #
 # AI 分类 Fallback 策略:
-# 1. 优先使用默认模型 tencent/hy3:free
-# 2. 失败后在首个免费模型上重试一次
+# 1. 优先使用默认模型 deepseek/deepseek-v4-flash
+# 2. 失败后在首个模型上重试一次
 # 3. 尝试 openrouter/free
-# 4. 免费池都失败后使用付费模型 tencent/hy3
+# 4. 以上都失败后使用付费模型(CLASSIFICATION_PAID_MODEL,默认同为 deepseek/deepseek-v4-flash)
 # 5. 最终降级到关键词分类
 
 name = "skillscat-classification"
@@ -56,9 +56,9 @@ binding = "CLASSIFICATION_ANALYTICS"
 dataset = "skillscat_classification_batches"
 
 [vars]
-AI_MODEL = "tencent/hy3:free"
+AI_MODEL = "deepseek/deepseek-v4-flash"
 FREE_MODELS = "openrouter/free"
-CLASSIFICATION_PAID_MODEL = "tencent/hy3"
+CLASSIFICATION_PAID_MODEL = "deepseek/deepseek-v4-flash"
 INDEXNOW_ENABLED = "0"
 
 [env.production]
@@ -94,7 +94,7 @@ binding = "CLASSIFICATION_ANALYTICS"
 dataset = "skillscat_classification_batches"
 
 [env.production.vars]
-AI_MODEL = "tencent/hy3:free"
+AI_MODEL = "deepseek/deepseek-v4-flash"
 FREE_MODELS = "openrouter/free"
-CLASSIFICATION_PAID_MODEL = "tencent/hy3"
+CLASSIFICATION_PAID_MODEL = "deepseek/deepseek-v4-flash"
 INDEXNOW_ENABLED = "1"

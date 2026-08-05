@@ -48,9 +48,9 @@ class_name = "SkillscatStateDurableObject"
 script_name = "skillscat-state"
 
 [vars]
-SECURITY_FREE_MODEL = "tencent/hy3:free"
+SECURITY_FREE_MODEL = "deepseek/deepseek-v4-flash"
 SECURITY_FREE_MODELS = "openrouter/free"
-SECURITY_PREMIUM_MODEL = "tencent/hy3"
+SECURITY_PREMIUM_MODEL = "deepseek/deepseek-v4-flash"
 SECURITY_MAX_AI_FILES = "8"
 SECURITY_MAX_AI_TEXT_BYTES = "48000"
 SECURITY_STABILITY_ROUNDS = "2"
@@ -92,9 +92,9 @@ class_name = "SkillscatStateDurableObject"
 script_name = "skillscat-state-production"
 
 [env.production.vars]
-SECURITY_FREE_MODEL = "tencent/hy3:free"
+SECURITY_FREE_MODEL = "deepseek/deepseek-v4-flash"
 SECURITY_FREE_MODELS = "openrouter/free"
-SECURITY_PREMIUM_MODEL = "tencent/hy3"
+SECURITY_PREMIUM_MODEL = "deepseek/deepseek-v4-flash"
 SECURITY_MAX_AI_FILES = "8"
 SECURITY_MAX_AI_TEXT_BYTES = "48000"
 SECURITY_STABILITY_ROUNDS = "2"

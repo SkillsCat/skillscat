@@ -26,6 +26,7 @@
     "indexnow:backfill": "node scripts/indexnow-backfill.mjs",
     "seo:check": "node scripts/seo-health-check.mjs",
     "security:backfill": "node scripts/security-backfill.mjs",
+    "summary:backfill": "node scripts/summary-backfill.mjs",
     "deploy": "node scripts/web-release.mjs deploy",
     "deploy:all": "node scripts/web-release.mjs deploy-all",
     "deploy:web": "node scripts/web-release.mjs deploy",

@@ -41,6 +41,7 @@ export interface SkillCardData {
 export interface SkillDetail extends SkillCardData {
   githubUrl: string | null;
   skillPath: string;
+  summary?: string | null;
   readme: string | null;
   fileStructure: FileNode[] | null;
   lastCommitAt: number | null;

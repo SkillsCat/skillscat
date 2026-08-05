@@ -38,17 +38,17 @@ INDEXNOW_KEY=
 OPENROUTER_API_KEY=
 
 # 分类免费模型固定先尝试 HY3 Free，再尝试 OpenRouter Free
-AI_MODEL=tencent/hy3:free
+AI_MODEL=deepseek/deepseek-v4-flash
 FREE_MODELS=openrouter/free
 
 # 免费池都失败后使用付费 HY3
-CLASSIFICATION_PAID_MODEL=tencent/hy3
+CLASSIFICATION_PAID_MODEL=deepseek/deepseek-v4-flash
 
 # ========== Security Analysis (可选调参) ==========
 # 免费分析依次使用 HY3 Free、OpenRouter Free；premium 显式使用付费 HY3
-SECURITY_FREE_MODEL=tencent/hy3:free
+SECURITY_FREE_MODEL=deepseek/deepseek-v4-flash
 SECURITY_FREE_MODELS=openrouter/free
-SECURITY_PREMIUM_MODEL=tencent/hy3
+SECURITY_PREMIUM_MODEL=deepseek/deepseek-v4-flash
 # SECURITY_PREMIUM_TOP_N=50
 # SECURITY_MAX_AI_FILES=8
 # SECURITY_MAX_AI_TEXT_BYTES=48000
