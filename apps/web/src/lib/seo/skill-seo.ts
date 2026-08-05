@@ -5,6 +5,7 @@ import type { SkillDetail } from '$lib/types';
 const CATEGORY_BY_SLUG = new Map(CATEGORIES.map((category) => [category.slug, category] as const));
 const MAX_SEO_TITLE_LENGTH = 68;
 const MAX_SEO_DESCRIPTION_LENGTH = 160;
+const MIN_STRONG_SEO_DESCRIPTION_LENGTH = 60;
 const MAX_SEO_KEYWORDS = 5;
 const MAX_SEO_ARTICLE_TAGS = 3;
 
@@ -52,9 +53,28 @@ function cleanDescriptionText(description: string | null | undefined): string | 
   return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
+function cleanSummaryText(summary: string | null | undefined): string | null {
+  if (!summary) return null;
+  const text = summary.replace(/\s+/g, ' ').trim();
+  return text || null;
+}
+
 function buildGroundedSeoDescription(skill: SkillDetail): string {
   // `skill.description` is the canonical summary extracted from SKILL.md during indexing.
   const fromSkillDescription = cleanDescriptionText(skill.description);
+  if (fromSkillDescription && fromSkillDescription.length >= MIN_STRONG_SEO_DESCRIPTION_LENGTH) {
+    return trimToLength(fromSkillDescription, MAX_SEO_DESCRIPTION_LENGTH);
+  }
+
+  // Thin or missing descriptions are padded with the AI-generated functional
+  // summary so the meta description (and JSON-LD) carry more unique text —
+  // thin snippets are a common "crawled, not indexed" driver on detail pages.
+  const summary = cleanSummaryText(skill.summary);
+  if (summary) {
+    const combined = fromSkillDescription ? `${fromSkillDescription} ${summary}` : summary;
+    return trimToLength(combined, MAX_SEO_DESCRIPTION_LENGTH);
+  }
+
   if (fromSkillDescription) {
     return trimToLength(fromSkillDescription, MAX_SEO_DESCRIPTION_LENGTH);
   }
