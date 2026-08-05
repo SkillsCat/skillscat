@@ -3,6 +3,7 @@ import type { ClassificationMessage, IndexingMessage, SecurityAnalysisMessage } 
 export interface BaseEnv {
   DB: D1Database;
   KV: KVNamespace;
+  STATE_DO?: DurableObjectNamespace;
   R2: R2Bucket;
   WORKER_ANALYTICS?: AnalyticsEngineDataset;
   PUBLIC_APP_URL?: string;

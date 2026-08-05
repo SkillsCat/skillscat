@@ -8,6 +8,7 @@ declare global {
         DB: D1Database;
         R2: R2Bucket;
         KV: KVNamespace;
+        STATE_DO?: DurableObjectNamespace;
         PUBLIC_APP_URL?: string;
         INDEXING_QUEUE: Queue;
         CLASSIFICATION_QUEUE: Queue;

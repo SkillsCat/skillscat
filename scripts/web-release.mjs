@@ -336,10 +336,11 @@ function printPlan(mode, versionInfo, tag, options) {
   console.log(`- Version: ${versionInfo.currentVersion} -> ${versionInfo.nextVersion}`);
   console.log(`- Build web: ${options.skipBuild ? 'skip' : 'run'}`);
   if (mode === 'deploy-all') {
-    console.log(`- Deploy workers: run first (env: ${options.workersEnv})`);
+    console.log(`- Deploy workers: run first (env: ${options.workersEnv}, includes Durable Object state owner)`);
     console.log('- Deploy web: run after workers');
   } else {
-    console.log('- Deploy web: run');
+    console.log(`- Bootstrap state worker: run first (env: ${options.workersEnv})`);
+    console.log('- Deploy web: run after state worker');
   }
   console.log(`- Commit version bump: ${versionInfo.changed ? 'run' : 'skip (no version change)'}`);
   console.log(`- Push branch: ${versionInfo.changed ? 'run' : 'skip (no version change)'}`);
@@ -356,6 +357,22 @@ function runWebBuild(options) {
   runStep('build:web', 'pnpm', ['--filter', '@skillscat/web', 'build'], {
     cwd: projectRoot,
     dryRun: options.dryRun
+  });
+}
+
+function runStateBootstrap(options) {
+  const args = ['scripts/deploy-workers.mjs', '--worker', 'state', '--env', options.workersEnv];
+  args.push('--skip-wrong-env-check');
+  if (options.dryRun) {
+    args.push('--dry-run');
+  }
+  if (options.yes) {
+    args.push('--yes');
+  }
+
+  runStep('deploy:state', 'node', args, {
+    cwd: projectRoot,
+    dryRun: false
   });
 }
 
@@ -455,6 +472,8 @@ async function runDeploy(command, options) {
 
     if (command === 'deploy-all') {
       runWorkersDeploy(options);
+    } else {
+      runStateBootstrap(options);
     }
 
     runWebDeploy(options);

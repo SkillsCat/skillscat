@@ -1,9 +1,11 @@
 /**
- * Rate limiting utility using Cloudflare KV
+ * Rate limiting utility using Cloudflare KV or Durable Objects
  *
  * Implements an adaptive fixed-window counter with configurable limits.
  * Repeated limit hits in a short window trigger stricter temporary limits.
  */
+
+import { callStateDurableObject } from '$lib/server/state/client';
 
 export interface RateLimitConfig {
   /** Maximum number of requests allowed in the window */
@@ -202,6 +204,39 @@ export async function checkRateLimit(
   } catch (error) {
     // On error, allow the request but log
     console.error('Rate limit check failed:', error);
+    return failOpenRateLimitResult(config, now);
+  }
+}
+
+/**
+ * 红线:限流 DO 实例命名只允许固定常量,禁止按 key/租户动态命名。
+ * DO 实例数直接决定时长计费;旧实现按客户端 key 哈希出几千个常驻实例,
+ * 导致时长计费爆炸。所有限流 key 都在单实例内以存储 key 区分。
+ */
+const RATE_LIMIT_OBJECT_NAME = 'rate-limit-global';
+
+export async function checkDurableRateLimit(
+  namespace: DurableObjectNamespace,
+  key: string,
+  config: RateLimitConfig,
+  options?: AdaptiveRateLimitOptions
+): Promise<RateLimitResult> {
+  const now = Math.floor(Date.now() / 1000);
+
+  try {
+    return await callStateDurableObject<RateLimitResult>(
+      namespace,
+      RATE_LIMIT_OBJECT_NAME,
+      'rate-limit/check',
+      {
+        key: `${config.prefix || 'ratelimit'}:${key}`,
+        config,
+        options,
+        nowEpochSec: now,
+      }
+    );
+  } catch (error) {
+    console.error('Durable rate limit check failed:', error);
     return failOpenRateLimitResult(config, now);
   }
 }

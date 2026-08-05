@@ -1,0 +1,30 @@
+# SkillsCat State Worker
+# 复制此文件为 wrangler.state.toml
+# 提供 Durable Object 状态存储，承载 discovery state 与 rate limit state
+
+name = "skillscat-state"
+main = "workers/state.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[[durable_objects.bindings]]
+name = "STATE_DO"
+class_name = "SkillscatStateDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SkillscatStateDurableObject"]
+
+[env.production]
+name = "skillscat-state-production"
+
+[[env.production.durable_objects.bindings]]
+name = "STATE_DO"
+class_name = "SkillscatStateDurableObject"
