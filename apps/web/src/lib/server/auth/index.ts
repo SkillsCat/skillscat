@@ -12,13 +12,24 @@ export interface AuthEnv {
   BETTER_AUTH_SECRET: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
+  PUBLIC_APP_URL?: string;
+}
+
+/**
+ * Resolve the canonical base URL for auth (OAuth callback URLs are derived
+ * from it). An explicit env URL wins over the request origin so local
+ * development behind a proxy never falls back to localhost.
+ */
+export function resolveAuthBaseURL(env: Pick<AuthEnv, 'PUBLIC_APP_URL'>, fallback?: string): string {
+  return env.PUBLIC_APP_URL?.trim() || fallback || 'https://skills.cat';
 }
 
 export function createAuth(env: AuthEnv, baseURL?: string) {
   const db = drizzle(env.DB, { schema });
+  const resolvedBaseURL = resolveAuthBaseURL(env, baseURL);
 
   return betterAuth({
-    baseURL: baseURL || 'https://skills.cat',
+    baseURL: resolvedBaseURL,
     database: drizzleAdapter(db, {
       provider: 'sqlite',
       schema: {
@@ -52,7 +63,9 @@ export function createAuth(env: AuthEnv, baseURL?: string) {
     trustedOrigins: [
       'http://localhost:5173',
       'http://localhost:3000',
-      'https://skills.cat'
+      'https://skills.cat',
+      // Proxy origin used for non-localhost development OAuth flows.
+      ...(env.PUBLIC_APP_URL?.trim() ? [env.PUBLIC_APP_URL.trim()] : []),
     ]
   });
 }
