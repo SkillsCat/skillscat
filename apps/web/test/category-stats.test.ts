@@ -169,13 +169,60 @@ describe('category public stats', () => {
       },
     ]);
 
+    // Both dynamic categories fall below the indexation threshold (8 skills).
+    await expect(getDynamicCategories(db as never)).resolves.toEqual([]);
+  });
+
+  it('lists dynamic categories only once they reach the indexation threshold', async () => {
+    const sqlite = createCategoryStatsDb();
+    sqlite.exec(`
+      INSERT INTO categories (id, slug, name, description, type)
+      VALUES
+        ('cat-big', 'big-cat', 'Big Cat', NULL, 'ai-suggested'),
+        ('cat-small', 'small-cat', 'Small Cat', NULL, 'ai-suggested');
+
+      INSERT INTO skills (
+        id, visibility, classification_method, trending_score, last_commit_at, updated_at, indexed_at
+      )
+      VALUES
+        ('skill-1', 'public', 'ai', 10, 2000, 1500, 1400),
+        ('skill-2', 'public', 'ai', 10, 2000, 1500, 1400),
+        ('skill-3', 'public', 'ai', 10, 2000, 1500, 1400),
+        ('skill-4', 'public', 'ai', 10, 2000, 1500, 1400),
+        ('skill-5', 'public', 'ai', 10, 2000, 1500, 1400),
+        ('skill-6', 'public', 'ai', 10, 2000, 1500, 1400),
+        ('skill-7', 'public', 'ai', 10, 2000, 1500, 1400),
+        ('skill-8', 'public', 'ai', 10, 2000, 1500, 1400);
+
+      INSERT INTO skill_categories (skill_id, category_slug)
+      VALUES
+        ('skill-1', 'big-cat'),
+        ('skill-2', 'big-cat'),
+        ('skill-3', 'big-cat'),
+        ('skill-4', 'big-cat'),
+        ('skill-5', 'big-cat'),
+        ('skill-6', 'big-cat'),
+        ('skill-7', 'big-cat'),
+        ('skill-8', 'big-cat'),
+        ('skill-1', 'small-cat'),
+        ('skill-2', 'small-cat'),
+        ('skill-3', 'small-cat'),
+        ('skill-4', 'small-cat'),
+        ('skill-5', 'small-cat'),
+        ('skill-6', 'small-cat'),
+        ('skill-7', 'small-cat');
+    `);
+
+    const db = new SqliteD1Database(sqlite);
+    await syncCategoryPublicStats(db as never, ['big-cat', 'small-cat'], 5000);
+
     await expect(getDynamicCategories(db as never)).resolves.toEqual([
       {
-        slug: 'custom-a',
-        name: 'Custom A',
+        slug: 'big-cat',
+        name: 'Big Cat',
         description: null,
         type: 'ai-suggested',
-        skillCount: 2,
+        skillCount: 8,
       },
     ]);
   });
