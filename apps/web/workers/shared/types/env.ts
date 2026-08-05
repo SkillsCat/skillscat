@@ -50,6 +50,8 @@ export interface ClassificationEnv extends BaseEnv {
   CLASSIFICATION_PAID_MODEL?: string;
   CLASSIFICATION_ANALYTICS?: AnalyticsEngineDataset;
   FREE_MODELS?: string;
+  /** Max skills processed per summary-backfill cron run (default 40, capped at 200). */
+  SUMMARY_BACKFILL_BATCH_SIZE?: string;
 }
 
 export interface TrendingEnv extends BaseEnv {

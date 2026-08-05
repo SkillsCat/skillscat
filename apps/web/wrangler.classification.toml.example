@@ -52,11 +52,16 @@ script_name = "skillscat-state"
 binding = "CLASSIFICATION_ANALYTICS"
 dataset = "skillscat_classification_batches"
 
+# Cron - 定时回补存量 skill 的 AI summary（提升详情页内容厚度，改善收录）
+[triggers]
+crons = ["17 * * * *"]
+
 [vars]
 AI_MODEL = "deepseek/deepseek-v4-flash"
 FREE_MODELS = "openrouter/free"
 CLASSIFICATION_PAID_MODEL = "deepseek/deepseek-v4-flash"
 INDEXNOW_ENABLED = "0"
+SUMMARY_BACKFILL_BATCH_SIZE = "40"
 
 [env.production]
 name = "skillscat-classification-production"
@@ -92,3 +97,4 @@ AI_MODEL = "deepseek/deepseek-v4-flash"
 FREE_MODELS = "openrouter/free"
 CLASSIFICATION_PAID_MODEL = "deepseek/deepseek-v4-flash"
 INDEXNOW_ENABLED = "1"
+SUMMARY_BACKFILL_BATCH_SIZE = "40"
