@@ -823,8 +823,11 @@ export const handle: Handle = async ({ event, resolve }) => {
     return applyResponseSecurityHeaders(event.url.pathname, optimizedResponse);
   }
 
-  // Get base URL from request
-  const baseURL = `${event.url.protocol}//${event.url.host}`;
+  // Prefer the configured app URL (e.g. a dev proxy domain) over the request
+  // origin so OAuth redirects never point at localhost.
+  const configuredAppURL = (event.platform?.env as { PUBLIC_APP_URL?: string } | undefined)
+    ?.PUBLIC_APP_URL?.trim();
+  const baseURL = configuredAppURL || `${event.url.protocol}//${event.url.host}`;
 
   // Create auth instance with runtime environment and base URL
   const auth = createAuth(env, baseURL);
