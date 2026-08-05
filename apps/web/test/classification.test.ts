@@ -26,6 +26,8 @@ import classificationWorker, {
   sanitizeSkillSummary,
   generateSkillSummary,
   ensureSkillSummary,
+  normalizeSummaryBackfillBatchSize,
+  runSummaryBackfill,
 } from '../workers/classification';
 import {
   getOpenRouterJsonGenerationOptions,
@@ -1334,5 +1336,173 @@ describe('skill summary generation', () => {
     } finally {
       vi.stubGlobal('fetch', originalFetch);
     }
+  });
+});
+
+describe('summary backfill cron', () => {
+  it('normalizes the batch size with a default and an upper cap', () => {
+    expect(normalizeSummaryBackfillBatchSize(undefined)).toBe(40);
+    expect(normalizeSummaryBackfillBatchSize('')).toBe(40);
+    expect(normalizeSummaryBackfillBatchSize('abc')).toBe(40);
+    expect(normalizeSummaryBackfillBatchSize('-5')).toBe(40);
+    expect(normalizeSummaryBackfillBatchSize('10')).toBe(10);
+    expect(normalizeSummaryBackfillBatchSize('9999')).toBe(200);
+  });
+
+  function createBackfillEnv(options: {
+    candidates: Array<{
+      rowid: number;
+      id: string;
+      slug: string;
+      source_type: string;
+      repo_owner: string | null;
+      repo_name: string | null;
+      skill_path: string | null;
+      readme: string | null;
+      tier: string | null;
+    }>;
+    storedCursor?: string | null;
+  }) {
+    const updates: Array<{ summary: string; id: string }> = [];
+    const kvStore = new Map<string, string>();
+    if (options.storedCursor != null) {
+      kvStore.set('summary-backfill:cursor', options.storedCursor);
+    }
+
+    const env = {
+      DB: {
+        prepare: (sql: string) => {
+          if (sql.includes('SELECT rowid, id, slug')) {
+            expect(sql).toContain("visibility = 'public'");
+            expect(sql).toContain("COALESCE(tier, 'cold') <> 'archived'");
+            expect(sql).toContain('summary IS NULL');
+            return {
+              bind: (cursor: number, batchSize: number) => ({
+                all: async () => ({
+                  results: options.candidates
+                    .filter((row) => row.rowid > cursor)
+                    .slice(0, batchSize),
+                }),
+              }),
+            };
+          }
+          if (sql.includes('SELECT summary, description FROM skills')) {
+            return {
+              bind: () => ({
+                first: async () => ({ summary: null, description: 'desc' }),
+              }),
+            };
+          }
+          if (sql.includes('UPDATE skills SET summary')) {
+            return {
+              bind: (summary: string, id: string) => ({
+                run: async () => {
+                  updates.push({ summary, id });
+                  return { success: true };
+                },
+              }),
+            };
+          }
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      },
+      KV: {
+        get: vi.fn(async (key: string) => kvStore.get(key) ?? null),
+        put: vi.fn(async (key: string, value: string) => {
+          kvStore.set(key, value);
+        }),
+      },
+      R2: { get: vi.fn(async () => null) },
+      OPENROUTER_API_KEY: 'or-key',
+    } as never;
+
+    return { env, updates, kvStore };
+  }
+
+  it('processes candidates after the cursor and advances it', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: 'This skill audits dependencies for known vulnerabilities.',
+        },
+      }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { env, updates, kvStore } = createBackfillEnv({
+      storedCursor: '10',
+      candidates: [
+        {
+          rowid: 5,
+          id: 'skill-old',
+          slug: 'acme/old',
+          source_type: 'github',
+          repo_owner: 'acme',
+          repo_name: 'old',
+          skill_path: null,
+          readme: 'SKILL.md body',
+          tier: 'cold',
+        },
+        {
+          rowid: 11,
+          id: 'skill-a',
+          slug: 'acme/a',
+          source_type: 'github',
+          repo_owner: 'acme',
+          repo_name: 'a',
+          skill_path: null,
+          readme: 'SKILL.md body A',
+          tier: 'warm',
+        },
+        {
+          rowid: 12,
+          id: 'skill-b',
+          slug: 'acme/b',
+          source_type: 'upload',
+          repo_owner: null,
+          repo_name: null,
+          skill_path: null,
+          readme: 'SKILL.md body B',
+          tier: null,
+        },
+      ],
+    });
+
+    try {
+      const stats = await runSummaryBackfill(env);
+
+      // The rowid=5 row is behind the cursor and must be skipped.
+      expect(stats.processed).toBe(2);
+      expect(stats.generated).toBe(2);
+      expect(updates.map((entry) => entry.id)).toEqual(['skill-a', 'skill-b']);
+      expect(kvStore.get('summary-backfill:cursor')).toBe('12');
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+  });
+
+  it('wraps the cursor around and stops when no candidates remain', async () => {
+    const { env, kvStore } = createBackfillEnv({
+      storedCursor: '99',
+      candidates: [],
+    });
+
+    const stats = await runSummaryBackfill(env);
+
+    expect(stats).toEqual({ processed: 0, generated: 0, cursor: 0 });
+    expect(kvStore.get('summary-backfill:cursor')).toBe('0');
+  });
+
+  it('does not touch the cursor when the table is empty from the start', async () => {
+    const { env, kvStore } = createBackfillEnv({ candidates: [] });
+
+    const stats = await runSummaryBackfill(env);
+
+    expect(stats).toEqual({ processed: 0, generated: 0, cursor: 0 });
+    expect(kvStore.has('summary-backfill:cursor')).toBe(false);
   });
 });

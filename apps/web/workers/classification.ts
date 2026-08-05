@@ -74,6 +74,9 @@ const SUMMARY_SKILL_MD_EXCERPT_CHARS = 2000;
 const SUMMARY_MAX_OUTPUT_TOKENS = 220;
 const SUMMARY_MAX_STORED_CHARS = 600;
 const SUMMARY_MIN_OUTPUT_CHARS = 24;
+const SUMMARY_BACKFILL_CURSOR_KV_KEY = 'summary-backfill:cursor';
+const SUMMARY_BACKFILL_DEFAULT_BATCH_SIZE = 40;
+const SUMMARY_BACKFILL_MAX_BATCH_SIZE = 200;
 
 const DESIGN_DIRECTION_SIGNALS = [
   'ui/ux',
@@ -665,6 +668,125 @@ export async function ensureSkillSummary(
   }
 }
 
+export function normalizeSummaryBackfillBatchSize(raw: string | undefined): number {
+  const parsed = Number.parseInt(raw ?? '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return SUMMARY_BACKFILL_DEFAULT_BATCH_SIZE;
+  }
+  return Math.min(parsed, SUMMARY_BACKFILL_MAX_BATCH_SIZE);
+}
+
+interface SummaryBackfillCandidateRow extends ClassificationSkillStorageLocation {
+  rowid: number;
+  id: string;
+}
+
+/**
+ * Primary R2 key for the candidate's SKILL.md. Always truthy: a wrong key is
+ * fine because `loadSkillMdForClassification` only consults the
+ * location-derived candidate keys and the D1 readme fallback after the direct
+ * key misses — but it never runs at all when given a falsy path.
+ */
+function buildSummaryBackfillSkillMdPath(skill: ClassificationSkillStorageLocation): string {
+  if (skill.source_type === 'upload') {
+    return buildUploadSkillR2Key(skill.slug, 'SKILL.md') || 'SKILL.md';
+  }
+  if (skill.repo_owner && skill.repo_name) {
+    return buildGithubSkillR2Keys(skill.repo_owner, skill.repo_name, skill.skill_path, 'SKILL.md')[0] ?? 'SKILL.md';
+  }
+  return 'SKILL.md';
+}
+
+/**
+ * Candidates mirror the SEO indexability gate (public, not archived, any real
+ * content): those are the detail pages Google crawls, so they are exactly the
+ * pages whose unique-text thickness the summary improves.
+ */
+async function loadSummaryBackfillCandidates(
+  env: Pick<ClassificationEnv, 'DB'>,
+  cursor: number,
+  batchSize: number
+): Promise<SummaryBackfillCandidateRow[]> {
+  const result = await env.DB.prepare(`
+    SELECT rowid, id, slug, source_type, repo_owner, repo_name, skill_path, readme, tier
+    FROM skills
+    WHERE rowid > ?
+      AND (summary IS NULL OR TRIM(summary) = '')
+      AND visibility = 'public'
+      AND COALESCE(tier, 'cold') <> 'archived'
+      AND (
+        TRIM(COALESCE(description, '')) <> ''
+        OR TRIM(COALESCE(readme, '')) <> ''
+      )
+    ORDER BY rowid
+    LIMIT ?
+  `)
+    .bind(cursor, batchSize)
+    .all<SummaryBackfillCandidateRow>();
+
+  return result.results || [];
+}
+
+export interface SummaryBackfillRunStats {
+  processed: number;
+  generated: number;
+  cursor: number;
+}
+
+/**
+ * Cron-driven backfill for the stock of skills that never got an AI summary
+ * (classified before summaries existed, or generation failed transiently and
+ * was never retried). Walks the skills table with a KV-stored rowid cursor in
+ * small batches; rows that fail simply get revisited on the next wrap-around.
+ */
+export async function runSummaryBackfill(env: ClassificationEnv): Promise<SummaryBackfillRunStats> {
+  const batchSize = normalizeSummaryBackfillBatchSize(env.SUMMARY_BACKFILL_BATCH_SIZE);
+  const storedCursor = Number.parseInt((await env.KV.get(SUMMARY_BACKFILL_CURSOR_KV_KEY)) ?? '', 10);
+  let cursor = Number.isFinite(storedCursor) && storedCursor > 0 ? storedCursor : 0;
+
+  let candidates = await loadSummaryBackfillCandidates(env, cursor, batchSize);
+  const hadCursor = cursor > 0;
+  if (candidates.length === 0 && hadCursor) {
+    // Reached the end of the table; wrap around for the next cycle.
+    cursor = 0;
+    candidates = await loadSummaryBackfillCandidates(env, cursor, batchSize);
+  }
+
+  if (candidates.length === 0) {
+    if (hadCursor) {
+      await env.KV.put(SUMMARY_BACKFILL_CURSOR_KV_KEY, '0');
+    }
+    return { processed: 0, generated: 0, cursor: 0 };
+  }
+
+  let generated = 0;
+  let maxRowid = cursor;
+
+  for (const candidate of candidates) {
+    maxRowid = Math.max(maxRowid, candidate.rowid);
+    const summary = await ensureSkillSummary(env, {
+      skillId: candidate.id,
+      skillSlug: candidate.slug,
+      skillMdPath: buildSummaryBackfillSkillMdPath(candidate),
+      preloadedSkill: {
+        slug: candidate.slug,
+        source_type: candidate.source_type,
+        repo_owner: candidate.repo_owner,
+        repo_name: candidate.repo_name,
+        skill_path: candidate.skill_path,
+        readme: candidate.readme,
+        tier: candidate.tier,
+      },
+    });
+    if (summary) {
+      generated += 1;
+    }
+  }
+
+  await env.KV.put(SUMMARY_BACKFILL_CURSOR_KV_KEY, String(maxRowid));
+  return { processed: candidates.length, generated, cursor: maxRowid };
+}
+
 async function callOpenRouter(
   prompt: string,
   model: string,
@@ -1186,6 +1308,22 @@ async function processMessage(
 }
 
 export default {
+  async scheduled(
+    _event: ScheduledEvent,
+    env: ClassificationEnv,
+    ctx: ExecutionContext
+  ): Promise<void> {
+    ctx.waitUntil(
+      runSummaryBackfill(env)
+        .then((stats) => {
+          log.log(`Summary backfill run: processed=${stats.processed} generated=${stats.generated} cursor=${stats.cursor}`);
+        })
+        .catch((error) => {
+          log.error('Summary backfill run failed:', error);
+        })
+    );
+  },
+
   async queue(
     batch: MessageBatch<ClassificationMessageWithMeta>,
     env: ClassificationEnv,
