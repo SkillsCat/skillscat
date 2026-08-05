@@ -4,6 +4,7 @@ import {
   hasGitHubTokenConfigured,
   type GitHubTokenEnv,
 } from './token-pool';
+import { createDurableObjectKvStore } from '../state/client';
 
 export type GitHubRequestEnv = GitHubTokenEnv;
 
@@ -17,7 +18,11 @@ export function hasGitHubAuthConfigured(env: GitHubRequestEnv | null | undefined
 }
 
 export function getGitHubRateLimitKVFromEnv(env: GitHubRequestEnv | null | undefined): KVNamespace | undefined {
-  return env?.KV;
+  // 固定单实例 'github-rate-limit':token 池快照为高频读写,DO 比 KV 便宜一个数量级。
+  // 红线:objectName 只允许固定常量,禁止动态命名(实例数决定时长计费)。
+  return createDurableObjectKvStore(env?.STATE_DO, {
+    objectName: 'github-rate-limit',
+  }) ?? env?.KV;
 }
 
 export function getGitHubRequestAuthFromEnv(

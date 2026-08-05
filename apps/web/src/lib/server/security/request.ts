@@ -1,5 +1,6 @@
 import type { RequestEvent } from '@sveltejs/kit';
 import {
+  checkDurableRateLimit,
   checkRateLimit,
   getRateLimitKey,
   rateLimitHeaders,
@@ -402,8 +403,9 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
     }
   }
 
+  const stateDo = platform?.env?.STATE_DO;
   const kv = platform?.env?.KV;
-  if (!kv) {
+  if (!stateDo && !kv) {
     return null;
   }
 
@@ -415,7 +417,9 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
   const clientKey = await resolveRateLimitClientKey(request, platform?.env?.DB);
   const adaptiveOptions = getAdaptiveRateLimitOptions(platform?.env);
   const key = `${routeId ?? pathname}:${clientKey}`;
-  const result = await checkRateLimit(kv, key, config, adaptiveOptions);
+  const result = stateDo
+    ? await checkDurableRateLimit(stateDo, key, config, adaptiveOptions)
+    : await checkRateLimit(kv!, key, config, adaptiveOptions);
 
   if (!result.allowed) {
     return securityJsonResponse(
