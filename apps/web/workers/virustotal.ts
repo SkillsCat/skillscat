@@ -10,8 +10,6 @@ import {
 import {
   normalizeVirusTotalStats,
 } from '../src/lib/server/security';
-import { createDurableObjectKvStore } from '../src/lib/server/state/client';
-
 const log = createLogger('VirusTotal');
 const VT_API_BASE = 'https://www.virustotal.com/api/v3';
 const DEFAULT_DAILY_REQUEST_BUDGET = 300;
@@ -77,9 +75,7 @@ async function incrementBudget(
 }
 
 function getVirusTotalBudgetStore(env: VirusTotalEnv): KVNamespace {
-  return createDurableObjectKvStore(env.STATE_DO, {
-    objectName: 'virustotal-rate-limit',
-  }) ?? env.KV;
+  return env.KV;
 }
 
 export async function tryConsumeBudget(env: VirusTotalEnv, amount: number = 1): Promise<boolean> {

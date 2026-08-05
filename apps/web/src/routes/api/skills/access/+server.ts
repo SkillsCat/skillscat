@@ -19,7 +19,6 @@ const NO_STORE_HEADERS = {
 async function recordPublicSkillAccessFallback(input: {
   db: D1Database | undefined;
   kv: KVNamespace | undefined;
-  stateDo: DurableObjectNamespace | undefined;
   workerSecret?: string;
   skillId: string;
   clientKey?: string;
@@ -45,7 +44,6 @@ async function recordPublicSkillAccessFallback(input: {
     {
       DB: input.db,
       KV: input.kv,
-      STATE_DO: input.stateDo,
       WORKER_SECRET: input.workerSecret,
     },
     input.skillId,
@@ -85,7 +83,6 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
       onError: () => recordPublicSkillAccessFallback({
         db: platform?.env?.DB,
         kv: platform?.env?.KV,
-        stateDo: platform?.env?.STATE_DO,
         workerSecret: platform?.env?.WORKER_SECRET,
         skillId,
         clientKey,
@@ -98,7 +95,6 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   await recordPublicSkillAccessFallback({
     db: platform?.env?.DB,
     kv: platform?.env?.KV,
-    stateDo: platform?.env?.STATE_DO,
     workerSecret: platform?.env?.WORKER_SECRET,
     skillId,
     clientKey,

@@ -1,7 +1,6 @@
 import { SITE_URL } from '$lib/seo/constants';
 import { isSeoIndexableSkill } from '$lib/seo/indexability';
 import { buildSkillPath } from '$lib/skill-path';
-import { createDurableObjectKvStore } from '$lib/server/state/client';
 
 const DEFAULT_INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow';
 const DEFAULT_INDEXNOW_DEDUPE_TTL_SECONDS = 600;
@@ -21,7 +20,6 @@ export interface IndexNowEnvLike {
   INDEXNOW_API_URL?: string;
   INDEXNOW_DEDUPE_TTL_SECONDS?: string;
   KV?: KVNamespace;
-  STATE_DO?: DurableObjectNamespace;
 }
 
 export interface IndexNowSkillTarget {
@@ -256,9 +254,7 @@ async function filterFreshUrls(
 }
 
 function getIndexNowStateStore(env: IndexNowEnvLike | undefined): KVNamespace | undefined {
-  return createDurableObjectKvStore(env?.STATE_DO, {
-    objectName: 'indexnow-state',
-  }) ?? env?.KV;
+  return env?.KV;
 }
 
 async function markFreshUrlsSubmitted(

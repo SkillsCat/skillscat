@@ -35,7 +35,6 @@ import {
 import { githubRequest } from '../src/lib/server/github-client/request';
 import { getGitHubRequestAuthFromEnv } from '../src/lib/server/github-client/env';
 import { invalidateCache } from '../src/lib/server/cache';
-import { createDurableObjectKvStore } from '../src/lib/server/state/client';
 import {
   getSkillPageCacheInvalidationKeys,
   getSkillSourceCacheKey,
@@ -87,9 +86,7 @@ import {
 const log = createLogger('Indexing');
 
 function getIndexingStateStore(env: IndexingEnv): KVNamespace {
-  return createDurableObjectKvStore(env.STATE_DO, {
-    objectName: 'indexing-state',
-  }) ?? env.KV;
+  return env.KV;
 }
 
 // ============================================

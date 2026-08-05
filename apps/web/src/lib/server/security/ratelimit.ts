@@ -1,11 +1,9 @@
 /**
- * Rate limiting utility using Cloudflare KV or Durable Objects
+ * Rate limiting utility using Cloudflare KV
  *
  * Implements an adaptive fixed-window counter with configurable limits.
  * Repeated limit hits in a short window trigger stricter temporary limits.
  */
-
-import { callStateDurableObject, hashDurableObjectName } from '$lib/server/state/client';
 
 export interface RateLimitConfig {
   /** Maximum number of requests allowed in the window */
@@ -204,32 +202,6 @@ export async function checkRateLimit(
   } catch (error) {
     // On error, allow the request but log
     console.error('Rate limit check failed:', error);
-    return failOpenRateLimitResult(config, now);
-  }
-}
-
-export async function checkDurableRateLimit(
-  namespace: DurableObjectNamespace,
-  key: string,
-  config: RateLimitConfig,
-  options?: AdaptiveRateLimitOptions
-): Promise<RateLimitResult> {
-  const now = Math.floor(Date.now() / 1000);
-
-  try {
-    return await callStateDurableObject<RateLimitResult>(
-      namespace,
-      `rate-limit:${hashDurableObjectName(`${config.prefix || 'ratelimit'}:${key}`)}`,
-      'rate-limit/check',
-      {
-        key,
-        config,
-        options,
-        nowEpochSec: now,
-      }
-    );
-  } catch (error) {
-    console.error('Durable rate limit check failed:', error);
     return failOpenRateLimitResult(config, now);
   }
 }
