@@ -12,20 +12,22 @@ vi.mock('$lib/auth-client', () => ({
 import { createLazyAuthSession, hasSessionCookieHint } from '../src/lib/auth-session';
 
 describe('hasSessionCookieHint', () => {
-  it('matches the plain better-auth session cookie', () => {
-    expect(hasSessionCookieHint('better-auth.session_token=abc123')).toBe(true);
+  it('matches the server-issued auth hint marker cookie', () => {
+    expect(hasSessionCookieHint('sc_auth_hint=1')).toBe(true);
   });
 
-  it('matches the __Secure- prefixed cookie used on HTTPS origins', () => {
-    expect(hasSessionCookieHint('__Secure-better-auth.session_token=abc123')).toBe(true);
+  it('matches the marker cookie when it is not the first entry', () => {
+    expect(hasSessionCookieHint('skillscat_locale=en; sc_auth_hint=1')).toBe(true);
   });
 
-  it('matches cookies that are not the first entry in the header', () => {
-    expect(hasSessionCookieHint('skillscat_locale=en; better-auth.session_token=abc')).toBe(true);
+  it('does not match HttpOnly better-auth cookies, which document.cookie never exposes', () => {
+    expect(hasSessionCookieHint('better-auth.session_token=abc123')).toBe(false);
+    expect(hasSessionCookieHint('__Secure-better-auth.session_token=abc123')).toBe(false);
   });
 
-  it('matches the better-auth cookie cache cookie as a session hint', () => {
-    expect(hasSessionCookieHint('__Secure-better-auth.session_data=abc')).toBe(true);
+  it('does not match a cleared or falsey marker cookie', () => {
+    expect(hasSessionCookieHint('sc_auth_hint=')).toBe(false);
+    expect(hasSessionCookieHint('sc_auth_hint=0')).toBe(false);
   });
 
   it('does not match unrelated cookies', () => {
@@ -34,8 +36,9 @@ describe('hasSessionCookieHint', () => {
   });
 
   it('does not match cookies that merely contain the substring', () => {
-    expect(hasSessionCookieHint('other=better-auth.session_token')).toBe(false);
-    expect(hasSessionCookieHint('mybetter-auth.session_token=abc')).toBe(false);
+    expect(hasSessionCookieHint('other=sc_auth_hint=1')).toBe(false);
+    expect(hasSessionCookieHint('sc_auth_hint=10')).toBe(false);
+    expect(hasSessionCookieHint('xsc_auth_hint=1')).toBe(false);
   });
 });
 
