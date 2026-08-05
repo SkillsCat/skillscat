@@ -68,12 +68,8 @@
   .tabs {
     display: flex;
     align-items: center;
-    gap: 0.125rem;
+    gap: 0.75rem;
     width: fit-content;
-    padding: 0.1875rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--muted);
     flex-shrink: 0;
   }
 
@@ -81,58 +77,67 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.375rem;
-    min-height: 2rem;
-    padding: 0.375rem 0.625rem;
-    border: none;
-    border-radius: calc(var(--radius-md) - 2px);
-    background: transparent;
+    gap: 0.5rem;
+    min-height: 2.5rem;
+    padding: 0.625rem 1.125rem;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--card);
     color: var(--muted-foreground);
     font-family: inherit;
-    font-size: 0.75rem;
+    font-size: 0.9375rem;
     font-weight: 600;
     line-height: 1;
     text-decoration: none;
     white-space: nowrap;
     cursor: pointer;
-    transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: 0 3px 0 0 oklch(75% 0.02 85);
+    transform: translateY(0);
+    transition: all 0.15s ease;
+  }
+
+  :global(.dark) .tab {
+    box-shadow: 0 3px 0 0 oklch(25% 0.02 85);
   }
 
   .tab:hover {
     color: var(--foreground);
+    border-color: var(--primary);
   }
 
   .tab:focus-visible {
     outline: none;
-    color: var(--foreground);
+    border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--primary-subtle);
   }
 
   .tab.active {
-    color: var(--foreground);
-    background: var(--background);
-    box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground) 12%, transparent);
+    color: var(--primary);
+    border-color: var(--primary);
+    background: var(--primary-subtle);
+    box-shadow: 0 1px 0 0 var(--primary);
+    transform: translateY(2px);
   }
 
   .tab-count {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 1.25rem;
-    height: 1.25rem;
-    padding: 0 0.3125rem;
-    border: 1px solid var(--border);
+    min-width: 1.5rem;
+    height: 1.5rem;
+    padding: 0 0.5rem;
     border-radius: var(--radius-full);
-    color: var(--foreground);
-    background: var(--background);
-    font-size: 0.6875rem;
+    color: var(--muted-foreground);
+    background: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
+    transition: all 0.15s ease;
   }
 
   .tab.active .tab-count {
-    color: var(--primary);
-    border-color: transparent;
-    background: var(--primary-subtle);
+    color: white;
+    background: var(--primary);
   }
 
   @media (max-width: 640px) {
