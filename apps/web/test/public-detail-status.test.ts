@@ -393,10 +393,10 @@ describe('public detail status overrides', () => {
       isDataRequest: false,
     } as never);
 
-    expect(result.deferRecommendSkills).toBe(false);
     expect(result.recommendSkills).toHaveLength(1);
     expect(fetch).not.toHaveBeenCalled();
     expect(getRecommendedSkills).not.toHaveBeenCalled();
+    expect(getLightweightRecommendedSkills).not.toHaveBeenCalled();
     expect(headers.get('X-Skillscat-Public-Skill-Cache')).toBe('1');
     expect(readRecommendRefreshState).toHaveBeenCalledWith(undefined, 'skill_1');
   });
@@ -485,14 +485,14 @@ describe('public detail status overrides', () => {
       isDataRequest: false,
     } as never);
 
-    expect(result.deferRecommendSkills).toBe(false);
+    expect(result.recommendSkills).toHaveLength(1);
     expect(platform.context.waitUntil).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith('/api/skills/acme/demo-skill/recommend', {
       headers: { accept: 'application/json' },
     });
   });
 
-  it('defers uncached related skills on the first detail render', async () => {
+  it('computes related skills inline when the precomputed cache misses', async () => {
     getSkillBySlug.mockResolvedValue({
       id: 'skill_1',
       name: 'Demo Skill',
@@ -530,6 +530,20 @@ describe('public detail status overrides', () => {
       orgAvatar: null,
     });
 
+    getLightweightRecommendedSkills.mockResolvedValue([{
+      id: 'skill_2',
+      name: 'Related Skill',
+      slug: 'acme/related-skill',
+      description: 'Related',
+      repoOwner: 'acme',
+      repoName: 'related-skill',
+      stars: 5,
+      forks: 0,
+      trendingScore: 2,
+      updatedAt: Date.now(),
+      categories: ['automation'],
+    }]);
+
     const { setHeaders } = createHeadersRecorder();
     const fetch = vi.fn();
     const { load } = await import('../src/routes/skills/[owner]/[...name]/+page.server');
@@ -544,13 +558,71 @@ describe('public detail status overrides', () => {
       isDataRequest: false,
     } as never);
 
-    expect(result.deferRecommendSkills).toBe(true);
-    expect(result.recommendSkills).toEqual([]);
+    expect(result.recommendSkills).toHaveLength(1);
+    expect(result.recommendSkills[0]?.slug).toBe('acme/related-skill');
     expect(fetch).not.toHaveBeenCalled();
+    expect(getLightweightRecommendedSkills).toHaveBeenCalledTimes(1);
     expect(getRecommendedSkills).not.toHaveBeenCalled();
   });
 
-  it('treats empty cached related skills as a miss and re-triggers client loading', async () => {
+  it('passes the AI summary through to the page data when present', async () => {
+    getSkillBySlug.mockResolvedValue({
+      id: 'skill_1',
+      name: 'Demo Skill',
+      slug: 'acme/demo-skill',
+      description: 'Demo',
+      summary: 'This skill audits dependencies for known vulnerabilities. Use it before releases.',
+      repoOwner: 'acme',
+      repoName: 'demo-skill',
+      githubUrl: 'https://github.com/acme/demo-skill',
+      skillPath: 'SKILL.md',
+      stars: 10,
+      forks: 1,
+      trendingScore: 5,
+      updatedAt: Date.now(),
+      lastCommitAt: null,
+      createdAt: Date.now(),
+      indexedAt: Date.now(),
+      readme: '# Demo',
+      fileStructure: null,
+      categories: ['automation'],
+      classificationMethod: null,
+      authorAvatar: null,
+      authorUsername: 'acme',
+      authorDisplayName: 'Acme',
+      authorBio: null,
+      authorSkillsCount: 1,
+      authorTotalStars: 10,
+      visibility: 'public',
+      sourceType: 'github',
+      ownerId: null,
+      ownerName: null,
+      ownerAvatar: null,
+      orgId: null,
+      orgName: null,
+      orgSlug: null,
+      orgAvatar: null,
+    });
+
+    const { setHeaders } = createHeadersRecorder();
+    const { load } = await import('../src/routes/skills/[owner]/[...name]/+page.server');
+
+    const result = await load({
+      params: { owner: 'acme', name: 'demo-skill' },
+      platform: createPlatform(),
+      locals: { user: null },
+      request: new Request('https://skills.cat/skills/acme/demo-skill'),
+      fetch: vi.fn(),
+      setHeaders,
+      isDataRequest: false,
+    } as never);
+
+    expect(result.skill?.summary).toBe(
+      'This skill audits dependencies for known vulnerabilities. Use it before releases.'
+    );
+  });
+
+  it('treats empty cached related skills as a miss and computes inline', async () => {
     getSkillBySlug.mockResolvedValue({
       id: 'skill_1',
       name: 'Demo Skill',
@@ -592,6 +664,19 @@ describe('public detail status overrides', () => {
       hit: true,
       algoVersion: 'v1',
     });
+    getLightweightRecommendedSkills.mockResolvedValue([{
+      id: 'skill_2',
+      name: 'Related Skill',
+      slug: 'acme/related-skill',
+      description: 'Related',
+      repoOwner: 'acme',
+      repoName: 'related-skill',
+      stars: 5,
+      forks: 0,
+      trendingScore: 2,
+      updatedAt: Date.now(),
+      categories: ['automation'],
+    }]);
 
     const { setHeaders } = createHeadersRecorder();
     const fetch = vi.fn(async () => new Response(JSON.stringify({
@@ -614,8 +699,9 @@ describe('public detail status overrides', () => {
       isDataRequest: false,
     } as never);
 
-    expect(result.deferRecommendSkills).toBe(true);
-    expect(result.recommendSkills).toEqual([]);
+    expect(result.recommendSkills).toHaveLength(1);
+    expect(result.recommendSkills[0]?.slug).toBe('acme/related-skill');
+    expect(getLightweightRecommendedSkills).toHaveBeenCalledTimes(1);
     expect(platform.context.waitUntil).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith('/api/skills/acme/demo-skill/recommend', {
       headers: { accept: 'application/json' },
