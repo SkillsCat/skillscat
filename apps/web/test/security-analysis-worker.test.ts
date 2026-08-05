@@ -24,20 +24,20 @@ describe('security analysis worker helpers', () => {
       KV: {} as never,
       R2: {} as never,
       OPENROUTER_API_KEY: 'or-key',
-      SECURITY_PREMIUM_MODEL: 'tencent/hy3',
-      SECURITY_FREE_MODEL: 'hy3:free',
+      SECURITY_PREMIUM_MODEL: 'deepseek/deepseek-v4-flash',
+      SECURITY_FREE_MODEL: 'deepseek-v4-flash',
       SECURITY_FREE_MODELS: 'foo/model:free,openrouter:free',
-    })).toEqual(['tencent/hy3']);
+    })).toEqual(['deepseek/deepseek-v4-flash']);
 
     expect(getTierModelCandidates('free', {
       DB: {} as never,
       KV: {} as never,
       R2: {} as never,
       OPENROUTER_API_KEY: 'or-key',
-      SECURITY_PREMIUM_MODEL: 'tencent/hy3',
+      SECURITY_PREMIUM_MODEL: 'deepseek/deepseek-v4-flash',
       SECURITY_FREE_MODEL: 'openrouter:free',
       SECURITY_FREE_MODELS: 'foo/model:free,openrouter:free,vendor/paid-model',
-    })).toEqual(['tencent/hy3:free', 'openrouter/free', 'foo/model:free']);
+    })).toEqual(['deepseek/deepseek-v4-flash', 'openrouter/free', 'foo/model:free']);
 
     expect(getTierModelCandidates('premium', {
       DB: {} as never,
@@ -156,7 +156,7 @@ describe('security analysis worker helpers', () => {
       findings: [],
       rounds: 1,
       provider: 'openrouter',
-      model: 'tencent/hy3:free',
+      model: 'deepseek/deepseek-v4-flash',
       promptTokens: 0,
       completionTokens: 0,
       totalTokens: 0,
@@ -619,7 +619,7 @@ describe('security analysis worker helpers', () => {
     expect(await getOpenRouterFreePauseUntil(kv as never, 20_000)).toBe(40_000);
     expect(await getOpenRouterFreePauseUntil(kv as never, 50_000)).toBeNull();
     expect(isOpenRouterFreePauseError(new OpenRouterApiError({
-      model: 'hy3:free',
+      model: 'openrouter/free',
       status: 429,
       retryAfterMs: 30_000,
       message: 'rate limited',

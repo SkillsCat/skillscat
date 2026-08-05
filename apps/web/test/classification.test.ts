@@ -22,6 +22,10 @@ import classificationWorker, {
   determineClassificationMethod,
   getFreeModelCandidates,
   loadSkillMdForClassification,
+  buildSkillSummaryPrompt,
+  sanitizeSkillSummary,
+  generateSkillSummary,
+  ensureSkillSummary,
 } from '../workers/classification';
 import {
   getOpenRouterJsonGenerationOptions,
@@ -35,10 +39,10 @@ describe('classification model helpers', () => {
       DB: {} as never,
       KV: {} as never,
       R2: {} as never,
-      AI_MODEL: 'hy3:free',
-      FREE_MODELS: 'openrouter:free,tencent/hy3:free,vendor/paid-model',
+      AI_MODEL: 'deepseek-v4-flash',
+      FREE_MODELS: 'openrouter:free,deepseek/deepseek-v4-flash,vendor/paid-model',
     })).toEqual([
-      'tencent/hy3:free',
+      'deepseek/deepseek-v4-flash',
       'openrouter/free',
     ]);
 
@@ -47,33 +51,27 @@ describe('classification model helpers', () => {
       KV: {} as never,
       R2: {} as never,
       AI_MODEL: 'vendor/paid-model',
-      FREE_MODELS: 'custom/model:free,hy3:free,openrouter:free',
+      FREE_MODELS: 'custom/model:free,deepseek-v4-flash,openrouter:free',
     })).toEqual([
-      'tencent/hy3:free',
+      'deepseek/deepseek-v4-flash',
       'openrouter/free',
       'custom/model:free',
     ]);
   });
 
-  it('uses HY3 as the permanent default OpenRouter model', () => {
-    expect(normalizeOpenRouterModelId('hy3:free')).toBe('tencent/hy3:free');
-    expect(normalizeOpenRouterModelId('hy3')).toBe('tencent/hy3');
+  it('uses DeepSeek V4 Flash as the permanent default OpenRouter model', () => {
+    expect(normalizeOpenRouterModelId('deepseek-v4-flash')).toBe('deepseek/deepseek-v4-flash');
+    expect(normalizeOpenRouterModelId('deepseek/deepseek-v4-flash')).toBe('deepseek/deepseek-v4-flash');
     expect(normalizeOpenRouterModelId('openrouter:free')).toBe('openrouter/free');
-    expect(getDefaultOpenRouterFreeModel()).toBe('tencent/hy3:free');
+    expect(getDefaultOpenRouterFreeModel()).toBe('deepseek/deepseek-v4-flash');
   });
 
-  it('uses HY3-compatible generation parameters', () => {
-    expect(getOpenRouterJsonGenerationOptions('tencent/hy3:free', 'classification')).toEqual({
-      temperature: 0.3,
-    });
-    expect(getOpenRouterJsonGenerationOptions('tencent/hy3:free', 'security')).toEqual({
-      temperature: 0.2,
-    });
-    expect(getOpenRouterJsonGenerationOptions('tencent/hy3', 'classification')).toEqual({
+  it('uses DeepSeek-compatible generation parameters', () => {
+    expect(getOpenRouterJsonGenerationOptions('deepseek/deepseek-v4-flash', 'classification')).toEqual({
       temperature: 0.3,
       response_format: { type: 'json_object' },
     });
-    expect(getOpenRouterJsonGenerationOptions('tencent/hy3', 'security')).toEqual({
+    expect(getOpenRouterJsonGenerationOptions('deepseek/deepseek-v4-flash', 'security')).toEqual({
       temperature: 0.2,
       response_format: { type: 'json_object' },
     });
@@ -82,7 +80,7 @@ describe('classification model helpers', () => {
     });
   });
 
-  it('routes classification through HY3 Free, OpenRouter Free, then paid HY3', async () => {
+  it('routes classification through DeepSeek V4 Flash, OpenRouter Free, then paid DeepSeek', async () => {
     const originalFetch = globalThis.fetch;
     const fetchMock = vi.fn(async () => {
       if (fetchMock.mock.calls.length < 4) {
@@ -112,8 +110,8 @@ describe('classification model helpers', () => {
         R2: {} as never,
         OPENROUTER_API_KEY: 'or-key',
         AI_MODEL: 'openrouter/free',
-        FREE_MODELS: 'tencent/hy3:free,openrouter/free',
-        CLASSIFICATION_PAID_MODEL: 'hy3',
+        FREE_MODELS: 'deepseek/deepseek-v4-flash,openrouter/free',
+        CLASSIFICATION_PAID_MODEL: 'deepseek-v4-flash',
       });
 
       expect(result.categories).toEqual(['automation']);
@@ -126,12 +124,14 @@ describe('classification model helpers', () => {
       String((call[1] as RequestInit | undefined)?.body)
     ) as { model: string; response_format?: { type: string } });
     expect(requestBodies.map((body) => body.model)).toEqual([
-      'tencent/hy3:free',
-      'tencent/hy3:free',
+      'deepseek/deepseek-v4-flash',
+      'deepseek/deepseek-v4-flash',
       'openrouter/free',
-      'tencent/hy3',
+      'deepseek/deepseek-v4-flash',
     ]);
-    expect(requestBodies.slice(0, 3).every((body) => body.response_format === undefined)).toBe(true);
+    expect(requestBodies[0]?.response_format).toEqual({ type: 'json_object' });
+    expect(requestBodies[1]?.response_format).toEqual({ type: 'json_object' });
+    expect(requestBodies[2]?.response_format).toBeUndefined();
     expect(requestBodies[3]?.response_format).toEqual({ type: 'json_object' });
   });
 
@@ -378,7 +378,7 @@ describe('classification queue preloading', () => {
         }),
       },
       OPENROUTER_API_KEY: 'or-key',
-      AI_MODEL: 'hy3:free',
+      AI_MODEL: 'deepseek-v4-flash',
     } as never;
 
     try {
@@ -408,7 +408,7 @@ describe('classification queue preloading', () => {
       messages: Array<{ content: string }>;
     };
     expect(requestBody).toMatchObject({
-      model: 'tencent/hy3:free',
+      model: 'deepseek/deepseek-v4-flash',
     });
     expect(requestBody.messages[0]?.content).toContain('Use design for UI/UX direction');
     expect(requestBody.messages[0]?.content).toContain('Use embeddings only for real vector retrieval');
@@ -521,7 +521,7 @@ describe('classification queue preloading', () => {
         }),
       },
       OPENROUTER_API_KEY: 'or-key',
-      AI_MODEL: 'hy3:free',
+      AI_MODEL: 'deepseek-v4-flash',
     } as never;
 
     try {
@@ -634,7 +634,7 @@ describe('classification queue preloading', () => {
         }),
       },
       OPENROUTER_API_KEY: 'or-key',
-      AI_MODEL: 'hy3:free',
+      AI_MODEL: 'deepseek-v4-flash',
     } as never;
 
     try {
@@ -791,7 +791,7 @@ describe('classification queue preloading', () => {
 
     expect(writeDataPoint).toHaveBeenCalledTimes(1);
     expect(writeDataPoint).toHaveBeenCalledWith({
-      blobs: ['succeeded', 'tencent/hy3:free', 'tencent/hy3'],
+      blobs: ['succeeded', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-flash'],
       doubles: [2, 2, 0, 0, 1, 0, 1],
       indexes: ['classification-batch'],
     });
@@ -1042,5 +1042,297 @@ describe('classification queue preloading', () => {
     expect(acked).toBe(1);
     expect(retried).toBe(0);
     expect(sqls.some((sql) => sql.includes('FROM skills') && sql.includes('WHERE id IN'))).toBe(true);
+  });
+});
+
+describe('skill summary generation', () => {
+  it('builds a prompt with the description, a capped excerpt, and anti-marketing rules', () => {
+    const longContent = `header ${'x'.repeat(5000)}`;
+    const prompt = buildSkillSummaryPrompt(longContent, 'Automates git chores');
+
+    expect(prompt).toContain('Author-provided short description: Automates git chores');
+    expect(prompt).toContain('no marketing language');
+    expect(prompt).toContain('no keyword stuffing');
+    expect(prompt).toContain('2-3 sentence');
+    // Excerpt is capped well below the raw content length.
+    expect(prompt.length).toBeLessThan(longContent.length);
+    expect(prompt).not.toContain('x'.repeat(2500));
+  });
+
+  it('omits the description line when no description is available', () => {
+    const prompt = buildSkillSummaryPrompt('SKILL.md body');
+    expect(prompt).not.toContain('Author-provided short description');
+    expect(prompt).toContain('SKILL.md body');
+  });
+
+  it('sanitizes model output into a single-line summary', () => {
+    expect(
+      sanitizeSkillSummary('  "This skill reviews pull requests.\nIt posts inline comments."  ')
+    ).toBe('This skill reviews pull requests. It posts inline comments.');
+
+    // Too short to be a real summary.
+    expect(sanitizeSkillSummary('ok')).toBeNull();
+    expect(sanitizeSkillSummary('')).toBeNull();
+    expect(sanitizeSkillSummary(null)).toBeNull();
+
+    // Overlong output is cut at the last sentence boundary within the cap.
+    const long = `${'a'.repeat(400)}. ${'b'.repeat(400)}.`;
+    const sanitized = sanitizeSkillSummary(long);
+    expect(sanitized).toBe(`${'a'.repeat(400)}.`);
+  });
+
+  it('returns null without an OpenRouter API key and never calls fetch', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const summary = await generateSkillSummary('SKILL.md body', null, {
+        DB: {} as never,
+        KV: { get: vi.fn(async () => null), put: vi.fn(async () => {}) } as never,
+        R2: {} as never,
+      });
+      expect(summary).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+  });
+
+  it('generates a summary with the free model first', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: 'This skill automates git commit messages. It helps developers write consistent history.',
+        },
+      }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const summary = await generateSkillSummary('SKILL.md body about git commits', 'Git helper', {
+        DB: {} as never,
+        KV: { get: vi.fn(async () => null), put: vi.fn(async () => {}) } as never,
+        R2: {} as never,
+        OPENROUTER_API_KEY: 'or-key',
+      });
+
+      expect(summary).toBe(
+        'This skill automates git commit messages. It helps developers write consistent history.'
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+        model: string;
+        max_tokens: number;
+        response_format?: unknown;
+        messages: Array<{ content: string }>;
+      };
+      expect(requestBody.model).toBe('deepseek/deepseek-v4-flash');
+      expect(requestBody.response_format).toBeUndefined();
+      expect(requestBody.messages[0]?.content).toContain('Git helper');
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+  });
+
+  it('falls back to the paid model when all free models fail', async () => {
+    const originalFetch = globalThis.fetch;
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      call += 1;
+      if (call <= 2) {
+        return new Response('unavailable', { status: 503 });
+      }
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: 'This skill lints markdown files for consistent style.' } }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const summary = await generateSkillSummary('SKILL.md body', null, {
+        DB: {} as never,
+        KV: { get: vi.fn(async () => null), put: vi.fn(async () => {}) } as never,
+        R2: {} as never,
+        OPENROUTER_API_KEY: 'or-key',
+      });
+
+      expect(summary).toBe('This skill lints markdown files for consistent style.');
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      const lastBody = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)) as { model: string };
+      expect(lastBody.model).toBe('deepseek/deepseek-v4-flash');
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+  });
+
+  it('skips skills that already have a summary', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const updates: string[] = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => {
+          if (sql.includes('SELECT summary, description FROM skills')) {
+            return {
+              bind: () => ({
+                first: async () => ({ summary: 'Existing summary.', description: 'desc' }),
+              }),
+            };
+          }
+          if (sql.includes('UPDATE skills SET summary')) {
+            return {
+              bind: (...args: unknown[]) => {
+                updates.push(String(args[0]));
+                return { run: async () => ({ success: true }) };
+              },
+            };
+          }
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      },
+      KV: { get: vi.fn(async () => null), put: vi.fn(async () => {}) },
+      R2: { get: vi.fn(async () => null) },
+      OPENROUTER_API_KEY: 'or-key',
+    } as never;
+
+    try {
+      const summary = await ensureSkillSummary(env, {
+        skillId: 'skill-1',
+        skillSlug: 'owner/skill-1',
+        skillMdContent: 'SKILL.md body',
+      });
+
+      expect(summary).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(updates).toEqual([]);
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+  });
+
+  it('writes a generated summary back and invalidates skill caches', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: 'This skill audits dependencies for known vulnerabilities. Use it before releases.',
+        },
+      }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const updates: Array<{ summary: string; id: string }> = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => {
+          if (sql.includes('SELECT summary, description FROM skills')) {
+            return {
+              bind: () => ({
+                first: async () => ({ summary: null, description: 'Dependency auditor' }),
+              }),
+            };
+          }
+          if (sql.includes('UPDATE skills SET summary')) {
+            expect(sql).not.toContain('updated_at');
+            return {
+              bind: (summary: string, id: string) => ({
+                run: async () => {
+                  updates.push({ summary, id });
+                  return { success: true };
+                },
+              }),
+            };
+          }
+          if (sql.includes('SELECT slug FROM skills')) {
+            return {
+              bind: () => ({
+                first: async () => ({ slug: 'owner/skill-2' }),
+              }),
+            };
+          }
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      },
+      KV: { get: vi.fn(async () => null), put: vi.fn(async () => {}) },
+      R2: { get: vi.fn(async () => null) },
+      OPENROUTER_API_KEY: 'or-key',
+    } as never;
+
+    try {
+      const summary = await ensureSkillSummary(env, {
+        skillId: 'skill-2',
+        skillSlug: 'owner/skill-2',
+        skillMdContent: 'SKILL.md body about dependency auditing',
+      });
+
+      expect(summary).toBe(
+        'This skill audits dependencies for known vulnerabilities. Use it before releases.'
+      );
+      expect(updates).toEqual([{
+        summary: 'This skill audits dependencies for known vulnerabilities. Use it before releases.',
+        id: 'skill-2',
+      }]);
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+  });
+
+  it('does not write anything when summary generation fails', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => new Response('unavailable', { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const updates: string[] = [];
+    const env = {
+      DB: {
+        prepare: (sql: string) => {
+          if (sql.includes('SELECT summary, description FROM skills')) {
+            return {
+              bind: () => ({
+                first: async () => ({ summary: null, description: null }),
+              }),
+            };
+          }
+          if (sql.includes('UPDATE skills SET summary')) {
+            return {
+              bind: (...args: unknown[]) => {
+                updates.push(String(args[0]));
+                return { run: async () => ({ success: true }) };
+              },
+            };
+          }
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      },
+      KV: { get: vi.fn(async () => null), put: vi.fn(async () => {}) },
+      R2: { get: vi.fn(async () => null) },
+      OPENROUTER_API_KEY: 'or-key',
+    } as never;
+
+    try {
+      const summary = await ensureSkillSummary(env, {
+        skillId: 'skill-3',
+        skillSlug: 'owner/skill-3',
+        skillMdContent: 'SKILL.md body',
+      });
+
+      expect(summary).toBeNull();
+      expect(updates).toEqual([]);
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
   });
 });

@@ -96,6 +96,7 @@ export const skills = sqliteTable('skills', {
   name: text('name').notNull(),
   slug: text('slug').notNull(),
   description: text('description'),
+  summary: text('summary'), // AI-generated functional summary shown above README on the detail page
   githubUrl: text('github_url'), // Not unique - multi-skill repos share the same URL
   repoOwner: text('repo_owner'),
   repoName: text('repo_name'),

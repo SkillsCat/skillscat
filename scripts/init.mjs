@@ -896,9 +896,9 @@ class_name = "SkillscatStateDurableObject"
 script_name = "skillscat-state-production"
 
 [env.production.vars]
-AI_MODEL = "tencent/hy3:free"
+AI_MODEL = "deepseek/deepseek-v4-flash"
 FREE_MODELS = "openrouter/free"
-CLASSIFICATION_PAID_MODEL = "tencent/hy3"
+CLASSIFICATION_PAID_MODEL = "deepseek/deepseek-v4-flash"
 INDEXNOW_ENABLED = "1"
 `.trim(),
   'wrangler.security-analysis.toml': `
@@ -938,9 +938,9 @@ class_name = "SkillscatStateDurableObject"
 script_name = "skillscat-state-production"
 
 [env.production.vars]
-SECURITY_FREE_MODEL = "tencent/hy3:free"
+SECURITY_FREE_MODEL = "deepseek/deepseek-v4-flash"
 SECURITY_FREE_MODELS = "openrouter/free"
-SECURITY_PREMIUM_MODEL = "tencent/hy3"
+SECURITY_PREMIUM_MODEL = "deepseek/deepseek-v4-flash"
 SECURITY_MAX_AI_FILES = "8"
 SECURITY_MAX_AI_TEXT_BYTES = "48000"
 SECURITY_STABILITY_ROUNDS = "2"
@@ -2489,7 +2489,7 @@ ${colors.cyan}╔═════════════════════
         lines.push('- GitHub Token(s): https://github.com/settings/tokens (需要 public_repo 权限；支持单个 GITHUB_TOKEN 或逗号分隔 / JSON 数组格式的 GITHUB_TOKENS)');
       }
       if (needsOpenRouter) {
-        lines.push('- OpenRouter: https://openrouter.ai/keys (可选，用于 HY3 AI 分类/安全分析)');
+        lines.push('- OpenRouter: https://openrouter.ai/keys (可选，用于 AI 分类/安全分析)');
       }
       if (needsVirusTotal) {
         lines.push('- VirusTotal: https://www.virustotal.com/gui/join-us (可选，public API 需要 API Key)');
@@ -2563,7 +2563,7 @@ ${colors.cyan}╔═════════════════════
             || await ask(rl, 'GitHub Personal Access Token(s) (single token, comma-separated, or JSON array)', '');
         }
         if (needsOpenRouter) {
-          openrouterApiKey = existingVars.OPENROUTER_API_KEY || await ask(rl, 'OpenRouter API Key (可选，HY3 模型)', '');
+          openrouterApiKey = existingVars.OPENROUTER_API_KEY || await ask(rl, 'OpenRouter API Key (可选，DeepSeek 模型)', '');
         }
         if (needsVirusTotal) {
           virusTotalApiKey = existingVars.VIRUSTOTAL_API_KEY || await ask(rl, 'VirusTotal API Key (可选，public API)', '');

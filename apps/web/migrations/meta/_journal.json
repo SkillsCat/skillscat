@@ -204,6 +204,13 @@
       "when": 1785751064440,
       "tag": "0028_windy_enchantress",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1785873319498,
+      "tag": "0029_steady_wallop",
+      "breakpoints": true
     }
   ]
 }

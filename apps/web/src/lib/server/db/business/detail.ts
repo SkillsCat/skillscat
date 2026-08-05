@@ -14,6 +14,7 @@ interface SkillDetailRow {
   repo_name: string;
   github_url: string | null;
   skill_path: string | null;
+  summary: string | null;
   stars: number | null;
   forks: number | null;
   trending_score: number | null;
@@ -102,6 +103,7 @@ export async function getSkillBySlug(
         s.repo_name,
         s.github_url,
         s.skill_path,
+        s.summary,
         s.stars,
         s.forks,
         s.trending_score,
@@ -305,6 +307,7 @@ export async function getSkillBySlug(
     repoName: skillData.repo_name,
     githubUrl: skillData.github_url || (skillData.repo_owner ? `https://github.com/${skillData.repo_owner}/${skillData.repo_name}` : null),
     skillPath: skillData.skill_path || '',
+    summary: skillData.summary,
     stars: skillData.stars || 0,
     forks: skillData.forks || 0,
     trendingScore: skillData.trending_score || 0,
