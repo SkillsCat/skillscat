@@ -44,8 +44,7 @@
     {#if item.href}
       <a
         href={item.href}
-        class="tab"
-        class:active={item.active}
+        class={item.active ? 'tab active' : 'tab'}
         aria-current={item.active ? 'page' : undefined}
         aria-label={item.ariaLabel}
       >
@@ -54,8 +53,7 @@
     {:else}
       <button
         type="button"
-        class="tab"
-        class:active={item.active}
+        class={item.active ? 'tab active' : 'tab'}
         aria-pressed={item.active ?? false}
         aria-label={item.ariaLabel}
         onclick={item.onclick}
