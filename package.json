@@ -47,7 +47,6 @@
     "release:web:all:patch": "node scripts/web-release.mjs deploy-all --bump patch",
     "deploy:workers": "node scripts/deploy-workers.mjs --all --env production",
     "deploy:workers:list": "node scripts/deploy-workers.mjs --list --env production",
-    "deploy:worker:state": "node scripts/deploy-workers.mjs --worker state --env production",
     "deploy:worker:archive": "node scripts/deploy-workers.mjs --worker archive --env production",
     "deploy:worker:classification": "node scripts/deploy-workers.mjs --worker classification --env production",
     "deploy:worker:github-events": "node scripts/deploy-workers.mjs --worker github-events --env production",

@@ -17,8 +17,6 @@
  *   pnpm init:project --workers trending,search-precompute # 仅初始化指定 workers
  *   pnpm init:project --force      # 强制覆盖现有配置
  *   pnpm init:project --production --dry-run # 预演生产初始化，不执行写入
- *   pnpm init:project --production --bootstrap-state # 初始化后部署 state worker，注册 Durable Object class
- *   pnpm init:project --production --skip-state-bootstrap # 跳过 state worker bootstrap
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
@@ -37,7 +35,6 @@ let DRY_RUN = false;
 // 生产环境 worker 名称映射
 const PRODUCTION_WORKER_NAMES = {
   'wrangler.preview.toml': 'skillscat-web-production',
-  'wrangler.state.toml': 'skillscat-state-production',
   'wrangler.github-events.toml': 'skillscat-github-events-production',
   'wrangler.indexing.toml': 'skillscat-indexing-production',
   'wrangler.classification.toml': 'skillscat-classification-production',
@@ -54,7 +51,6 @@ const PRODUCTION_WORKER_NAMES = {
 // 配置文件列表 (单文件，通过 env.production 区分生产环境)
 const CONFIG_FILES = [
   'wrangler.preview.toml',
-  'wrangler.state.toml',
   'wrangler.github-events.toml',
   'wrangler.indexing.toml',
   'wrangler.classification.toml',
@@ -67,17 +63,6 @@ const CONFIG_FILES = [
   'wrangler.archive.toml',
   'wrangler.resurrection.toml',
 ];
-
-const STATE_BINDING_REQUIRED_WORKERS = new Set([
-  'preview',
-  'classification',
-  'github-events',
-  'indexing',
-  'resurrection',
-  'security-analysis',
-  'trending',
-  'virustotal',
-]);
 
 const R2_REQUIRED_WORKERS = new Set([
   'preview',
@@ -133,7 +118,6 @@ const QUEUE_REQUIRED_WORKERS = new Set([
 
 const REQUIRED_SECRETS_BY_WORKER = {
   preview: ['BETTER_AUTH_SECRET', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'GITHUB_TOKEN'],
-  state: [],
   'github-events': ['GITHUB_TOKEN'],
   indexing: ['GITHUB_TOKEN'],
   classification: [],
@@ -149,7 +133,6 @@ const REQUIRED_SECRETS_BY_WORKER = {
 
 const OPTIONAL_SECRETS_BY_WORKER = {
   preview: ['INDEXNOW_KEY'],
-  state: [],
   'github-events': [],
   indexing: ['INDEXNOW_KEY'],
   classification: ['OPENROUTER_API_KEY', 'INDEXNOW_KEY'],
@@ -307,19 +290,6 @@ function resolveSelectedWorkers(args) {
   }
 
   return selected;
-}
-
-function withStateWorkerDependency(selectedWorkerKeys) {
-  if (!selectedWorkerKeys || selectedWorkerKeys.length === 0) {
-    return selectedWorkerKeys;
-  }
-
-  const needsStateWorker = selectedWorkerKeys.some((key) => STATE_BINDING_REQUIRED_WORKERS.has(key));
-  if (!needsStateWorker || selectedWorkerKeys.includes('state')) {
-    return selectedWorkerKeys;
-  }
-
-  return ['state', ...selectedWorkerKeys];
 }
 
 function getSelectedConfigFiles(selectedWorkerKeys) {
@@ -749,11 +719,6 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
 
-[[env.production.durable_objects.bindings]]
-name = "STATE_DO"
-class_name = "SkillscatStateDurableObject"
-script_name = "skillscat-state-production"
-
 [[env.production.queues.producers]]
 binding = "INDEXING_QUEUE"
 queue = "skillscat-indexing"
@@ -784,14 +749,6 @@ RATE_LIMIT_PENALTY_TTL_LEVEL_1_SECONDS = "300"
 RATE_LIMIT_PENALTY_TTL_LEVEL_2_SECONDS = "900"
 RATE_LIMIT_PENALTY_TTL_LEVEL_3_SECONDS = "1800"
 `.trim(),
-  'wrangler.state.toml': `
-[env.production]
-name = "skillscat-state-production"
-
-[[env.production.durable_objects.bindings]]
-name = "STATE_DO"
-class_name = "SkillscatStateDurableObject"
-`.trim(),
   'wrangler.github-events.toml': `
 [env.production]
 name = "skillscat-github-events-production"
@@ -807,11 +764,6 @@ database_id = "<your-production-database-id>"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
-
-[[env.production.durable_objects.bindings]]
-name = "STATE_DO"
-class_name = "SkillscatStateDurableObject"
-script_name = "skillscat-state-production"
 
 [[env.production.r2_buckets]]
 binding = "R2"
@@ -847,11 +799,6 @@ bucket_name = "skillscat-storage"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
-
-[[env.production.durable_objects.bindings]]
-name = "STATE_DO"
-class_name = "SkillscatStateDurableObject"
-script_name = "skillscat-state-production"
 
 [[env.production.queues.producers]]
 binding = "CLASSIFICATION_QUEUE"
@@ -890,11 +837,6 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
 
-[[env.production.durable_objects.bindings]]
-name = "STATE_DO"
-class_name = "SkillscatStateDurableObject"
-script_name = "skillscat-state-production"
-
 [env.production.vars]
 AI_MODEL = "deepseek/deepseek-v4-flash"
 FREE_MODELS = "openrouter/free"
@@ -931,11 +873,6 @@ bucket_name = "skillscat-storage"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
-
-[[env.production.durable_objects.bindings]]
-name = "STATE_DO"
-class_name = "SkillscatStateDurableObject"
-script_name = "skillscat-state-production"
 
 [env.production.vars]
 SECURITY_FREE_MODEL = "deepseek/deepseek-v4-flash"
@@ -986,11 +923,6 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
 
-[[env.production.durable_objects.bindings]]
-name = "STATE_DO"
-class_name = "SkillscatStateDurableObject"
-script_name = "skillscat-state-production"
-
 [[env.production.queues.producers]]
 binding = "SECURITY_ANALYSIS_QUEUE"
 queue = "skillscat-security-analysis"
@@ -1022,11 +954,6 @@ bucket_name = "skillscat-storage"
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
-
-[[env.production.durable_objects.bindings]]
-name = "STATE_DO"
-class_name = "SkillscatStateDurableObject"
-script_name = "skillscat-state-production"
 
 [env.production.vars]
 VT_ENABLED = "1"
@@ -1125,10 +1052,6 @@ bucket_name = "skillscat-storage"
 binding = "KV"
 id = "<your-production-kv-namespace-id>"
 
-[[env.production.durable_objects.bindings]]
-name = "STATE_DO"
-class_name = "SkillscatStateDurableObject"
-script_name = "skillscat-state-production"
 `.trim(),
 };
 
@@ -2069,69 +1992,6 @@ async function setSecret(workerName, secretName, secretValue, env = 'production'
   return { success: false, error: errorMessage };
 }
 
-function bootstrapStateWorker() {
-  const args = ['exec', 'wrangler', 'deploy', '-c', 'wrangler.state.toml', '--env', 'production'];
-  const display = `pnpm ${args.join(' ')}`;
-
-  if (DRY_RUN) {
-    logDryRun(`Would bootstrap Durable Object state worker: ${display}`);
-    return { success: true };
-  }
-
-  logInfo(`Bootstrapping Durable Object state worker: ${display}`);
-  const result = spawnSync('pnpm', args, {
-    cwd: WEB_DIR,
-    stdio: 'inherit',
-    env: getWranglerEnv(),
-  });
-
-  if (result.status === 0) {
-    return { success: true };
-  }
-
-  return {
-    success: false,
-    error: `Exit code: ${result.status ?? 'unknown'}`,
-  };
-}
-
-async function maybeBootstrapStateWorker(rl, {
-  needsStateBootstrap,
-  skipStateBootstrap,
-  bootstrapState,
-}) {
-  if (!needsStateBootstrap) {
-    return false;
-  }
-
-  if (skipStateBootstrap) {
-    logInfo('Skipped Durable Object state worker bootstrap (--skip-state-bootstrap)');
-    logInfo('Before deploying web directly, run: pnpm deploy:worker:state');
-    return true;
-  }
-
-  const shouldBootstrapState = DRY_RUN
-    ? true
-    : bootstrapState || await askYesNo(
-      rl,
-      'Bootstrap Durable Object state worker now? Required before deploying web/DO consumers',
-    );
-
-  if (shouldBootstrapState) {
-    const stateBootstrapResult = bootstrapStateWorker();
-    if (!stateBootstrapResult.success) {
-      logError(`Failed to bootstrap Durable Object state worker: ${stateBootstrapResult.error}`);
-      process.exit(1);
-    }
-    logSuccess('Durable Object state worker bootstrapped');
-  } else {
-    logInfo('Skipped Durable Object state worker bootstrap');
-    logInfo('Before deploying web directly, run: pnpm deploy:worker:state');
-  }
-
-  return true;
-}
-
 /**
  * 主函数
  */
@@ -2141,9 +2001,7 @@ async function main() {
   const isProduction = args.includes('--production');
   const force = args.includes('--force');
   const dryRun = args.includes('--dry-run');
-  const bootstrapState = args.includes('--bootstrap-state');
-  const skipStateBootstrap = args.includes('--skip-state-bootstrap');
-  const selectedWorkerKeys = withStateWorkerDependency(resolveSelectedWorkers(args));
+  const selectedWorkerKeys = resolveSelectedWorkers(args);
   const hasWorkerSelection = Array.isArray(selectedWorkerKeys) && selectedWorkerKeys.length > 0;
   const selectedConfigFiles = getSelectedConfigFiles(selectedWorkerKeys);
   const selectedProductionWorkers = getSelectedProductionWorkers(selectedConfigFiles, selectedWorkerKeys);
@@ -2173,11 +2031,6 @@ async function main() {
     || needsOpenRouter
     || needsVirusTotal
     || (isProduction && needsProductionAppUrl);
-  const needsStateBootstrap = isProduction && (
-    !hasWorkerSelection
-    || selectedWorkerKeys.includes('state')
-    || selectedWorkerKeys.some((key) => STATE_BINDING_REQUIRED_WORKERS.has(key))
-  );
   DRY_RUN = dryRun;
 
   const modeTitle = isProduction ? '线上环境初始化' : '本地开发环境初始化';
@@ -2475,7 +2328,6 @@ ${colors.cyan}╔═════════════════════
     let virusTotalApiKey = '';
     let indexNowKey = '';
     let productionAppUrl = '';
-    let stateBootstrapHandled = false;
 
     if (!needsEnvInput && !needsSecretSetup) {
       logInfo('Skipped (selected workers do not require env vars or secrets)');
@@ -2701,12 +2553,6 @@ ${colors.cyan}╔═════════════════════
         } else {
           logInfo('Skipped secrets configuration (selected workers do not require secrets)');
         }
-
-        stateBootstrapHandled = await maybeBootstrapStateWorker(rl, {
-          needsStateBootstrap,
-          skipStateBootstrap,
-          bootstrapState,
-        });
       } else if (needsSecretSetup) {
         const devVars = {};
         if (needsBetterAuthSecret) {
@@ -2743,14 +2589,6 @@ ${colors.cyan}╔═════════════════════
       } else {
         logInfo('Skipped .dev.vars update (selected workers do not require secrets)');
       }
-    }
-
-    if (isProduction && needsStateBootstrap && !stateBootstrapHandled) {
-      await maybeBootstrapStateWorker(rl, {
-        needsStateBootstrap,
-        skipStateBootstrap,
-        bootstrapState,
-      });
     }
 
     // 本地模式: 可选创建 Cloudflare 资源
@@ -2887,7 +2725,6 @@ ${colors.bold}下一步:${colors.reset}
 1. 检查 ${colors.cyan}apps/web/wrangler.*.toml${colors.reset} 文件中的配置
 2. 运行 ${colors.cyan}pnpm db:migrate:prod${colors.reset} 执行数据库迁移
 3. 运行 ${colors.cyan}pnpm deploy:all --no-bump --no-tag --yes${colors.reset} 部署 workers + web
-   ${colors.gray}脚本会先部署 state worker，确保 Durable Object binding owner 已存在${colors.reset}
 4. 如只部署主服务，运行 ${colors.cyan}pnpm run deploy -- --no-bump --no-tag --yes${colors.reset}
 
 ${colors.gray}本地开发环境配置请运行: pnpm init:project${colors.reset}

@@ -4,7 +4,6 @@ import {
   hasGitHubTokenConfigured,
   type GitHubTokenEnv,
 } from './token-pool';
-import { createDurableObjectKvStore } from '../state/client';
 
 export type GitHubRequestEnv = GitHubTokenEnv;
 
@@ -18,9 +17,7 @@ export function hasGitHubAuthConfigured(env: GitHubRequestEnv | null | undefined
 }
 
 export function getGitHubRateLimitKVFromEnv(env: GitHubRequestEnv | null | undefined): KVNamespace | undefined {
-  return createDurableObjectKvStore(env?.STATE_DO, {
-    objectName: 'github-rate-limit',
-  }) ?? env?.KV;
+  return env?.KV;
 }
 
 export function getGitHubRequestAuthFromEnv(

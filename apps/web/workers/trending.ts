@@ -44,7 +44,6 @@ import {
   buildSkillMetricDate,
 } from '../src/lib/server/skill/metrics';
 import { getGitHubRequestAuthFromEnv, hasGitHubAuthConfigured } from '../src/lib/server/github-client/env';
-import { createDurableObjectKvStore } from '../src/lib/server/state/client';
 
 const MAX_SKILLS_PER_RUN = 500; // Limit per cron run to control costs
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
@@ -56,9 +55,7 @@ const D1_SKILL_UPDATE_BATCH_SIZE = 50;
 const D1_REPO_REFRESH_LOOKUP_BATCH_SIZE = 40;
 
 function getTrendingStateStore(env: TrendingEnv): KVNamespace {
-  return createDurableObjectKvStore(env.STATE_DO, {
-    objectName: 'trending-state',
-  }) ?? env.KV;
+  return env.KV;
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {

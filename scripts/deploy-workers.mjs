@@ -14,15 +14,6 @@ const webDir = resolve(projectRoot, 'apps/web');
 const ALLOWED_ENVS = new Set(['production', 'local']);
 const DEFAULT_ENV = 'production';
 const SKILLSCAT_NAME_PATTERN = /^skillscat(?:-|$)/;
-const STATE_DEPENDENT_WORKERS = new Set([
-  'classification',
-  'github-events',
-  'indexing',
-  'resurrection',
-  'security-analysis',
-  'trending',
-  'virustotal'
-]);
 const WRONG_ENV_SUFFIXES = ['-local', '-dev', '-development', '-staging', '-preview', '-test'];
 const NOT_FOUND_PATTERNS = [
   /this worker does not exist/i,
@@ -83,11 +74,7 @@ function discoverWorkers() {
       return worker;
     })
     .filter(Boolean)
-    .sort((left, right) => {
-      if (left === 'state') return -1;
-      if (right === 'state') return 1;
-      return left.localeCompare(right);
-    });
+    .sort((left, right) => left.localeCompare(right));
 }
 
 function parseWorkerArg(value) {
@@ -864,15 +851,6 @@ async function main() {
   let requestedWorkers = options.all
     ? availableWorkers
     : Array.from(new Set(options.workers));
-
-  if (
-    !options.cleanupOnly
-    && !requestedWorkers.includes('state')
-    && requestedWorkers.some((worker) => STATE_DEPENDENT_WORKERS.has(worker))
-    && availableWorkers.includes('state')
-  ) {
-    requestedWorkers = ['state', ...requestedWorkers];
-  }
 
   if (!options.cleanupOnly && requestedWorkers.length === 0) {
     throw new Error('Please pass --all or at least one --worker <name>');

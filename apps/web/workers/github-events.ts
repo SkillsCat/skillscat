@@ -18,7 +18,6 @@ import {
   resolveGitHubTokenCandidates,
   resolveGitHubTokenIds,
 } from '../src/lib/server/github-client/token-pool';
-import { createDurableObjectKvStore } from '../src/lib/server/state/client';
 
 const DEFAULT_EVENTS_PER_PAGE = 100;
 const DEFAULT_EVENTS_PAGES = 1;
@@ -212,9 +211,7 @@ function getDiscoveryLockTtlSeconds(env: GithubEventsEnv): number {
 }
 
 function getGithubEventsStateStore(env: GithubEventsEnv): KVNamespace {
-  return createDurableObjectKvStore(env.STATE_DO, {
-    objectName: 'github-events',
-  }) ?? env.KV;
+  return env.KV;
 }
 
 export function buildRepoQueuedDedupIdentity(owner: string, name: string, skillPath?: string): string {

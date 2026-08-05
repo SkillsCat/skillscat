@@ -8,7 +8,6 @@ import type {
 } from './shared/types';
 import type { D1Database } from '@cloudflare/workers-types';
 import { createLogger, generateId } from './shared/utils';
-import { createDurableObjectKvStore } from '../src/lib/server/state/client';
 import {
   getDefaultOpenRouterFreeModels,
   getOpenRouterJsonGenerationOptions,
@@ -52,11 +51,9 @@ import {
 const log = createLogger('SecurityAnalysis');
 
 function getSecurityAnalysisStateStore(
-  env: Pick<SecurityAnalysisEnv, 'KV' | 'STATE_DO'>
+  env: Pick<SecurityAnalysisEnv, 'KV'>
 ): KVNamespace {
-  return createDurableObjectKvStore(env.STATE_DO, {
-    objectName: 'security-analysis-state',
-  }) ?? env.KV;
+  return env.KV;
 }
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MAX_AI_FILES = 8;
@@ -1699,14 +1696,14 @@ function getSecurityReindexBackfillKey(candidate: SecurityReindexBackfillCandida
 }
 
 async function wasSecurityReindexBackfillQueued(
-  env: Pick<SecurityAnalysisEnv, 'KV' | 'STATE_DO'>,
+  env: Pick<SecurityAnalysisEnv, 'KV'>,
   key: string
 ): Promise<boolean> {
   return (await getSecurityAnalysisStateStore(env).get(key)) !== null;
 }
 
 async function markSecurityReindexBackfillQueued(
-  env: Pick<SecurityAnalysisEnv, 'KV' | 'STATE_DO'>,
+  env: Pick<SecurityAnalysisEnv, 'KV'>,
   key: string
 ): Promise<void> {
   await getSecurityAnalysisStateStore(env).put(key, '1', {
