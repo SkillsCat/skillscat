@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MIN_INDEXABLE_DYNAMIC_CATEGORY_SKILLS } from '../src/lib/seo/constants';
 import {
   buildSitemapCacheControl,
   buildSitemapIndexEntries,
@@ -69,8 +70,8 @@ function createDbMock(rows: {
       if (normalized.includes('FROM categories c INDEXED BY categories_ai_suggested_skill_count_idx')) {
         return {
           bind(minCategorySkills: number, minPublicSkills: number, limit: number) {
-            expect(minCategorySkills).toBe(2);
-            expect(minPublicSkills).toBe(2);
+            expect(minCategorySkills).toBe(MIN_INDEXABLE_DYNAMIC_CATEGORY_SKILLS);
+            expect(minPublicSkills).toBe(MIN_INDEXABLE_DYNAMIC_CATEGORY_SKILLS);
             expect(limit).toBe(MAX_CORE_DYNAMIC_CATEGORIES);
             return {
               all: async () => ({ results: rows.dynamicCategoryCounts || [] }),
@@ -327,7 +328,8 @@ describe('profile and org sitemap freshness', () => {
         expect(normalized).toContain('SELECT a.username AS entity_label');
         expect(normalized).toContain('WITH skill_freshness AS (');
         expect(normalized).toContain('INDEXED BY skills_public_repo_owner_sitemap_freshness_idx');
-        expect(normalized).toContain("WHERE s.visibility = 'public' AND TRIM(COALESCE(s.description, '')) <> ''");
+        expect(normalized).toContain("WHERE s.visibility = 'public' AND COALESCE(s.tier, 'cold') <> 'archived'");
+        expect(normalized).toContain("TRIM(COALESCE(s.description, '')) <> '' OR TRIM(COALESCE(s.readme, '')) <> ''");
         expect(normalized).toContain('s.repo_owner IS NOT NULL');
         expect(normalized).toContain('JOIN skill_freshness sf ON sf.entity_key = a.username');
         expect(normalized).toContain('ORDER BY entity_label ASC');
@@ -415,7 +417,8 @@ describe('profile and org sitemap freshness', () => {
         expect(normalized).toContain('SELECT o.slug AS entity_label');
         expect(normalized).toContain('WITH skill_freshness AS (');
         expect(normalized).toContain('INDEXED BY skills_public_org_sitemap_freshness_idx');
-        expect(normalized).toContain("WHERE s.visibility = 'public' AND TRIM(COALESCE(s.description, '')) <> ''");
+        expect(normalized).toContain("WHERE s.visibility = 'public' AND COALESCE(s.tier, 'cold') <> 'archived'");
+        expect(normalized).toContain("TRIM(COALESCE(s.description, '')) <> '' OR TRIM(COALESCE(s.readme, '')) <> ''");
         expect(normalized).toContain('s.org_id IS NOT NULL');
         expect(normalized).toContain('JOIN skill_freshness sf ON sf.entity_key = o.id');
         expect(normalized).toContain('ORDER BY freshness_ts DESC, entity_label ASC');

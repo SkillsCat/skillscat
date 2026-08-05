@@ -1,55 +1,78 @@
 import { describe, expect, it } from 'vitest';
-import {
-  SEO_INDEXING_GRACE_PERIOD_MS,
-  isSeoIndexableSkill,
-} from '../src/lib/seo/indexability';
+import { isSeoIndexableSkill } from '../src/lib/seo/indexability';
 import { buildSeoIndexableSkillWhere } from '../src/lib/server/seo/indexability';
 
 describe('isSeoIndexableSkill', () => {
-  const now = Date.parse('2026-07-18T00:00:00.000Z');
-
-  it('keeps active and newly discovered public skills indexable', () => {
+  it('indexes any public, non-archived skill that has content, regardless of tier or activity', () => {
     expect(isSeoIndexableSkill({
       visibility: 'public',
       tier: 'hot',
       description: 'Useful skill',
-      indexedAt: now - SEO_INDEXING_GRACE_PERIOD_MS * 2,
-    }, now)).toBe(true);
+    })).toBe(true);
 
+    // Cold tier with no downloads/access is the long-tail case that must stay indexable.
     expect(isSeoIndexableSkill({
       visibility: 'public',
       tier: 'cold',
       description: 'New skill',
-      indexedAt: now - 1_000,
-    }, now)).toBe(true);
+    })).toBe(true);
+
+    // Tier is absent on some list payloads; a missing tier must not gate indexation.
+    expect(isSeoIndexableSkill({
+      visibility: 'public',
+      description: 'Listed skill',
+    })).toBe(true);
   });
 
-  it('excludes stale low-signal, archived, and incomplete pages', () => {
-    const stale = {
+  it('treats a README as content when the description is empty', () => {
+    expect(isSeoIndexableSkill({
+      visibility: 'public',
+      tier: 'cold',
+      description: null,
+      readme: '# Demo',
+    })).toBe(true);
+
+    expect(isSeoIndexableSkill({
+      visibility: 'public',
+      description: '   ',
+      readme: '  # Demo  ',
+    })).toBe(true);
+  });
+
+  it('excludes non-public, archived, and content-less pages', () => {
+    const base = {
       visibility: 'public',
       tier: 'cold',
       description: 'Old skill',
-      indexedAt: now - SEO_INDEXING_GRACE_PERIOD_MS * 2,
     };
 
-    expect(isSeoIndexableSkill(stale, now)).toBe(false);
-    expect(isSeoIndexableSkill({ ...stale, downloadCount90d: 1 }, now)).toBe(true);
-    expect(isSeoIndexableSkill({ ...stale, tier: 'warm' }, now)).toBe(true);
-    expect(isSeoIndexableSkill({ ...stale, tier: 'archived' }, now)).toBe(false);
-    expect(isSeoIndexableSkill({ ...stale, description: ' ' }, now)).toBe(false);
-    expect(isSeoIndexableSkill({ ...stale, visibility: 'private' }, now)).toBe(false);
+    expect(isSeoIndexableSkill({ ...base, tier: 'archived' })).toBe(false);
+    expect(isSeoIndexableSkill({ ...base, visibility: 'private' })).toBe(false);
+    expect(isSeoIndexableSkill({ ...base, visibility: 'unlisted' })).toBe(false);
+    expect(isSeoIndexableSkill({ ...base, description: ' ', readme: null })).toBe(false);
+    expect(isSeoIndexableSkill({ ...base, description: null, readme: '  ' })).toBe(false);
   });
 });
 
 describe('buildSeoIndexableSkillWhere', () => {
-  it('keeps the SQL predicate aligned with the page-level quality signals', () => {
+  it('mirrors the page-level rule: public, non-archived, with a description or README', () => {
     const sql = buildSeoIndexableSkillWhere('skill');
 
     expect(sql).toContain("skill.visibility = 'public'");
     expect(sql).toContain("COALESCE(skill.tier, 'cold') <> 'archived'");
-    expect(sql).toContain('skill.download_count_90d');
-    expect(sql).toContain('skill.access_count_30d');
+    expect(sql).toContain("TRIM(COALESCE(skill.description, '')) <> ''");
+    expect(sql).toContain("TRIM(COALESCE(skill.readme, '')) <> ''");
+  });
+
+  it('no longer gates on tier ranking, activity counters, or an indexing grace window', () => {
+    const sql = buildSeoIndexableSkillWhere('skill');
+
+    expect(sql).not.toContain("'hot'");
+    expect(sql).not.toContain("'warm'");
     expect(sql).not.toContain('skill.stars');
-    expect(sql).toContain('90 * 86400');
+    expect(sql).not.toContain('skill.download_count_90d');
+    expect(sql).not.toContain('skill.access_count_30d');
+    expect(sql).not.toContain('skill.indexed_at');
+    expect(sql).not.toContain('86400');
   });
 });

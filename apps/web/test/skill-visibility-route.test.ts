@@ -51,8 +51,7 @@ interface SkillRow {
   description: string | null;
   tier: string | null;
   indexed_at: number | null;
-  download_count_90d: number | null;
-  access_count_30d: number | null;
+  has_readme: number | null;
   org_slug: string | null;
   github_org_id: number | null;
   org_verified_at: number | null;
@@ -95,8 +94,7 @@ function createDb(skillOverrides: Partial<SkillRow> = {}, accountId: string | nu
     description: 'Demo skill',
     tier: 'hot',
     indexed_at: null,
-    download_count_90d: 0,
-    access_count_30d: 0,
+    has_readme: 0,
     org_slug: null,
     github_org_id: null,
     org_verified_at: null,

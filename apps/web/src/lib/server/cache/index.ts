@@ -6,7 +6,7 @@
  */
 
 const CACHE_DOMAIN = 'https://skills.cat/cache';
-const DEFAULT_CACHE_VERSION = 'v1';
+const DEFAULT_CACHE_VERSION = 'v2';
 const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 

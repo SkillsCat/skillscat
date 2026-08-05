@@ -40,9 +40,7 @@ interface LoadedSkillTargetRow {
   ownerUsername: string | null;
   description: string | null;
   tier: string | null;
-  indexedAt: number | null;
-  downloadCount90d: number | null;
-  accessCount30d: number | null;
+  hasReadme: number | null;
 }
 
 export interface SubmitIndexNowUrlsOptions {
@@ -344,9 +342,7 @@ export async function loadIndexNowSkillTarget(
       a.username AS ownerUsername,
       s.description AS description,
       s.tier AS tier,
-      s.indexed_at AS indexedAt,
-      s.download_count_90d AS downloadCount90d,
-      s.access_count_30d AS accessCount30d
+      (TRIM(COALESCE(s.readme, '')) <> '') AS hasReadme
     FROM skills s
     LEFT JOIN organizations o ON o.id = s.org_id
     LEFT JOIN authors a ON a.user_id = s.owner_id
@@ -369,9 +365,7 @@ export async function loadIndexNowSkillTarget(
       visibility: row.visibility,
       description: row.description,
       tier: row.tier,
-      indexedAt: row.indexedAt,
-      downloadCount90d: row.downloadCount90d,
-      accessCount30d: row.accessCount30d,
+      readme: row.hasReadme ? 'present' : null,
     }),
     orgSlug: row.orgSlug,
     ownerHandle,

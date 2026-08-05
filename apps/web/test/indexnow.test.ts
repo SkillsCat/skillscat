@@ -129,40 +129,83 @@ describe('resolveIndexNowOwnerHandle', () => {
 });
 
 describe('loadIndexNowSkillTarget', () => {
-  it('loads the quality fields and marks a low-signal skill as non-indexable', async () => {
-    const db = {
+  function createDb(row: Record<string, unknown>, assertQuery: (query: string) => void) {
+    return {
       prepare(query: string) {
-        expect(query).toContain('s.download_count_90d AS downloadCount90d');
-        expect(query).toContain('s.access_count_30d AS accessCount30d');
+        assertQuery(query);
 
         return {
           bind(skillId: string) {
             expect(skillId).toBe('skill-id');
             return {
-              first: async () => ({
-                slug: 'acme/low-signal-skill',
-                visibility: 'public',
-                orgSlug: null,
-                repoOwner: 'acme',
-                ownerUsername: 'octocat',
-                description: 'A valid description',
-                tier: 'cold',
-                indexedAt: 1,
-                downloadCount90d: 0,
-                accessCount30d: 0,
-              }),
+              first: async () => row,
             };
           },
         };
       },
     };
+  }
+
+  it('marks a public cold-tier skill with a description as indexable', async () => {
+    const db = createDb({
+      slug: 'acme/cold-skill',
+      visibility: 'public',
+      orgSlug: null,
+      repoOwner: 'acme',
+      ownerUsername: 'octocat',
+      description: 'A valid description',
+      tier: 'cold',
+      hasReadme: 0,
+    }, (query) => {
+      expect(query).toContain("(TRIM(COALESCE(s.readme, '')) <> '') AS hasReadme");
+    });
 
     await expect(loadIndexNowSkillTarget(db as unknown as D1Database, 'skill-id')).resolves.toEqual({
-      slug: 'acme/low-signal-skill',
+      slug: 'acme/cold-skill',
+      visibility: 'public',
+      seoIndexable: true,
+      orgSlug: null,
+      ownerHandle: 'acme',
+    });
+  });
+
+  it('marks a public skill without description or README as non-indexable', async () => {
+    const db = createDb({
+      slug: 'acme/empty-skill',
+      visibility: 'public',
+      orgSlug: null,
+      repoOwner: 'acme',
+      ownerUsername: 'octocat',
+      description: null,
+      tier: 'cold',
+      hasReadme: 0,
+    }, (query) => {
+      expect(query).toContain("(TRIM(COALESCE(s.readme, '')) <> '') AS hasReadme");
+    });
+
+    await expect(loadIndexNowSkillTarget(db as unknown as D1Database, 'skill-id')).resolves.toEqual({
+      slug: 'acme/empty-skill',
       visibility: 'public',
       seoIndexable: false,
       orgSlug: null,
       ownerHandle: 'acme',
+    });
+  });
+
+  it('treats a README as content when the description is empty', async () => {
+    const db = createDb({
+      slug: 'acme/readme-skill',
+      visibility: 'public',
+      orgSlug: null,
+      repoOwner: 'acme',
+      ownerUsername: 'octocat',
+      description: null,
+      tier: 'cold',
+      hasReadme: 1,
+    }, () => {});
+
+    await expect(loadIndexNowSkillTarget(db as unknown as D1Database, 'skill-id')).resolves.toMatchObject({
+      seoIndexable: true,
     });
   });
 });

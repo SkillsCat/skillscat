@@ -772,7 +772,7 @@ queue = "skillscat-metrics"
 
 [env.production.vars]
 PUBLIC_APP_URL = "https://your-domain.com"
-CACHE_VERSION = "v1"
+CACHE_VERSION = "v2"
 GITHUB_HTML_SUBMIT_FALLBACK_ENABLED = "1"
 SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
 RECOMMEND_ALGO_VERSION = "v1"
@@ -1000,7 +1000,7 @@ TRENDING_DECAY_HOURS = "72"
 TRENDING_STAR_WEIGHT = "1.0"
 TRENDING_FORK_WEIGHT = "2.0"
 TRENDING_VIEW_WEIGHT = "0.1"
-CACHE_VERSION = "v1"
+CACHE_VERSION = "v2"
 SECURITY_PREMIUM_TOP_N = "50"
 `.trim(),
   'wrangler.virustotal.toml': `
@@ -1449,7 +1449,7 @@ function ensurePrecomputeWorkerEnvVars({
     if (includeProductionVars) {
       results.push(
         upsertTomlVarsEntries('wrangler.preview.toml', '[env.production.vars]', {
-          CACHE_VERSION: 'v1',
+          CACHE_VERSION: 'v2',
           SITEMAP_REFRESH_MIN_INTERVAL_SECONDS: '3600',
           RECOMMEND_ALGO_VERSION: 'v1',
         }),

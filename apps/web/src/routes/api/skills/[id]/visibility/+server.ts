@@ -175,8 +175,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
       s.description AS description,
       s.tier AS tier,
       s.indexed_at AS indexed_at,
-      s.download_count_90d AS download_count_90d,
-      s.access_count_30d AS access_count_30d,
+      (TRIM(COALESCE(s.readme, '')) <> '') AS has_readme,
       o.slug AS org_slug,
       o.github_org_id AS github_org_id,
       o.verified_at AS org_verified_at,
@@ -197,8 +196,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
       description: string | null;
       tier: string | null;
       indexed_at: number | null;
-      download_count_90d: number | null;
-      access_count_30d: number | null;
+      has_readme: number | null;
       org_slug: string | null;
       github_org_id: number | null;
       org_verified_at: number | null;
@@ -325,9 +323,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
           visibility,
           description: skill.description,
           tier: skill.tier,
-          indexedAt: becamePublic ? now : skill.indexed_at,
-          downloadCount90d: skill.download_count_90d,
-          accessCount30d: skill.access_count_30d,
+          readme: skill.has_readme ? 'present' : null,
         }),
         orgSlug: skill.org_slug,
         ownerHandle: skill.org_slug ? null : resolveIndexNowOwnerHandle(skill.repo_owner, skill.owner_username),
