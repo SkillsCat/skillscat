@@ -61,6 +61,29 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function parseJsonObject(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return isObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function shallowJsonEqual(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+  ignoreFields: Set<string>
+): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const key of keys) {
+    if (ignoreFields.has(key)) continue;
+    if (left[key] !== right[key]) return false;
+  }
+
+  return true;
+}
+
 function toPositiveInt(value: number | undefined, fallback: number): number {
   if (!Number.isFinite(value) || typeof value !== 'number') return fallback;
   return value > 0 ? Math.floor(value) : fallback;
@@ -113,8 +136,12 @@ export class SkillscatStateDurableObject {
     switch (operation) {
       case 'kv/get':
         return this.handleKvGet(body);
+      case 'kv/getMany':
+        return this.handleKvGetMany(body);
       case 'kv/put':
         return this.handleKvPut(body);
+      case 'kv/putIfChanged':
+        return this.handleKvPutIfChanged(body);
       case 'kv/delete':
         return this.handleKvDelete(body);
       case 'rate-limit/check':
@@ -137,6 +164,35 @@ export class SkillscatStateDurableObject {
     }
 
     return jsonResponse({ value: record.value });
+  }
+
+  private async handleKvGetMany(body: Record<string, unknown>): Promise<Response> {
+    const requestedKeys = Array.isArray(body.keys) ? body.keys : [];
+    const keys = requestedKeys.map((key) =>
+      typeof key === 'string' && key.length > 0 ? key : null
+    );
+    if (keys.every((key) => key === null)) {
+      return jsonResponse({ error: 'missing_keys' }, 400);
+    }
+
+    // values 与请求 keys 严格按位对齐,非法 key 返回 null,避免客户端错位解析。
+    const validKeys = keys.filter((key): key is string => key !== null);
+    const records = await this.state.storage.get<ExpiringValue>(validKeys.map((key) => `kv:${key}`));
+    const nowMs = Date.now();
+    const values = keys.map((key) => {
+      if (key === null) {
+        return null;
+      }
+
+      const record = records.get(`kv:${key}`);
+      if (!record || isExpired(record.expiresAtEpochMs, nowMs)) {
+        return null;
+      }
+
+      return record.value;
+    });
+
+    return jsonResponse({ values });
   }
 
   private async handleKvPut(body: Record<string, unknown>): Promise<Response> {
@@ -165,21 +221,56 @@ export class SkillscatStateDurableObject {
     return jsonResponse({ ok: true });
   }
 
-  private async getStoredNumber(key: string, nowMs: number): Promise<number> {
-    const record = await this.state.storage.get<StoredNumber>(key);
-    if (!record || isExpired(record.expiresAtEpochMs, nowMs)) {
-      return 0;
+  /**
+   * 条件写入:旧值与新值 JSON 浅层等价(忽略 ignoreFields)且旧值仍在 noopWithinMs
+   * 窗口内时跳过写入。把客户端"读-判重-写"两次 DO 请求合并为一次,缩短 active 时长。
+   */
+  private async handleKvPutIfChanged(body: Record<string, unknown>): Promise<Response> {
+    const key = typeof body.key === 'string' ? body.key : '';
+    const value = typeof body.value === 'string' ? body.value : null;
+    if (!key || value === null) {
+      return jsonResponse({ error: 'invalid_put' }, 400);
     }
 
-    const value = Number(record.value);
-    return Number.isFinite(value) && value > 0 ? value : 0;
-  }
+    const nowMs = Date.now();
+    const storageKey = `kv:${key}`;
+    const existing = await this.state.storage.get<ExpiringValue>(storageKey);
 
-  private async putStoredNumber(key: string, value: number, ttlSeconds: number, nowMs: number): Promise<void> {
-    await this.state.storage.put<StoredNumber>(key, {
+    if (existing && !isExpired(existing.expiresAtEpochMs, nowMs)) {
+      const ignoreFields = new Set(
+        Array.isArray(body.ignoreFields)
+          ? body.ignoreFields.filter((field): field is string => typeof field === 'string')
+          : []
+      );
+      const noopWithinMs = toPositiveInt(
+        typeof body.noopWithinMs === 'number' ? body.noopWithinMs : undefined,
+        0
+      );
+      const updatedAtField = typeof body.updatedAtField === 'string' && body.updatedAtField
+        ? body.updatedAtField
+        : 'updatedAtEpochMs';
+
+      const existingJson = parseJsonObject(existing.value);
+      const nextJson = parseJsonObject(value);
+      if (
+        existingJson
+        && nextJson
+        && noopWithinMs > 0
+        && shallowJsonEqual(existingJson, nextJson, ignoreFields)
+      ) {
+        const updatedAt = Number(existingJson[updatedAtField]);
+        if (Number.isFinite(updatedAt) && nowMs - updatedAt < noopWithinMs) {
+          return jsonResponse({ written: false, value: existing.value });
+        }
+      }
+    }
+
+    await this.state.storage.put<ExpiringValue>(storageKey, {
       value,
-      expiresAtEpochMs: nowMs + ttlSeconds * 1000,
+      expiresAtEpochMs: parseExpirationMs(body, nowMs),
     });
+
+    return jsonResponse({ written: true, value });
   }
 
   private async handleRateLimitCheck(body: Record<string, unknown>): Promise<Response> {
@@ -219,14 +310,27 @@ export class SkillscatStateDurableObject {
       PENALTY_TTL_SECONDS[3]
     );
 
-    const parsedPenalty = await this.getStoredNumber(`${storageKeyPrefix}:penalty`, nowMs);
-    const penaltyLevel = parsedPenalty > 0 ? Math.min(maxPenaltyLevel, parsedPenalty) : 0;
+    const penaltyStorageKey = `${storageKeyPrefix}:penalty`;
+    const counterStorageKey = `${storageKeyPrefix}:counter`;
+    // 批量读 penalty + counter:一次 storage 往返代替两次串行 await,压缩 DO active 时长。
+    const stored = await this.state.storage.get<StoredNumber | StoredCounter>([
+      penaltyStorageKey,
+      counterStorageKey,
+    ]);
+
+    const storedPenalty = stored.get(penaltyStorageKey) as StoredNumber | undefined;
+    const parsedPenalty = storedPenalty && !isExpired(storedPenalty.expiresAtEpochMs, nowMs)
+      ? Number(storedPenalty.value)
+      : 0;
+    const penaltyLevel = Number.isFinite(parsedPenalty) && parsedPenalty > 0
+      ? Math.min(maxPenaltyLevel, Math.floor(parsedPenalty))
+      : 0;
     const penaltyFactor = penaltyLevel + 1;
     const effectiveLimit = Math.max(1, Math.floor(limit / penaltyFactor));
     const effectiveWindowSeconds = baseWindowSeconds * penaltyFactor;
     const windowBucket = Math.floor(now / effectiveWindowSeconds);
     const resetAt = (windowBucket + 1) * effectiveWindowSeconds;
-    const counter = await this.state.storage.get<StoredCounter>(`${storageKeyPrefix}:counter`);
+    const counter = stored.get(counterStorageKey) as StoredCounter | undefined;
     const current = counter
       && !isExpired(counter.expiresAtEpochMs, nowMs)
       && counter.bucket === windowBucket
@@ -244,26 +348,29 @@ export class SkillscatStateDurableObject {
         : 0;
       const nextViolations = currentViolations + 1;
 
-      await this.state.storage.put<StoredViolations>(`${storageKeyPrefix}:violations`, {
-        bucket: violationBucket,
-        count: nextViolations,
-        expiresAtEpochMs: nowMs + burstViolationWindowSeconds * 2 * 1000,
-      });
+      // 批量写 violations(及可能的 penalty 升级):一次 storage 往返。
+      const writes: Record<string, StoredViolations | StoredNumber> = {
+        [`${storageKeyPrefix}:violations`]: {
+          bucket: violationBucket,
+          count: nextViolations,
+          expiresAtEpochMs: nowMs + burstViolationWindowSeconds * 2 * 1000,
+        },
+      };
 
       if (nextViolations >= burstViolationThreshold && penaltyLevel < maxPenaltyLevel) {
         const nextPenaltyLevel = Math.min(maxPenaltyLevel, penaltyLevel + 1);
-        await this.putStoredNumber(
-          `${storageKeyPrefix}:penalty`,
-          nextPenaltyLevel,
-          getPenaltyTtlSeconds(
+        writes[`${storageKeyPrefix}:penalty`] = {
+          value: nextPenaltyLevel,
+          expiresAtEpochMs: nowMs + getPenaltyTtlSeconds(
             nextPenaltyLevel,
             penaltyTtlLevel1Seconds,
             penaltyTtlLevel2Seconds,
             penaltyTtlLevel3Seconds
-          ),
-          nowMs
-        );
+          ) * 1000,
+        };
       }
+
+      await this.state.storage.put(writes);
 
       return jsonResponse({
         allowed: false,

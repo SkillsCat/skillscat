@@ -22,12 +22,30 @@ class MemoryKV {
 class MemoryDurableObjectStorage {
   private store = new Map<string, unknown>();
 
-  async get<T = unknown>(key: string): Promise<T | undefined> {
-    return this.store.get(key) as T | undefined;
+  async get<T = unknown>(keyOrKeys: string | string[]): Promise<T | Map<string, T> | undefined> {
+    if (Array.isArray(keyOrKeys)) {
+      const result = new Map<string, T>();
+      for (const key of keyOrKeys) {
+        const value = this.store.get(key);
+        if (value !== undefined) {
+          result.set(key, value as T);
+        }
+      }
+      return result;
+    }
+
+    return this.store.get(keyOrKeys) as T | undefined;
   }
 
-  async put<T>(key: string, value: T): Promise<void> {
-    this.store.set(key, value);
+  async put<T>(keyOrEntries: string | Record<string, T>, value?: T): Promise<void> {
+    if (typeof keyOrEntries === 'string') {
+      this.store.set(keyOrEntries, value);
+      return;
+    }
+
+    for (const [key, entryValue] of Object.entries(keyOrEntries)) {
+      this.store.set(key, entryValue);
+    }
   }
 
   async delete(key: string): Promise<boolean> {
