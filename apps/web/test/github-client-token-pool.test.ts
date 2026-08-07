@@ -27,6 +27,34 @@ class MemoryKv {
   }
 }
 
+class MemoryDurableKv extends MemoryKv {
+  getCalls = 0;
+  overridePutCalls = 0;
+  getManyCalls = 0;
+  putIfChangedCalls = 0;
+
+  override async get(key: string) {
+    this.getCalls += 1;
+    return super.get(key);
+  }
+
+  override async put(key: string, value: string) {
+    this.overridePutCalls += 1;
+    return super.put(key, value);
+  }
+
+  async getMany(keys: string[]) {
+    this.getManyCalls += 1;
+    return Promise.all(keys.map((key) => super.get(key)));
+  }
+
+  async putIfChanged(key: string, value: string) {
+    this.putIfChangedCalls += 1;
+    await super.put(key, value);
+    return { written: true, value };
+  }
+}
+
 function jsonResponse(body: unknown, status: number, headers: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -426,5 +454,43 @@ describe('github token pool', () => {
       kv: kv as never,
       tokenId: tokenBId,
     })).resolves.toBeNull();
+  });
+
+  it('batches pooled snapshot reads and writes through the Durable Object store', async () => {
+    const kv = new MemoryDurableKv();
+    const resetAt = String(Math.floor(Date.now() / 1000) + 300);
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(
+      { ok: true },
+      200,
+      {
+        'x-ratelimit-limit': '5000',
+        'x-ratelimit-remaining': '4999',
+        'x-ratelimit-used': '1',
+        'x-ratelimit-reset': resetAt,
+      }
+    ));
+
+    const response = await githubRequest('https://api.github.com/repos/skillscat/demo', {
+      token: ['token-a', 'token-b'],
+      rateLimitKV: kv as never,
+    });
+
+    expect(response.ok).toBe(true);
+    // 排序读取:两个 token 合并为一次 getMany,且不再使用单发 get。
+    expect(kv.getManyCalls).toBe(1);
+    expect(kv.getCalls).toBe(0);
+    // 成功响应的快照写入:读-判重-写合并为一次 putIfChanged,无单独 put。
+    expect(kv.putIfChangedCalls).toBe(1);
+    expect(kv.overridePutCalls).toBe(0);
+
+    const tokenAId = await getGitHubTokenId('token-a');
+    await expect(readRateLimitSnapshot('rest', {
+      kv: kv as never,
+      tokenId: tokenAId,
+    })).resolves.toEqual(expect.objectContaining({
+      remaining: 4999,
+      tokenId: tokenAId,
+    }));
   });
 });

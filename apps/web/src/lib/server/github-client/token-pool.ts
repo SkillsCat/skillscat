@@ -1,6 +1,6 @@
 import {
   isRateLimitSnapshotStale,
-  readRateLimitSnapshot,
+  readRateLimitSnapshotsMany,
   type GitHubRateLimitBucket,
   type GitHubRateLimitSnapshot,
 } from './rate-limit-kv';
@@ -168,12 +168,16 @@ export async function orderGitHubTokenCandidates(
   const nowMs = options.nowMs ?? Date.now();
   const maxAgeMs = options.maxAgeMs ?? TOKEN_HEALTH_MAX_AGE_MS;
 
-  const entries = await Promise.all(candidates.map(async (candidate) => {
-    const snapshot = await readRateLimitSnapshot(options.bucket, {
-      kv: options.kv,
-      keyPrefix: options.keyPrefix,
-      tokenId: candidate.id,
-    });
+  // 批量读所有 token 快照:DO 路径下 N 个 token 只发一次 kv/getMany,
+  // 避免 N 次串行 DO 请求拉长 DO active 计费时长。
+  const snapshots = await readRateLimitSnapshotsMany(options.bucket, {
+    kv: options.kv,
+    keyPrefix: options.keyPrefix,
+    tokenIds: candidates.map((candidate) => candidate.id),
+  });
+
+  const entries = candidates.map((candidate, index) => {
+    const snapshot = snapshots[index] ?? null;
 
     return {
       candidate,
@@ -183,7 +187,7 @@ export async function orderGitHubTokenCandidates(
         && snapshot.resetAtEpochSec * 1000 > nowMs
         && snapshot.remaining <= 0,
     } satisfies TokenOrderEntry;
-  }));
+  });
 
   entries.sort(compareTokenEntries);
   return entries.map((entry) => entry.candidate);

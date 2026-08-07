@@ -1,4 +1,5 @@
 import type { GitHubEndpointId } from './endpoints';
+import { isDurableObjectKvStore } from '../state/client';
 
 export type GitHubRateLimitBucket = 'rest' | 'graphql';
 
@@ -105,6 +106,28 @@ async function persistSnapshotIfNeeded(
     return snapshot;
   }
 
+  const key = getBucketKey(snapshot.bucket, options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX, options.tokenId);
+  const expirationTtl = computeSnapshotTtlSeconds(snapshot.resetAtEpochSec);
+
+  // DO 路径:读-判重-写合并为一次 putIfChanged,避免每次 GitHub 响应 2 次 DO 请求。
+  if (isDurableObjectKvStore(kv)) {
+    const result = await kv.putIfChanged(key, JSON.stringify(snapshot), {
+      expirationTtl,
+      ignoreFields: ['updatedAtEpochMs'],
+      noopWithinMs: SNAPSHOT_NOOP_WRITE_WINDOW_MS,
+      updatedAtField: 'updatedAtEpochMs',
+    });
+
+    if (!result.written) {
+      const existing = parseRateLimitSnapshot(result.value, snapshot.bucket);
+      if (existing) {
+        return existing;
+      }
+    }
+
+    return snapshot;
+  }
+
   const existing = await readRateLimitSnapshot(snapshot.bucket, {
     kv,
     keyPrefix: options.keyPrefix,
@@ -119,11 +142,7 @@ async function persistSnapshotIfNeeded(
     return existing;
   }
 
-  await kv.put(
-    getBucketKey(snapshot.bucket, options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX, options.tokenId),
-    JSON.stringify(snapshot),
-    { expirationTtl: computeSnapshotTtlSeconds(snapshot.resetAtEpochSec) }
-  );
+  await kv.put(key, JSON.stringify(snapshot), { expirationTtl });
 
   return snapshot;
 }
@@ -227,16 +246,7 @@ export async function recordRateLimitFromRateLimitBody(
   return { rest, graphql };
 }
 
-export async function readRateLimitSnapshot(
-  bucket: GitHubRateLimitBucket,
-  options: GitHubRateLimitStorageOptions & { tokenId?: string } = {}
-): Promise<GitHubRateLimitSnapshot | null> {
-  const kv = options.kv;
-  if (!kv) return null;
-
-  const raw = await kv.get(getBucketKey(bucket, options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX, options.tokenId));
-  if (!raw) return null;
-
+function parseRateLimitSnapshot(raw: string, bucket: GitHubRateLimitBucket): GitHubRateLimitSnapshot | null {
   try {
     const parsed = JSON.parse(raw) as Partial<GitHubRateLimitSnapshot>;
     if (!parsed || parsed.bucket !== bucket) return null;
@@ -272,6 +282,48 @@ export async function readRateLimitSnapshot(
   } catch {
     return null;
   }
+}
+
+export async function readRateLimitSnapshot(
+  bucket: GitHubRateLimitBucket,
+  options: GitHubRateLimitStorageOptions & { tokenId?: string } = {}
+): Promise<GitHubRateLimitSnapshot | null> {
+  const kv = options.kv;
+  if (!kv) return null;
+
+  const raw = await kv.get(getBucketKey(bucket, options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX, options.tokenId));
+  if (!raw) return null;
+
+  return parseRateLimitSnapshot(raw, bucket);
+}
+
+/**
+ * 批量读取多个 token 的快照。DO store 时合并为一次 kv/getMany 请求,
+ * 避免按 token 各发一次 DO fetch 拉长 DO active 计费时长。
+ */
+export async function readRateLimitSnapshotsMany(
+  bucket: GitHubRateLimitBucket,
+  options: GitHubRateLimitStorageOptions & { tokenIds: string[] }
+): Promise<(GitHubRateLimitSnapshot | null)[]> {
+  const kv = options.kv;
+  const tokenIds = options.tokenIds;
+  if (!kv || tokenIds.length === 0) {
+    return tokenIds.map(() => null);
+  }
+
+  const keyPrefix = options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX;
+
+  if (isDurableObjectKvStore(kv)) {
+    const keys = tokenIds.map((tokenId) => getBucketKey(bucket, keyPrefix, tokenId));
+    const values = await kv.getMany(keys);
+    return values.map((raw) => (raw ? parseRateLimitSnapshot(raw, bucket) : null));
+  }
+
+  return await Promise.all(tokenIds.map((tokenId) => readRateLimitSnapshot(bucket, {
+    kv,
+    keyPrefix: options.keyPrefix,
+    tokenId,
+  })));
 }
 
 export function aggregateRateLimitSnapshots(
@@ -319,11 +371,11 @@ export async function readAggregatedRateLimitSnapshot(
   }
 
   const nowMs = options.nowMs ?? Date.now();
-  const snapshots = (await Promise.all(tokenIds.map((tokenId) => readRateLimitSnapshot(bucket, {
+  const snapshots = (await readRateLimitSnapshotsMany(bucket, {
     kv,
     keyPrefix: options.keyPrefix,
-    tokenId,
-  }))))
+    tokenIds,
+  }))
     .filter((snapshot): snapshot is GitHubRateLimitSnapshot => Boolean(snapshot))
     .filter((snapshot) => snapshot.resetAtEpochSec * 1000 > nowMs)
     .filter((snapshot) => {

@@ -11,6 +11,40 @@ export interface DurableObjectKvPutOptions {
   expirationTtl?: number;
 }
 
+export interface DurableObjectKvPutIfChangedOptions extends DurableObjectKvPutOptions {
+  /** JSON 浅层比较时忽略的字段(如时间戳) */
+  ignoreFields?: string[];
+  /** 旧值在窗口内且等价时跳过写入 */
+  noopWithinMs?: number;
+  /** 旧值 JSON 中表示更新时间的字段名 */
+  updatedAtField?: string;
+}
+
+export interface DurableObjectKvPutIfChangedResult {
+  written: boolean;
+  value: string;
+}
+
+/**
+ * DO 版 KV 适配器在标准 KVNamespace 之上暴露批量读和条件写,
+ * 用于把多次 DO fetch 合并成一次,压缩 DO active 计费时长。
+ * KV fallback 路径没有这两个方法,用 isDurableObjectKvStore 区分。
+ */
+export interface DurableObjectKvStore extends KVNamespace {
+  getMany(keys: string[]): Promise<(string | null)[]>;
+  putIfChanged(
+    key: string,
+    value: string,
+    options?: DurableObjectKvPutIfChangedOptions
+  ): Promise<DurableObjectKvPutIfChangedResult>;
+}
+
+export function isDurableObjectKvStore(kv: KVNamespace | undefined): kv is DurableObjectKvStore {
+  if (!kv) return false;
+  const candidate = kv as Partial<DurableObjectKvStore>;
+  return typeof candidate.getMany === 'function' && typeof candidate.putIfChanged === 'function';
+}
+
 export async function callStateDurableObject<T>(
   namespace: DurableObjectNamespace,
   objectName: string,
@@ -38,7 +72,7 @@ export async function callStateDurableObject<T>(
 export function createDurableObjectKvStore(
   namespace: DurableObjectNamespace | undefined,
   options: DurableObjectKvStoreOptions
-): KVNamespace | undefined {
+): DurableObjectKvStore | undefined {
   if (!namespace) {
     return undefined;
   }
@@ -53,6 +87,19 @@ export function createDurableObjectKvStore(
       );
       return result.value;
     },
+    async getMany(keys: string[]): Promise<(string | null)[]> {
+      if (keys.length === 0) {
+        return [];
+      }
+
+      const result = await callStateDurableObject<{ values: (string | null)[] }>(
+        namespace,
+        options.objectName,
+        'kv/getMany',
+        { keys }
+      );
+      return result.values;
+    },
     async put(key: string, value: string, putOptions?: DurableObjectKvPutOptions): Promise<void> {
       await callStateDurableObject<{ ok: true }>(
         namespace,
@@ -66,6 +113,26 @@ export function createDurableObjectKvStore(
         }
       );
     },
+    async putIfChanged(
+      key: string,
+      value: string,
+      putOptions?: DurableObjectKvPutIfChangedOptions
+    ): Promise<DurableObjectKvPutIfChangedResult> {
+      return await callStateDurableObject<DurableObjectKvPutIfChangedResult>(
+        namespace,
+        options.objectName,
+        'kv/putIfChanged',
+        {
+          key,
+          value,
+          expiration: putOptions?.expiration,
+          expirationTtl: putOptions?.expirationTtl,
+          ignoreFields: putOptions?.ignoreFields,
+          noopWithinMs: putOptions?.noopWithinMs,
+          updatedAtField: putOptions?.updatedAtField,
+        }
+      );
+    },
     async delete(key: string): Promise<void> {
       await callStateDurableObject<{ ok: true }>(
         namespace,
@@ -74,5 +141,5 @@ export function createDurableObjectKvStore(
         { key }
       );
     },
-  } as unknown as KVNamespace;
+  } as unknown as DurableObjectKvStore;
 }
