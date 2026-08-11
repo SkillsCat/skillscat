@@ -36,23 +36,8 @@
   let highlighter = $state<Awaited<ReturnType<typeof getClientShikiHighlighter>> | null>(null);
   let isLoadingShiki = $state(false);
   let activeFileSelectionId = $state(0);
-  let allowDirectGitHubRead = $state(true);
-  let pendingClientRateLimitSignal = $state(false);
 
   const encodedApiSkillSlug = $derived(encodeURIComponent(skill.slug));
-  const canUseDirectGitHubRead = $derived(Boolean(
-    skill.visibility === 'public'
-    && skill.sourceType === 'github'
-    && skill.repoOwner
-    && skill.repoName
-  ));
-
-  const MAX_DIRECT_DOWNLOAD_FILES = 12;
-  const MAX_DIRECT_FILE_SIZE = 512 * 1024;
-  const MIN_DIRECT_RATE_LIMIT_REMAINING = 15;
-  const CLIENT_GITHUB_RATE_LIMIT_UNTIL_KEY = 'skillscat:github-client-rate-limit-until';
-  const CLIENT_GITHUB_RATE_LIMIT_FALLBACK_HEADER = 'x-skillscat-client-github-rate-limited';
-  const DEFAULT_CLIENT_GITHUB_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
   const BINARY_EXTENSIONS = new Set([
     'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp',
@@ -74,8 +59,6 @@
     highlighter = null;
     isLoadingShiki = false;
     activeFileSelectionId = 0;
-    allowDirectGitHubRead = true;
-    pendingClientRateLimitSignal = false;
   });
 
   function isBinaryFile(path: string): boolean {
@@ -92,167 +75,6 @@
       return CSS.escape(value);
     }
     return value.replace(/["\\\]]/g, '\\$&');
-  }
-
-  function getStoredClientRateLimitUntil(): number | null {
-    if (typeof window === 'undefined') return null;
-    const raw = window.sessionStorage.getItem(CLIENT_GITHUB_RATE_LIMIT_UNTIL_KEY);
-    if (!raw) return null;
-
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  function setStoredClientRateLimitUntil(untilMs: number): void {
-    if (typeof window === 'undefined') return;
-    window.sessionStorage.setItem(CLIENT_GITHUB_RATE_LIMIT_UNTIL_KEY, String(untilMs));
-  }
-
-  function parseRateLimitRemaining(headers: Headers): number | null {
-    const value = headers.get('x-ratelimit-remaining');
-    if (!value) return null;
-
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  function parseRateLimitResetMs(headers: Headers): number | null {
-    const retryAfter = headers.get('retry-after');
-    if (retryAfter) {
-      const seconds = Number.parseInt(retryAfter, 10);
-      if (Number.isFinite(seconds) && seconds >= 0) {
-        return Date.now() + (seconds * 1000);
-      }
-
-      const asDate = Date.parse(retryAfter);
-      if (Number.isFinite(asDate)) {
-        return asDate;
-      }
-    }
-
-    const resetEpoch = headers.get('x-ratelimit-reset');
-    if (!resetEpoch) return null;
-
-    const parsed = Number.parseInt(resetEpoch, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) return null;
-
-    return parsed * 1000;
-  }
-
-  function markClientGithubRateLimited(headers: Headers): void {
-    allowDirectGitHubRead = false;
-    pendingClientRateLimitSignal = true;
-
-    const resetAt = parseRateLimitResetMs(headers) ?? (Date.now() + DEFAULT_CLIENT_GITHUB_RATE_LIMIT_WINDOW_MS);
-    setStoredClientRateLimitUntil(resetAt);
-  }
-
-  function consumeClientRateLimitSignalHeaders(): HeadersInit | undefined {
-    if (!pendingClientRateLimitSignal) return undefined;
-
-    pendingClientRateLimitSignal = false;
-    return { [CLIENT_GITHUB_RATE_LIMIT_FALLBACK_HEADER]: '1' };
-  }
-
-  $effect(() => {
-    const storedUntil = getStoredClientRateLimitUntil();
-    if (!storedUntil) return;
-
-    if (storedUntil > Date.now()) {
-      allowDirectGitHubRead = false;
-      return;
-    }
-
-    window.sessionStorage.removeItem(CLIENT_GITHUB_RATE_LIMIT_UNTIL_KEY);
-  });
-
-  function decodeGitHubBase64ToUtf8(base64: string): string {
-    const cleanBase64 = base64.replace(/\n/g, '');
-    const binaryString = atob(cleanBase64);
-    const bytes = new Uint8Array(binaryString.length);
-
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-
-    return new TextDecoder('utf-8').decode(bytes);
-  }
-
-  function buildGitHubContentApiUrl(relativePath: string): string | null {
-    if (!canUseDirectGitHubRead || !allowDirectGitHubRead) return null;
-
-    const normalizedRelativePath = relativePath.replace(/^\/+/, '').replace(/^\.\//, '');
-    if (!normalizedRelativePath || normalizedRelativePath.includes('..')) return null;
-
-    const fullPath = skill.skillPath
-      ? `${skill.skillPath}/${normalizedRelativePath}`.replace(/^\/+/, '')
-      : normalizedRelativePath;
-
-    const encodedPath = fullPath
-      .split('/')
-      .filter(Boolean)
-      .map((segment) => encodeURIComponent(segment))
-      .join('/');
-
-    if (!encodedPath) return null;
-
-    return `https://api.github.com/repos/${encodeURIComponent(skill.repoOwner)}/${encodeURIComponent(skill.repoName)}/contents/${encodedPath}`;
-  }
-
-  interface GitHubContentResponse {
-    content?: string;
-    encoding?: string;
-    size?: number;
-    type?: string;
-  }
-
-  interface DirectGitHubFileResult {
-    content: string | null;
-    remaining: number | null;
-  }
-
-  async function fetchGitHubFileDirect(relativePath: string): Promise<DirectGitHubFileResult> {
-    const contentUrl = buildGitHubContentApiUrl(relativePath);
-    if (!contentUrl) return { content: null, remaining: null };
-
-    const response = await fetch(contentUrl, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-      },
-    });
-
-    const remaining = parseRateLimitRemaining(response.headers);
-    if (remaining !== null && remaining <= MIN_DIRECT_RATE_LIMIT_REMAINING) {
-      allowDirectGitHubRead = false;
-    }
-
-    if (response.status === 404) {
-      allowDirectGitHubRead = false;
-      return { content: null, remaining };
-    }
-
-    if (response.status === 429 || (response.status === 403 && remaining === 0)) {
-      markClientGithubRateLimited(response.headers);
-      return { content: null, remaining };
-    }
-
-    if (!response.ok) {
-      throw new Error(`GitHub fetch failed (${response.status})`);
-    }
-
-    const payload = await response.json() as GitHubContentResponse;
-    if (payload.type !== 'file' || payload.encoding !== 'base64' || !payload.content) {
-      throw new Error('Unexpected GitHub content response');
-    }
-
-    if (payload.size && payload.size > MAX_DIRECT_FILE_SIZE) {
-      throw new Error('File too large');
-    }
-
-    return {
-      content: decodeGitHubBase64ToUtf8(payload.content),
-      remaining,
-    };
   }
 
   function toggleFolder(path: string) {
@@ -377,34 +199,19 @@
     fileLoading = true;
 
     try {
-      let resolvedContent: string | null = null;
-      try {
-        const directResult = await fetchGitHubFileDirect(path);
-        resolvedContent = directResult.content;
-      } catch (directError) {
-        console.warn('Direct GitHub file fetch failed, fallback to SkillsCat API:', directError);
+      const response = await fetch(
+        `/api/skills/${encodedApiSkillSlug}/file?path=${encodeURIComponent(path)}`
+      );
+
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({ message: 'Failed to load file' })) as { message?: string };
+        throw new Error(errorPayload.message || 'Failed to load file');
       }
 
-      if (resolvedContent !== null) {
-        if (selectionId !== activeFileSelectionId || selectedFile !== path) return;
-        fileContent = resolvedContent;
-      } else {
-        const fallbackHeaders = consumeClientRateLimitSignalHeaders();
-        const response = await fetch(
-          `/api/skills/${encodedApiSkillSlug}/file?path=${encodeURIComponent(path)}`,
-          fallbackHeaders ? { headers: fallbackHeaders } : undefined
-        );
-
-        if (!response.ok) {
-          const errorPayload = await response.json().catch(() => ({ message: 'Failed to load file' })) as { message?: string };
-          throw new Error(errorPayload.message || 'Failed to load file');
-        }
-
-        const result = await response.json() as { path: string; content: string };
-        resolvedContent = result.content;
-        if (selectionId !== activeFileSelectionId || selectedFile !== path) return;
-        fileContent = resolvedContent;
-      }
+      const result = await response.json() as { path: string; content: string };
+      const resolvedContent = result.content;
+      if (selectionId !== activeFileSelectionId || selectedFile !== path) return;
+      fileContent = resolvedContent;
 
       if (resolvedContent) {
         void updateHighlightedFileContent(path, resolvedContent, selectionId);

@@ -2,6 +2,10 @@ import { getBlob, getRepo, getTreeRecursive } from '$lib/server/github-client/re
 import { buildGithubSkillR2Prefixes, buildUploadSkillR2Prefix } from '$lib/skill-path';
 import { buildBundleExpectationFromFileTree, chooseBestR2Bundle } from '$lib/server/skill/r2-bundle';
 import { resolveSkillRelativePath } from '$lib/server/skill/scope';
+import {
+  createMemoizedDurableObjectKvStore,
+  isDurableObjectKvStore,
+} from '$lib/server/state/client';
 import type { SkillDetail } from '$lib/types';
 import type { SkillFile } from '$lib/server/skill/files';
 
@@ -189,6 +193,9 @@ export async function resolveOpenClawBundleFiles(input: {
   githubRateLimitKV?: KVNamespace;
 }): Promise<SkillFile[]> {
   const { skill, r2, githubToken, githubRateLimitKV } = input;
+  const requestRateLimitKV = isDurableObjectKvStore(githubRateLimitKV)
+    ? createMemoizedDurableObjectKvStore(githubRateLimitKV)
+    : githubRateLimitKV;
 
   if (skill.sourceType === 'upload') {
     const prefix = buildUploadSkillR2Prefix(skill.slug);
@@ -222,5 +229,5 @@ export async function resolveOpenClawBundleFiles(input: {
     }
   }
 
-  return fetchGitHubBundleFiles(skill, githubToken, githubRateLimitKV);
+  return fetchGitHubBundleFiles(skill, githubToken, requestRateLimitKV);
 }

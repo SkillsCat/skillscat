@@ -823,6 +823,20 @@ queue = "skillscat-indexing"
 
 [env.production.vars]
 GITHUB_EVENTS_PER_PAGE = "100"
+GITHUB_EVENTS_PAGES = "1"
+GITHUB_EVENTS_KNOWN_REPOS_ONLY = "1"
+GITHUB_EVENTS_MAX_QUEUED_REPOS = "20"
+GITHUB_EVENTS_MIN_REST_REMAINING = "1000"
+GITHUB_EVENTS_REST_RESERVE = "300"
+GITHUB_SEARCH_DISCOVERY_ENABLED = "1"
+GITHUB_SEARCH_DISCOVERY_QUERY = "filename:SKILL.md"
+GITHUB_SEARCH_DISCOVERY_PAGES = "1"
+GITHUB_SEARCH_DISCOVERY_PER_PAGE = "100"
+GITHUB_SEARCH_DISCOVERY_INTERVAL_SECONDS = "900"
+GITHUB_SEARCH_DISCOVERY_MIN_REMAINING = "2"
+GITHUB_SEARCH_DISCOVERY_RESERVE = "2"
+GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS = "300"
+GITHUB_DISCOVERY_LOCK_TTL_SECONDS = "240"
 `.trim(),
   'wrangler.indexing.toml': `
 [env.production]
@@ -833,6 +847,7 @@ queue = "skillscat-indexing"
 max_batch_size = 10
 max_batch_timeout = 30
 max_retries = 3
+max_concurrency = 1
 dead_letter_queue = "skillscat-indexing-dlq"
 
 [[env.production.d1_databases]]
@@ -854,6 +869,10 @@ class_name = "SkillscatStateDurableObject"
 script_name = "skillscat-state-production"
 
 [[env.production.queues.producers]]
+binding = "INDEXING_QUEUE"
+queue = "skillscat-indexing"
+
+[[env.production.queues.producers]]
 binding = "CLASSIFICATION_QUEUE"
 queue = "skillscat-classification"
 
@@ -864,6 +883,9 @@ queue = "skillscat-security-analysis"
 [env.production.vars]
 GITHUB_API_VERSION = "2022-11-28"
 GITHUB_HTML_INDEXING_FALLBACK_ENABLED = "1"
+GITHUB_INDEXING_REST_RESERVE = "500"
+GITHUB_INDEXING_ESTIMATED_REQUESTS_PER_MESSAGE = "60"
+GITHUB_INDEXING_RATE_LIMIT_MAX_AGE_SECONDS = "600"
 INDEXNOW_ENABLED = "1"
 `.trim(),
   'wrangler.classification.toml': `

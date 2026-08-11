@@ -1,12 +1,16 @@
 /**
  * GitHub Events Worker
  *
- * 轮询 GitHub Events API，并在预算允许时使用 Code Search 增强发现
+ * 轮询 GitHub Events API 刷新已知仓库，并在预算允许时使用 Code Search 发现新仓库
  * 通过 Cron Trigger 默认每 5 分钟执行一次
  */
 
 import type { GithubEventsEnv, GitHubEvent, IndexingMessage } from './shared/types';
-import { getGitHubRateLimitKVFromEnv, getGitHubRequestAuthFromEnv } from '../src/lib/server/github-client/env';
+import {
+  getGitHubRateLimitKVFromEnv,
+  getGitHubRequestAuthFromEnv,
+  withGitHubRateLimitKVOverride,
+} from '../src/lib/server/github-client/env';
 import { getRateLimit, listPublicEvents, searchCode } from '../src/lib/server/github-client/rest';
 import {
   isRateLimitSnapshotStale,
@@ -18,9 +22,15 @@ import {
   resolveGitHubTokenCandidates,
   resolveGitHubTokenIds,
 } from '../src/lib/server/github-client/token-pool';
+import {
+  createMemoizedDurableObjectKvStore,
+  isDurableObjectKvStore,
+} from '../src/lib/server/state/client';
 
 const DEFAULT_EVENTS_PER_PAGE = 100;
 const DEFAULT_EVENTS_PAGES = 1;
+const DEFAULT_EVENTS_KNOWN_REPOS_ONLY = true;
+const DEFAULT_EVENTS_MAX_QUEUED_REPOS = 20;
 const DEFAULT_EVENTS_MIN_REST_REMAINING = 1000;
 const DEFAULT_EVENTS_REST_RESERVE = 300;
 const DEFAULT_SEARCH_DISCOVERY_QUERY = 'filename:SKILL.md';
@@ -28,12 +38,17 @@ const DEFAULT_SEARCH_DISCOVERY_PAGES = 1;
 const DEFAULT_SEARCH_DISCOVERY_PER_PAGE = 100;
 const DEFAULT_SEARCH_DISCOVERY_INTERVAL_SECONDS = 15 * 60;
 const DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS = 5 * 60;
-const DEFAULT_MIN_REST_REMAINING = 1000;
-const DEFAULT_REST_RESERVE = 300;
+const DEFAULT_SEARCH_MIN_REMAINING = 2;
+const DEFAULT_SEARCH_RESERVE = 2;
 const DEFAULT_DISCOVERY_LOCK_TTL_SECONDS = 240;
 
 const REPO_QUEUE_DEDUP_TTL_SECONDS = 5 * 60;
 const RATE_LIMIT_SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
+const D1_MAX_BOUND_PARAMETERS = 100;
+const REPO_IDENTITY_BOUND_PARAMETERS = 2;
+const D1_REPO_IDENTITY_CHUNK_SIZE = Math.floor(
+  D1_MAX_BOUND_PARAMETERS / REPO_IDENTITY_BOUND_PARAMETERS
+);
 
 const RUN_LOCK_KEY = 'github-discovery:run-lock';
 const CODE_SEARCH_CURSOR_KEY = 'github-events:code-search:last-head';
@@ -52,6 +67,7 @@ interface SearchDiscoveryResult {
 interface EventsDiscoveryResult {
   processed: number;
   queued: number;
+  unknownSkipped: number;
   pagesFetched: number;
   allowedPages: number;
   skippedReason?: string;
@@ -159,6 +175,8 @@ function getEventsPerPage(env: GithubEventsEnv): number {
 function getEventsDiscoveryConfig(env: GithubEventsEnv): {
   pages: number;
   perPage: number;
+  knownReposOnly: boolean;
+  maxQueuedRepos: number;
   cronIntervalSeconds: number;
   minRestRemaining: number;
   restReserve: number;
@@ -166,6 +184,14 @@ function getEventsDiscoveryConfig(env: GithubEventsEnv): {
   return {
     pages: parsePositiveInt(env.GITHUB_EVENTS_PAGES, DEFAULT_EVENTS_PAGES),
     perPage: getEventsPerPage(env),
+    knownReposOnly: parseEnabled(
+      env.GITHUB_EVENTS_KNOWN_REPOS_ONLY,
+      DEFAULT_EVENTS_KNOWN_REPOS_ONLY
+    ),
+    maxQueuedRepos: parsePositiveInt(
+      env.GITHUB_EVENTS_MAX_QUEUED_REPOS,
+      DEFAULT_EVENTS_MAX_QUEUED_REPOS
+    ),
     cronIntervalSeconds: parsePositiveInt(
       env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
       DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS
@@ -201,8 +227,14 @@ function getSearchDiscoveryConfig(env: GithubEventsEnv): {
       env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
       DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS
     ),
-    minRestRemaining: parsePositiveInt(env.GITHUB_DISCOVERY_MIN_REST_REMAINING, DEFAULT_MIN_REST_REMAINING),
-    restReserve: parsePositiveInt(env.GITHUB_DISCOVERY_REST_RESERVE, DEFAULT_REST_RESERVE),
+    minRestRemaining: parsePositiveInt(
+      env.GITHUB_SEARCH_DISCOVERY_MIN_REMAINING,
+      DEFAULT_SEARCH_MIN_REMAINING
+    ),
+    restReserve: parsePositiveInt(
+      env.GITHUB_SEARCH_DISCOVERY_RESERVE,
+      DEFAULT_SEARCH_RESERVE
+    ),
   };
 }
 
@@ -300,8 +332,59 @@ function extractRepoInfo(event: GitHubEvent): IndexingMessage | null {
     eventId: event.id,
     eventType: event.type,
     createdAt: event.created_at,
+    ...(event.payload?.head ? { headSha: event.payload.head } : {}),
+    ...(event.payload?.ref ? { gitRef: event.payload.ref } : {}),
     discoverySource: 'github-events',
   };
+}
+
+export async function loadKnownGitHubRepoIdentities(
+  db: D1Database,
+  repos: RepoIdentity[]
+): Promise<Set<string>> {
+  const unique = new Map<string, RepoIdentity>();
+  for (const repo of repos) {
+    const identity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
+    if (!unique.has(identity)) unique.set(identity, repo);
+  }
+  if (unique.size === 0) return new Set();
+
+  const candidates = [...unique.values()];
+  const known = new Set<string>();
+
+  for (let offset = 0; offset < candidates.length; offset += D1_REPO_IDENTITY_CHUNK_SIZE) {
+    const chunk = candidates.slice(offset, offset + D1_REPO_IDENTITY_CHUNK_SIZE);
+    const valuesSql = chunk.map(() => '(?, ?)').join(', ');
+    const bindings = chunk.flatMap((repo) => [repo.owner, repo.name]);
+    const result = await db.prepare(`
+      WITH candidate_repos(repo_owner, repo_name) AS (
+        VALUES ${valuesSql}
+      )
+      SELECT c.repo_owner AS repoOwner, c.repo_name AS repoName
+      FROM candidate_repos c
+      WHERE EXISTS (
+        SELECT 1
+        FROM skill_sources AS s INDEXED BY skill_sources_repo_path_unique
+        WHERE s.repo_owner = c.repo_owner
+          AND s.repo_name = c.repo_name
+        LIMIT 1
+      ) OR EXISTS (
+        SELECT 1
+        FROM skills AS sk INDEXED BY skills_repo_path_unique
+        WHERE sk.repo_owner = c.repo_owner
+          AND sk.repo_name = c.repo_name
+        LIMIT 1
+      )
+    `)
+      .bind(...bindings)
+      .all<{ repoOwner: string; repoName: string }>();
+
+    for (const row of result.results || []) {
+      known.add(`${row.repoOwner.toLowerCase()}/${row.repoName.toLowerCase()}`);
+    }
+  }
+
+  return known;
 }
 
 /**
@@ -502,10 +585,14 @@ async function setCodeSearchHeadCursor(env: GithubEventsEnv, fingerprint: string
 
 async function readGitHubRateLimitBudget(
   env: GithubEventsEnv,
-  bucket: 'rest' | 'graphql',
+  bucket: 'rest' | 'search' | 'graphql',
   options: { maxAgeMs?: number; includeStale?: boolean } = {}
 ): Promise<GitHubRateLimitSnapshot | null> {
   const tokenIds = await resolveGitHubTokenIds(getGitHubTokenInputFromEnv(env));
+  // The anonymous GitHub API pool is only 60 requests/hour and is shared by
+  // Worker egress. Discovery must stop instead of silently falling back to it.
+  if (tokenIds.length === 0) return null;
+
   return readAggregatedRateLimitSnapshot(bucket, {
     kv: getGitHubRateLimitKVFromEnv(env),
     tokenIds,
@@ -514,8 +601,11 @@ async function readGitHubRateLimitBudget(
   });
 }
 
-async function readOrRefreshRestRateLimitSnapshot(env: GithubEventsEnv): Promise<GitHubRateLimitSnapshot | null> {
-  let snapshot = await readGitHubRateLimitBudget(env, 'rest', {
+async function readOrRefreshRateLimitSnapshot(
+  env: GithubEventsEnv,
+  bucket: 'rest' | 'search'
+): Promise<GitHubRateLimitSnapshot | null> {
+  let snapshot = await readGitHubRateLimitBudget(env, bucket, {
     maxAgeMs: RATE_LIMIT_SNAPSHOT_MAX_AGE_MS,
   });
 
@@ -541,7 +631,7 @@ async function readOrRefreshRestRateLimitSnapshot(env: GithubEventsEnv): Promise
     console.warn('Failed to refresh GitHub rate limit snapshot due to network error:', error);
   }
 
-  snapshot = await readGitHubRateLimitBudget(env, 'rest', {
+  snapshot = await readGitHubRateLimitBudget(env, bucket, {
     maxAgeMs: RATE_LIMIT_SNAPSHOT_MAX_AGE_MS,
   });
   return snapshot;
@@ -558,6 +648,7 @@ async function processEvents(
 ): Promise<EventsDiscoveryResult> {
   let processed = 0;
   let queued = 0;
+  let unknownSkipped = 0;
   let pagesFetched = 0;
 
   const config = getEventsDiscoveryConfig(env);
@@ -566,6 +657,7 @@ async function processEvents(
     return {
       processed,
       queued,
+      unknownSkipped,
       pagesFetched,
       allowedPages: 0,
       skippedReason: 'missing_rate_limit',
@@ -576,6 +668,7 @@ async function processEvents(
     return {
       processed,
       queued,
+      unknownSkipped,
       pagesFetched,
       allowedPages: 0,
       skippedReason: 'insufficient_rest_remaining',
@@ -594,6 +687,7 @@ async function processEvents(
     return {
       processed,
       queued,
+      unknownSkipped,
       pagesFetched,
       allowedPages: 0,
       skippedReason: 'budget_exhausted',
@@ -610,17 +704,18 @@ async function processEvents(
     hadReplayState = replayedPushEventIds.size > 0;
     let newestEventId: string | null = null;
     let reachedLastProcessed = false;
+    let deferredByQueueCap = false;
 
     for (let page = 1; page <= allowedPages; page++) {
       const fetchResult = await fetchGitHubEvents(env, page, config.perPage);
       if (fetchResult.rateLimited) {
-        if (hadReplayState) {
-          await clearEventReplayState(env);
+        if (replayedPushEventIds.size > 0) {
+          await persistEventReplayState(env, lastEventId, replayedPushEventIds);
         }
-        await persistProcessedEventCursor(env, lastEventId, newestEventId);
         return {
           processed,
           queued,
+          unknownSkipped,
           pagesFetched,
           allowedPages,
           skippedReason: 'events_rate_limited',
@@ -642,6 +737,8 @@ async function processEvents(
         newestEventId = sortedEvents[0].id;
       }
 
+      const pushCandidates: Array<{ event: GitHubEvent; message: IndexingMessage }> = [];
+
       for (const event of sortedEvents) {
         if (event.id === lastEventId) {
           reachedLastProcessed = true;
@@ -661,24 +758,69 @@ async function processEvents(
         }
 
         const message = extractRepoInfo(event);
-        if (message) {
-          if (wasRepoQueuedRecently(repoDedupeState, message.repoOwner, message.repoName, undefined, nowMs)) {
-            replayedPushEventIds.add(event.id);
-            continue;
-          }
+        if (message) pushCandidates.push({ event, message });
+      }
 
-          await env.INDEXING_QUEUE.send(message);
-          markRepoQueued(repoDedupeState, message.repoOwner, message.repoName, undefined, nowMs);
-          queued++;
-          console.log(`Queued repo for indexing: ${message.repoOwner}/${message.repoName}`);
+      let knownRepoIdentities: Set<string> | null = null;
+      if (config.knownReposOnly && pushCandidates.length > 0) {
+        try {
+          knownRepoIdentities = await loadKnownGitHubRepoIdentities(
+            env.DB,
+            pushCandidates.map(({ message }) => ({
+              owner: message.repoOwner,
+              name: message.repoName,
+            }))
+          );
+        } catch (error) {
+          console.warn('Failed to load known GitHub repositories; preserving the event cursor for retry:', error);
+          throw error;
+        }
+      }
+
+      for (const { event, message } of pushCandidates) {
+        const repoIdentity = `${message.repoOwner.toLowerCase()}/${message.repoName.toLowerCase()}`;
+        if (knownRepoIdentities && !knownRepoIdentities.has(repoIdentity)) {
+          unknownSkipped++;
+          replayedPushEventIds.add(event.id);
+          continue;
         }
 
+        if (wasRepoQueuedRecently(repoDedupeState, message.repoOwner, message.repoName, undefined, nowMs)) {
+          replayedPushEventIds.add(event.id);
+          continue;
+        }
+
+        if (queued >= config.maxQueuedRepos) {
+          deferredByQueueCap = true;
+          break;
+        }
+
+        await env.INDEXING_QUEUE.send(message);
+        markRepoQueued(repoDedupeState, message.repoOwner, message.repoName, undefined, nowMs);
+        queued++;
+        console.log(`Queued known repo for indexing: ${message.repoOwner}/${message.repoName}`);
         replayedPushEventIds.add(event.id);
+      }
+
+      if (deferredByQueueCap) {
+        break;
       }
 
       if (reachedLastProcessed || events.length < config.perPage) {
         break;
       }
+    }
+
+    if (deferredByQueueCap) {
+      await persistEventReplayState(env, lastEventId, replayedPushEventIds);
+      return {
+        processed,
+        queued,
+        unknownSkipped,
+        pagesFetched,
+        allowedPages,
+        skippedReason: 'queue_cap_reached',
+      };
     }
 
     if (hadReplayState) {
@@ -700,6 +842,7 @@ async function processEvents(
   return {
     processed,
     queued,
+    unknownSkipped,
     pagesFetched,
     allowedPages,
   };
@@ -708,7 +851,7 @@ async function processEvents(
 async function processCodeSearchDiscovery(
   env: GithubEventsEnv,
   repoDedupeState: RepoQueueDedupeState,
-  initialRestSnapshot?: GitHubRateLimitSnapshot | null,
+  initialSearchSnapshot?: GitHubRateLimitSnapshot | null,
   nowMs: number = Date.now()
 ): Promise<SearchDiscoveryResult> {
   const config = getSearchDiscoveryConfig(env);
@@ -734,17 +877,17 @@ async function processCodeSearchDiscovery(
     };
   }
 
-  const restSnapshot = (!initialRestSnapshot || isRateLimitSnapshotStale(initialRestSnapshot, RATE_LIMIT_SNAPSHOT_MAX_AGE_MS))
-    ? await readOrRefreshRestRateLimitSnapshot(env)
-    : initialRestSnapshot;
-  if (!restSnapshot) {
+  const searchSnapshot = (!initialSearchSnapshot || isRateLimitSnapshotStale(initialSearchSnapshot, RATE_LIMIT_SNAPSHOT_MAX_AGE_MS))
+    ? await readOrRefreshRateLimitSnapshot(env, 'search')
+    : initialSearchSnapshot;
+  if (!searchSnapshot) {
     return {
       ...baseResult,
       skippedReason: 'missing_rate_limit',
     };
   }
 
-  if (restSnapshot.remaining < config.minRestRemaining) {
+  if (searchSnapshot.remaining < config.minRestRemaining) {
     return {
       ...baseResult,
       skippedReason: 'insufficient_rest_remaining',
@@ -753,8 +896,8 @@ async function processCodeSearchDiscovery(
 
   const allowedPages = computeAllowedSearchPages(
     config.pages,
-    restSnapshot.remaining,
-    restSnapshot.resetAtEpochSec,
+    searchSnapshot.remaining,
+    searchSnapshot.resetAtEpochSec,
     config.cronIntervalSeconds,
     config.restReserve
   );
@@ -846,6 +989,7 @@ async function processCodeSearchDiscovery(
         repoOwner: repo.owner,
         repoName: repo.name,
         skillPath,
+        skillFilePath: item.path,
         discoverySource: 'github-code-search',
         discoveryFingerprint: fingerprint,
       };
@@ -964,7 +1108,14 @@ export default {
     env: GithubEventsEnv,
     _ctx: ExecutionContext
   ): Promise<void> {
-    const lockToken = await acquireDiscoveryRunLock(env);
+    const sharedRateLimitKV = getGitHubRateLimitKVFromEnv(env);
+    const runtimeEnv = withGitHubRateLimitKVOverride(
+      env,
+      isDurableObjectKvStore(sharedRateLimitKV)
+        ? createMemoizedDurableObjectKvStore(sharedRateLimitKV)
+        : sharedRateLimitKV
+    );
+    const lockToken = await acquireDiscoveryRunLock(runtimeEnv);
     if (!lockToken) {
       console.log('GitHub Events Worker skipped due to active discovery lock');
       return;
@@ -976,43 +1127,40 @@ export default {
     let nowMs = Date.now();
 
     try {
-      repoDedupeState = await readRepoQueueDedupeState(env, nowMs);
+      repoDedupeState = await readRepoQueueDedupeState(runtimeEnv, nowMs);
 
-      if (!await hasDiscoveryRunLockOwnership(env, lockToken)) {
+      if (!await hasDiscoveryRunLockOwnership(runtimeEnv, lockToken)) {
         console.log('GitHub Events Worker lock ownership lost before discovery start');
         return;
       }
 
-      const restBeforeEvents = await readOrRefreshRestRateLimitSnapshot(env);
+      const restBeforeEvents = await readOrRefreshRateLimitSnapshot(runtimeEnv, 'rest');
 
-      if (!await hasDiscoveryRunLockOwnership(env, lockToken)) {
+      if (!await hasDiscoveryRunLockOwnership(runtimeEnv, lockToken)) {
         console.log('GitHub Events Worker lock ownership lost before events processing');
         return;
       }
 
-      const eventsResult = await processEvents(env, restBeforeEvents, repoDedupeState, nowMs);
-      const restAfterEvents = await readGitHubRateLimitBudget(env, 'rest', {
+      const eventsResult = await processEvents(runtimeEnv, restBeforeEvents, repoDedupeState, nowMs);
+      const searchBeforeDiscovery = await readGitHubRateLimitBudget(runtimeEnv, 'search', {
         includeStale: true,
       });
 
-      if (!await hasDiscoveryRunLockOwnership(env, lockToken)) {
+      if (!await hasDiscoveryRunLockOwnership(runtimeEnv, lockToken)) {
         console.log('GitHub Events Worker lock ownership lost before code search processing');
         return;
       }
 
       nowMs = Date.now();
-      const searchResult = await processCodeSearchDiscovery(env, repoDedupeState, restAfterEvents, nowMs);
-      const restSnapshot = await readGitHubRateLimitBudget(env, 'rest', { includeStale: true });
-      const graphqlSnapshot = await readGitHubRateLimitBudget(env, 'graphql', { includeStale: true });
-
+      const searchResult = await processCodeSearchDiscovery(runtimeEnv, repoDedupeState, searchBeforeDiscovery, nowMs);
       console.log(
-        `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, rest_remaining=${restSnapshot?.remaining ?? 'unknown'}, graphql_remaining=${graphqlSnapshot?.remaining ?? 'unknown'}`
+        `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_unknown_skipped=${eventsResult.unknownSkipped}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, rest_snapshot_remaining=${restBeforeEvents?.remaining ?? 'unknown'}, search_snapshot_remaining=${searchBeforeDiscovery?.remaining ?? 'unknown'}`
       );
     } finally {
       if (repoDedupeState) {
-        await persistRepoQueueDedupeState(env, repoDedupeState, Date.now());
+        await persistRepoQueueDedupeState(runtimeEnv, repoDedupeState, Date.now());
       }
-      await releaseDiscoveryRunLock(env, lockToken);
+      await releaseDiscoveryRunLock(runtimeEnv, lockToken);
     }
   },
 };

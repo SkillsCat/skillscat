@@ -40,6 +40,10 @@ class MemoryStorage {
   async delete(key: string): Promise<void> {
     this.store.delete(key);
   }
+
+  async transaction<T>(closure: (transaction: MemoryStorage) => Promise<T>): Promise<T> {
+    return await closure(this);
+  }
 }
 
 function createHarness() {
@@ -249,5 +253,95 @@ describe('SkillscatStateDurableObject kv/putIfChanged', () => {
     });
 
     expect(json).toEqual(expect.objectContaining({ written: true }));
+  });
+});
+
+describe('SkillscatStateDurableObject github-rate-limit/reserve', () => {
+  function snapshot(remaining: number, updatedAtEpochMs: number): string {
+    return JSON.stringify({
+      bucket: 'rest',
+      limit: 5000,
+      remaining,
+      used: 5000 - remaining,
+      resetAtEpochSec: Math.floor(updatedAtEpochMs / 1000) + 3600,
+      updatedAtEpochMs,
+      source: 'rate_limit_api',
+    });
+  }
+
+  it('atomically accounts for prior batch reservations without rewriting token snapshots', async () => {
+    const { call } = createHarness();
+    const now = Date.now();
+    const keys = [
+      'github-rate-limit:token:a:rest',
+      'github-rate-limit:token:b:rest',
+    ];
+
+    await call('kv/put', { key: keys[0], value: snapshot(700, now), expirationTtl: 7200 });
+    await call('kv/put', { key: keys[1], value: snapshot(600, now), expirationTtl: 7200 });
+
+    const first = await call('github-rate-limit/reserve', {
+      keys,
+      reservationKey: 'github-rate-limit:rest:a,b',
+      bucket: 'rest',
+      requestCost: 300,
+      reservePerToken: 500,
+      maxAgeMs: 600_000,
+    });
+    expect(first.json).toEqual(expect.objectContaining({
+      allowed: true,
+      status: 'allowed',
+      remaining: 1000,
+      required: 1300,
+    }));
+
+    const second = await call('github-rate-limit/reserve', {
+      keys,
+      reservationKey: 'github-rate-limit:rest:a,b',
+      bucket: 'rest',
+      requestCost: 1,
+      reservePerToken: 500,
+      maxAgeMs: 600_000,
+    });
+    expect(second.json).toEqual(expect.objectContaining({
+      allowed: false,
+      status: 'insufficient',
+      remaining: 1000,
+      required: 1001,
+    }));
+
+    await expect(call('kv/get', { key: keys[0] })).resolves.toEqual(expect.objectContaining({
+      json: { value: snapshot(700, now) },
+    }));
+    await expect(call('kv/get', { key: keys[1] })).resolves.toEqual(expect.objectContaining({
+      json: { value: snapshot(600, now) },
+    }));
+  });
+
+  it('discards old reservations after refreshed snapshots change the fingerprint', async () => {
+    const { call } = createHarness();
+    const now = Date.now();
+    const key = 'github-rate-limit:token:a:rest';
+    const body = {
+      keys: [key],
+      reservationKey: 'github-rate-limit:rest:a',
+      bucket: 'rest',
+      requestCost: 100,
+      reservePerToken: 500,
+      maxAgeMs: 600_000,
+    };
+
+    await call('kv/put', { key, value: snapshot(600, now), expirationTtl: 7200 });
+    expect((await call('github-rate-limit/reserve', body)).json).toEqual(
+      expect.objectContaining({ allowed: true })
+    );
+    expect((await call('github-rate-limit/reserve', { ...body, requestCost: 1 })).json).toEqual(
+      expect.objectContaining({ allowed: false, status: 'insufficient' })
+    );
+
+    await call('kv/put', { key, value: snapshot(600, now + 1), expirationTtl: 7200 });
+    expect((await call('github-rate-limit/reserve', { ...body, requestCost: 1 })).json).toEqual(
+      expect.objectContaining({ allowed: true, status: 'allowed' })
+    );
   });
 });

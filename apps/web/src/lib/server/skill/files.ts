@@ -15,6 +15,10 @@ import {
 } from '$lib/server/skill/r2-bundle';
 import { resolveSkillRelativePath } from '$lib/server/skill/scope';
 import { getCurrentSkillVisibility } from '$lib/server/skill/visibility';
+import {
+  createMemoizedDurableObjectKvStore,
+  isDurableObjectKvStore,
+} from '$lib/server/state/client';
 
 export interface SkillFile {
   path: string;
@@ -46,9 +50,6 @@ interface SkillInfo {
   skill_path: string | null;
   readme: string | null;
   visibility: string;
-  last_commit_at: number | null;
-  indexed_at: number | null;
-  updated_at: number | null;
   file_structure: string | null;
 }
 
@@ -65,8 +66,6 @@ interface CachedPublicSkillFiles {
 
 const COMMIT_CACHE_TTL = 300;
 const PUBLIC_CACHE_TTL_SECONDS = 300;
-const STALE_SKILL_REFRESH_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
-const STALE_SKILL_COMMIT_CACHE_TTL_SECONDS = 6 * 60 * 60;
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 
 const TEXT_EXTENSIONS = new Set([
@@ -96,17 +95,6 @@ function decodeBase64ToUtf8(base64: string): string {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return new TextDecoder('utf-8').decode(bytes);
-}
-
-function getSkillFreshnessTimestamp(skill: SkillInfo): number {
-  return skill.last_commit_at || skill.indexed_at || skill.updated_at || 0;
-}
-
-function shouldRunRealtimeRefresh(skill: SkillInfo, hasR2Files: boolean): boolean {
-  if (!hasR2Files) return true;
-  const freshnessTs = getSkillFreshnessTimestamp(skill);
-  if (!freshnessTs) return true;
-  return Date.now() - freshnessTs >= STALE_SKILL_REFRESH_AFTER_MS;
 }
 
 export function parseSkillFilesInput(input: Record<string, unknown>): SkillFilesInput | null {
@@ -286,7 +274,7 @@ async function getR2CacheSha(r2: R2Bucket, r2Prefixes: string[]): Promise<string
 async function fetchSkillInfo(db: D1Database, slug: string): Promise<SkillInfo | null> {
   return db.prepare(`
     SELECT id, name, slug, source_type, repo_owner, repo_name, skill_path, readme, visibility,
-           last_commit_at, indexed_at, updated_at, file_structure
+           file_structure
     FROM skills WHERE slug = ?
   `).bind(slug).first<SkillInfo>();
 }
@@ -333,21 +321,23 @@ async function buildSkillFilesData(
       skill.file_structure
     );
     const hasR2Files = r2Files.length > 0;
-    const shouldRealtimeRefresh = !hasCompleteR2Bundle || shouldRunRealtimeRefresh(skill, hasR2Files);
+    // Public downloads serve the indexed bundle. Freshness is maintained by
+    // background indexing; a download must not fan out to GitHub merely
+    // because an otherwise complete R2 snapshot is old.
+    const shouldRealtimeRefresh = !hasCompleteR2Bundle;
 
     if (!shouldRealtimeRefresh) {
       files.push(...r2Files);
     } else {
       try {
-        const commitCacheTtl = hasR2Files ? STALE_SKILL_COMMIT_CACHE_TTL_SECONDS : COMMIT_CACHE_TTL;
         const latestCommit = await getLatestCommitSha(
           skill.repo_owner,
           skill.repo_name,
           githubToken,
           githubRateLimitKV,
           {
-            cacheTtlSeconds: commitCacheTtl,
-            cacheKeySuffix: hasR2Files ? 'stale' : 'default'
+            cacheTtlSeconds: COMMIT_CACHE_TTL,
+            cacheKeySuffix: 'incomplete'
           }
         );
 
@@ -431,6 +421,10 @@ export async function resolveSkillFiles(
     throw error(503, 'Storage not available');
   }
 
+  const requestRateLimitKV = isDurableObjectKvStore(githubRateLimitKV)
+    ? createMemoizedDurableObjectKvStore(githubRateLimitKV)
+    : githubRateLimitKV;
+
   const currentVisibility = await getCurrentSkillVisibility(db, input.slug);
   if (!currentVisibility) {
     throw error(404, 'Skill not found');
@@ -454,7 +448,13 @@ export async function resolveSkillFiles(
           }
 
           return {
-            result: await buildSkillFilesData({ skill, r2, githubToken, githubRateLimitKV, waitUntil }),
+            result: await buildSkillFilesData({
+              skill,
+              r2,
+              githubToken,
+              githubRateLimitKV: requestRateLimitKV,
+              waitUntil,
+            }),
           };
         },
         PUBLIC_CACHE_TTL_SECONDS,
@@ -501,7 +501,13 @@ export async function resolveSkillFiles(
     }
   }
 
-  const result = await buildSkillFilesData({ skill: bypassSkill, r2, githubToken, githubRateLimitKV, waitUntil });
+  const result = await buildSkillFilesData({
+    skill: bypassSkill,
+    r2,
+    githubToken,
+    githubRateLimitKV: requestRateLimitKV,
+    waitUntil,
+  });
 
   return {
     data: result,

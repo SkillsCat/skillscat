@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   default as indexingWorker,
+  computeIndexingRateLimitAdmission,
   determineSkillVersionRelationType,
   extractStoredFileShas,
   getExistingSkillSnapshot,
@@ -74,6 +75,25 @@ class MemoryKv {
   }
 }
 
+function createRateLimitReservationNamespace(result: {
+  allowed: boolean;
+  status: 'allowed' | 'insufficient' | 'missing' | 'stale' | 'unavailable';
+  remaining: number | null;
+  required: number | null;
+  resetAtEpochSec: number | null;
+  retryAtEpochSec: number | null;
+}) {
+  const fetch = vi.fn(async () => new Response(JSON.stringify(result), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  }));
+  const namespace = {
+    idFromName: vi.fn(() => ({ name: 'github-rate-limit' })),
+    get: vi.fn(() => ({ fetch })),
+  };
+  return { namespace, fetch };
+}
+
 function createIndexingMessage(): IndexingMessage {
   return {
     type: 'check_skill',
@@ -81,6 +101,206 @@ function createIndexingMessage(): IndexingMessage {
     repoName: 'skillscat',
   };
 }
+
+describe('indexing GitHub budget admission', () => {
+  it('fails closed when no managed GitHub rate-limit snapshot is available', () => {
+    expect(computeIndexingRateLimitAdmission(null, 1, {
+      restReserve: 500,
+      estimatedRequestsPerMessage: 60,
+    })).toMatchObject({
+      allowed: false,
+      status: 'unavailable',
+    });
+  });
+
+  it('reserves capacity for every token and every message in the batch', () => {
+    const now = Date.now();
+    const snapshot = {
+      bucket: 'rest' as const,
+      limit: 10_000,
+      remaining: 1_300,
+      used: 8_700,
+      resetAtEpochSec: Math.floor(now / 1000) + 600,
+      updatedAtEpochMs: now,
+      source: 'aggregate' as const,
+      tokenCount: 2,
+      knownTokenCount: 2,
+    };
+
+    expect(computeIndexingRateLimitAdmission(snapshot, 5, {
+      restReserve: 500,
+      estimatedRequestsPerMessage: 60,
+    })).toMatchObject({
+      allowed: true,
+      required: 1_300,
+    });
+
+    expect(computeIndexingRateLimitAdmission({ ...snapshot, remaining: 1_299 }, 5, {
+      restReserve: 500,
+      estimatedRequestsPerMessage: 60,
+    })).toMatchObject({
+      allowed: false,
+      required: 1_300,
+    });
+  });
+
+  it('requeues budget deferrals with delay and acknowledges the original message', async () => {
+    const resetAtEpochSec = Math.floor(Date.now() / 1000) + 600;
+    const { namespace } = createRateLimitReservationNamespace({
+      allowed: false,
+      status: 'insufficient',
+      remaining: 500,
+      required: 560,
+      resetAtEpochSec,
+      retryAtEpochSec: resetAtEpochSec,
+    });
+    const sendBatch = vi.fn(async () => undefined);
+    const ack = vi.fn();
+    const retry = vi.fn();
+
+    await indexingWorker.queue({
+      queue: 'skillscat-indexing',
+      messages: [{
+        id: 'msg-budget',
+        timestamp: new Date(),
+        attempts: 1,
+        body: createIndexingMessage(),
+        ack,
+        retry,
+      }],
+      ackAll: vi.fn(),
+      retryAll: vi.fn(),
+    }, {
+      GITHUB_TOKEN: 'token-a',
+      STATE_DO: namespace,
+      INDEXING_QUEUE: { sendBatch },
+    } as never, {} as never);
+
+    expect(sendBatch).toHaveBeenCalledWith([
+      expect.objectContaining({
+        body: expect.objectContaining({
+          repoOwner: 'backrunner',
+          repoName: 'skillscat',
+          rateLimitDeferrals: 1,
+        }),
+        delaySeconds: expect.any(Number),
+      }),
+    ]);
+    expect(ack).toHaveBeenCalledOnce();
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('backs off stale budget state per message without inheriting another message deferral count', async () => {
+    const nowEpochSec = Math.floor(Date.now() / 1000);
+    const { namespace } = createRateLimitReservationNamespace({
+      allowed: false,
+      status: 'stale',
+      remaining: 500,
+      required: 620,
+      resetAtEpochSec: nowEpochSec,
+      retryAtEpochSec: nowEpochSec,
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'x-ratelimit-limit': '5000',
+        'x-ratelimit-remaining': '4000',
+        'x-ratelimit-reset': String(nowEpochSec + 3600),
+      },
+    }));
+    const sendBatch = vi.fn(async () => undefined);
+    const firstAck = vi.fn();
+    const secondAck = vi.fn();
+
+    await indexingWorker.queue({
+      queue: 'skillscat-indexing',
+      messages: [
+        {
+          id: 'msg-new',
+          timestamp: new Date(),
+          attempts: 1,
+          body: createIndexingMessage(),
+          ack: firstAck,
+          retry: vi.fn(),
+        },
+        {
+          id: 'msg-old',
+          timestamp: new Date(),
+          attempts: 1,
+          body: {
+            ...createIndexingMessage(),
+            repoName: 'skillscat-old',
+            rateLimitDeferrals: 5,
+          },
+          ack: secondAck,
+          retry: vi.fn(),
+        },
+      ],
+      ackAll: vi.fn(),
+      retryAll: vi.fn(),
+    }, {
+      GITHUB_TOKEN: 'token-a',
+      STATE_DO: namespace,
+      INDEXING_QUEUE: { sendBatch },
+    } as never, {} as never);
+
+    const replayed = sendBatch.mock.calls[0]?.[0] as Array<{
+      body: IndexingMessage;
+      delaySeconds: number;
+    }>;
+    expect(replayed).toHaveLength(2);
+    expect(replayed[0].body.rateLimitDeferrals).toBe(1);
+    expect(replayed[0].delaySeconds).toBeGreaterThanOrEqual(60);
+    expect(replayed[0].delaySeconds).toBeLessThan(90);
+    expect(replayed[1].body.rateLimitDeferrals).toBe(6);
+    expect(replayed[1].delaySeconds).toBeGreaterThanOrEqual(1_920);
+    expect(replayed[1].delaySeconds).toBeLessThan(1_950);
+    expect(firstAck).toHaveBeenCalledOnce();
+    expect(secondAck).toHaveBeenCalledOnce();
+  });
+
+  it('uses native Queue retries after the bounded self-requeue window', async () => {
+    const resetAtEpochSec = Math.floor(Date.now() / 1000) + 600;
+    const { namespace } = createRateLimitReservationNamespace({
+      allowed: false,
+      status: 'insufficient',
+      remaining: 500,
+      required: 560,
+      resetAtEpochSec,
+      retryAtEpochSec: resetAtEpochSec,
+    });
+    const sendBatch = vi.fn(async () => undefined);
+    const ack = vi.fn();
+    const retry = vi.fn();
+
+    await indexingWorker.queue({
+      queue: 'skillscat-indexing',
+      messages: [{
+        id: 'msg-budget-cap',
+        timestamp: new Date(),
+        attempts: 1,
+        body: {
+          ...createIndexingMessage(),
+          rateLimitDeferrals: 12,
+        },
+        ack,
+        retry,
+      }],
+      ackAll: vi.fn(),
+      retryAll: vi.fn(),
+    }, {
+      GITHUB_TOKEN: 'token-a',
+      STATE_DO: namespace,
+      INDEXING_QUEUE: { sendBatch },
+    } as never, {} as never);
+
+    expect(sendBatch).not.toHaveBeenCalled();
+    expect(ack).not.toHaveBeenCalled();
+    expect(retry).toHaveBeenCalledOnce();
+    expect(retry).toHaveBeenCalledWith({ delaySeconds: expect.any(Number) });
+  });
+});
 
 describe('indexing worker snapshot lookup', () => {
   it('loads the stored skill snapshot in one query and reuses file_structure data', async () => {
@@ -649,6 +869,38 @@ describe('indexing worker lineage helpers', () => {
 });
 
 describe('queueDiscoveredSkillPaths', () => {
+  it('preserves the exact SKILL.md casing discovered in the repository tree', async () => {
+    const kv = new MemoryKv();
+    const send = vi.fn(async () => undefined);
+
+    await queueDiscoveredSkillPaths(
+      createIndexingMessage(),
+      'backrunner',
+      'skillscat',
+      'sha-123',
+      ['agents/cursor'],
+      {
+        KV: kv,
+        INDEXING_QUEUE: { send },
+      } as never,
+      {
+        sha: 'sha-123',
+        truncated: false,
+        tree: [{
+          path: 'agents/cursor/skill.md',
+          type: 'blob',
+          sha: 'blob-123',
+          mode: '100644',
+        }],
+      }
+    );
+
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      skillPath: 'agents/cursor',
+      skillFilePath: 'agents/cursor/skill.md',
+    }));
+  });
+
   it('suppresses duplicate discovered path enqueues while the first batch is still pending', async () => {
     const kv = new MemoryKv();
     const send = vi.fn(async () => undefined);
@@ -803,6 +1055,15 @@ describe('queueDiscoveredSkillPaths', () => {
     const retryFirst = vi.fn();
     const retrySecond = vi.fn();
 
+    const { namespace } = createRateLimitReservationNamespace({
+      allowed: true,
+      status: 'allowed',
+      remaining: 4000,
+      required: 620,
+      resetAtEpochSec: Math.floor(Date.now() / 1000) + 3600,
+      retryAtEpochSec: Math.floor(Date.now() / 1000) + 600,
+    });
+
     await indexingWorker.queue({
       messages: [
         {
@@ -832,6 +1093,7 @@ describe('queueDiscoveredSkillPaths', () => {
     } as never, {
       KV: kv,
       GITHUB_TOKEN: 'token-a',
+      STATE_DO: namespace,
     } as never, {} as never);
 
     expect(ackFirst).toHaveBeenCalledTimes(1);
@@ -840,5 +1102,94 @@ describe('queueDiscoveredSkillPaths', () => {
     expect(retrySecond).not.toHaveBeenCalled();
     await expect(kv.get(pendingKey)).resolves.toBeNull();
     expect(kv.deleteCalls).toBe(1);
+  });
+});
+
+describe('indexing worker negative repository path', () => {
+  it('resolves the current default-branch head instead of trusting a stale PushEvent SHA', async () => {
+    const requestedUrls: string[] = [];
+    const currentHead = 'b'.repeat(40);
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      requestedUrls.push(url);
+
+      if (url === 'https://api.github.com/repos/noise/unrelated') {
+        return new Response(JSON.stringify({
+          fork: false,
+          owner: { login: 'noise' },
+          name: 'unrelated',
+          stargazers_count: 0,
+          forks_count: 0,
+          default_branch: 'main',
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === 'https://api.github.com/repos/noise/unrelated/commits/main') {
+        return new Response(JSON.stringify({ sha: currentHead }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      if (url === `https://api.github.com/repos/noise/unrelated/git/trees/${currentHead}?recursive=1`) {
+        return new Response(JSON.stringify({
+          sha: 'tree-sha',
+          truncated: false,
+          tree: [{ path: 'README.md', type: 'blob', sha: 'readme', mode: '100644' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const ack = vi.fn();
+    const retry = vi.fn();
+    const { namespace } = createRateLimitReservationNamespace({
+      allowed: true,
+      status: 'allowed',
+      remaining: 4000,
+      required: 560,
+      resetAtEpochSec: Math.floor(Date.now() / 1000) + 3600,
+      retryAtEpochSec: Math.floor(Date.now() / 1000) + 600,
+    });
+    await indexingWorker.queue({
+      queue: 'skillscat-indexing',
+      messages: [{
+        id: 'msg-no-skill',
+        timestamp: new Date(),
+        body: {
+          type: 'check_skill',
+          repoOwner: 'noise',
+          repoName: 'unrelated',
+          headSha: 'a'.repeat(40),
+          gitRef: 'refs/heads/main',
+          discoverySource: 'github-events',
+        },
+        ack,
+        retry,
+      }],
+      ackAll: vi.fn(),
+      retryAll: vi.fn(),
+    }, {
+      KV: new MemoryKv(),
+      GITHUB_TOKEN: 'token-a',
+      STATE_DO: namespace,
+      GITHUB_HTML_INDEXING_FALLBACK_ENABLED: '1',
+    } as never, {
+      waitUntil: vi.fn(),
+      passThroughOnException: vi.fn(),
+    });
+
+    expect(ack).toHaveBeenCalledOnce();
+    expect(retry).not.toHaveBeenCalled();
+    expect(requestedUrls).toEqual([
+      'https://api.github.com/repos/noise/unrelated',
+      'https://api.github.com/repos/noise/unrelated/commits/main',
+      `https://api.github.com/repos/noise/unrelated/git/trees/${currentHead}?recursive=1`,
+    ]);
   });
 });

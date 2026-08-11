@@ -90,41 +90,75 @@ describe('resolveOpenClawBundleFiles', () => {
   });
 
   it('fetches root GitHub bundles from the repository tree instead of only returning SKILL.md', async () => {
-    vi.doMock('../src/lib/server/github-client/rest', () => ({
-      getRepo: vi.fn(async () => ({
-        ok: true,
-        json: async () => ({ default_branch: 'main' }),
-      })),
-      getTreeRecursive: vi.fn(async () => ({
-        ok: true,
-        json: async () => ({
-          truncated: false,
-          tree: [
-            { path: 'SKILL.md', type: 'blob', sha: 'skill-md' },
-            { path: 'templates/prompt.txt', type: 'blob', sha: 'prompt' },
-            { path: '.claude/commands/review.md', type: 'blob', sha: 'dot-companion' },
-            { path: 'subskill/SKILL.md', type: 'blob', sha: 'subskill-skill' },
-            { path: 'subskill/extra.txt', type: 'blob', sha: 'subskill-extra' },
-          ],
-        }),
-      })),
-      getBlob: vi.fn(async (_owner: string, _repo: string, sha: string) => ({
-        ok: true,
-        json: async () => {
-          const contentBySha: Record<string, string> = {
-            'skill-md': btoa('# Demo'),
-            prompt: btoa('Write a better prompt'),
-            'dot-companion': btoa('Review the current change set'),
-            'subskill-skill': btoa('# Nested Skill'),
-            'subskill-extra': btoa('Nested companion'),
-          };
+    const underlyingGetMany = vi.fn(async (keys: string[]) => keys.map(() => null));
+    const durableRateLimitKv = {
+      get: vi.fn(async () => null),
+      getMany: underlyingGetMany,
+      put: vi.fn(async () => undefined),
+      putIfChanged: vi.fn(async (_key: string, value: string) => ({ written: true, value })),
+      delete: vi.fn(async () => undefined),
+    } as unknown as KVNamespace;
+    const observeRateLimitState = async (options?: { rateLimitKV?: KVNamespace }) => {
+      const store = options?.rateLimitKV as KVNamespace & {
+        getMany(keys: string[]): Promise<(string | null)[]>;
+      };
+      await store.getMany(['github:rate-limit:rest:test-token']);
+    };
 
-          return {
-            encoding: 'base64',
-            content: contentBySha[sha],
-          };
-        },
-      })),
+    vi.doMock('../src/lib/server/github-client/rest', () => ({
+      getRepo: vi.fn(async (_owner: string, _repo: string, options?: { rateLimitKV?: KVNamespace }) => {
+        await observeRateLimitState(options);
+        return {
+          ok: true,
+          json: async () => ({ default_branch: 'main' }),
+        };
+      }),
+      getTreeRecursive: vi.fn(async (
+        _owner: string,
+        _repo: string,
+        _ref: string,
+        options?: { rateLimitKV?: KVNamespace }
+      ) => {
+        await observeRateLimitState(options);
+        return {
+          ok: true,
+          json: async () => ({
+            truncated: false,
+            tree: [
+              { path: 'SKILL.md', type: 'blob', sha: 'skill-md' },
+              { path: 'templates/prompt.txt', type: 'blob', sha: 'prompt' },
+              { path: '.claude/commands/review.md', type: 'blob', sha: 'dot-companion' },
+              { path: 'subskill/SKILL.md', type: 'blob', sha: 'subskill-skill' },
+              { path: 'subskill/extra.txt', type: 'blob', sha: 'subskill-extra' },
+            ],
+          }),
+        };
+      }),
+      getBlob: vi.fn(async (
+        _owner: string,
+        _repo: string,
+        sha: string,
+        options?: { rateLimitKV?: KVNamespace }
+      ) => {
+        await observeRateLimitState(options);
+        return {
+          ok: true,
+          json: async () => {
+            const contentBySha: Record<string, string> = {
+              'skill-md': btoa('# Demo'),
+              prompt: btoa('Write a better prompt'),
+              'dot-companion': btoa('Review the current change set'),
+              'subskill-skill': btoa('# Nested Skill'),
+              'subskill-extra': btoa('Nested companion'),
+            };
+
+            return {
+              encoding: 'base64',
+              content: contentBySha[sha],
+            };
+          },
+        };
+      }),
     }));
 
     const { resolveOpenClawBundleFiles } = await import('../src/lib/server/openclaw/bundle-files');
@@ -135,6 +169,7 @@ describe('resolveOpenClawBundleFiles', () => {
       }),
       r2: undefined,
       githubToken: 'token',
+      githubRateLimitKV: durableRateLimitKv,
     });
 
     expect(files.map((file) => file.path)).toEqual([
@@ -144,6 +179,7 @@ describe('resolveOpenClawBundleFiles', () => {
       'subskill/SKILL.md',
       'templates/prompt.txt',
     ]);
+    expect(underlyingGetMany).toHaveBeenCalledOnce();
   });
 
   it('reads nested GitHub bundles from the canonical isolated R2 prefix', async () => {

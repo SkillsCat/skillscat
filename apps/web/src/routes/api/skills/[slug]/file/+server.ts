@@ -13,7 +13,6 @@ import {
 } from '$lib/skill-path';
 
 const PUBLIC_FILE_CACHE_TTL_SECONDS = 300;
-const CLIENT_GITHUB_RATE_LIMIT_HEADER = 'x-skillscat-client-github-rate-limited';
 
 interface FilePayload {
   path: string;
@@ -163,10 +162,6 @@ export const GET: RequestHandler = async ({ params, platform, request, url, loca
 
   if (!isTextFile(filePath)) {
     throw error(400, 'File type not supported');
-  }
-
-  if (request.headers.get(CLIENT_GITHUB_RATE_LIMIT_HEADER) === '1') {
-    console.warn(`Client-side GitHub rate limit header received for skill file ${slug}`);
   }
 
   const resolved = await resolveSkillSourceInfo(

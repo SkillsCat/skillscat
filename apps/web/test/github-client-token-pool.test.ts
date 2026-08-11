@@ -8,6 +8,7 @@ import {
   readRateLimitSnapshot,
 } from '../src/lib/server/github-client/rate-limit-kv';
 import { getGitHubTokenId } from '../src/lib/server/github-client/token-pool';
+import { createMemoizedDurableObjectKvStore } from '../src/lib/server/state/client';
 
 class MemoryKv {
   private readonly store = new Map<string, string>();
@@ -70,6 +71,21 @@ afterEach(() => {
 });
 
 describe('github token pool', () => {
+  it('reuses DO snapshot reads within a batch and updates the memoized view after writes', async () => {
+    const store = new MemoryDurableKv();
+    await store.put('token-a', 'healthy');
+    store.getManyCalls = 0;
+    const memoized = createMemoizedDurableObjectKvStore(store as never);
+
+    await expect(memoized.getMany(['token-a'])).resolves.toEqual(['healthy']);
+    await expect(memoized.getMany(['token-a'])).resolves.toEqual(['healthy']);
+    expect(store.getManyCalls).toBe(1);
+
+    await memoized.putIfChanged('token-a', 'exhausted');
+    await expect(memoized.getMany(['token-a'])).resolves.toEqual(['exhausted']);
+    expect(store.getManyCalls).toBe(1);
+  });
+
   it('rotates to the next token when the current token is rate limited', async () => {
     const kv = new MemoryKv();
     const seenAuthHeaders: string[] = [];
@@ -254,6 +270,38 @@ describe('github token pool', () => {
     expect(kv.putCalls).toBe(0);
   });
 
+  it('records code search headers in the search bucket instead of core REST', async () => {
+    const kv = new MemoryKv();
+    const resetAt = String(Math.floor(Date.now() / 1000) + 60);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(
+      { message: 'search rate limited' },
+      403,
+      {
+        'x-ratelimit-limit': '10',
+        'x-ratelimit-remaining': '0',
+        'x-ratelimit-used': '10',
+        'x-ratelimit-reset': resetAt,
+        'x-ratelimit-resource': 'code_search',
+      }
+    ));
+
+    await githubRequest('https://api.github.com/search/code?q=filename%3ASKILL.md', {
+      token: 'token-a',
+      rateLimitKV: kv as never,
+      rateLimitWritePolicy: 'rate_limit_only',
+    });
+
+    const tokenId = await getGitHubTokenId('token-a');
+    await expect(readRateLimitSnapshot('search', {
+      kv: kv as never,
+      tokenId,
+    })).resolves.toEqual(expect.objectContaining({ remaining: 0 }));
+    await expect(readRateLimitSnapshot('rest', {
+      kv: kv as never,
+      tokenId,
+    })).resolves.toBeNull();
+  });
+
   it('aggregates remaining rate-limit budget across token snapshots', async () => {
     const kv = new MemoryKv();
     const tokenAId = await getGitHubTokenId('token-a');
@@ -317,6 +365,12 @@ describe('github token pool', () => {
           used: 800,
           reset: resetAt,
         },
+        code_search: {
+          limit: 10,
+          remaining: 8,
+          used: 2,
+          reset: resetAt,
+        },
         graphql: {
           limit: 5000,
           remaining: 4700,
@@ -337,7 +391,7 @@ describe('github token pool', () => {
     });
 
     expect(response.ok).toBe(true);
-    expect(kv.putCalls).toBe(2);
+    expect(kv.putCalls).toBe(3);
 
     const tokenId = await getGitHubTokenId('token-a');
     await expect(readRateLimitSnapshot('rest', {
@@ -352,6 +406,13 @@ describe('github token pool', () => {
       tokenId,
     })).resolves.toEqual(expect.objectContaining({
       remaining: 4700,
+      tokenId,
+    }));
+    await expect(readRateLimitSnapshot('search', {
+      kv: kv as never,
+      tokenId,
+    })).resolves.toEqual(expect.objectContaining({
+      remaining: 8,
       tokenId,
     }));
   });
