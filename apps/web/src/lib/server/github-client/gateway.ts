@@ -1,6 +1,7 @@
 import type { GitHubRequestOptions } from './request';
 import {
   buildGitHubRequestHeaders,
+  getGitHubRateLimitBucket,
   getGitHubResponseMetadata,
   getUrlHost,
   isGitHubApiHost,
@@ -150,7 +151,8 @@ async function sendRaw(url: string, options: GitHubRequestOptions): Promise<Resp
   });
 }
 
-async function maybeRecordRestRateLimitFromResponse(
+async function maybeRecordRateLimitFromResponse(
+  url: URL,
   response: Response,
   options: GitHubRequestOptions
 ): Promise<void> {
@@ -178,7 +180,7 @@ async function maybeRecordRestRateLimitFromResponse(
           tokenId: metadata?.tokenId,
         });
 
-        if (recorded.rest || recorded.graphql) {
+        if (recorded.rest || recorded.search || recorded.graphql) {
           if (!recorded.rest) {
             await recordRateLimitFromHeaders(response.headers, 'rest', {
               kv: options.rateLimitKV,
@@ -196,7 +198,8 @@ async function maybeRecordRestRateLimitFromResponse(
     }
   }
 
-  await recordRateLimitFromHeaders(response.headers, 'rest', {
+  const bucket = getGitHubRateLimitBucket(url.toString()) ?? 'rest';
+  await recordRateLimitFromHeaders(response.headers, bucket, {
     kv: options.rateLimitKV,
     keyPrefix: options.rateLimitKeyPrefix,
     endpointId: options.endpointId,
@@ -265,7 +268,7 @@ export async function sendGitHubRequestThroughGateway(
 
     const conditionalOptions = withConditionalHeaders(options, validators);
     const conditionalResponse = await sendRaw(urlString, conditionalOptions);
-    await maybeRecordRestRateLimitFromResponse(conditionalResponse, conditionalOptions);
+    await maybeRecordRateLimitFromResponse(url, conditionalResponse, conditionalOptions);
 
     if (conditionalResponse.status === 304) {
       return cachedResponse;
@@ -288,7 +291,7 @@ export async function sendGitHubRequestThroughGateway(
   }
 
   const response = await sendRaw(urlString, options);
-  await maybeRecordRestRateLimitFromResponse(response, options);
+  await maybeRecordRateLimitFromResponse(url, response, options);
 
   if (isGitHubRateLimitResponse(response)) {
     const fallback = await maybeGraphqlFallback(url, method, options, endpoint, response.clone());

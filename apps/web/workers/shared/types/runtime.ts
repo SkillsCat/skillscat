@@ -14,7 +14,7 @@ export interface Message<T> {
   readonly timestamp: Date;
   readonly body: T;
   ack(): void;
-  retry(): void;
+  retry(options?: { delaySeconds?: number }): void;
 }
 
 export interface MessageBatch<T> {

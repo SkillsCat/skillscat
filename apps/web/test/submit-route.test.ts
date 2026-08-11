@@ -1,6 +1,9 @@
 import { strToU8, zipSync } from 'fflate';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { getRateLimitKvKey } from '../src/lib/server/github-client/rate-limit-kv';
+import { getGitHubTokenId } from '../src/lib/server/github-client/token-pool';
+
 function jsonResponse(body: unknown, status: number = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -8,6 +11,22 @@ function jsonResponse(body: unknown, status: number = 200): Response {
       'content-type': 'application/json',
     },
   });
+}
+
+class MemoryRateLimitKv {
+  readonly store = new Map<string, string>();
+
+  async get(key: string) {
+    return this.store.get(key) ?? null;
+  }
+
+  async put(key: string, value: string) {
+    this.store.set(key, value);
+  }
+
+  async delete(key: string) {
+    this.store.delete(key);
+  }
 }
 
 interface MockExistingSkill {
@@ -180,7 +199,138 @@ describe('submit route', () => {
     expect(githubRequest).toHaveBeenCalledTimes(1);
   });
 
-  it('deduplicates public ZIP discoveries before queueing when GitHub API is rate limited', async () => {
+  it('uses the shared exhausted-budget snapshot before API calls and checks an exact path through raw GitHub', async () => {
+    const commitSha = '0123456789abcdef0123456789abcdef01234567';
+    const githubToken = 'snapshot-exhausted-token';
+    const tokenId = await getGitHubTokenId(githubToken);
+    const nowMs = Date.now();
+    const kv = new MemoryRateLimitKv();
+    kv.store.set(
+      getRateLimitKvKey('rest', 'github-rate-limit', { tokenId }),
+      JSON.stringify({
+        bucket: 'rest',
+        limit: 5000,
+        remaining: 0,
+        used: 5000,
+        resetAtEpochSec: Math.floor(nowMs / 1000) + 3600,
+        updatedAtEpochMs: nowMs,
+        source: 'headers',
+        tokenId,
+      })
+    );
+
+    const githubRequest = vi.fn(async () => {
+      throw new Error('GitHub API must be skipped while the shared REST budget is exhausted');
+    });
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const repositoryHtml = `<script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({
+      payload: {
+        codeViewRepoRoute: {
+          refInfo: {
+            name: 'main',
+            refType: 'branch',
+            currentOid: commitSha,
+          },
+          tree: {
+            items: [{ path: 'skills', contentType: 'directory' }],
+            totalCount: 1,
+          },
+        },
+        codeViewLayoutRoute: {
+          repo: {
+            id: 123,
+            name: 'toolbox',
+            ownerLogin: 'forker',
+            defaultBranch: 'main',
+            createdAt: '2026-01-02T03:04:05Z',
+            private: false,
+            public: true,
+            isOrgOwned: false,
+            isFork: false,
+          },
+        },
+        sidebarAbout: {
+          repoName: 'toolbox',
+          ownerLogin: 'forker',
+          stargazerCount: 42,
+          forksCount: 3,
+          repo: {
+            ownerId: 456,
+            ownerAvatarUrl: 'https://avatars.githubusercontent.com/u/456?v=4',
+            isPrivate: false,
+            isFork: false,
+          },
+        },
+      },
+    })}</script>`;
+    const publicFetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const requestUrl = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      const headers = new Headers(init?.headers);
+      expect(headers.has('Authorization')).toBe(false);
+      expect(headers.has('Cookie')).toBe(false);
+
+      if (requestUrl === 'https://github.com/forker/toolbox') {
+        return new Response(repositoryHtml);
+      }
+      if (requestUrl === `https://raw.githubusercontent.com/forker/toolbox/${commitSha}/skills/alpha/SKILL.md`) {
+        return new Response('# Alpha\n');
+      }
+      throw new Error(`Unexpected public GitHub request: ${requestUrl}`);
+    });
+    vi.stubGlobal('fetch', publicFetch);
+
+    const queue = { send: vi.fn(async () => undefined) };
+    const { POST } = await import('../src/routes/api/submit/+server');
+    const response = await POST({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: buildDbMock(),
+          KV: kv,
+          GITHUB_TOKEN: githubToken,
+          GITHUB_HTML_SUBMIT_FALLBACK_ENABLED: '1',
+          INDEXING_QUEUE: queue,
+        },
+      },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          url: 'https://github.com/forker/toolbox',
+          skillPath: 'skills/alpha',
+        }),
+      }),
+    } as never);
+    const payload = await response.json() as { success: boolean };
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(githubRequest).not.toHaveBeenCalled();
+    expect(publicFetch.mock.calls.map(([input]) => String(input))).toEqual([
+      'https://github.com/forker/toolbox',
+      `https://raw.githubusercontent.com/forker/toolbox/${commitSha}/skills/alpha/SKILL.md`,
+    ]);
+    expect(queue.send).toHaveBeenCalledWith(expect.objectContaining({
+      repoOwner: 'forker',
+      repoName: 'toolbox',
+      skillPath: 'skills/alpha',
+      skillFilePath: 'skills/alpha/SKILL.md',
+    }));
+  });
+
+  it('uses the public ZIP fallback when rate-limit state is unavailable and GitHub API is limited', async () => {
     const commitSha = '0123456789abcdef0123456789abcdef01234567';
     const queue = {
       send: vi.fn(async () => undefined),
@@ -193,6 +343,9 @@ describe('submit route', () => {
         'x-ratelimit-remaining': '0',
       },
     }));
+    const stateFetch = vi.fn(async () => {
+      throw new Error('state unavailable');
+    });
     vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
     vi.doMock('../src/lib/server/auth/middleware', () => ({
       getAuthContext: vi.fn(async () => ({
@@ -280,6 +433,10 @@ describe('submit route', () => {
           GITHUB_TOKEN: 'test-token',
           GITHUB_HTML_SUBMIT_FALLBACK_ENABLED: '1',
           INDEXING_QUEUE: queue,
+          STATE_DO: {
+            idFromName: vi.fn(() => ({ name: 'github-rate-limit' })),
+            get: vi.fn(() => ({ fetch: stateFetch })),
+          },
         },
       },
       request: new Request('https://skills.cat/api/submit', {
@@ -310,9 +467,35 @@ describe('submit route', () => {
       queue.send.mock.invocationCallOrder[0]
     );
     expect(publicFetch).toHaveBeenCalledTimes(2);
+    expect(stateFetch).toHaveBeenCalledTimes(1);
     // The first 429 marks the request as rate limited; later call sites
     // short-circuit to the public fallback instead of re-hitting the API.
     expect(githubRequest).toHaveBeenCalledTimes(1);
+
+    githubRequest.mockClear();
+    publicFetch.mockClear();
+    queue.send.mockClear();
+
+    const noTokenResponse = await POST({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: db,
+          GITHUB_HTML_SUBMIT_FALLBACK_ENABLED: '1',
+          INDEXING_QUEUE: queue,
+        },
+      },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://github.com/forker/toolbox' }),
+      }),
+    } as never);
+
+    expect(noTokenResponse.status).toBe(200);
+    expect(githubRequest).not.toHaveBeenCalled();
+    expect(publicFetch).toHaveBeenCalledTimes(2);
+    expect(queue.send).toHaveBeenCalledTimes(2);
   });
 
   it('refuses fork submissions when rate limiting leaves only the public fallback', async () => {
@@ -640,6 +823,134 @@ describe('submit route', () => {
     // the upstream rate limit instead of a false no_skill_md_found verdict.
     expect(response.status).toBe(429);
     expect(payload.code).toBe('github_rate_limited');
+  });
+
+  it('checks commit-pinned raw SKILL.md when a root snapshot is truncated', async () => {
+    const commitSha = '0123456789abcdef0123456789abcdef01234567';
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          default_branch: 'main',
+          fork: false,
+        });
+      }
+      if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
+        return new Response('rate limited', {
+          status: 429,
+          headers: {
+            'retry-after': '60',
+            'x-ratelimit-remaining': '0',
+          },
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const repositoryHtml = `<script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({
+      payload: {
+        codeViewRepoRoute: {
+          refInfo: {
+            name: 'main',
+            refType: 'branch',
+            currentOid: commitSha,
+          },
+          tree: {
+            items: [{ path: 'README.md', contentType: 'file' }],
+            totalCount: 100,
+          },
+        },
+        codeViewLayoutRoute: {
+          repo: {
+            id: 123,
+            name: 'toolbox',
+            ownerLogin: 'forker',
+            defaultBranch: 'main',
+            createdAt: '2026-01-02T03:04:05Z',
+            private: false,
+            public: true,
+            isOrgOwned: false,
+            isFork: false,
+          },
+        },
+        sidebarAbout: {
+          repoName: 'toolbox',
+          ownerLogin: 'forker',
+          stargazerCount: 42,
+          forksCount: 3,
+          repo: {
+            ownerId: 456,
+            ownerAvatarUrl: 'https://avatars.githubusercontent.com/u/456?v=4',
+            isPrivate: false,
+            isFork: false,
+          },
+        },
+      },
+    })}</script>`;
+    const publicFetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const requestUrl = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      const headers = new Headers(init?.headers);
+      expect(headers.has('Authorization')).toBe(false);
+      expect(headers.has('Cookie')).toBe(false);
+
+      if (requestUrl === 'https://github.com/forker/toolbox') {
+        return new Response(repositoryHtml);
+      }
+      if (requestUrl === `https://codeload.github.com/forker/toolbox/zip/${commitSha}`) {
+        return new Response('not found', { status: 404 });
+      }
+      if (requestUrl === `https://raw.githubusercontent.com/forker/toolbox/${commitSha}/SKILL.md`) {
+        return new Response('# Root skill\n');
+      }
+      throw new Error(`Unexpected public GitHub request: ${requestUrl}`);
+    });
+    vi.stubGlobal('fetch', publicFetch);
+
+    const queue = { send: vi.fn(async () => undefined) };
+    const { POST } = await import('../src/routes/api/submit/+server');
+    const response = await POST({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: buildDbMock(),
+          GITHUB_TOKEN: 'test-token',
+          GITHUB_HTML_SUBMIT_FALLBACK_ENABLED: '1',
+          INDEXING_QUEUE: queue,
+        },
+      },
+      request: new Request('https://skills.cat/api/submit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://github.com/forker/toolbox' }),
+      }),
+    } as never);
+    const payload = await response.json() as { success: boolean };
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(publicFetch.mock.calls.map(([input]) => String(input))).toEqual([
+      'https://github.com/forker/toolbox',
+      `https://codeload.github.com/forker/toolbox/zip/${commitSha}`,
+      `https://raw.githubusercontent.com/forker/toolbox/${commitSha}/SKILL.md`,
+    ]);
+    expect(queue.send).toHaveBeenCalledWith(expect.objectContaining({
+      repoOwner: 'forker',
+      repoName: 'toolbox',
+      skillPath: '',
+      skillFilePath: 'SKILL.md',
+    }));
   });
 
   it('never issues public fallback requests from the anonymous submit precheck', async () => {

@@ -1,7 +1,7 @@
 import type { GitHubEndpointId } from './endpoints';
-import { isDurableObjectKvStore } from '../state/client';
+import { callStateDurableObject, isDurableObjectKvStore } from '../state/client';
 
-export type GitHubRateLimitBucket = 'rest' | 'graphql';
+export type GitHubRateLimitBucket = 'rest' | 'search' | 'graphql';
 
 export interface GitHubRateLimitSnapshot {
   bucket: GitHubRateLimitBucket;
@@ -32,6 +32,8 @@ interface RateLimitResourcePayload {
 interface RateLimitApiBody {
   resources?: {
     core?: RateLimitResourcePayload;
+    search?: RateLimitResourcePayload;
+    code_search?: RateLimitResourcePayload;
     graphql?: RateLimitResourcePayload;
     [key: string]: RateLimitResourcePayload | undefined;
   };
@@ -40,6 +42,23 @@ interface RateLimitApiBody {
 
 const DEFAULT_RATE_LIMIT_KEY_PREFIX = 'github-rate-limit';
 const SNAPSHOT_NOOP_WRITE_WINDOW_MS = 60_000;
+export const GITHUB_RATE_LIMIT_STATE_OBJECT_NAME = 'github-rate-limit';
+
+export type GitHubRateLimitReservationStatus =
+  | 'allowed'
+  | 'insufficient'
+  | 'missing'
+  | 'stale'
+  | 'unavailable';
+
+export interface GitHubRateLimitReservationResult {
+  allowed: boolean;
+  status: GitHubRateLimitReservationStatus;
+  remaining: number | null;
+  required: number | null;
+  resetAtEpochSec: number | null;
+  retryAtEpochSec: number | null;
+}
 
 function getBucketKey(bucket: GitHubRateLimitBucket, keyPrefix: string, tokenId?: string): string {
   return tokenId
@@ -155,6 +174,50 @@ export function getRateLimitKvKey(
   return getBucketKey(bucket, keyPrefix, options.tokenId);
 }
 
+/**
+ * Atomically reserves an estimated request budget across a token pool in one
+ * fixed Durable Object. The DO stores one aggregate reservation record per
+ * token set instead of rewriting every token snapshot for each queue batch.
+ */
+export async function reserveGitHubRateLimitBudget(
+  bucket: GitHubRateLimitBucket,
+  options: GitHubRateLimitStorageOptions & {
+    namespace?: DurableObjectNamespace;
+    tokenIds: string[];
+    requestCost: number;
+    reservePerToken: number;
+    maxAgeMs: number;
+  }
+): Promise<GitHubRateLimitReservationResult> {
+  const tokenIds = [...new Set(options.tokenIds.filter(Boolean))].sort();
+  if (!options.namespace || tokenIds.length === 0) {
+    return {
+      allowed: false,
+      status: 'unavailable',
+      remaining: null,
+      required: null,
+      resetAtEpochSec: null,
+      retryAtEpochSec: null,
+    };
+  }
+
+  const keyPrefix = options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX;
+  const keys = tokenIds.map((tokenId) => getBucketKey(bucket, keyPrefix, tokenId));
+  return await callStateDurableObject<GitHubRateLimitReservationResult>(
+    options.namespace,
+    GITHUB_RATE_LIMIT_STATE_OBJECT_NAME,
+    'github-rate-limit/reserve',
+    {
+      keys,
+      reservationKey: `${keyPrefix}:${bucket}:${tokenIds.join(',')}`,
+      bucket,
+      requestCost: Math.max(0, Math.floor(options.requestCost)),
+      reservePerToken: Math.max(0, Math.floor(options.reservePerToken)),
+      maxAgeMs: Math.max(1, Math.floor(options.maxAgeMs)),
+    }
+  );
+}
+
 export async function recordRateLimitFromHeaders(
   headers: Headers,
   bucket: GitHubRateLimitBucket,
@@ -197,14 +260,21 @@ export async function recordRateLimitFromRateLimitBody(
     endpointId?: GitHubEndpointId | string;
     tokenId?: string;
   } = {}
-): Promise<{ rest: GitHubRateLimitSnapshot | null; graphql: GitHubRateLimitSnapshot | null }> {
+): Promise<{
+  rest: GitHubRateLimitSnapshot | null;
+  search: GitHubRateLimitSnapshot | null;
+  graphql: GitHubRateLimitSnapshot | null;
+}> {
   const kv = options.kv;
   if (!kv) {
-    return { rest: null, graphql: null };
+    return { rest: null, search: null, graphql: null };
   }
 
   const payload = (body || {}) as RateLimitApiBody;
   const restResource = normalizeRateLimitResource(payload.resources?.core || payload.rate);
+  const searchResource = normalizeRateLimitResource(
+    payload.resources?.code_search || payload.resources?.search
+  );
   const graphqlResource = normalizeRateLimitResource(payload.resources?.graphql);
   const keyPrefix = options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX;
   const now = Date.now();
@@ -220,6 +290,23 @@ export async function recordRateLimitFromRateLimitBody(
       tokenId: options.tokenId,
     };
     rest = await persistSnapshotIfNeeded(rest, {
+      kv,
+      keyPrefix,
+      tokenId: options.tokenId,
+    });
+  }
+
+  let search: GitHubRateLimitSnapshot | null = null;
+  if (searchResource) {
+    search = {
+      bucket: 'search',
+      ...searchResource,
+      updatedAtEpochMs: now,
+      source: 'rate_limit_api',
+      endpointId: options.endpointId,
+      tokenId: options.tokenId,
+    };
+    search = await persistSnapshotIfNeeded(search, {
       kv,
       keyPrefix,
       tokenId: options.tokenId,
@@ -243,7 +330,7 @@ export async function recordRateLimitFromRateLimitBody(
     });
   }
 
-  return { rest, graphql };
+  return { rest, search, graphql };
 }
 
 function parseRateLimitSnapshot(raw: string, bucket: GitHubRateLimitBucket): GitHubRateLimitSnapshot | null {

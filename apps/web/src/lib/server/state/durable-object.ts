@@ -21,6 +21,29 @@ interface StoredViolations {
   expiresAtEpochMs?: number;
 }
 
+interface StoredGitHubRateLimitReservation {
+  snapshotFingerprint: string;
+  reserved: number;
+  expiresAtEpochMs?: number;
+}
+
+interface GitHubRateLimitBudgetBody {
+  keys: string[];
+  reservationKey: string;
+  bucket: 'rest' | 'search' | 'graphql';
+  requestCost: number;
+  reservePerToken: number;
+  maxAgeMs: number;
+}
+
+interface ParsedGitHubRateLimitSnapshot {
+  key: string;
+  remaining: number;
+  used: number;
+  resetAtEpochSec: number;
+  updatedAtEpochMs: number;
+}
+
 interface RateLimitCheckBody {
   key: string;
   config: {
@@ -144,6 +167,8 @@ export class SkillscatStateDurableObject {
         return this.handleKvPutIfChanged(body);
       case 'kv/delete':
         return this.handleKvDelete(body);
+      case 'github-rate-limit/reserve':
+        return this.handleGitHubRateLimitReserve(body);
       case 'rate-limit/check':
         return this.handleRateLimitCheck(body);
       default:
@@ -271,6 +296,169 @@ export class SkillscatStateDurableObject {
     });
 
     return jsonResponse({ written: true, value });
+  }
+
+  private async handleGitHubRateLimitReserve(body: Record<string, unknown>): Promise<Response> {
+    const input = body as unknown as GitHubRateLimitBudgetBody;
+    const keys = Array.isArray(input.keys)
+      ? [...new Set(input.keys.filter((key): key is string => typeof key === 'string' && key.length > 0))]
+      : [];
+    const reservationKey = typeof input.reservationKey === 'string' ? input.reservationKey : '';
+    const bucket = input.bucket;
+    const requestCost = Number(input.requestCost);
+    const reservePerToken = Number(input.reservePerToken);
+    const maxAgeMs = Number(input.maxAgeMs);
+
+    if (
+      keys.length === 0
+      || keys.length > 100
+      || !reservationKey
+      || reservationKey.length > 1800
+      || !['rest', 'search', 'graphql'].includes(bucket)
+      || !Number.isFinite(requestCost)
+      || requestCost < 0
+      || !Number.isFinite(reservePerToken)
+      || reservePerToken < 0
+      || !Number.isFinite(maxAgeMs)
+      || maxAgeMs <= 0
+    ) {
+      return jsonResponse({ error: 'invalid_github_rate_limit_reservation' }, 400);
+    }
+
+    const normalizedRequestCost = Math.floor(requestCost);
+    const normalizedReservePerToken = Math.floor(reservePerToken);
+    const normalizedMaxAgeMs = Math.floor(maxAgeMs);
+    const nowMs = Date.now();
+    const reservationStorageKey = `github-rate-limit-reservation:${reservationKey}`;
+    const snapshotStorageKeys = keys.map((key) => `kv:${key}`);
+
+    const result = await this.state.storage.transaction(async (transaction) => {
+      const stored = await transaction.get<ExpiringValue | StoredGitHubRateLimitReservation>([
+        ...snapshotStorageKeys,
+        reservationStorageKey,
+      ]);
+      const snapshots: ParsedGitHubRateLimitSnapshot[] = [];
+      let hasMissingSnapshot = false;
+      let hasStaleSnapshot = false;
+
+      for (let index = 0; index < keys.length; index++) {
+        const record = stored.get(snapshotStorageKeys[index]) as ExpiringValue | undefined;
+        if (!record || isExpired(record.expiresAtEpochMs, nowMs)) {
+          hasMissingSnapshot = true;
+          continue;
+        }
+
+        const parsed = parseJsonObject(record.value);
+        const remaining = Number(parsed?.remaining);
+        const used = Number(parsed?.used);
+        const resetAtEpochSec = Number(parsed?.resetAtEpochSec);
+        const updatedAtEpochMs = Number(parsed?.updatedAtEpochMs);
+        if (
+          parsed?.bucket !== bucket
+          || ![remaining, used, resetAtEpochSec, updatedAtEpochMs].every(Number.isFinite)
+        ) {
+          hasMissingSnapshot = true;
+          continue;
+        }
+
+        if (
+          resetAtEpochSec * 1000 <= nowMs
+          || updatedAtEpochMs + normalizedMaxAgeMs <= nowMs
+        ) {
+          hasStaleSnapshot = true;
+        }
+
+        snapshots.push({
+          key: keys[index],
+          remaining: Math.max(0, Math.floor(remaining)),
+          used: Math.max(0, Math.floor(used)),
+          resetAtEpochSec: Math.floor(resetAtEpochSec),
+          updatedAtEpochMs: Math.floor(updatedAtEpochMs),
+        });
+      }
+
+      if (hasMissingSnapshot || snapshots.length !== keys.length) {
+        return {
+          allowed: false,
+          status: 'missing' as const,
+          remaining: null,
+          required: null,
+          resetAtEpochSec: null,
+          retryAtEpochSec: null,
+        };
+      }
+
+      const earliestResetAtEpochSec = snapshots.reduce(
+        (earliest, snapshot) => Math.min(earliest, snapshot.resetAtEpochSec),
+        Number.POSITIVE_INFINITY
+      );
+      const earliestRefreshAtEpochSec = Math.ceil(snapshots.reduce(
+        (earliest, snapshot) => Math.min(
+          earliest,
+          snapshot.updatedAtEpochMs + normalizedMaxAgeMs
+        ),
+        Number.POSITIVE_INFINITY
+      ) / 1000);
+
+      if (hasStaleSnapshot) {
+        return {
+          allowed: false,
+          status: 'stale' as const,
+          remaining: null,
+          required: null,
+          resetAtEpochSec: earliestResetAtEpochSec,
+          retryAtEpochSec: Math.floor(nowMs / 1000),
+        };
+      }
+
+      const snapshotFingerprint = JSON.stringify(snapshots.map((snapshot) => [
+        snapshot.key,
+        snapshot.remaining,
+        snapshot.used,
+        snapshot.resetAtEpochSec,
+        snapshot.updatedAtEpochMs,
+      ]));
+      const existingReservation = stored.get(reservationStorageKey) as StoredGitHubRateLimitReservation | undefined;
+      const alreadyReserved = existingReservation
+        && !isExpired(existingReservation.expiresAtEpochMs, nowMs)
+        && existingReservation.snapshotFingerprint === snapshotFingerprint
+        ? Math.max(0, Math.floor(Number(existingReservation.reserved)))
+        : 0;
+      const snapshotRemaining = snapshots.reduce((sum, snapshot) => sum + snapshot.remaining, 0);
+      const effectiveRemaining = Math.max(0, snapshotRemaining - alreadyReserved);
+      const required = (normalizedReservePerToken * snapshots.length) + normalizedRequestCost;
+      const retryAtEpochSec = Math.min(earliestResetAtEpochSec, earliestRefreshAtEpochSec);
+
+      if (effectiveRemaining < required) {
+        return {
+          allowed: false,
+          status: 'insufficient' as const,
+          remaining: effectiveRemaining,
+          required,
+          resetAtEpochSec: earliestResetAtEpochSec,
+          retryAtEpochSec,
+        };
+      }
+
+      if (normalizedRequestCost > 0) {
+        await transaction.put<StoredGitHubRateLimitReservation>(reservationStorageKey, {
+          snapshotFingerprint,
+          reserved: alreadyReserved + normalizedRequestCost,
+          expiresAtEpochMs: earliestResetAtEpochSec * 1000 + 10 * 60 * 1000,
+        });
+      }
+
+      return {
+        allowed: true,
+        status: 'allowed' as const,
+        remaining: Math.max(0, effectiveRemaining - normalizedRequestCost),
+        required,
+        resetAtEpochSec: earliestResetAtEpochSec,
+        retryAtEpochSec,
+      };
+    });
+
+    return jsonResponse(result);
   }
 
   private async handleRateLimitCheck(body: Record<string, unknown>): Promise<Response> {

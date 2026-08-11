@@ -55,12 +55,10 @@ function getUrlHost(url: string): string | null {
   }
 }
 
-function isGitHubDomain(host: string | null): boolean {
-  if (!host) return false;
-  return host === 'github.com'
-    || host.endsWith('.github.com')
-    || host === 'githubusercontent.com'
-    || host.endsWith('.githubusercontent.com');
+function getDefaultGitHubToken(): string | undefined {
+  return process.env.GH_TOKEN?.trim()
+    || process.env.GITHUB_TOKEN?.trim()
+    || undefined;
 }
 
 export interface GitHubRequestOptions extends Omit<RequestInit, 'headers'> {
@@ -94,8 +92,8 @@ export async function githubRequest(
   } = options;
 
   const host = getUrlHost(url);
-  const githubDomain = isGitHubDomain(host);
   const isApiHost = host === 'api.github.com';
+  const resolvedToken = token || (isApiHost ? getDefaultGitHubToken() : undefined);
 
   const headers = new Headers(extraHeaders ?? {});
   if (!headers.has('Accept')) headers.set('Accept', 'application/vnd.github+json');
@@ -103,8 +101,8 @@ export async function githubRequest(
     headers.set('X-GitHub-Api-Version', apiVersion);
   }
   if (!headers.has('User-Agent')) headers.set('User-Agent', userAgent);
-  if (githubDomain && token && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`);
+  if (isApiHost && resolvedToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${resolvedToken}`);
   }
 
   const statuses = new Set(retryableStatuses ?? Array.from(DEFAULT_RETRYABLE_STATUSES));
@@ -118,8 +116,14 @@ export async function githubRequest(
         timeoutMs,
       });
 
-      const shouldRetry =
-        statuses.has(response.status) || isRateLimited(response);
+      // GitHub explicitly asks clients not to retry primary/secondary limits
+      // before reset. Returning immediately also avoids turning one CLI action
+      // into four doomed requests when reset is far beyond maxDelayMs.
+      if (isRateLimited(response)) {
+        return response;
+      }
+
+      const shouldRetry = statuses.has(response.status);
 
       if (attempt < maxRetries && shouldRetry) {
         const retryAfterMs = parseRetryAfterMs(response.headers);

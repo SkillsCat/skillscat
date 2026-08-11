@@ -5,12 +5,17 @@ export interface IndexingMessage {
   eventId?: string;
   eventType?: string;
   createdAt?: string;
+  headSha?: string;
+  gitRef?: string;
   skillPath?: string;
+  skillFilePath?: string;
   submittedBy?: string;
   submittedAt?: string;
   submissionUserId?: string;
   forceReindex?: boolean;
   queuedAsPending?: boolean;
+  /** Internal counter for bounded self-requeue backoff before native Queue retries take over. */
+  rateLimitDeferrals?: number;
   discoverySource?: 'github-events' | 'github-code-search';
   discoveryFingerprint?: string;
 }

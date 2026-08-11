@@ -7,7 +7,19 @@ import {
   resolveSubmitApiLocale,
   type SubmitApiMessageDescriptor,
 } from '$lib/i18n/submit-api';
-import { getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
+import {
+  getGitHubRateLimitKVFromEnv,
+  getGitHubRequestAuthFromEnv,
+} from '$lib/server/github-client/env';
+import { readAggregatedRateLimitSnapshot } from '$lib/server/github-client/rate-limit-kv';
+import {
+  getGitHubTokenInputFromEnv,
+  resolveGitHubTokenIds,
+} from '$lib/server/github-client/token-pool';
+import {
+  createMemoizedDurableObjectKvStore,
+  isDurableObjectKvStore,
+} from '$lib/server/state/client';
 import type { SkillMdLocation, ScanResult } from '$lib/types';
 import { githubRequest } from '$lib/server/github-client/request';
 import { getCached } from '$lib/server/cache';
@@ -37,6 +49,10 @@ const MAX_SUBMIT_BODY_BYTES = 16 * 1024;
 const GITHUB_SUBMIT_FAST_FAIL_MAX_RETRIES = 0;
 const GITHUB_SUBMIT_FAST_FAIL_MAX_DELAY_MS = 2_000;
 const SUBMIT_CHECK_CACHE_TTL_SECONDS = 60;
+const SUBMIT_RATE_LIMIT_STATE_CACHE_MS = 30_000;
+const SUBMIT_RATE_LIMIT_SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
+const SUBMIT_REST_RESERVE_PER_TOKEN = 50;
+const MAX_PUBLIC_SKILL_MD_BYTES = 512 * 1024;
 
 type GitHubUpstreamErrorCode = 'github_rate_limited' | 'github_upstream_failure';
 type GitHubRequestMode = 'default' | 'submit_fast_fail';
@@ -300,7 +316,8 @@ function buildSubmitQueueMessage(
   owner: string,
   repo: string,
   skillPath: string,
-  userId: string | null
+  userId: string | null,
+  skillFilePath?: string
 ) {
   const submissionUserId = userId && !userId.startsWith('org:') ? userId : null;
 
@@ -309,6 +326,7 @@ function buildSubmitQueueMessage(
     repoOwner: owner,
     repoName: repo,
     skillPath,
+    ...(skillFilePath ? { skillFilePath } : {}),
     submittedBy: userId ?? ANON_CLI_SUBMIT_SENTINEL,
     submittedAt: new Date().toISOString(),
     ...(submissionUserId ? { submissionUserId } : {}),
@@ -446,10 +464,111 @@ function createSubmitPublicReader(
  */
 interface SubmitGitHubRateLimitState {
   rateLimited: boolean;
+  resetAtEpochSec: number | null;
+  rateLimitKV?: KVNamespace;
+  tokenKey: string;
 }
 
-function createSubmitGitHubRateLimitState(): SubmitGitHubRateLimitState {
-  return { rateLimited: false };
+interface CachedSubmitRateLimitState {
+  tokenKey: string;
+  expiresAtEpochMs: number;
+  rateLimited: boolean;
+  resetAtEpochSec: number | null;
+}
+
+let cachedSubmitRateLimitState: CachedSubmitRateLimitState | null = null;
+
+async function createSubmitGitHubRateLimitState(
+  platform: App.Platform | undefined
+): Promise<SubmitGitHubRateLimitState> {
+  const sharedRateLimitKV = getGitHubRateLimitKVFromEnv(platform?.env);
+  const rateLimitKV = isDurableObjectKvStore(sharedRateLimitKV)
+    ? createMemoizedDurableObjectKvStore(sharedRateLimitKV)
+    : sharedRateLimitKV;
+  try {
+    const tokenIds = await resolveGitHubTokenIds(getGitHubTokenInputFromEnv(platform?.env));
+    const tokenKey = tokenIds.join(',');
+    const nowMs = Date.now();
+
+    if (tokenIds.length === 0) {
+      // POST can use the public HTML/raw/ZIP reader directly. Avoid consuming
+      // GitHub's tiny anonymous egress-IP quota before taking that fallback.
+      return {
+        rateLimited: true,
+        resetAtEpochSec: null,
+        rateLimitKV,
+        tokenKey: '',
+      };
+    }
+
+    if (
+      tokenKey
+      && cachedSubmitRateLimitState?.tokenKey === tokenKey
+      && cachedSubmitRateLimitState.expiresAtEpochMs > nowMs
+    ) {
+      return {
+        rateLimited: cachedSubmitRateLimitState.rateLimited,
+        resetAtEpochSec: cachedSubmitRateLimitState.resetAtEpochSec,
+        rateLimitKV,
+        tokenKey,
+      };
+    }
+
+    const snapshot = tokenIds.length > 0
+      ? await readAggregatedRateLimitSnapshot('rest', {
+        kv: rateLimitKV,
+        tokenIds,
+        maxAgeMs: SUBMIT_RATE_LIMIT_SNAPSHOT_MAX_AGE_MS,
+        nowMs,
+      })
+      : null;
+    const tokenCount = Math.max(1, snapshot?.tokenCount ?? tokenIds.length);
+    const rateLimited = Boolean(
+      snapshot && snapshot.remaining <= SUBMIT_REST_RESERVE_PER_TOKEN * tokenCount
+    );
+    const resetAtEpochSec = snapshot?.resetAtEpochSec ?? null;
+
+    if (tokenKey) {
+      cachedSubmitRateLimitState = {
+        tokenKey,
+        expiresAtEpochMs: nowMs + SUBMIT_RATE_LIMIT_STATE_CACHE_MS,
+        rateLimited,
+        resetAtEpochSec,
+      };
+    }
+
+    return { rateLimited, resetAtEpochSec, rateLimitKV, tokenKey };
+  } catch (error) {
+    log.warn('GitHub rate limit state unavailable; continuing with public submit fallback enabled', error);
+    return {
+      rateLimited: false,
+      resetAtEpochSec: null,
+      // Avoid turning a later rate-limit response into another state-store error.
+      rateLimitKV: undefined,
+      tokenKey: '',
+    };
+  }
+}
+
+function markSubmitGitHubRateLimited(
+  state: SubmitGitHubRateLimitState,
+  response: Response
+): void {
+  state.rateLimited = true;
+  const reset = response.headers.get('x-ratelimit-reset');
+  const parsedReset = reset ? Number.parseInt(reset, 10) : Number.NaN;
+  if (Number.isFinite(parsedReset) && parsedReset > 0) {
+    state.resetAtEpochSec = parsedReset;
+  }
+
+  if (state.tokenKey) {
+    cachedSubmitRateLimitState = {
+      tokenKey: state.tokenKey,
+      expiresAtEpochMs: Date.now() + SUBMIT_RATE_LIMIT_STATE_CACHE_MS,
+      rateLimited: true,
+      resetAtEpochSec: state.resetAtEpochSec,
+    };
+  }
 }
 
 function buildGitHubUpstreamResponse(
@@ -508,15 +627,25 @@ async function githubRequestForSubmit(
     // An earlier call in this request already hit the GitHub rate limit.
     // Return a synthetic 429 so callers take their fallback/error path
     // immediately instead of burning another doomed API request.
+    const headers = new Headers({ 'x-ratelimit-remaining': '0' });
+    if (rateLimitState.resetAtEpochSec) {
+      headers.set('x-ratelimit-reset', String(rateLimitState.resetAtEpochSec));
+      headers.set('retry-after', String(Math.max(
+        0,
+        rateLimitState.resetAtEpochSec - Math.floor(Date.now() / 1000)
+      )));
+    }
     return new Response('GitHub rate limit already hit in this request', {
       status: 429,
-      headers: { 'x-ratelimit-remaining': '0' },
+      headers,
     });
   }
 
   const requestOptions: Parameters<typeof githubRequest>[1] = {
     token,
     userAgent: 'SkillsCat/1.0',
+    rateLimitKV: rateLimitState?.rateLimitKV,
+    rateLimitWritePolicy: 'rate_limit_only',
   };
 
   if (mode === 'submit_fast_fail') {
@@ -526,8 +655,14 @@ async function githubRequestForSubmit(
 
   try {
     const response = await githubRequest(url, requestOptions);
-    if (rateLimitState && isGitHubRateLimited(response)) {
-      rateLimitState.rateLimited = true;
+    if (
+      rateLimitState
+      && (
+        isGitHubRateLimited(response)
+        || response.headers.get('x-skillscat-github-fallback') === 'graphql'
+      )
+    ) {
+      markSubmitGitHubRateLimited(rateLimitState, response);
     }
     return response;
   } catch (cause) {
@@ -1240,26 +1375,59 @@ async function validateForkSubmission(
 }
 
 /**
- * Exact SKILL.md existence check against the public fallback snapshot.
- * Returns null when the fallback cannot give a definitive answer: no reader,
- * snapshot failure, or a truncated snapshot without a match (truncation
- * cannot prove absence).
+ * Exact SKILL.md existence check using the public snapshot and pinned raw URL.
+ * Returns null only when no reader is available or both applicable fallback
+ * sources fail to give a definitive answer.
  */
 async function tryCheckPublicSkillMd(
   reader: PublicGitHubRepositoryReader | undefined,
-  checkPath: string
+  checkPath: string,
+  preferSnapshot: boolean = false
 ): Promise<boolean | null> {
   if (!reader) return null;
+  if (preferSnapshot) {
+    let snapshotError: unknown = null;
+    try {
+      const snapshot = await reader.getSnapshot();
+      const found = snapshot.entries.some(
+        (entry) => entry.type === 'blob' && entry.path === checkPath
+      );
+      if (found || !snapshot.truncated) return found;
+    } catch (error) {
+      snapshotError = error;
+    }
+
+    // A truncated or failed snapshot cannot prove absence. The raw URL is
+    // commit-pinned by PublicGitHubRepositoryReader, so it is both definitive
+    // for this path and consistent with the metadata snapshot.
+    try {
+      return Boolean(await reader.getFile(checkPath, MAX_PUBLIC_SKILL_MD_BYTES));
+    } catch (rawError) {
+      log.warn(`Public SKILL.md check failed for ${checkPath}:`, {
+        snapshotError,
+        rawError,
+      });
+      return null;
+    }
+  }
+
   try {
-    const snapshot = await reader.getSnapshot();
-    const found = snapshot.entries.some(
-      (entry) => entry.type === 'blob' && entry.path === checkPath
-    );
-    if (!found && snapshot.truncated) return null;
-    return found;
-  } catch (error) {
-    log.warn(`Public SKILL.md check failed for ${checkPath}:`, error);
-    return null;
+    return Boolean(await reader.getFile(checkPath, MAX_PUBLIC_SKILL_MD_BYTES));
+  } catch (rawError) {
+    try {
+      const snapshot = await reader.getSnapshot();
+      const found = snapshot.entries.some(
+        (entry) => entry.type === 'blob' && entry.path === checkPath
+      );
+      if (!found && snapshot.truncated) return null;
+      return found;
+    } catch (snapshotError) {
+      log.warn(`Public SKILL.md check failed for ${checkPath}:`, {
+        rawError,
+        snapshotError,
+      });
+      return null;
+    }
   }
 }
 
@@ -1290,7 +1458,7 @@ async function checkGitHubSkillMd(
       );
     } catch (error) {
       if (error instanceof GitHubUpstreamError) {
-        const publicResult = await tryCheckPublicSkillMd(publicReader, checkPath);
+        const publicResult = await tryCheckPublicSkillMd(publicReader, checkPath, !path);
         if (publicResult !== null) return publicResult;
       }
       throw error;
@@ -1299,7 +1467,7 @@ async function checkGitHubSkillMd(
     if (response.ok) return true;
     if (response.status !== 404) {
       if (isPublicFallbackResponse(response)) {
-        const publicResult = await tryCheckPublicSkillMd(publicReader, checkPath);
+        const publicResult = await tryCheckPublicSkillMd(publicReader, checkPath, !path);
         if (publicResult !== null) return publicResult;
       }
       throw toGitHubUpstreamError(response, `checking ${checkPath} in ${owner}/${repo}`);
@@ -1370,7 +1538,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 
     const { owner, repo } = repoInfo;
     const publicReader = createSubmitPublicReader(owner, repo, platform);
-    const rateLimitState = createSubmitGitHubRateLimitState();
+    const rateLimitState = await createSubmitGitHubRateLimitState(platform);
 
     // Fetch repository info first
     const repoData = await fetchGitHubRepo(owner, repo, githubToken, githubRequestMode, publicReader, rateLimitState);
@@ -1616,7 +1784,10 @@ async function submitMultipleSkills({
       // Send to indexing queue with delay
       // Use delaySeconds for staggered processing (Cloudflare Queues supports this)
       const delaySeconds = i * Math.ceil(QUEUE_DELAY_MS / 1000);
-      await queue.send(buildSubmitQueueMessage(owner, repo, skillPath, userId), { delaySeconds });
+      await queue.send(
+        buildSubmitQueueMessage(owner, repo, skillPath, userId, skill.path),
+        { delaySeconds }
+      );
 
       results.push({ path: skill.path, status: 'queued' });
       log.log(`Queued skill ${i + 1}/${uniqueSkills.length}: ${owner}/${repo}/${skillPath || '(root)'}`);
@@ -1742,7 +1913,7 @@ async function submitSingleSkill({
 
   // Send to indexing queue
   if (queue) {
-    const queueMessage = buildSubmitQueueMessage(owner, repo, path, userId);
+    const queueMessage = buildSubmitQueueMessage(owner, repo, path, userId, resultPath);
     log.log(`Sending to indexing queue: ${owner}/${repo}`, queueMessage);
     try {
       await queue.send(queueMessage);
@@ -1915,7 +2086,7 @@ export const GET: RequestHandler = async ({ locals, platform, request, url }) =>
         // The anonymous precheck endpoint must not trigger the public
         // fallback: without auth, a ZIP/HTML crawl per uncached URL would be
         // an outbound amplification vector. POST keeps the fallback.
-        const rateLimitState = createSubmitGitHubRateLimitState();
+        const rateLimitState = await createSubmitGitHubRateLimitState(platform);
 
         const db = platform?.env?.DB;
         const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;

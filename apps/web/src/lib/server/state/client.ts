@@ -45,6 +45,53 @@ export function isDurableObjectKvStore(kv: KVNamespace | undefined): kv is Durab
   return typeof candidate.getMany === 'function' && typeof candidate.putIfChanged === 'function';
 }
 
+/**
+ * Reuse immutable DO reads within one request or queue batch. Writes update the
+ * local view immediately, so a rate-limit response can still move an exhausted
+ * token out of rotation without another DO round trip.
+ */
+export function createMemoizedDurableObjectKvStore(
+  store: DurableObjectKvStore
+): DurableObjectKvStore {
+  const values = new Map<string, string | null>();
+
+  return {
+    async get(key: string): Promise<string | null> {
+      if (values.has(key)) return values.get(key) ?? null;
+      const value = await store.get(key);
+      values.set(key, value);
+      return value;
+    },
+    async getMany(keys: string[]): Promise<(string | null)[]> {
+      const missing = [...new Set(keys.filter((key) => !values.has(key)))];
+      if (missing.length > 0) {
+        const loaded = await store.getMany(missing);
+        for (let index = 0; index < missing.length; index++) {
+          values.set(missing[index], loaded[index] ?? null);
+        }
+      }
+      return keys.map((key) => values.get(key) ?? null);
+    },
+    async put(key: string, value: string, options?: DurableObjectKvPutOptions): Promise<void> {
+      await store.put(key, value, options);
+      values.set(key, value);
+    },
+    async putIfChanged(
+      key: string,
+      value: string,
+      options?: DurableObjectKvPutIfChangedOptions
+    ): Promise<DurableObjectKvPutIfChangedResult> {
+      const result = await store.putIfChanged(key, value, options);
+      values.set(key, result.value);
+      return result;
+    },
+    async delete(key: string): Promise<void> {
+      await store.delete(key);
+      values.set(key, null);
+    },
+  } as unknown as DurableObjectKvStore;
+}
+
 export async function callStateDurableObject<T>(
   namespace: DurableObjectNamespace,
   objectName: string,

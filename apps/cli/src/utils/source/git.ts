@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { posix as pathPosix } from 'node:path';
 import type { RepoSource, SkillCompanionFile, SkillInfo } from './source';
 import { SKILL_DISCOVERY_PATHS, parseSkillFrontmatter } from './source';
@@ -10,6 +11,14 @@ const GITHUB_API = 'https://api.github.com';
 const GITHUB_RAW = 'https://raw.githubusercontent.com';
 const GITLAB_API = 'https://gitlab.com/api/v4';
 const MAX_GITHUB_SYMLINK_DEPTH = 8;
+
+function calculateGitBlobSha(bytes: Buffer, expectedSha: string): string {
+  const algorithm = expectedSha.length === 64 ? 'sha256' : 'sha1';
+  return createHash(algorithm)
+    .update(`blob ${bytes.byteLength}\0`)
+    .update(bytes)
+    .digest('hex');
+}
 
 interface GitHubTreeItem {
   path: string;
@@ -124,10 +133,21 @@ class CachedGitHubRepoSnapshot implements GitHubRepoSnapshot {
 
     return getOrCreate(this.fileBytesByPath, cacheKey, async () => {
       if (item?.sha && item.mode !== '120000') {
+        const branch = await this.getBranch();
+        const rawBytes = await tryFetchGitHubRawFileBytes(
+          this.owner,
+          this.repo,
+          branch,
+          normalizedPath
+        );
+        if (rawBytes && calculateGitBlobSha(rawBytes, item.sha) === item.sha.toLowerCase()) {
+          cacheGitHubBlob(item.sha, rawBytes);
+          return rawBytes;
+        }
+
         try {
           return await this.getBlobBytesBySha(item.sha);
         } catch {
-          const branch = await this.getBranch();
           const file = await fetchGitHubFileBytes(this.owner, this.repo, normalizedPath, branch);
           if (file.sha && file.sha !== item.sha) {
             throw new Error(`GitHub file changed during fetch: ${normalizedPath}`);

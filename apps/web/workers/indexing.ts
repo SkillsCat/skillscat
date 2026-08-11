@@ -15,6 +15,7 @@ import type {
   ClassificationMessage,
   GitHubRepo,
   GitHubContent,
+  Message,
   MessageBatch,
   ExecutionContext,
   GitHubTreeResponse,
@@ -33,7 +34,25 @@ import {
   buildFileTree,
 } from './shared/utils';
 import { githubRequest } from '../src/lib/server/github-client/request';
-import { getGitHubRequestAuthFromEnv } from '../src/lib/server/github-client/env';
+import {
+  getGitHubRateLimitKVFromEnv,
+  getGitHubRequestAuthFromEnv,
+  withGitHubRateLimitKVOverride,
+} from '../src/lib/server/github-client/env';
+import { getRateLimit } from '../src/lib/server/github-client/rest';
+import {
+  reserveGitHubRateLimitBudget as reserveSharedGitHubRateLimitBudget,
+  type GitHubRateLimitReservationStatus,
+  type GitHubRateLimitSnapshot,
+} from '../src/lib/server/github-client/rate-limit-kv';
+import {
+  getGitHubTokenInputFromEnv,
+  resolveGitHubTokenCandidates,
+} from '../src/lib/server/github-client/token-pool';
+import {
+  createMemoizedDurableObjectKvStore,
+  isDurableObjectKvStore,
+} from '../src/lib/server/state/client';
 import { invalidateCache } from '../src/lib/server/cache';
 import {
   getSkillPageCacheInvalidationKeys,
@@ -99,6 +118,15 @@ const MAX_TOTAL_SIZE = 5 * 1024 * 1024; // 总大小最大 5MB
 const MAX_DISCOVERED_SKILLS_PER_REPO = 100;
 const INDEXING_PROCESSED_TTL_SECONDS = 30 * 24 * 60 * 60;
 const INDEXING_PENDING_TTL_SECONDS = 6 * 60 * 60;
+const DEFAULT_INDEXING_REST_RESERVE = 500;
+// A new skill can require repo + commit + tree + history requests and up to
+// MAX_FILES blob reads. Keep admission conservative so one dense repository
+// cannot consume the reserve that protects submit and other interactive paths.
+const DEFAULT_INDEXING_ESTIMATED_REQUESTS_PER_MESSAGE = 60;
+const DEFAULT_INDEXING_RATE_LIMIT_MAX_AGE_SECONDS = 10 * 60;
+const DEFAULT_INDEXING_RETRY_DELAY_SECONDS = 60;
+const MAX_QUEUE_RETRY_DELAY_SECONDS = 12 * 60 * 60;
+const MAX_INDEXING_RATE_LIMIT_DEFERRALS = 12;
 const NON_USER_SUBMITTERS = new Set(['anonymous_cli', 'security-analysis-backfill']);
 
 interface UserSubmissionContext {
@@ -287,6 +315,201 @@ interface IndexingBatchContext {
   publicRepositoryReaders: Map<string, PublicGitHubRepositoryReader>;
   indexNowUrls: Set<string>;
   waitUntil?: (promise: Promise<unknown>) => void;
+}
+
+interface IndexingRateLimitConfig {
+  restReserve: number;
+  estimatedRequestsPerMessage: number;
+  maxAgeMs: number;
+}
+
+interface IndexingRateLimitAdmission {
+  allowed: boolean;
+  status: GitHubRateLimitReservationStatus | 'error';
+  remaining: number | null;
+  required: number | null;
+  resetAtEpochSec: number | null;
+  retryAtEpochSec: number | null;
+}
+
+function parseNonNegativeInt(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return fallback;
+  return Math.floor(value);
+}
+
+function getIndexingRateLimitConfig(env: IndexingEnv): IndexingRateLimitConfig {
+  return {
+    restReserve: parseNonNegativeInt(
+      env.GITHUB_INDEXING_REST_RESERVE,
+      DEFAULT_INDEXING_REST_RESERVE
+    ),
+    estimatedRequestsPerMessage: Math.max(1, parseNonNegativeInt(
+      env.GITHUB_INDEXING_ESTIMATED_REQUESTS_PER_MESSAGE,
+      DEFAULT_INDEXING_ESTIMATED_REQUESTS_PER_MESSAGE
+    )),
+    maxAgeMs: Math.max(60, parseNonNegativeInt(
+      env.GITHUB_INDEXING_RATE_LIMIT_MAX_AGE_SECONDS,
+      DEFAULT_INDEXING_RATE_LIMIT_MAX_AGE_SECONDS
+    )) * 1000,
+  };
+}
+
+export function computeIndexingRateLimitAdmission(
+  snapshot: GitHubRateLimitSnapshot | null,
+  messageCount: number,
+  config: Pick<IndexingRateLimitConfig, 'restReserve' | 'estimatedRequestsPerMessage'>
+): IndexingRateLimitAdmission {
+  if (!snapshot) {
+    return {
+      allowed: false,
+      status: 'unavailable',
+      remaining: null,
+      required: null,
+      resetAtEpochSec: null,
+      retryAtEpochSec: null,
+    };
+  }
+
+  const tokenCount = Math.max(1, snapshot.tokenCount ?? snapshot.knownTokenCount ?? 1);
+  const required = (config.restReserve * tokenCount)
+    + (Math.max(0, messageCount) * config.estimatedRequestsPerMessage);
+
+  return {
+    allowed: snapshot.remaining >= required,
+    status: snapshot.remaining >= required ? 'allowed' : 'insufficient',
+    remaining: snapshot.remaining,
+    required,
+    resetAtEpochSec: snapshot.resetAtEpochSec,
+    retryAtEpochSec: snapshot.resetAtEpochSec,
+  };
+}
+
+async function reserveIndexingRateLimitBudget(
+  env: IndexingEnv,
+  messageCount: number
+): Promise<IndexingRateLimitAdmission> {
+  const config = getIndexingRateLimitConfig(env);
+  const candidates = await resolveGitHubTokenCandidates(getGitHubTokenInputFromEnv(env));
+  if (candidates.length === 0) {
+    return computeIndexingRateLimitAdmission(null, messageCount, config);
+  }
+
+  const rateLimitKV = getGitHubRateLimitKVFromEnv(env);
+  const reservationOptions = {
+    namespace: env.STATE_DO,
+    tokenIds: candidates.map((candidate) => candidate.id),
+    requestCost: Math.max(0, messageCount) * config.estimatedRequestsPerMessage,
+    reservePerToken: config.restReserve,
+    maxAgeMs: config.maxAgeMs,
+  };
+  let reservation = await reserveSharedGitHubRateLimitBudget('rest', reservationOptions);
+
+  if (reservation.status === 'missing' || reservation.status === 'stale') {
+    for (const candidate of candidates) {
+      try {
+        const response = await getRateLimit({
+          token: candidate.value,
+          userAgent: 'SkillsCat-Indexing-Worker/1.0',
+          rateLimitKV,
+          rateLimitWritePolicy: 'always',
+        });
+        if (!response.ok) {
+          log.warn(`Failed to refresh GitHub rate limit for token ${candidate.id}: ${response.status}`);
+        }
+      } catch (error) {
+        log.warn(`Failed to refresh GitHub rate limit for token ${candidate.id}`, error);
+      }
+    }
+
+    reservation = await reserveSharedGitHubRateLimitBudget('rest', reservationOptions);
+  }
+
+  return reservation;
+}
+
+function getQueueRetryDelaySeconds(
+  retryAtEpochSec: number | null,
+  priorDeferrals: number = 0
+): number {
+  const nowEpochSec = Math.floor(Date.now() / 1000);
+  const normalizedDeferrals = Number.isFinite(priorDeferrals)
+    ? Math.max(0, Math.floor(priorDeferrals))
+    : 0;
+  const fallbackDelay = DEFAULT_INDEXING_RETRY_DELAY_SECONDS
+    * (2 ** Math.min(9, normalizedDeferrals));
+  const targetDelay = retryAtEpochSec
+    ? Math.max(DEFAULT_INDEXING_RETRY_DELAY_SECONDS, retryAtEpochSec - nowEpochSec)
+    : fallbackDelay;
+  const jitterBytes = new Uint32Array(1);
+  crypto.getRandomValues(jitterBytes);
+  const jitter = jitterBytes[0] % 30;
+  return Math.min(MAX_QUEUE_RETRY_DELAY_SECONDS, targetDelay + jitter);
+}
+
+async function deferIndexingMessagesForBudget(
+  messages: Message<IndexingMessage>[],
+  env: IndexingEnv,
+  retryAtEpochSec: number | null
+): Promise<number> {
+  const replayable: Array<{
+    message: Message<IndexingMessage>;
+    delaySeconds: number;
+    nextDeferral: number;
+  }> = [];
+  const queueRetries: Array<{
+    message: Message<IndexingMessage>;
+    delaySeconds: number;
+  }> = [];
+  let maxDelaySeconds = DEFAULT_INDEXING_RETRY_DELAY_SECONDS;
+
+  for (const message of messages) {
+    const rawDeferrals = message.body.rateLimitDeferrals ?? 0;
+    const priorDeferrals = Number.isFinite(rawDeferrals)
+      ? Math.max(0, Math.floor(rawDeferrals))
+      : 0;
+    const delaySeconds = getQueueRetryDelaySeconds(retryAtEpochSec, priorDeferrals);
+    maxDelaySeconds = Math.max(maxDelaySeconds, delaySeconds);
+
+    if (priorDeferrals >= MAX_INDEXING_RATE_LIMIT_DEFERRALS) {
+      queueRetries.push({ message, delaySeconds });
+      continue;
+    }
+
+    replayable.push({
+      message,
+      delaySeconds,
+      nextDeferral: priorDeferrals + 1,
+    });
+  }
+
+  if (replayable.length > 0) {
+    try {
+      await env.INDEXING_QUEUE.sendBatch(replayable.map((entry) => ({
+        body: {
+          ...entry.message.body,
+          rateLimitDeferrals: entry.nextDeferral,
+        },
+        delaySeconds: entry.delaySeconds,
+      })));
+      for (const { message } of replayable) {
+        message.ack();
+      }
+    } catch (error) {
+      log.error('Failed to requeue indexing messages after budget deferral', error);
+      for (const { message, delaySeconds } of replayable) {
+        message.retry({ delaySeconds });
+      }
+    }
+  }
+
+  // Self-requeueing resets Queue attempts. Once the bounded preservation
+  // window is exhausted, use native retries so max_retries and the DLQ apply.
+  for (const { message, delaySeconds } of queueRetries) {
+    message.retry({ delaySeconds });
+  }
+
+  return maxDelaySeconds;
 }
 
 interface RepositoryTreeData extends GitHubTreeResponse {
@@ -964,6 +1187,22 @@ function getSkillPathFromSkillMdPath(path: string): string | null {
   parts.pop();
   const skillPath = parts.join('/');
   return skillPath || null;
+}
+
+function normalizeSkillPath(path: string | null | undefined): string {
+  return (path || '').replace(/^\/+|\/+$/g, '');
+}
+
+function findSkillMdFilePathFromTree(
+  treeData: GitHubTreeResponse,
+  skillPath: string | null | undefined
+): string | undefined {
+  const normalizedSkillPath = normalizeSkillPath(skillPath);
+  return treeData.tree.find((item) => {
+    if (item.type !== 'blob') return false;
+    if (item.path.split('/').pop()?.toLowerCase() !== 'skill.md') return false;
+    return normalizeSkillPath(getSkillPathFromSkillMdPath(item.path)) === normalizedSkillPath;
+  })?.path;
 }
 
 export async function getRepositoryTree(
@@ -2237,13 +2476,22 @@ export async function getSkillMd(
   commitSha: string,
   env: IndexingEnv,
   skillPath?: string,
-  publicReader?: PublicGitHubRepositoryReader
+  publicReader?: PublicGitHubRepositoryReader,
+  exactSkillMdPath?: string
 ): Promise<GitHubContent | null> {
   const basePath = skillPath ? `${skillPath}/` : '';
-  const paths = [`${basePath}SKILL.md`, `${basePath}skill.md`];
+  const normalizedExactPath = exactSkillMdPath?.replace(/^\/+/, '');
+  const exactPath = normalizedExactPath
+    && normalizedExactPath.split('/').pop()?.toLowerCase() === 'skill.md'
+    && normalizeSkillPath(getSkillPathFromSkillMdPath(normalizedExactPath)) === normalizeSkillPath(skillPath)
+    ? normalizedExactPath
+    : null;
+  const paths: string[] = exactPath
+    ? [exactPath]
+    : [`${basePath}SKILL.md`, `${basePath}skill.md`];
 
   for (const path of paths) {
-    let content: GitHubContent | null;
+    let content: GitHubContent | null = null;
     try {
       content = await githubFetch<GitHubContent>(
         `${getContentsApiUrl(owner, name, path)}?ref=${encodeURIComponent(commitSha)}`,
@@ -2255,15 +2503,42 @@ export async function getSkillMd(
       );
     } catch (error) {
       if (!publicReader) throw error;
-      const snapshot = await publicReader.getSnapshot(publicCaptureOptions(skillPath || null));
-      const publicPath = paths.find((candidatePath) => snapshot.entries.some(
-        (entry) => entry.type === 'blob' && entry.path === candidatePath
-      ));
-      if (!publicPath) return null;
-      const publicFile = await publicReader.getFile(publicPath, MAX_FILE_SIZE);
-      return publicFile
-        ? publicFileToGitHubContent(owner, name, commitSha, publicFile)
-        : null;
+      if (!exactPath) {
+        try {
+          const snapshot = await publicReader.getSnapshot(publicCaptureOptions(skillPath || null));
+          const publicPath = paths.find((candidatePath) => snapshot.entries.some(
+            (entry) => entry.type === 'blob' && entry.path === candidatePath
+          ));
+          if (!publicPath) return null;
+          const publicFile = await publicReader.getFile(publicPath, MAX_FILE_SIZE);
+          return publicFile
+            ? publicFileToGitHubContent(owner, name, commitSha, publicFile)
+            : null;
+        } catch {
+          throw error;
+        }
+      }
+
+      try {
+        const publicFile = await publicReader.getFile(path, MAX_FILE_SIZE);
+        if (publicFile) {
+          return publicFileToGitHubContent(owner, name, commitSha, publicFile);
+        }
+      } catch {
+        try {
+          const snapshot = await publicReader.getSnapshot(publicCaptureOptions(skillPath || null));
+          const publicPath = paths.find((candidatePath) => snapshot.entries.some(
+            (entry) => entry.type === 'blob' && entry.path === candidatePath
+          ));
+          if (!publicPath) return null;
+          const publicFile = await publicReader.getFile(publicPath, MAX_FILE_SIZE);
+          return publicFile
+            ? publicFileToGitHubContent(owner, name, commitSha, publicFile)
+            : null;
+        } catch {
+          throw error;
+        }
+      }
     }
     if (content && content.type === 'file') {
       return content;
@@ -2703,7 +2978,8 @@ export async function queueDiscoveredSkillPaths(
   repo: string,
   headSha: string,
   skillPaths: string[],
-  env: IndexingEnv
+  env: IndexingEnv,
+  treeData?: GitHubTreeResponse
 ): Promise<number> {
   let queued = 0;
   const shouldUsePendingMarker = !message.forceReindex;
@@ -2732,11 +3008,15 @@ export async function queueDiscoveredSkillPaths(
     }
 
     try {
+      const skillFilePath = treeData
+        ? findSkillMdFilePathFromTree(treeData, discoveredSkillPath)
+        : undefined;
       await env.INDEXING_QUEUE.send({
         type: 'check_skill',
         repoOwner: owner,
         repoName: repo,
         skillPath: discoveredSkillPath,
+        ...(skillFilePath ? { skillFilePath } : {}),
         submittedBy: message.submittedBy,
         submittedAt: message.submittedAt,
         submissionUserId: message.submissionUserId,
@@ -2808,14 +3088,17 @@ async function processMessage(
   log.log(`Repo info fetched: ${canonicalRepoOwner}/${canonicalRepoName}, stars: ${repo.stargazers_count}, fork: ${repo.fork}`);
 
   // Step 2: Get latest commit SHA
+  const defaultBranch = repo.default_branch || 'main';
+  // Queue delivery is best-effort ordered. Always resolve the current branch
+  // head so an older PushEvent cannot overwrite a newer indexed revision.
   const latestCommit = await getOrCreateBatchPromise(
     batchContext.latestCommitByRepoRef,
-    getRepoRefCacheKey(canonicalRepoOwner, canonicalRepoName, repo.default_branch || 'main'),
+    getRepoRefCacheKey(canonicalRepoOwner, canonicalRepoName, defaultBranch),
     () => getLatestCommitSha(
       canonicalRepoOwner,
       canonicalRepoName,
       env,
-      repo.default_branch,
+      defaultBranch,
       publicHeadReader
     )
   );
@@ -2863,6 +3146,7 @@ async function processMessage(
 
   let shouldMarkProcessed = false;
   let discoveredRepositorySkillPaths: string[] | null = null;
+  let discoveredSkillFilePath = message.skillFilePath;
   let repositoryTree: RepositoryTreeData | null = null;
 
   try {
@@ -2878,16 +3162,28 @@ async function processMessage(
           null
         );
         discoveredRepositorySkillPaths = scanRepositorySkillPathsFromTree(repositoryTree);
+        discoveredSkillFilePath = findSkillMdFilePathFromTree(repositoryTree, null);
         const queuedDiscoveredPaths = await queueDiscoveredSkillPaths(
           message,
           canonicalRepoOwner,
           canonicalRepoName,
           latestCommit.sha,
           discoveredRepositorySkillPaths.filter(Boolean),
-          env
+          env,
+          repositoryTree
         );
         if (queuedDiscoveredPaths > 0) {
           log.log(`Queued ${queuedDiscoveredPaths} discovered nested skill paths for ${canonicalRepoOwner}/${canonicalRepoName}`);
+        }
+
+        if (!discoveredRepositorySkillPaths.includes('')) {
+          if (discoveredRepositorySkillPaths.length === 0) {
+            log.log(`No SKILL.md found anywhere in repository: ${canonicalRepoOwner}/${canonicalRepoName}`);
+          } else {
+            log.log(`No root SKILL.md found in repository ${canonicalRepoOwner}/${canonicalRepoName}; nested skills were queued separately`);
+          }
+          shouldMarkProcessed = true;
+          return;
         }
       } catch (scanError) {
         log.warn(`Failed to scan repository skill paths for ${canonicalRepoOwner}/${canonicalRepoName}`, scanError);
@@ -2960,13 +3256,14 @@ async function processMessage(
     }
 
     // Step 4: Verify SKILL.md exists for the requested path.
-    let skillMd = await getSkillMd(
+    const skillMd = await getSkillMd(
       canonicalRepoOwner,
       canonicalRepoName,
       latestCommit.sha,
       env,
       skillPath,
-      publicReader
+      publicReader,
+      discoveredSkillFilePath
     );
     if (!skillMd && !skillPath) {
       const repositorySkillPaths = discoveredRepositorySkillPaths || await scanRepositorySkillPaths(
@@ -2988,7 +3285,8 @@ async function processMessage(
             canonicalRepoName,
             latestCommit.sha,
             discoveredSkillPaths,
-            env
+            env,
+            repositoryTree || undefined
           );
           if (queuedDiscoveredPaths > 0) {
             log.log(`Queued ${queuedDiscoveredPaths} discovered skill paths for ${canonicalRepoOwner}/${canonicalRepoName}`);
@@ -3564,9 +3862,15 @@ export default {
     ctx: ExecutionContext
   ): Promise<void> {
     log.log(`Processing batch of ${batch.messages.length} messages`);
+    const sharedRateLimitKV = getGitHubRateLimitKVFromEnv(env);
+    const runtimeEnv = withGitHubRateLimitKVOverride(
+      env,
+      isDurableObjectKvStore(sharedRateLimitKV)
+        ? createMemoizedDurableObjectKvStore(sharedRateLimitKV)
+        : sharedRateLimitKV
+    );
     const seenInBatch = new Map<string, { queuedAsPending: boolean }>();
-    const batchContext = createIndexingBatchContext();
-    batchContext.waitUntil = ctx?.waitUntil?.bind(ctx);
+    const messagesToProcess: Message<IndexingMessage>[] = [];
 
     for (const message of batch.messages) {
       const dedupKey = getMessageDedupKey(message.body);
@@ -3581,25 +3885,67 @@ export default {
       seenInBatch.set(dedupKey, {
         queuedAsPending: Boolean(seenState?.queuedAsPending || message.body.queuedAsPending),
       });
+      messagesToProcess.push(message);
+    }
+
+    if (messagesToProcess.length === 0) {
+      return;
+    }
+
+    let admission: IndexingRateLimitAdmission;
+    try {
+      admission = await reserveIndexingRateLimitBudget(runtimeEnv, messagesToProcess.length);
+    } catch (error) {
+      log.warn('GitHub rate limit admission check failed; deferring the batch', error);
+      admission = {
+        allowed: false,
+        status: 'error',
+        remaining: null,
+        required: null,
+        resetAtEpochSec: null,
+        retryAtEpochSec: null,
+      };
+    }
+    if (!admission.allowed) {
+      const retryAtEpochSec = admission.status === 'insufficient'
+        ? admission.retryAtEpochSec
+        : null;
+      const delaySeconds = await deferIndexingMessagesForBudget(
+        messagesToProcess,
+        runtimeEnv,
+        retryAtEpochSec
+      );
+      log.warn(
+        `Deferring indexing batch for GitHub core budget: status=${admission.status}, remaining=${admission.remaining}, required=${admission.required}, retry_in=${delaySeconds}s`
+      );
+      return;
+    }
+
+    const batchContext = createIndexingBatchContext();
+    batchContext.waitUntil = ctx?.waitUntil?.bind(ctx);
+
+    for (const message of messagesToProcess) {
+      const dedupKey = getMessageDedupKey(message.body);
 
       try {
         if (!message.body.forceReindex) {
           log.log(`Processing deduped queue candidate: ${dedupKey}`);
         }
         log.log(`Processing message ID: ${message.id}`);
-        await processMessage(message.body, env, batchContext);
+        await processMessage(message.body, runtimeEnv, batchContext);
         message.ack();
         log.log(`Message acknowledged: ${message.id}`);
       } catch (error) {
         log.error(`Error processing message ${message.id}:`, error);
-        message.retry();
-        log.log(`Message scheduled for retry: ${message.id}`);
+        const delaySeconds = getQueueRetryDelaySeconds(null);
+        message.retry({ delaySeconds });
+        log.log(`Message scheduled for retry in ${delaySeconds}s: ${message.id}`);
       }
     }
 
     if (isIndexNowEnabled(env) && batchContext.indexNowUrls.size > 0) {
       scheduleIndexNowSubmission({
-        env,
+        env: runtimeEnv,
         urls: [...batchContext.indexNowUrls],
         source: `indexing:batch:${batch.messages.length}`,
         waitUntil: ctx.waitUntil.bind(ctx),

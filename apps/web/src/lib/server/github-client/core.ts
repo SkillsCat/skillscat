@@ -135,7 +135,7 @@ export function getGitHubResponseMetadata(response: Response): GitHubResponseMet
   return responseMetadata.get(response);
 }
 
-function getGitHubRateLimitBucket(url: string): GitHubRateLimitBucket | null {
+export function getGitHubRateLimitBucket(url: string): GitHubRateLimitBucket | null {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -147,7 +147,9 @@ function getGitHubRateLimitBucket(url: string): GitHubRateLimitBucket | null {
     return null;
   }
 
-  return parsed.pathname === '/graphql' ? 'graphql' : 'rest';
+  if (parsed.pathname === '/graphql') return 'graphql';
+  if (parsed.pathname.startsWith('/search/')) return 'search';
+  return 'rest';
 }
 
 function shouldWriteRateLimitSnapshot(

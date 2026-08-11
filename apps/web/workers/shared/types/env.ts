@@ -24,6 +24,8 @@ export interface GithubEventsEnv extends BaseEnv {
   INDEXING_QUEUE: Queue<IndexingMessage>;
   GITHUB_EVENTS_PER_PAGE?: string;
   GITHUB_EVENTS_PAGES?: string;
+  GITHUB_EVENTS_KNOWN_REPOS_ONLY?: string;
+  GITHUB_EVENTS_MAX_QUEUED_REPOS?: string;
   GITHUB_EVENTS_MIN_REST_REMAINING?: string;
   GITHUB_EVENTS_REST_RESERVE?: string;
   GITHUB_SEARCH_DISCOVERY_ENABLED?: string;
@@ -32,8 +34,8 @@ export interface GithubEventsEnv extends BaseEnv {
   GITHUB_SEARCH_DISCOVERY_PER_PAGE?: string;
   GITHUB_SEARCH_DISCOVERY_INTERVAL_SECONDS?: string;
   GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS?: string;
-  GITHUB_DISCOVERY_MIN_REST_REMAINING?: string;
-  GITHUB_DISCOVERY_REST_RESERVE?: string;
+  GITHUB_SEARCH_DISCOVERY_MIN_REMAINING?: string;
+  GITHUB_SEARCH_DISCOVERY_RESERVE?: string;
   GITHUB_DISCOVERY_LOCK_TTL_SECONDS?: string;
 }
 
@@ -42,6 +44,9 @@ export interface IndexingEnv extends BaseEnv {
   CLASSIFICATION_QUEUE: Queue<ClassificationMessage>;
   SECURITY_ANALYSIS_QUEUE?: Queue<SecurityAnalysisMessage>;
   GITHUB_API_VERSION?: string;
+  GITHUB_INDEXING_REST_RESERVE?: string;
+  GITHUB_INDEXING_ESTIMATED_REQUESTS_PER_MESSAGE?: string;
+  GITHUB_INDEXING_RATE_LIMIT_MAX_AGE_SECONDS?: string;
 }
 
 export interface ClassificationEnv extends BaseEnv {
