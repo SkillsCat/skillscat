@@ -9,16 +9,16 @@ import type {
 import type { D1Database } from '@cloudflare/workers-types';
 import { createLogger, generateId } from './shared/utils';
 import {
-  getDefaultOpenRouterFreeModels,
+  formatOpenRouterErrorForLog,
   getOpenRouterJsonGenerationOptions,
   getOpenRouterFreePauseUntil,
   getOpenRouterFreePauseStore,
-  isOpenRouterFreeModel,
   isOpenRouterFreePauseError,
   normalizeOpenRouterModelId,
   OpenRouterApiError,
   parseOpenRouterRetryAfterMs,
   pauseOpenRouterFreeModels,
+  resolveOpenRouterFreeModelCandidates,
 } from './shared/ai/openrouter';
 import {
   buildSkillBundleFiles,
@@ -137,11 +137,10 @@ function parsePositiveFloat(raw: string | undefined, fallback: number): number {
 }
 
 function getFreeModelCandidates(env: SecurityAnalysisEnv): string[] {
-  const configured = [env.SECURITY_FREE_MODEL || '', ...(env.SECURITY_FREE_MODELS || '').split(',')]
-    .map(normalizeOpenRouterModelId)
-    .filter(Boolean)
-    .filter(isOpenRouterFreeModel);
-  return Array.from(new Set([...getDefaultOpenRouterFreeModels(), ...configured]));
+  return resolveOpenRouterFreeModelCandidates(
+    env.SECURITY_FREE_MODEL,
+    env.SECURITY_FREE_MODELS
+  );
 }
 
 export function getTierModelCandidates(tier: SecurityAnalysisTier, env: SecurityAnalysisEnv): string[] {
@@ -541,7 +540,7 @@ async function runAiPipeline(
   const stabilityRounds = parsePositiveInt(env.SECURITY_STABILITY_ROUNDS, DEFAULT_STABILITY_ROUNDS);
   let lastError: Error | null = null;
 
-  for (const model of modelCandidates) {
+  for (const [modelIndex, model] of modelCandidates.entries()) {
     try {
       let previousJson: string | undefined;
       let finalAssessment: AiAssessmentResult | null = null;
@@ -604,7 +603,12 @@ async function runAiPipeline(
       if (tier === 'free' && isOpenRouterFreePauseError(error)) {
         throw error;
       }
-      log.error(`AI security analysis failed for model ${model}:`, error);
+      const message = `AI security analysis failed for model ${model}: ${formatOpenRouterErrorForLog(error)}`;
+      if (modelIndex < modelCandidates.length - 1) {
+        log.warn(message);
+      } else {
+        log.error(message);
+      }
     }
   }
 

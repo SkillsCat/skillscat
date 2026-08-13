@@ -55,9 +55,9 @@ describe('classification model helpers', () => {
       AI_MODEL: 'vendor/paid-model',
       FREE_MODELS: 'custom/model:free,deepseek-v4-flash,openrouter:free',
     })).toEqual([
+      'custom/model:free',
       'deepseek/deepseek-v4-flash',
       'openrouter/free',
-      'custom/model:free',
     ]);
   });
 
@@ -82,7 +82,7 @@ describe('classification model helpers', () => {
     });
   });
 
-  it('routes classification through DeepSeek V4 Flash, OpenRouter Free, then paid DeepSeek', async () => {
+  it('respects the configured free-model order before the paid fallback', async () => {
     const originalFetch = globalThis.fetch;
     const fetchMock = vi.fn(async () => {
       if (fetchMock.mock.calls.length < 4) {
@@ -126,14 +126,14 @@ describe('classification model helpers', () => {
       String((call[1] as RequestInit | undefined)?.body)
     ) as { model: string; response_format?: { type: string } });
     expect(requestBodies.map((body) => body.model)).toEqual([
-      'deepseek/deepseek-v4-flash',
-      'deepseek/deepseek-v4-flash',
+      'openrouter/free',
       'openrouter/free',
       'deepseek/deepseek-v4-flash',
+      'deepseek/deepseek-v4-flash',
     ]);
-    expect(requestBodies[0]?.response_format).toEqual({ type: 'json_object' });
-    expect(requestBodies[1]?.response_format).toEqual({ type: 'json_object' });
-    expect(requestBodies[2]?.response_format).toBeUndefined();
+    expect(requestBodies[0]?.response_format).toBeUndefined();
+    expect(requestBodies[1]?.response_format).toBeUndefined();
+    expect(requestBodies[2]?.response_format).toEqual({ type: 'json_object' });
     expect(requestBodies[3]?.response_format).toEqual({ type: 'json_object' });
   });
 
@@ -793,7 +793,7 @@ describe('classification queue preloading', () => {
 
     expect(writeDataPoint).toHaveBeenCalledTimes(1);
     expect(writeDataPoint).toHaveBeenCalledWith({
-      blobs: ['succeeded', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-flash'],
+      blobs: ['succeeded', 'openrouter/free', 'deepseek/deepseek-v4-flash'],
       doubles: [2, 2, 0, 0, 1, 0, 1],
       indexes: ['classification-batch'],
     });

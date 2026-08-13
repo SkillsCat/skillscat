@@ -1,5 +1,6 @@
 const OPENROUTER_FREE_PAUSE_KEY = 'openrouter:free:paused_until';
 const DEFAULT_OPENROUTER_FREE_PAUSE_MS = 15 * 60 * 1000;
+const MAX_OPENROUTER_ERROR_LOG_CHARS = 1_000;
 export const OPENROUTER_FREE_ROUTER_MODEL = 'openrouter/free';
 export const DEFAULT_OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash';
 export const DEFAULT_OPENROUTER_PAID_MODEL = 'deepseek/deepseek-v4-flash';
@@ -46,6 +47,25 @@ export class OpenRouterApiError extends Error {
   }
 }
 
+export function formatOpenRouterErrorForLog(error: unknown): string {
+  const rawMessage = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  const normalizedMessage = rawMessage.replace(/\s+/g, ' ').trim();
+  const message = normalizedMessage.length > MAX_OPENROUTER_ERROR_LOG_CHARS
+    ? `${normalizedMessage.slice(0, MAX_OPENROUTER_ERROR_LOG_CHARS)}...`
+    : normalizedMessage;
+
+  return JSON.stringify({
+    ...(error instanceof OpenRouterApiError
+      ? {
+          model: error.model,
+          status: error.status,
+          retryAfterMs: error.retryAfterMs,
+        }
+      : {}),
+    error: message,
+  });
+}
+
 export function isOpenRouterFreeModel(model: string): boolean {
   const normalized = normalizeOpenRouterModelId(model);
   return normalized === OPENROUTER_FREE_ROUTER_MODEL || normalized.endsWith(':free');
@@ -64,6 +84,20 @@ export function getDefaultOpenRouterFreeModel(): string {
 
 export function getDefaultOpenRouterFreeModels(): string[] {
   return [DEFAULT_OPENROUTER_MODEL, OPENROUTER_FREE_ROUTER_MODEL];
+}
+
+export function resolveOpenRouterFreeModelCandidates(
+  primaryModel: string | undefined,
+  additionalModels: string | undefined
+): string[] {
+  const configured = [primaryModel || '', ...(additionalModels || '').split(',')]
+    .map(normalizeOpenRouterModelId)
+    .filter(Boolean)
+    .filter((model) => model === DEFAULT_OPENROUTER_MODEL || isOpenRouterFreeModel(model));
+
+  return configured.length > 0
+    ? Array.from(new Set(configured))
+    : getDefaultOpenRouterFreeModels();
 }
 
 export function parseOpenRouterRetryAfterMs(headers: Headers): number | null {
