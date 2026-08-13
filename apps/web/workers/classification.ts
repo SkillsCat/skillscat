@@ -27,7 +27,6 @@ import {
 import {
   DEFAULT_OPENROUTER_PAID_MODEL,
   getDefaultOpenRouterFreeModel,
-  getDefaultOpenRouterFreeModels,
   getOpenRouterJsonGenerationOptions,
   getOpenRouterFreePauseUntil,
   getOpenRouterFreePauseStore,
@@ -37,6 +36,7 @@ import {
   OpenRouterApiError,
   parseOpenRouterRetryAfterMs,
   pauseOpenRouterFreeModels,
+  resolveOpenRouterFreeModelCandidates,
 } from './shared/ai/openrouter';
 import { createLogger } from './shared/utils';
 import { buildGithubSkillR2Keys, buildUploadSkillR2Key } from '../src/lib/skill-path';
@@ -555,8 +555,8 @@ async function callOpenRouterText(
 
 /**
  * Generate the functional summary with the same cost policy as classification:
- * DeepSeek V4 Flash and the OpenRouter free router first (respecting the shared pause store),
- * paid DeepSeek V4 Flash as the fallback. Returns null when no provider succeeds.
+ * configured free candidates first (respecting the shared pause store), then the
+ * configured paid model. Returns null when no provider succeeds.
  */
 export async function generateSkillSummary(
   skillMdContent: string,
@@ -906,15 +906,11 @@ function parseClassificationResult(content: string): ExtendedClassificationResul
 
 /**
  * Get ordered free model candidates for classification.
- * DeepSeek V4 Flash and the OpenRouter free router always lead the pool; custom free
- * candidates are appended for compatibility without changing the cost policy.
+ * Explicit configuration defines the pool and its order. Defaults are used only when
+ * no valid configured candidate is present.
  */
 export function getFreeModelCandidates(env: ClassificationEnv): string[] {
-  const configured = [env.AI_MODEL || '', ...(env.FREE_MODELS || '').split(',')]
-    .map(normalizeOpenRouterModelId)
-    .filter(Boolean)
-    .filter(isOpenRouterFreeModel);
-  return Array.from(new Set([...getDefaultOpenRouterFreeModels(), ...configured]));
+  return resolveOpenRouterFreeModelCandidates(env.AI_MODEL, env.FREE_MODELS);
 }
 
 function getClassificationPaidModel(env: ClassificationEnv): string {
@@ -1019,10 +1015,9 @@ export function classifyByKeywords(content: string, tags?: string[]): Classifica
 
 /**
  * Classify skill using AI with multi-model fallback strategy:
- * 1. Try DeepSeek V4 Flash and retry it once for transient errors
- * 2. Try the OpenRouter free router
- * 3. Try paid DeepSeek V4 Flash
- * 4. Fall back to keyword classification
+ * 1. Try configured free candidates in order, retrying the first once
+ * 2. Try the configured paid model
+ * 3. Fall back to keyword classification
  */
 export async function classifyWithAI(
   skillMdContent: string,
@@ -1076,7 +1071,7 @@ export async function classifyWithAI(
     console.log(`[OpenRouter] Free classification models paused until ${new Date(freePausedUntil).toISOString()}`);
   }
 
-  // 2. Use paid DeepSeek V4 Flash only after the ordered free pool is unavailable or exhausted.
+  // 2. Use the configured paid model only after the ordered free pool is unavailable or exhausted.
   if (env.OPENROUTER_API_KEY) {
     try {
       console.log(`[OpenRouter] Trying paid classification model: ${paidModel}`);

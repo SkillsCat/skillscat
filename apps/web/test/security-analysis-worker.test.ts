@@ -4,6 +4,7 @@ import { runSecurityHeuristics } from '../src/lib/server/security';
 import { tryClaimSkillSecurityAnalysis } from '../src/lib/server/security/state';
 import {
   getOpenRouterFreePauseUntil,
+  formatOpenRouterErrorForLog,
   isOpenRouterFreePauseError,
   OpenRouterApiError,
   pauseOpenRouterFreeModels,
@@ -37,7 +38,14 @@ describe('security analysis worker helpers', () => {
       SECURITY_PREMIUM_MODEL: 'deepseek/deepseek-v4-flash',
       SECURITY_FREE_MODEL: 'openrouter:free',
       SECURITY_FREE_MODELS: 'foo/model:free,openrouter:free,vendor/paid-model',
-    })).toEqual(['deepseek/deepseek-v4-flash', 'openrouter/free', 'foo/model:free']);
+    })).toEqual(['openrouter/free', 'foo/model:free']);
+
+    expect(getTierModelCandidates('free', {
+      DB: {} as never,
+      KV: {} as never,
+      R2: {} as never,
+      OPENROUTER_API_KEY: 'or-key',
+    })).toEqual(['deepseek/deepseek-v4-flash', 'openrouter/free']);
 
     expect(getTierModelCandidates('premium', {
       DB: {} as never,
@@ -45,6 +53,29 @@ describe('security analysis worker helpers', () => {
       R2: {} as never,
       OPENROUTER_API_KEY: 'or-key',
     })).toEqual([]);
+  });
+
+  it('keeps OpenRouter status and message details in one bounded log value', () => {
+    const details = JSON.parse(formatOpenRouterErrorForLog(new OpenRouterApiError({
+      model: 'deepseek/deepseek-v4-flash',
+      status: 503,
+      retryAfterMs: 30_000,
+      message: `upstream unavailable\n${'x'.repeat(1_200)}`,
+    }))) as {
+      model: string;
+      status: number;
+      retryAfterMs: number;
+      error: string;
+    };
+
+    expect(details).toEqual(expect.objectContaining({
+      model: 'deepseek/deepseek-v4-flash',
+      status: 503,
+      retryAfterMs: 30_000,
+    }));
+    expect(details.error).toContain('OpenRouterApiError: upstream unavailable x');
+    expect(details.error.length).toBeLessThanOrEqual(1_003);
+    expect(details.error).not.toContain('\n');
   });
 
   it('tells the AI model to reserve critical scores for only severe real-world harm', () => {
