@@ -76,11 +76,11 @@
     "test:cli:all": "pnpm --filter ./apps/cli test:all"
   },
   "devDependencies": {
-    "eslint": "^10.8.0",
-    "eslint-plugin-svelte": "^3.22.0",
+    "eslint": "^10.9.0",
+    "eslint-plugin-svelte": "^3.23.0",
     "eslint-plugin-unused-imports": "^4.4.1",
-    "svelte-eslint-parser": "^1.8.0",
+    "svelte-eslint-parser": "^1.8.1",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.66.0"
+    "typescript-eslint": "^8.67.0"
   }
 }

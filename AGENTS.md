@@ -105,7 +105,7 @@ SkillsCat 是一个 `pnpm` monorepo，目标是构建一个用于发现、发布
 
 当前项目有一组独立的 Cloudflare workers / cron / queue 消费者：
 
-- `github-events`: 轮询 GitHub Events 和 Code Search，发现包含 `SKILL.md` 的仓库。
+- `github-events`: 轮询 GitHub Events 和 Code Search（追头 + 日期切片回填），并以零 API 配额的 HTML 仓库搜索爬虫补充发现包含 `SKILL.md` 的仓库。
 - `indexing`: 拉取 GitHub 仓库内容，写入 D1，并缓存 `SKILL.md`/文本文件到 R2，再投递分类任务。
 - `classification`: 用 AI 或关键词分类 skills，写分类结果，并标记 search/recommend 预计算状态。
 - `trending`: 刷新 star/download/access 指标、更新 trending score、维护列表缓存。

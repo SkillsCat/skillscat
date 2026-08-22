@@ -2,6 +2,7 @@
  * GitHub Events Worker
  *
  * 轮询 GitHub Events API 刷新已知仓库，并在预算允许时使用 Code Search 发现新仓库
+ * （追头 + 日期切片回填），另有零 API 配额的 HTML 仓库搜索爬虫补充发现
  * 通过 Cron Trigger 默认每 5 分钟执行一次
  */
 
@@ -11,6 +12,11 @@ import {
   getGitHubRequestAuthFromEnv,
   withGitHubRateLimitKVOverride,
 } from '../src/lib/server/github-client/env';
+import {
+  checkPublicSkillMdAtHead,
+  fetchPublicSkillRepoSearchPage,
+  PublicRepoSearchError,
+} from '../src/lib/server/github-client/public-search';
 import { getRateLimit, listPublicEvents, searchCode } from '../src/lib/server/github-client/rest';
 import {
   isRateLimitSnapshotStale,
@@ -34,15 +40,23 @@ const DEFAULT_EVENTS_MAX_QUEUED_REPOS = 20;
 const DEFAULT_EVENTS_MIN_REST_REMAINING = 1000;
 const DEFAULT_EVENTS_REST_RESERVE = 300;
 const DEFAULT_SEARCH_DISCOVERY_QUERY = 'filename:SKILL.md';
-const DEFAULT_SEARCH_DISCOVERY_PAGES = 1;
+const DEFAULT_SEARCH_DISCOVERY_PAGES = 3;
 const DEFAULT_SEARCH_DISCOVERY_PER_PAGE = 100;
 const DEFAULT_SEARCH_DISCOVERY_INTERVAL_SECONDS = 15 * 60;
 const DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS = 5 * 60;
 const DEFAULT_SEARCH_MIN_REMAINING = 2;
 const DEFAULT_SEARCH_RESERVE = 2;
 const DEFAULT_DISCOVERY_LOCK_TTL_SECONDS = 240;
+const DEFAULT_REPO_QUEUE_DEDUP_TTL_SECONDS = 24 * 60 * 60;
+const DEFAULT_EVENT_QUEUE_DEDUP_TTL_SECONDS = 5 * 60;
+const DEFAULT_HTML_SEARCH_DISCOVERY_INTERVAL_SECONDS = 15 * 60;
+const DEFAULT_HTML_SEARCH_QUERIES = 'SKILL.md in:readme';
+const DEFAULT_SEARCH_BACKFILL_INTERVAL_SECONDS = 60 * 60;
+const DEFAULT_SEARCH_BACKFILL_START_DATE = '2025-01-01';
+const DEFAULT_SEARCH_BACKFILL_MIN_REMAINING = 5;
+const DEFAULT_SEARCH_BACKFILL_RESERVE = 5;
+const DEFAULT_SEARCH_BACKFILL_MAX_PAGES = 3;
 
-const REPO_QUEUE_DEDUP_TTL_SECONDS = 5 * 60;
 const RATE_LIMIT_SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
 const D1_MAX_BOUND_PARAMETERS = 100;
 const REPO_IDENTITY_BOUND_PARAMETERS = 2;
@@ -52,6 +66,7 @@ const D1_REPO_IDENTITY_CHUNK_SIZE = Math.floor(
 
 const RUN_LOCK_KEY = 'github-discovery:run-lock';
 const CODE_SEARCH_CURSOR_KEY = 'github-events:code-search:last-head';
+const CODE_SEARCH_BACKFILL_CURSOR_KEY = 'github-events:code-search:backfill-cursor';
 const EVENT_REPLAY_STATE_KEY = 'github-events:event-replay-state';
 const REPO_QUEUE_DEDUP_WINDOW_KEY = 'github-events:repo-queued-window';
 
@@ -61,6 +76,23 @@ interface SearchDiscoveryResult {
   pagesFetched: number;
   allowedPages: number;
   stoppedByCursor: boolean;
+  remainingAfter?: number;
+  resetAtEpochSecAfter?: number;
+  skippedReason?: string;
+}
+
+interface CodeSearchBackfillResult {
+  scanned: number;
+  queued: number;
+  pagesFetched: number;
+  allowedPages: number;
+  date?: string;
+  skippedReason?: string;
+}
+
+interface HtmlSearchDiscoveryResult {
+  scanned: number;
+  queued: number;
   skippedReason?: string;
 }
 
@@ -240,6 +272,83 @@ function getSearchDiscoveryConfig(env: GithubEventsEnv): {
 
 function getDiscoveryLockTtlSeconds(env: GithubEventsEnv): number {
   return parsePositiveInt(env.GITHUB_DISCOVERY_LOCK_TTL_SECONDS, DEFAULT_DISCOVERY_LOCK_TTL_SECONDS);
+}
+
+function getRepoQueueDedupTtlSeconds(env: GithubEventsEnv): number {
+  return parsePositiveInt(env.GITHUB_REPO_QUEUE_DEDUP_TTL_SECONDS, DEFAULT_REPO_QUEUE_DEDUP_TTL_SECONDS);
+}
+
+function getEventQueueDedupTtlSeconds(env: GithubEventsEnv): number {
+  return parsePositiveInt(env.GITHUB_EVENT_QUEUE_DEDUP_TTL_SECONDS, DEFAULT_EVENT_QUEUE_DEDUP_TTL_SECONDS);
+}
+
+function parseDateOnly(raw: string | undefined, fallback: string): string {
+  const value = (raw || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return fallback;
+  return Number.isFinite(Date.parse(`${value}T00:00:00Z`)) ? value : fallback;
+}
+
+function formatDateOnly(epochMs: number): string {
+  return new Date(epochMs).toISOString().slice(0, 10);
+}
+
+function addDaysToDateOnly(date: string, days: number): string {
+  return formatDateOnly(Date.parse(`${date}T00:00:00Z`) + days * 86400_000);
+}
+
+function getHtmlSearchDiscoveryConfig(env: GithubEventsEnv): {
+  enabled: boolean;
+  intervalSeconds: number;
+  cronIntervalSeconds: number;
+  queries: string[];
+} {
+  const rawQueries = (env.GITHUB_HTML_SEARCH_QUERIES || DEFAULT_HTML_SEARCH_QUERIES)
+    .split(',')
+    .map((query) => query.trim())
+    .filter(Boolean);
+  return {
+    enabled: parseEnabled(env.GITHUB_HTML_SEARCH_DISCOVERY_ENABLED, true),
+    intervalSeconds: parsePositiveInt(
+      env.GITHUB_HTML_SEARCH_DISCOVERY_INTERVAL_SECONDS,
+      DEFAULT_HTML_SEARCH_DISCOVERY_INTERVAL_SECONDS
+    ),
+    cronIntervalSeconds: parsePositiveInt(
+      env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
+      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS
+    ),
+    queries: rawQueries.length > 0 ? rawQueries : [DEFAULT_HTML_SEARCH_QUERIES],
+  };
+}
+
+function getSearchBackfillConfig(env: GithubEventsEnv): {
+  enabled: boolean;
+  intervalSeconds: number;
+  startDate: string;
+  minRemaining: number;
+  reserve: number;
+  maxPages: number;
+  perPage: number;
+  cronIntervalSeconds: number;
+} {
+  return {
+    enabled: parseEnabled(env.GITHUB_SEARCH_BACKFILL_ENABLED, true),
+    intervalSeconds: parsePositiveInt(
+      env.GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS,
+      DEFAULT_SEARCH_BACKFILL_INTERVAL_SECONDS
+    ),
+    startDate: parseDateOnly(env.GITHUB_SEARCH_BACKFILL_START_DATE, DEFAULT_SEARCH_BACKFILL_START_DATE),
+    minRemaining: parsePositiveInt(
+      env.GITHUB_SEARCH_BACKFILL_MIN_REMAINING,
+      DEFAULT_SEARCH_BACKFILL_MIN_REMAINING
+    ),
+    reserve: parsePositiveInt(env.GITHUB_SEARCH_BACKFILL_RESERVE, DEFAULT_SEARCH_BACKFILL_RESERVE),
+    maxPages: parsePositiveInt(env.GITHUB_SEARCH_BACKFILL_MAX_PAGES, DEFAULT_SEARCH_BACKFILL_MAX_PAGES),
+    perPage: parsePositiveInt(env.GITHUB_SEARCH_DISCOVERY_PER_PAGE, DEFAULT_SEARCH_DISCOVERY_PER_PAGE),
+    cronIntervalSeconds: parsePositiveInt(
+      env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
+      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS
+    ),
+  };
 }
 
 function getGithubEventsStateStore(env: GithubEventsEnv): KVNamespace {
@@ -544,11 +653,12 @@ function markRepoQueued(
   owner: string,
   name: string,
   skillPath: string | undefined,
-  nowMs: number
+  nowMs: number,
+  ttlSeconds: number
 ): void {
   const identity = buildRepoQueuedDedupIdentity(owner, name, skillPath);
   state.queuedInRun.add(identity);
-  state.recentUntilByIdentity.set(identity, nowMs + REPO_QUEUE_DEDUP_TTL_SECONDS * 1000);
+  state.recentUntilByIdentity.set(identity, nowMs + ttlSeconds * 1000);
   state.dirty = true;
 }
 
@@ -561,6 +671,7 @@ async function persistRepoQueueDedupeState(
     return;
   }
 
+  const ttlSeconds = getRepoQueueDedupTtlSeconds(env);
   const entries: Record<string, number> = {};
   for (const [identity, expiresAtEpochMs] of state.recentUntilByIdentity.entries()) {
     if (expiresAtEpochMs > nowMs) {
@@ -569,7 +680,7 @@ async function persistRepoQueueDedupeState(
   }
 
   await getGithubEventsStateStore(env).put(REPO_QUEUE_DEDUP_WINDOW_KEY, JSON.stringify({ entries }), {
-    expirationTtl: REPO_QUEUE_DEDUP_TTL_SECONDS * 2,
+    expirationTtl: ttlSeconds * 2,
   });
 }
 
@@ -796,7 +907,7 @@ async function processEvents(
         }
 
         await env.INDEXING_QUEUE.send(message);
-        markRepoQueued(repoDedupeState, message.repoOwner, message.repoName, undefined, nowMs);
+        markRepoQueued(repoDedupeState, message.repoOwner, message.repoName, undefined, nowMs, getEventQueueDedupTtlSeconds(env));
         queued++;
         console.log(`Queued known repo for indexing: ${message.repoOwner}/${message.repoName}`);
         replayedPushEventIds.add(event.id);
@@ -848,6 +959,73 @@ async function processEvents(
   };
 }
 
+/**
+ * 处理一页 code search 结果:过滤 SKILL.md → run 内去重 → 窗口去重 → 入队。
+ * previousHeadCursor 仅追头路径使用;回填传 null 不做游标截停。
+ */
+async function queueCodeSearchItems(
+  env: GithubEventsEnv,
+  items: GitHubCodeSearchItem[],
+  repoDedupeState: RepoQueueDedupeState,
+  seenFingerprints: Set<string>,
+  previousHeadCursor: string | null,
+  nowMs: number
+): Promise<{ scanned: number; queued: number; stoppedByCursor: boolean }> {
+  let scanned = 0;
+  let queued = 0;
+  let stoppedByCursor = false;
+  const dedupTtlSeconds = getRepoQueueDedupTtlSeconds(env);
+
+  for (const item of items) {
+    scanned++;
+
+    if (!isSkillMdPath(item.path)) {
+      continue;
+    }
+
+    const fingerprint = buildSearchFingerprint(item);
+    if (!fingerprint) {
+      continue;
+    }
+
+    if (previousHeadCursor && fingerprint === previousHeadCursor) {
+      stoppedByCursor = true;
+      break;
+    }
+
+    if (seenFingerprints.has(fingerprint)) {
+      continue;
+    }
+    seenFingerprints.add(fingerprint);
+
+    const repo = parseRepoFullName(item.repository?.full_name);
+    if (!repo) {
+      continue;
+    }
+
+    const skillPath = getSkillPathFromSkillMdPath(item.path);
+    if (wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, skillPath, nowMs)) {
+      continue;
+    }
+
+    const message: IndexingMessage = {
+      type: 'check_skill',
+      repoOwner: repo.owner,
+      repoName: repo.name,
+      skillPath,
+      skillFilePath: item.path,
+      discoverySource: 'github-code-search',
+      discoveryFingerprint: fingerprint,
+    };
+
+    await env.INDEXING_QUEUE.send(message);
+    markRepoQueued(repoDedupeState, repo.owner, repo.name, skillPath, nowMs, dedupTtlSeconds);
+    queued++;
+  }
+
+  return { scanned, queued, stoppedByCursor };
+}
+
 async function processCodeSearchDiscovery(
   env: GithubEventsEnv,
   repoDedupeState: RepoQueueDedupeState,
@@ -887,11 +1065,17 @@ async function processCodeSearchDiscovery(
     };
   }
 
+  const snapshotResult = (result: SearchDiscoveryResult): SearchDiscoveryResult => ({
+    ...result,
+    remainingAfter: Math.max(0, searchSnapshot.remaining - result.pagesFetched),
+    resetAtEpochSecAfter: searchSnapshot.resetAtEpochSec,
+  });
+
   if (searchSnapshot.remaining < config.minRestRemaining) {
-    return {
+    return snapshotResult({
       ...baseResult,
       skippedReason: 'insufficient_rest_remaining',
-    };
+    });
   }
 
   const allowedPages = computeAllowedSearchPages(
@@ -903,11 +1087,11 @@ async function processCodeSearchDiscovery(
   );
 
   if (allowedPages <= 0) {
-    return {
+    return snapshotResult({
       ...baseResult,
       allowedPages,
       skippedReason: 'budget_exhausted',
-    };
+    });
   }
 
   const previousHeadCursor = await getCodeSearchHeadCursor(env);
@@ -932,14 +1116,14 @@ async function processCodeSearchDiscovery(
 
     if (!response.ok) {
       if (isGitHubRateLimited(response)) {
-        return {
+        return snapshotResult({
           scanned,
           queued,
           pagesFetched,
           allowedPages,
           stoppedByCursor,
           skippedReason: 'search_rate_limited',
-        };
+        });
       }
       throw new Error(`Failed to fetch GitHub code search: ${response.status}`);
     }
@@ -952,51 +1136,18 @@ async function processCodeSearchDiscovery(
       nextHeadCursor = buildSearchFingerprint(items[0]);
     }
 
-    for (const item of items) {
-      scanned++;
-
-      if (!isSkillMdPath(item.path)) {
-        continue;
-      }
-
-      const fingerprint = buildSearchFingerprint(item);
-      if (!fingerprint) {
-        continue;
-      }
-
-      if (previousHeadCursor && fingerprint === previousHeadCursor) {
-        stoppedByCursor = true;
-        break;
-      }
-
-      if (seenFingerprints.has(fingerprint)) {
-        continue;
-      }
-      seenFingerprints.add(fingerprint);
-
-      const repo = parseRepoFullName(item.repository?.full_name);
-      if (!repo) {
-        continue;
-      }
-
-      const skillPath = getSkillPathFromSkillMdPath(item.path);
-      if (wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, skillPath, nowMs)) {
-        continue;
-      }
-
-      const message: IndexingMessage = {
-        type: 'check_skill',
-        repoOwner: repo.owner,
-        repoName: repo.name,
-        skillPath,
-        skillFilePath: item.path,
-        discoverySource: 'github-code-search',
-        discoveryFingerprint: fingerprint,
-      };
-
-      await env.INDEXING_QUEUE.send(message);
-      markRepoQueued(repoDedupeState, repo.owner, repo.name, skillPath, nowMs);
-      queued++;
+    const outcome = await queueCodeSearchItems(
+      env,
+      items,
+      repoDedupeState,
+      seenFingerprints,
+      previousHeadCursor,
+      nowMs
+    );
+    scanned += outcome.scanned;
+    queued += outcome.queued;
+    if (outcome.stoppedByCursor) {
+      stoppedByCursor = true;
     }
 
     if (stoppedByCursor) {
@@ -1012,13 +1163,236 @@ async function processCodeSearchDiscovery(
     await setCodeSearchHeadCursor(env, nextHeadCursor);
   }
 
-  return {
+  return snapshotResult({
     scanned,
     queued,
     pagesFetched,
     allowedPages,
     stoppedByCursor,
+  });
+}
+
+async function getCodeSearchBackfillCursor(env: GithubEventsEnv): Promise<string | null> {
+  const raw = await getGithubEventsStateStore(env).get(CODE_SEARCH_BACKFILL_CURSOR_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as { date?: unknown };
+    return typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date)
+      ? parsed.date
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function setCodeSearchBackfillCursor(env: GithubEventsEnv, date: string): Promise<void> {
+  await getGithubEventsStateStore(env).put(CODE_SEARCH_BACKFILL_CURSOR_KEY, JSON.stringify({ date }), {
+    expirationTtl: 86400 * 30,
+  });
+}
+
+/**
+ * Code Search 日期切片回填:每 tick 处理一个 `created:<date>..<date>` 切片,
+ * 游标前进一天;到达今天后回卷到起始日期重扫,捕获漏网仓库。
+ * 严格受 search 预算约束,快照不可用或余量不足时整体跳过。
+ */
+async function processCodeSearchBackfill(
+  env: GithubEventsEnv,
+  repoDedupeState: RepoQueueDedupeState,
+  initialSearchSnapshot?: GitHubRateLimitSnapshot | null,
+  nowMs: number = Date.now(),
+  pageBudgetOverride?: number
+): Promise<CodeSearchBackfillResult> {
+  const config = getSearchBackfillConfig(env);
+  const baseResult: CodeSearchBackfillResult = {
+    scanned: 0,
+    queued: 0,
+    pagesFetched: 0,
+    allowedPages: 0,
   };
+
+  if (!config.enabled) {
+    return { ...baseResult, skippedReason: 'disabled' };
+  }
+
+  if (!shouldRunSearchDiscoveryThisTick(nowMs, config.cronIntervalSeconds, config.intervalSeconds)) {
+    return { ...baseResult, skippedReason: 'interval_throttled' };
+  }
+
+  const searchSnapshot = (!initialSearchSnapshot || isRateLimitSnapshotStale(initialSearchSnapshot, RATE_LIMIT_SNAPSHOT_MAX_AGE_MS))
+    ? await readOrRefreshRateLimitSnapshot(env, 'search')
+    : initialSearchSnapshot;
+  if (!searchSnapshot) {
+    return { ...baseResult, skippedReason: 'missing_rate_limit' };
+  }
+
+  if (searchSnapshot.remaining < config.minRemaining) {
+    return { ...baseResult, skippedReason: 'insufficient_remaining' };
+  }
+
+  const computedAllowedPages = computeAllowedSearchPages(
+    config.maxPages,
+    searchSnapshot.remaining,
+    searchSnapshot.resetAtEpochSec,
+    config.cronIntervalSeconds,
+    config.reserve,
+    nowMs
+  );
+  const allowedPages = pageBudgetOverride === undefined
+    ? computedAllowedPages
+    : Math.min(computedAllowedPages, Math.max(0, Math.floor(pageBudgetOverride)));
+
+  if (allowedPages <= 0) {
+    return { ...baseResult, allowedPages, skippedReason: 'budget_exhausted' };
+  }
+
+  const today = formatDateOnly(nowMs);
+  const cursor = await getCodeSearchBackfillCursor(env);
+  const date = (!cursor || cursor >= today) ? config.startDate : cursor;
+  const query = `filename:SKILL.md created:${date}..${date}`;
+
+  const seenFingerprints = new Set<string>();
+  let scanned = 0;
+  let queued = 0;
+  let pagesFetched = 0;
+
+  for (let page = 1; page <= allowedPages; page++) {
+    const response = await searchCode(query, {
+      page,
+      perPage: config.perPage,
+      sort: 'indexed',
+      order: 'desc',
+      // Budget snapshots are refreshed explicitly via /rate_limit.
+      // Keep discovery requests themselves write-free for KV cost control.
+      ...getGitHubRequestAuthFromEnv(env, { rateLimitMode: 'read_only' }),
+      userAgent: 'SkillsCat-Worker/1.0',
+    });
+
+    if (!response.ok) {
+      if (isGitHubRateLimited(response)) {
+        return { scanned, queued, pagesFetched, allowedPages, date, skippedReason: 'search_rate_limited' };
+      }
+      console.warn(`Code search backfill failed for ${date}: ${response.status}`);
+      return { scanned, queued, pagesFetched, allowedPages, date, skippedReason: 'search_failed' };
+    }
+
+    const payload = await response.json() as GitHubCodeSearchResponse;
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    pagesFetched++;
+
+    const outcome = await queueCodeSearchItems(
+      env,
+      items,
+      repoDedupeState,
+      seenFingerprints,
+      null,
+      nowMs
+    );
+    scanned += outcome.scanned;
+    queued += outcome.queued;
+
+    if (items.length < config.perPage) {
+      break;
+    }
+
+    if (page === allowedPages) {
+      // GitHub search 单查询上限 1000 条/10 页,单日 SKILL.md 新增量远达不到;
+      // 截断只记日志,游标照常前进。
+      console.log(`Code search backfill page budget exhausted on a full page for ${date}; remaining results are not fetched`);
+    }
+  }
+
+  await setCodeSearchBackfillCursor(env, addDaysToDateOnly(date, 1));
+
+  return { scanned, queued, pagesFetched, allowedPages, date };
+}
+
+/**
+ * HTML 仓库搜索发现:抓 github.com/search 仓库结果页(零 API 配额),
+ * 入队前用 github.com/<owner>/<repo>/raw/HEAD/SKILL.md 校验候选(200 才算通过),
+ * 过滤 awesome-list 类仓库。任何抓取/解析失败只记日志跳过,绝不影响其他路径。
+ */
+async function processHtmlRepoSearchDiscovery(
+  env: GithubEventsEnv,
+  repoDedupeState: RepoQueueDedupeState,
+  ctx: ExecutionContext | null,
+  lockToken: string,
+  nowMs: number = Date.now()
+): Promise<HtmlSearchDiscoveryResult> {
+  const config = getHtmlSearchDiscoveryConfig(env);
+  const baseResult: HtmlSearchDiscoveryResult = { scanned: 0, queued: 0 };
+
+  if (!config.enabled) {
+    return { ...baseResult, skippedReason: 'disabled' };
+  }
+
+  if (!shouldRunSearchDiscoveryThisTick(nowMs, config.cronIntervalSeconds, config.intervalSeconds)) {
+    return { ...baseResult, skippedReason: 'interval_throttled' };
+  }
+
+  const dedupTtlSeconds = getRepoQueueDedupTtlSeconds(env);
+  const waitUntil = ctx ? (promise: Promise<unknown>) => ctx.waitUntil(promise) : undefined;
+  let scanned = 0;
+  let queued = 0;
+
+  for (const query of config.queries) {
+    if (!await renewDiscoveryRunLock(env, lockToken)) {
+      return { scanned, queued, skippedReason: 'lock_lost' };
+    }
+    let results;
+    try {
+      results = await fetchPublicSkillRepoSearchPage({ query, page: 1, waitUntil });
+    } catch (error) {
+      console.warn(
+        `HTML repo search discovery failed for query "${query}":`,
+        error instanceof PublicRepoSearchError ? `${error.reason} (status=${error.status ?? 'none'})` : error
+      );
+      continue;
+    }
+
+    for (const repo of results) {
+      scanned++;
+
+      if (!await renewDiscoveryRunLock(env, lockToken)) {
+        return { scanned, queued, skippedReason: 'lock_lost' };
+      }
+
+      if (wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, undefined, nowMs)) {
+        continue;
+      }
+
+      let hasSkillMd = false;
+      try {
+        hasSkillMd = await checkPublicSkillMdAtHead(repo.owner, repo.name, { waitUntil });
+      } catch (error) {
+        console.warn(`HTML repo search candidate check failed for ${repo.owner}/${repo.name}:`, error);
+        continue;
+      }
+      if (!hasSkillMd) {
+        continue;
+      }
+
+      if (!await renewDiscoveryRunLock(env, lockToken)) {
+        return { scanned, queued, skippedReason: 'lock_lost' };
+      }
+
+      const message: IndexingMessage = {
+        type: 'check_skill',
+        repoOwner: repo.owner,
+        repoName: repo.name,
+        skillPath: undefined,
+        discoverySource: 'github-repo-search-html',
+      };
+
+      await env.INDEXING_QUEUE.send(message);
+      markRepoQueued(repoDedupeState, repo.owner, repo.name, undefined, nowMs, dedupTtlSeconds);
+      queued++;
+      console.log(`Queued HTML-discovered repo for indexing: ${repo.owner}/${repo.name}`);
+    }
+  }
+
+  return { scanned, queued };
 }
 
 function parseDiscoveryRunLockPayload(
@@ -1094,6 +1468,30 @@ async function hasDiscoveryRunLockOwnership(env: GithubEventsEnv, token: string)
   return current.expiresAtEpochMs > Date.now();
 }
 
+async function renewDiscoveryRunLock(env: GithubEventsEnv, token: string): Promise<boolean> {
+  const current = await readDiscoveryRunLock(env);
+  if (!current || current.token !== token || current.expiresAtEpochMs <= Date.now()) {
+    return false;
+  }
+
+  const ttlSeconds = getDiscoveryLockTtlSeconds(env);
+  const now = Date.now();
+  if (current.expiresAtEpochMs - now > (ttlSeconds * 1000) / 2) {
+    return true;
+  }
+
+  const payload: DiscoveryRunLockPayload = {
+    token,
+    acquiredAtEpochMs: current.acquiredAtEpochMs,
+    expiresAtEpochMs: now + ttlSeconds * 1000,
+  };
+  await getGithubEventsStateStore(env).put(RUN_LOCK_KEY, JSON.stringify(payload), {
+    expirationTtl: ttlSeconds,
+  });
+  const confirmed = await readDiscoveryRunLock(env);
+  return Boolean(confirmed && confirmed.token === token && confirmed.expiresAtEpochMs > Date.now());
+}
+
 async function releaseDiscoveryRunLock(env: GithubEventsEnv, token: string): Promise<void> {
   const current = await readDiscoveryRunLock(env);
   if (!current || current.token !== token) {
@@ -1153,8 +1551,44 @@ export default {
 
       nowMs = Date.now();
       const searchResult = await processCodeSearchDiscovery(runtimeEnv, repoDedupeState, searchBeforeDiscovery, nowMs);
+
+      nowMs = Date.now();
+      const backfillSnapshot = searchBeforeDiscovery && searchResult.remainingAfter !== undefined
+        ? {
+            ...searchBeforeDiscovery,
+            remaining: searchResult.remainingAfter,
+            // This is a local per-tick budget after subtracting requests made
+            // above, so do not refresh it back to the original snapshot.
+            updatedAtEpochMs: Date.now(),
+            ...(searchResult.resetAtEpochSecAfter === undefined
+              ? {}
+              : { resetAtEpochSec: searchResult.resetAtEpochSecAfter }),
+          }
+        : searchBeforeDiscovery;
+      const backfillPageBudget = searchResult.skippedReason === 'search_rate_limited'
+        ? 0
+        : searchResult.skippedReason === 'disabled'
+          || searchResult.skippedReason === 'interval_throttled'
+          || searchResult.skippedReason === 'missing_rate_limit'
+          ? undefined
+          : Math.max(0, searchResult.allowedPages - searchResult.pagesFetched);
+      const backfillResult = await processCodeSearchBackfill(
+        runtimeEnv,
+        repoDedupeState,
+        backfillSnapshot,
+        nowMs,
+        backfillPageBudget
+      );
+
+      if (!await hasDiscoveryRunLockOwnership(runtimeEnv, lockToken)) {
+        console.log('GitHub Events Worker lock ownership lost before HTML repo search processing');
+        return;
+      }
+
+      nowMs = Date.now();
+      const htmlResult = await processHtmlRepoSearchDiscovery(runtimeEnv, repoDedupeState, _ctx, lockToken, nowMs);
       console.log(
-        `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_unknown_skipped=${eventsResult.unknownSkipped}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, rest_snapshot_remaining=${restBeforeEvents?.remaining ?? 'unknown'}, search_snapshot_remaining=${searchBeforeDiscovery?.remaining ?? 'unknown'}`
+        `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_unknown_skipped=${eventsResult.unknownSkipped}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, backfill_scanned=${backfillResult.scanned}, backfill_queued=${backfillResult.queued}, backfill_pages=${backfillResult.pagesFetched}/${backfillResult.allowedPages}, backfill_date=${backfillResult.date || 'none'}, backfill_skipped=${backfillResult.skippedReason || 'none'}, html_scanned=${htmlResult.scanned}, html_queued=${htmlResult.queued}, html_skipped=${htmlResult.skippedReason || 'none'}, rest_snapshot_remaining=${restBeforeEvents?.remaining ?? 'unknown'}, search_snapshot_remaining=${searchBeforeDiscovery?.remaining ?? 'unknown'}`
       );
     } finally {
       if (repoDedupeState) {

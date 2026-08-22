@@ -39,20 +39,21 @@ INDEXNOW_KEY=
 # ========== OpenRouter API (用于 AI 分类/安全分析) ==========
 # 获取 API Key: https://openrouter.ai/keys
 # 查看可用免费模型: https://openrouter.ai/models?q=:free
+# DeepSeek V4 Flash 请求已通过 provider 路由锁定 GMICloud(折扣 SKU,允许 fallback)
 OPENROUTER_API_KEY=
 
-# 分类依次尝试 DeepSeek V4 Flash、OpenRouter Free
-AI_MODEL=deepseek/deepseek-v4-flash
+# 分类依次尝试 DeepSeek V4 Flash 0731、OpenRouter Free
+AI_MODEL=deepseek/deepseek-v4-flash-0731
 FREE_MODELS=openrouter/free
 
 # 免费池都失败后使用付费模型
-CLASSIFICATION_PAID_MODEL=deepseek/deepseek-v4-flash
+CLASSIFICATION_PAID_MODEL=deepseek/deepseek-v4-flash-0731
 
 # ========== Security Analysis (可选调参) ==========
-# 免费分析依次使用 DeepSeek V4 Flash、OpenRouter Free;premium 显式使用付费模型
-SECURITY_FREE_MODEL=deepseek/deepseek-v4-flash
+# 免费分析依次使用 DeepSeek V4 Flash 0731、OpenRouter Free;premium 显式使用付费模型
+SECURITY_FREE_MODEL=deepseek/deepseek-v4-flash-0731
 SECURITY_FREE_MODELS=openrouter/free
-SECURITY_PREMIUM_MODEL=deepseek/deepseek-v4-flash
+SECURITY_PREMIUM_MODEL=deepseek/deepseek-v4-flash-0731
 # SECURITY_PREMIUM_TOP_N=50
 # SECURITY_MAX_AI_FILES=8
 # SECURITY_MAX_AI_TEXT_BYTES=48000

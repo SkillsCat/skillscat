@@ -13,6 +13,7 @@ import {
   getOpenRouterJsonGenerationOptions,
   getOpenRouterFreePauseUntil,
   getOpenRouterFreePauseStore,
+  getOpenRouterProviderRouting,
   isOpenRouterFreePauseError,
   normalizeOpenRouterModelId,
   OpenRouterApiError,
@@ -404,6 +405,7 @@ async function callOpenRouter(
       model,
       messages: [{ role: 'user', content: prompt }],
       ...getOpenRouterJsonGenerationOptions(model, 'security'),
+      ...getOpenRouterProviderRouting(model),
       max_tokens: 1800,
     }),
   });

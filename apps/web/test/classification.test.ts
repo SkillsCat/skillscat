@@ -32,11 +32,12 @@ import classificationWorker, {
 import {
   getOpenRouterJsonGenerationOptions,
   getDefaultOpenRouterFreeModel,
+  getOpenRouterProviderRouting,
   normalizeOpenRouterModelId,
 } from '../workers/shared/ai/openrouter';
 
 describe('classification model helpers', () => {
-  it('keeps free-model candidates ordered, filtered, and deduplicated', () => {
+  it('keeps explicitly configured model candidates ordered and deduplicated', () => {
     expect(getFreeModelCandidates({
       DB: {} as never,
       KV: {} as never,
@@ -44,8 +45,10 @@ describe('classification model helpers', () => {
       AI_MODEL: 'deepseek-v4-flash',
       FREE_MODELS: 'openrouter:free,deepseek/deepseek-v4-flash,vendor/paid-model',
     })).toEqual([
-      'deepseek/deepseek-v4-flash',
+      'deepseek/deepseek-v4-flash-0731',
       'openrouter/free',
+      'deepseek/deepseek-v4-flash',
+      'vendor/paid-model',
     ]);
 
     expect(getFreeModelCandidates({
@@ -55,31 +58,70 @@ describe('classification model helpers', () => {
       AI_MODEL: 'vendor/paid-model',
       FREE_MODELS: 'custom/model:free,deepseek-v4-flash,openrouter:free',
     })).toEqual([
+      'vendor/paid-model',
       'custom/model:free',
-      'deepseek/deepseek-v4-flash',
+      'deepseek/deepseek-v4-flash-0731',
       'openrouter/free',
     ]);
   });
 
-  it('uses DeepSeek V4 Flash as the permanent default OpenRouter model', () => {
-    expect(normalizeOpenRouterModelId('deepseek-v4-flash')).toBe('deepseek/deepseek-v4-flash');
+  it('keeps an explicitly configured model without falling back to defaults', () => {
+    expect(getFreeModelCandidates({
+      DB: {} as never,
+      KV: {} as never,
+      R2: {} as never,
+      AI_MODEL: 'deepseek-ai/DeepSeek-V4-Flash',
+      FREE_MODELS: '',
+    })).toEqual([
+      'deepseek-ai/DeepSeek-V4-Flash',
+    ]);
+  });
+
+  it('falls back to the default free models only when nothing is configured', () => {
+    expect(getFreeModelCandidates({
+      DB: {} as never,
+      KV: {} as never,
+      R2: {} as never,
+    })).toEqual([
+      'deepseek/deepseek-v4-flash-0731',
+      'openrouter/free',
+    ]);
+  });
+
+  it('uses DeepSeek V4 Flash 0731 as the permanent default OpenRouter model', () => {
+    expect(normalizeOpenRouterModelId('deepseek-v4-flash')).toBe('deepseek/deepseek-v4-flash-0731');
     expect(normalizeOpenRouterModelId('deepseek/deepseek-v4-flash')).toBe('deepseek/deepseek-v4-flash');
     expect(normalizeOpenRouterModelId('openrouter:free')).toBe('openrouter/free');
-    expect(getDefaultOpenRouterFreeModel()).toBe('deepseek/deepseek-v4-flash');
+    expect(getDefaultOpenRouterFreeModel()).toBe('deepseek/deepseek-v4-flash-0731');
   });
 
   it('uses DeepSeek-compatible generation parameters', () => {
-    expect(getOpenRouterJsonGenerationOptions('deepseek/deepseek-v4-flash', 'classification')).toEqual({
+    expect(getOpenRouterJsonGenerationOptions('deepseek/deepseek-v4-flash-0731', 'classification')).toEqual({
       temperature: 0.3,
       response_format: { type: 'json_object' },
     });
-    expect(getOpenRouterJsonGenerationOptions('deepseek/deepseek-v4-flash', 'security')).toEqual({
+    expect(getOpenRouterJsonGenerationOptions('deepseek/deepseek-v4-flash-0731', 'security')).toEqual({
       temperature: 0.2,
+      response_format: { type: 'json_object' },
+    });
+    expect(getOpenRouterJsonGenerationOptions('deepseek/deepseek-v4-flash', 'classification')).toEqual({
+      temperature: 0.3,
       response_format: { type: 'json_object' },
     });
     expect(getOpenRouterJsonGenerationOptions('openrouter/free', 'security')).toEqual({
       temperature: 0.2,
     });
+  });
+
+  it('routes DeepSeek V4 Flash models to GMICloud and leaves the free pool unrouted', () => {
+    const gmiRouting = {
+      provider: { order: ['GMICloud'], allow_fallbacks: true },
+    };
+    expect(getOpenRouterProviderRouting('deepseek/deepseek-v4-flash-0731')).toEqual(gmiRouting);
+    expect(getOpenRouterProviderRouting('deepseek/deepseek-v4-flash')).toEqual(gmiRouting);
+    expect(getOpenRouterProviderRouting('deepseek-v4-flash')).toEqual(gmiRouting);
+    expect(getOpenRouterProviderRouting('openrouter/free')).toEqual({});
+    expect(getOpenRouterProviderRouting('vendor/paid-model')).toEqual({});
   });
 
   it('respects the configured free-model order before the paid fallback', async () => {
@@ -124,17 +166,75 @@ describe('classification model helpers', () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
     const requestBodies = fetchMock.mock.calls.map((call) => JSON.parse(
       String((call[1] as RequestInit | undefined)?.body)
-    ) as { model: string; response_format?: { type: string } });
+    ) as {
+      model: string;
+      response_format?: { type: string };
+      provider?: { order: string[]; allow_fallbacks: boolean };
+    });
     expect(requestBodies.map((body) => body.model)).toEqual([
       'openrouter/free',
       'openrouter/free',
       'deepseek/deepseek-v4-flash',
-      'deepseek/deepseek-v4-flash',
+      'deepseek/deepseek-v4-flash-0731',
     ]);
     expect(requestBodies[0]?.response_format).toBeUndefined();
     expect(requestBodies[1]?.response_format).toBeUndefined();
     expect(requestBodies[2]?.response_format).toEqual({ type: 'json_object' });
     expect(requestBodies[3]?.response_format).toEqual({ type: 'json_object' });
+    // The free pool is never routed; DeepSeek V4 Flash is pinned to GMICloud.
+    expect(requestBodies[0]?.provider).toBeUndefined();
+    expect(requestBodies[1]?.provider).toBeUndefined();
+    expect(requestBodies[2]?.provider).toEqual({ order: ['GMICloud'], allow_fallbacks: true });
+    expect(requestBodies[3]?.provider).toEqual({ order: ['GMICloud'], allow_fallbacks: true });
+  });
+
+  it('targets the OpenRouter endpoint with attribution headers and GMICloud routing for the default model', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: '{"categories":["automation"],"confidence":0.9,"reasoning":"Automates workflows"}',
+        },
+      }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const result = await classifyWithAI('This skill automates workflows.', {
+        DB: {} as never,
+        KV: {
+          get: vi.fn(async () => null),
+          put: vi.fn(async () => {}),
+        } as never,
+        R2: {} as never,
+        OPENROUTER_API_KEY: 'or-key',
+        AI_MODEL: 'deepseek/deepseek-v4-flash-0731',
+      });
+
+      expect(result.categories).toEqual(['automation']);
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer or-key');
+    expect(headers['HTTP-Referer']).toBe('https://skills.cat');
+    expect(headers['X-Title']).toBe('SkillsCat Classification Worker');
+
+    const requestBody = JSON.parse(String(init.body)) as {
+      model: string;
+      response_format?: { type: string };
+      provider?: { order: string[]; allow_fallbacks: boolean };
+    };
+    expect(requestBody.model).toBe('deepseek/deepseek-v4-flash-0731');
+    expect(requestBody.response_format).toEqual({ type: 'json_object' });
+    expect(requestBody.provider).toEqual({ order: ['GMICloud'], allow_fallbacks: true });
   });
 
   it('uses AI classification only for hot-worthy skills', () => {
@@ -410,7 +510,7 @@ describe('classification queue preloading', () => {
       messages: Array<{ content: string }>;
     };
     expect(requestBody).toMatchObject({
-      model: 'deepseek/deepseek-v4-flash',
+      model: 'deepseek/deepseek-v4-flash-0731',
     });
     expect(requestBody.messages[0]?.content).toContain('Use design for UI/UX direction');
     expect(requestBody.messages[0]?.content).toContain('Use embeddings only for real vector retrieval');
@@ -793,7 +893,7 @@ describe('classification queue preloading', () => {
 
     expect(writeDataPoint).toHaveBeenCalledTimes(1);
     expect(writeDataPoint).toHaveBeenCalledWith({
-      blobs: ['succeeded', 'openrouter/free', 'deepseek/deepseek-v4-flash'],
+      blobs: ['succeeded', 'openrouter/free', 'deepseek/deepseek-v4-flash-0731'],
       doubles: [2, 2, 0, 0, 1, 0, 1],
       indexes: ['classification-batch'],
     });
@@ -1133,7 +1233,7 @@ describe('skill summary generation', () => {
         response_format?: unknown;
         messages: Array<{ content: string }>;
       };
-      expect(requestBody.model).toBe('deepseek/deepseek-v4-flash');
+      expect(requestBody.model).toBe('deepseek/deepseek-v4-flash-0731');
       expect(requestBody.response_format).toBeUndefined();
       expect(requestBody.messages[0]?.content).toContain('Git helper');
     } finally {
@@ -1169,7 +1269,7 @@ describe('skill summary generation', () => {
       expect(summary).toBe('This skill lints markdown files for consistent style.');
       expect(fetchMock).toHaveBeenCalledTimes(3);
       const lastBody = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)) as { model: string };
-      expect(lastBody.model).toBe('deepseek/deepseek-v4-flash');
+      expect(lastBody.model).toBe('deepseek/deepseek-v4-flash-0731');
     } finally {
       vi.stubGlobal('fetch', originalFetch);
     }
