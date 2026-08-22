@@ -30,6 +30,7 @@ import {
   getOpenRouterJsonGenerationOptions,
   getOpenRouterFreePauseUntil,
   getOpenRouterFreePauseStore,
+  getOpenRouterProviderRouting,
   isOpenRouterFreeModel,
   isOpenRouterFreePauseError,
   normalizeOpenRouterModelId,
@@ -528,6 +529,7 @@ async function callOpenRouterText(
           content: prompt,
         },
       ],
+      ...getOpenRouterProviderRouting(model),
       temperature: 0.3,
       max_tokens: SUMMARY_MAX_OUTPUT_TOKENS,
     }),
@@ -809,6 +811,7 @@ async function callOpenRouter(
         },
       ],
       ...getOpenRouterJsonGenerationOptions(model, 'classification'),
+      ...getOpenRouterProviderRouting(model),
       max_tokens: 500,
     }),
   });

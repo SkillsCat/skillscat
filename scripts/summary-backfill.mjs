@@ -9,7 +9,7 @@ const ROOT_DIR = resolve(__dirname, '..');
 const WEB_DIR = resolve(ROOT_DIR, 'apps/web');
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
+const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash-0731';
 const SUMMARY_SKILL_MD_EXCERPT_CHARS = 2000;
 const SUMMARY_MAX_OUTPUT_TOKENS = 220;
 const SUMMARY_MAX_STORED_CHARS = 600;
@@ -261,10 +261,24 @@ function sanitizeSummary(raw) {
   return text;
 }
 
+/**
+ * OpenRouter provider routing for DeepSeek V4 Flash: pin to GMICloud
+ * (discounted serving) while allowing fallbacks. Mirrors the workers'
+ * getOpenRouterProviderRouting().
+ */
+function getProviderRouting(model) {
+  const normalized = String(model || '').trim().toLowerCase();
+  if (normalized === 'deepseek/deepseek-v4-flash' || normalized === 'deepseek/deepseek-v4-flash-0731') {
+    return { provider: { order: ['GMICloud'], allow_fallbacks: true } };
+  }
+  return {};
+}
+
 async function callOpenRouter(prompt, options, apiKey) {
   const body = JSON.stringify({
     model: options.model,
     messages: [{ role: 'user', content: prompt }],
+    ...getProviderRouting(options.model),
     temperature: 0.3,
     max_tokens: SUMMARY_MAX_OUTPUT_TOKENS,
   });

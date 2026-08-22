@@ -2,10 +2,28 @@ const OPENROUTER_FREE_PAUSE_KEY = 'openrouter:free:paused_until';
 const DEFAULT_OPENROUTER_FREE_PAUSE_MS = 15 * 60 * 1000;
 const MAX_OPENROUTER_ERROR_LOG_CHARS = 1_000;
 export const OPENROUTER_FREE_ROUTER_MODEL = 'openrouter/free';
-export const DEFAULT_OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash';
-export const DEFAULT_OPENROUTER_PAID_MODEL = 'deepseek/deepseek-v4-flash';
+export const DEFAULT_OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash-0731';
+export const DEFAULT_OPENROUTER_PAID_MODEL = 'deepseek/deepseek-v4-flash-0731';
 
 type OpenRouterJsonTask = 'classification' | 'security';
+
+/**
+ * Models known to support OpenAI-compatible JSON object mode, matched
+ * case-insensitively. Covers the DeepSeek V4 Flash family on OpenRouter.
+ */
+const JSON_OBJECT_MODEL_IDS = new Set([
+  'deepseek/deepseek-v4-flash',
+  'deepseek/deepseek-v4-flash-0731',
+]);
+
+/**
+ * DeepSeek V4 Flash variants that should be routed to GMICloud on OpenRouter
+ * (discounted serving), matched case-insensitively on the normalized model ID.
+ */
+const GMI_CLOUD_ROUTED_MODEL_IDS = new Set([
+  'deepseek/deepseek-v4-flash',
+  'deepseek/deepseek-v4-flash-0731',
+]);
 
 export function getOpenRouterJsonGenerationOptions(
   model: string,
@@ -15,11 +33,29 @@ export function getOpenRouterJsonGenerationOptions(
     temperature: task === 'classification' ? 0.3 : 0.2,
   };
 
-  if (normalizeOpenRouterModelId(model) === DEFAULT_OPENROUTER_PAID_MODEL) {
+  if (JSON_OBJECT_MODEL_IDS.has(normalizeOpenRouterModelId(model).toLowerCase())) {
     options.response_format = { type: 'json_object' };
   }
 
   return options;
+}
+
+/**
+ * OpenRouter provider routing for the request body. DeepSeek V4 Flash models
+ * are pinned to GMICloud (with fallbacks allowed) to use the discounted SKU;
+ * every other model — notably the `openrouter/free` pool — gets no routing.
+ */
+export function getOpenRouterProviderRouting(model: string): Record<string, unknown> {
+  if (!GMI_CLOUD_ROUTED_MODEL_IDS.has(normalizeOpenRouterModelId(model).toLowerCase())) {
+    return {};
+  }
+
+  return {
+    provider: {
+      order: ['GMICloud'],
+      allow_fallbacks: true,
+    },
+  };
 }
 
 export function getOpenRouterFreePauseStore(
@@ -90,10 +126,12 @@ export function resolveOpenRouterFreeModelCandidates(
   primaryModel: string | undefined,
   additionalModels: string | undefined
 ): string[] {
+  // Explicit configuration is authoritative: the primary model and every
+  // FREE_MODELS entry are kept as-is (no OpenRouter `:free` whitelist), so
+  // non-OpenRouter gateways like GMI Cloud can use their own model IDs.
   const configured = [primaryModel || '', ...(additionalModels || '').split(',')]
     .map(normalizeOpenRouterModelId)
-    .filter(Boolean)
-    .filter((model) => model === DEFAULT_OPENROUTER_MODEL || isOpenRouterFreeModel(model));
+    .filter(Boolean);
 
   return configured.length > 0
     ? Array.from(new Set(configured))

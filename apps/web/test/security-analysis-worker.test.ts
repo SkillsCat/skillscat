@@ -5,6 +5,7 @@ import { tryClaimSkillSecurityAnalysis } from '../src/lib/server/security/state'
 import {
   getOpenRouterFreePauseUntil,
   formatOpenRouterErrorForLog,
+  getOpenRouterProviderRouting,
   isOpenRouterFreePauseError,
   OpenRouterApiError,
   pauseOpenRouterFreeModels,
@@ -38,14 +39,14 @@ describe('security analysis worker helpers', () => {
       SECURITY_PREMIUM_MODEL: 'deepseek/deepseek-v4-flash',
       SECURITY_FREE_MODEL: 'openrouter:free',
       SECURITY_FREE_MODELS: 'foo/model:free,openrouter:free,vendor/paid-model',
-    })).toEqual(['openrouter/free', 'foo/model:free']);
+    })).toEqual(['openrouter/free', 'foo/model:free', 'vendor/paid-model']);
 
     expect(getTierModelCandidates('free', {
       DB: {} as never,
       KV: {} as never,
       R2: {} as never,
       OPENROUTER_API_KEY: 'or-key',
-    })).toEqual(['deepseek/deepseek-v4-flash', 'openrouter/free']);
+    })).toEqual(['deepseek/deepseek-v4-flash-0731', 'openrouter/free']);
 
     expect(getTierModelCandidates('premium', {
       DB: {} as never,
@@ -161,6 +162,16 @@ describe('security analysis worker helpers', () => {
         }),
       ],
     }));
+  });
+
+  it('pins DeepSeek V4 Flash models to GMICloud and leaves the free pool unrouted', () => {
+    const gmiRouting = {
+      provider: { order: ['GMICloud'], allow_fallbacks: true },
+    };
+    expect(getOpenRouterProviderRouting('deepseek/deepseek-v4-flash-0731')).toEqual(gmiRouting);
+    expect(getOpenRouterProviderRouting('deepseek/deepseek-v4-flash')).toEqual(gmiRouting);
+    expect(getOpenRouterProviderRouting('openrouter/free')).toEqual({});
+    expect(getOpenRouterProviderRouting('vendor/paid-model')).toEqual({});
   });
 
   it('prefers AI-backed findings for the user-facing scan payload when AI analysis exists', () => {

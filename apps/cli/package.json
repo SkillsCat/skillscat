@@ -21,17 +21,17 @@
   },
   "dependencies": {
     "commander": "^15.0.0",
-    "inquirer": "^14.0.2",
+    "inquirer": "^14.1.0",
     "picocolors": "^1.1.1"
   },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-typescript": "^12.3.0",
-    "@types/node": "^26.1.2",
-    "rollup": "^4.62.4",
+    "@types/node": "^26.2.0",
+    "rollup": "^4.62.5",
     "rollup-plugin-preserve-shebang": "^1.0.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "claude",

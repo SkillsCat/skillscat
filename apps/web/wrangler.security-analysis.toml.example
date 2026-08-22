@@ -2,6 +2,8 @@
 # 复制此文件为 wrangler.security-analysis.toml 并填入你的配置
 # GitHub API 鉴权请通过 wrangler secret 设置 `GITHUB_TOKEN` 或 `GITHUB_TOKENS`
 # 消费 security-analysis 队列，并定时回补 dirty / missing 的安全分析状态
+#
+# AI 分析走 OpenRouter;DeepSeek V4 Flash 请求的 provider 路由已锁定 GMICloud(折扣 SKU,允许 fallback)
 
 name = "skillscat-security-analysis"
 main = "workers/security-analysis.ts"
@@ -48,9 +50,9 @@ class_name = "SkillscatStateDurableObject"
 script_name = "skillscat-state"
 
 [vars]
-SECURITY_FREE_MODEL = "deepseek/deepseek-v4-flash"
+SECURITY_FREE_MODEL = "deepseek/deepseek-v4-flash-0731"
 SECURITY_FREE_MODELS = "openrouter/free"
-SECURITY_PREMIUM_MODEL = "deepseek/deepseek-v4-flash"
+SECURITY_PREMIUM_MODEL = "deepseek/deepseek-v4-flash-0731"
 SECURITY_MAX_AI_FILES = "8"
 SECURITY_MAX_AI_TEXT_BYTES = "48000"
 SECURITY_STABILITY_ROUNDS = "2"
@@ -92,9 +94,9 @@ class_name = "SkillscatStateDurableObject"
 script_name = "skillscat-state-production"
 
 [env.production.vars]
-SECURITY_FREE_MODEL = "deepseek/deepseek-v4-flash"
+SECURITY_FREE_MODEL = "deepseek/deepseek-v4-flash-0731"
 SECURITY_FREE_MODELS = "openrouter/free"
-SECURITY_PREMIUM_MODEL = "deepseek/deepseek-v4-flash"
+SECURITY_PREMIUM_MODEL = "deepseek/deepseek-v4-flash-0731"
 SECURITY_MAX_AI_FILES = "8"
 SECURITY_MAX_AI_TEXT_BYTES = "48000"
 SECURITY_STABILITY_ROUNDS = "2"
