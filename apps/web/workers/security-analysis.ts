@@ -59,6 +59,9 @@ function getSecurityAnalysisStateStore(
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MAX_AI_FILES = 8;
 const DEFAULT_MAX_AI_TEXT_BYTES = 48_000;
+const MAX_AI_FILES = 16;
+const MAX_AI_TEXT_BYTES = 96_000;
+const MAX_STABILITY_ROUNDS = 3;
 const DEFAULT_HEURISTIC_THRESHOLD = 4.5;
 const DEFAULT_STABILITY_ROUNDS = 2;
 const VT_MAX_BUNDLE_BYTES = 32 * 1024 * 1024;
@@ -127,9 +130,9 @@ interface SecurityReindexBackfillCandidate {
   updatedAt: number;
 }
 
-function parsePositiveInt(raw: string | undefined, fallback: number): number {
+function parsePositiveInt(raw: string | undefined, fallback: number, max = Number.MAX_SAFE_INTEGER): number {
   const parsed = Number.parseInt(raw || '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
 }
 
 function parsePositiveFloat(raw: string | undefined, fallback: number): number {
@@ -494,8 +497,8 @@ function selectFilesForAi(
   heuristicFileScores: SecurityFileScore[],
   env: SecurityAnalysisEnv
 ): SecurityFileInput[] {
-  const maxFiles = parsePositiveInt(env.SECURITY_MAX_AI_FILES, DEFAULT_MAX_AI_FILES);
-  const maxBytes = parsePositiveInt(env.SECURITY_MAX_AI_TEXT_BYTES, DEFAULT_MAX_AI_TEXT_BYTES);
+  const maxFiles = parsePositiveInt(env.SECURITY_MAX_AI_FILES, DEFAULT_MAX_AI_FILES, MAX_AI_FILES);
+  const maxBytes = parsePositiveInt(env.SECURITY_MAX_AI_TEXT_BYTES, DEFAULT_MAX_AI_TEXT_BYTES, MAX_AI_TEXT_BYTES);
 
   const candidates = [...files]
     .filter((file) => file.type === 'text' && file.content)
@@ -539,7 +542,7 @@ async function runAiPipeline(
   }
 
   const modelCandidates = getTierModelCandidates(tier, env);
-  const stabilityRounds = parsePositiveInt(env.SECURITY_STABILITY_ROUNDS, DEFAULT_STABILITY_ROUNDS);
+  const stabilityRounds = parsePositiveInt(env.SECURITY_STABILITY_ROUNDS, DEFAULT_STABILITY_ROUNDS, MAX_STABILITY_ROUNDS);
   let lastError: Error | null = null;
 
   for (const [modelIndex, model] of modelCandidates.entries()) {

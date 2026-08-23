@@ -36,6 +36,8 @@ const DEFAULT_RECOMMEND_PRECOMPUTE_REQUEST_TIMEOUT_MS = 2_500;
 const DEFAULT_SEARCH_PRECOMPUTE_MAX_PER_RUN = 500;
 const DEFAULT_SEARCH_PRECOMPUTE_TIME_BUDGET_MS = 10_000;
 const DEFAULT_SITEMAP_PREWARM_TIMEOUT_MS = 20_000;
+const DEFAULT_SITEMAP_PREWARM_MAX_PATHS = 24;
+const DEFAULT_SITEMAP_PREWARM_TIME_BUDGET_MS = 8_000;
 const DEFAULT_SITEMAP_FULL_REFRESH_HOUR_UTC = 3;
 const SITEMAP_PREWARM_CONCURRENCY = 4;
 const DEFAULT_MISSING_STATE_SCAN_HOUR_UTC = 3;
@@ -107,6 +109,18 @@ function getAppOrigin(env: SearchPrecomputeEnv): string | null {
   const origin = (env.APP_ORIGIN || '').trim();
   if (!origin) return null;
   return origin.replace(/\/+$/, '');
+}
+
+function getSitemapPrewarmMaxPaths(env: SearchPrecomputeEnv): number {
+  const parsed = Number.parseInt(env.SITEMAP_PREWARM_MAX_PATHS || '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SITEMAP_PREWARM_MAX_PATHS;
+  return Math.min(parsed, 100);
+}
+
+function getSitemapPrewarmTimeBudgetMs(env: SearchPrecomputeEnv): number {
+  const parsed = Number.parseInt(env.SITEMAP_PREWARM_TIME_BUDGET_MS || '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SITEMAP_PREWARM_TIME_BUDGET_MS;
+  return Math.min(parsed, 30_000);
 }
 
 function buildRecommendRefreshUrl(appOrigin: string, slug: string): string | null {
@@ -402,20 +416,25 @@ async function prewarmSitemapRoutes(
     return { attempted: 0, succeeded: 0, failed: 0 };
   }
 
-  const sitemapPaths = normalizeSitemapPaths(paths);
+  const sitemapPaths = normalizeSitemapPaths(paths).slice(0, getSitemapPrewarmMaxPaths(env));
   if (sitemapPaths.length === 0) {
     return { attempted: 0, succeeded: 0, failed: 0 };
   }
 
-  const requestTimeoutMs = DEFAULT_SITEMAP_PREWARM_TIMEOUT_MS;
+  const timeBudgetMs = getSitemapPrewarmTimeBudgetMs(env);
+  const startedAt = Date.now();
+  const deadline = startedAt + timeBudgetMs;
   let attempted = 0;
   let succeeded = 0;
   let failed = 0;
 
   for (let index = 0; index < sitemapPaths.length; index += SITEMAP_PREWARM_CONCURRENCY) {
+    if (Date.now() - startedAt >= timeBudgetMs) break;
     const batch = sitemapPaths.slice(index, index + SITEMAP_PREWARM_CONCURRENCY);
 
     await Promise.all(batch.map(async (path) => {
+      const remainingMs = Math.max(1, deadline - Date.now());
+      const requestTimeoutMs = Math.min(DEFAULT_SITEMAP_PREWARM_TIMEOUT_MS, remainingMs);
       attempted += 1;
 
       // Force a revalidation so the public HTTP cache sees the fresh snapshot as soon as it lands.
