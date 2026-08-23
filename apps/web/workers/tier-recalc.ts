@@ -15,24 +15,44 @@ import { isImmediateRefreshNextUpdateAt } from '../src/lib/server/db/business/ac
 
 interface TierRecalcEnv extends BaseEnv {}
 
+const TIER_RECALC_BATCH_SIZE = 500;
+const TIER_RECALC_MAX_ROWS_PER_RUN = 10_000;
+const TIER_RECALC_CURSOR_KEY = 'tier-recalc:cursor';
+const TIER_RECALC_RESET_DATE_KEY = 'tier-recalc:last-reset-date';
+
+interface TierRecalcCursor {
+  createdAt: number;
+  id: string;
+}
+
 interface SkillForTierCalc {
   id: string;
+  created_at: number;
   stars: number;
   tier: SkillTier;
   next_update_at: number | null;
   last_accessed_at: number | null;
   access_count_7d: number;
   access_count_30d: number;
+  download_count_7d: number;
+  download_count_30d: number;
+  download_count_90d: number;
   last_commit_at: number | null;
 }
 
 /**
  * Calculate the appropriate tier for a skill
  */
-function calculateTier(skill: SkillForTierCalc): SkillTier {
+export function calculateTier(skill: SkillForTierCalc): SkillTier {
   const now = Date.now();
   const lastAccess = skill.last_accessed_at || 0;
   const lastCommit = skill.last_commit_at || 0;
+
+  // Archived rows are restored only through the resurrection flow, which also
+  // restores their R2 content and category relations.
+  if (skill.tier === 'archived') {
+    return 'archived';
+  }
 
   // Check for archive candidates first
   // Archived: 1 year no access + stars < 5 + 2 years no commit
@@ -42,7 +62,12 @@ function calculateTier(skill: SkillForTierCalc): SkillTier {
   if (
     skill.stars < 5 &&
     lastAccess < oneYearAgo &&
-    lastCommit < twoYearsAgo
+    lastCommit < twoYearsAgo &&
+    skill.access_count_7d === 0 &&
+    skill.access_count_30d === 0 &&
+    skill.download_count_7d === 0 &&
+    skill.download_count_30d === 0 &&
+    skill.download_count_90d === 0
   ) {
     return 'archived';
   }
@@ -129,16 +154,36 @@ async function resetAccessCounts(env: TierRecalcEnv): Promise<void> {
   console.log('Access counts reset completed');
 }
 
+async function resetAccessCountsIfDue(env: TierRecalcEnv): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  if (await env.KV.get(TIER_RECALC_RESET_DATE_KEY) === today) {
+    return;
+  }
+
+  await resetAccessCounts(env);
+  await env.KV.put(TIER_RECALC_RESET_DATE_KEY, today, { expirationTtl: 172_800 });
+}
+
 /**
- * Recalculate tiers for all skills in batches
+ * Recalculate a bounded slice of skills and persist the cursor for the next run.
  */
 async function recalculateTiers(env: TierRecalcEnv): Promise<{
   total: number;
   changed: number;
   byTier: Record<SkillTier, number>;
 }> {
-  const BATCH_SIZE = 1000;
-  let lastSeenId: string | null = null;
+  const rawCursor = await env.KV.get(TIER_RECALC_CURSOR_KEY);
+  let cursor: TierRecalcCursor | null = null;
+  if (rawCursor) {
+    try {
+      const parsed = JSON.parse(rawCursor) as Partial<TierRecalcCursor>;
+      if (Number.isFinite(parsed.createdAt) && typeof parsed.id === 'string' && parsed.id) {
+        cursor = { createdAt: Number(parsed.createdAt), id: parsed.id };
+      }
+    } catch {
+      // Discard legacy id-only cursors; restarting avoids skipping rows.
+    }
+  }
   let scanned = 0;
   let total = 0;
   let changed = 0;
@@ -150,33 +195,45 @@ async function recalculateTiers(env: TierRecalcEnv): Promise<{
     archived: 0,
   };
 
-  while (true) {
+  const startedAt = Date.now();
+  while (scanned < TIER_RECALC_MAX_ROWS_PER_RUN) {
+    const batchSize = Math.min(TIER_RECALC_BATCH_SIZE, TIER_RECALC_MAX_ROWS_PER_RUN - scanned);
     let rows: SkillForTierCalc[] = [];
-    if (lastSeenId) {
+    if (cursor) {
       const result = await env.DB.prepare(`
-        SELECT id, stars, tier, next_update_at, last_accessed_at, access_count_7d, access_count_30d, last_commit_at
+        SELECT id, created_at, stars, tier, next_update_at, last_accessed_at,
+               access_count_7d, access_count_30d,
+               download_count_7d, download_count_30d, download_count_90d,
+               last_commit_at
         FROM skills
-        WHERE visibility = 'public' AND id > ?
-        ORDER BY id
+        WHERE visibility = 'public'
+          AND (created_at > ? OR (created_at = ? AND id > ?))
+        ORDER BY created_at, id
         LIMIT ?
       `)
-        .bind(lastSeenId, BATCH_SIZE)
+        .bind(cursor.createdAt, cursor.createdAt, cursor.id, batchSize)
         .all<SkillForTierCalc>();
       rows = result.results || [];
     } else {
       const result = await env.DB.prepare(`
-        SELECT id, stars, tier, next_update_at, last_accessed_at, access_count_7d, access_count_30d, last_commit_at
+        SELECT id, created_at, stars, tier, next_update_at, last_accessed_at,
+               access_count_7d, access_count_30d,
+               download_count_7d, download_count_30d, download_count_90d,
+               last_commit_at
         FROM skills
         WHERE visibility = 'public'
-        ORDER BY id
+        ORDER BY created_at, id
         LIMIT ?
       `)
-        .bind(BATCH_SIZE)
+        .bind(batchSize)
         .all<SkillForTierCalc>();
       rows = result.results || [];
     }
 
-    if (rows.length === 0) break;
+    if (rows.length === 0) {
+      await env.KV.delete(TIER_RECALC_CURSOR_KEY);
+      break;
+    }
     scanned += rows.length;
 
     const updates: Array<{ id: string; tier: SkillTier; nextUpdateAt: number | null }> = [];
@@ -228,21 +285,27 @@ async function recalculateTiers(env: TierRecalcEnv): Promise<{
       await env.DB.batch(recommendStateStatements);
     }
 
-    lastSeenId = rows[rows.length - 1]?.id || lastSeenId;
+    const lastRow = rows[rows.length - 1];
+    if (lastRow) {
+      cursor = { createdAt: lastRow.created_at, id: lastRow.id };
+      await env.KV.put(TIER_RECALC_CURSOR_KEY, JSON.stringify(cursor), { expirationTtl: 7 * 86400 });
+    }
 
-    // Safety limit
-    if (scanned > 10000000) {
-      console.warn('Tier recalculation hit safety limit');
+    if (rows.length < batchSize) {
+      await env.KV.delete(TIER_RECALC_CURSOR_KEY);
+      cursor = null;
       break;
     }
   }
+
+  console.log(`Tier recalculation slice scanned ${scanned} skills in ${Date.now() - startedAt}ms`);
 
   return { total, changed, byTier };
 }
 
 function recordMetrics(
   env: TierRecalcEnv,
-  stats: { total: number; changed: number; byTier: Record<SkillTier, number> }
+  stats: { total: number; changed: number; durationMs: number; byTier: Record<SkillTier, number> }
 ): void {
   if (!env.WORKER_ANALYTICS) {
     return;
@@ -259,6 +322,7 @@ function recordMetrics(
         stats.byTier.cool,
         stats.byTier.cold,
         stats.byTier.archived,
+        stats.durationMs,
       ],
       indexes: ['tier-recalc-run'],
     });
@@ -273,10 +337,11 @@ export default {
     env: TierRecalcEnv,
     _ctx: ExecutionContext
   ): Promise<void> {
+    const startedAt = Date.now();
     console.log('Tier Recalculation Worker triggered at:', new Date().toISOString());
 
-    // 1. Reset expired access counts
-    await resetAccessCounts(env);
+    // 1. Reset expired access counts once per day, independently of cursor slices.
+    await resetAccessCountsIfDue(env);
 
     // 2. Recalculate all tiers
     const stats = await recalculateTiers(env);
@@ -292,7 +357,7 @@ export default {
     `);
 
     // 3. Record metrics
-    await recordMetrics(env, stats);
+    await recordMetrics(env, { ...stats, durationMs: Date.now() - startedAt });
 
     console.log('Tier recalculation completed');
   },

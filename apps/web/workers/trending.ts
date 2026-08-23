@@ -53,6 +53,9 @@ const D1_SAFE_IN_CLAUSE_BATCH_SIZE = 90;
 const CATEGORY_STATS_SYNC_SKILL_BATCH_SIZE = D1_SAFE_IN_CLAUSE_BATCH_SIZE;
 const D1_SKILL_UPDATE_BATCH_SIZE = 50;
 const D1_REPO_REFRESH_LOOKUP_BATCH_SIZE = 40;
+const MAX_SIBLINGS_PER_REPO = 100;
+const MAX_SIBLING_ROWS_SCANNED_PER_RUN = 500;
+const MAX_SECURITY_PREMIUM_TOP_N = 100;
 
 function getTrendingStateStore(env: TrendingEnv): KVNamespace {
   return env.KV;
@@ -348,19 +351,40 @@ export async function loadRepoSiblingRefreshUpdates(
   const syncByRepo = new Map(
     repoMetricSyncs.map((sync) => [getRepoMetricSyncKey(sync.owner, sync.name), sync])
   );
+  let siblingRowsScanned = 0;
 
   for (let i = 0; i < repoMetricSyncs.length; i += D1_REPO_REFRESH_LOOKUP_BATCH_SIZE) {
+    if (siblingRowsScanned >= MAX_SIBLING_ROWS_SCANNED_PER_RUN) break;
     const chunk = repoMetricSyncs.slice(i, i + D1_REPO_REFRESH_LOOKUP_BATCH_SIZE);
-    const repoPredicates = chunk.map(() => '(repo_owner = ? AND repo_name = ?)').join(' OR ');
-    const result = await db.prepare(`
+    // Limit each repository independently before the outer scan. A global
+    // LIMIT (or a window function) still requires D1 to materialize every
+    // sibling row first, defeating the scan budget for large repositories.
+    const siblingCtes = chunk.map((_, index) => `repo_${index} AS (
       SELECT ${SKILL_REFRESH_SELECT_COLUMNS}
       FROM skills
       WHERE source_type = 'github'
         AND tier != 'archived'
-        AND (${repoPredicates})
+        AND repo_owner = ?
+        AND repo_name = ?
+      ORDER BY id
+      LIMIT ${MAX_SIBLINGS_PER_REPO}
+    )`).join(',');
+    const siblingUnion = chunk.map((_, index) =>
+      `SELECT ${SKILL_REFRESH_SELECT_COLUMNS} FROM repo_${index}`
+    ).join(' UNION ALL ');
+    const remainingScanBudget = MAX_SIBLING_ROWS_SCANNED_PER_RUN - siblingRowsScanned;
+    const result = await db.prepare(`
+      WITH ${siblingCtes}
+      ${siblingUnion}
+      LIMIT ?
     `)
-      .bind(...chunk.flatMap((sync) => [sync.owner, sync.name]))
+      .bind(
+        ...chunk.flatMap((sync) => [sync.owner, sync.name]),
+        remainingScanBudget
+      )
       .all<SkillRecord>();
+
+    siblingRowsScanned += (result.results || []).length;
 
     for (const skill of result.results || []) {
       if (selectedIds.has(skill.id)) continue;
@@ -1048,7 +1072,10 @@ export async function queueTrendingHeadSecurityPremium(env: TrendingEnv): Promis
     return 0;
   }
 
-  const limit = parsePositiveInt(env.SECURITY_PREMIUM_TOP_N, 50);
+  const limit = Math.min(
+    parsePositiveInt(env.SECURITY_PREMIUM_TOP_N, 50),
+    MAX_SECURITY_PREMIUM_TOP_N
+  );
   const rows = await env.DB.prepare(`
     WITH trending_head AS (
       SELECT id, trending_score
@@ -1114,6 +1141,7 @@ function recordMetrics(
     githubApiCalls: number;
     downloadsFlushed: number;
     premiumSecurityQueued: number;
+    durationMs: number;
   }
 ): void {
   if (!env.WORKER_ANALYTICS) {
@@ -1131,6 +1159,7 @@ function recordMetrics(
         metrics.githubApiCalls,
         metrics.downloadsFlushed,
         metrics.premiumSecurityQueued,
+        metrics.durationMs,
       ],
       indexes: ['trending-run'],
     });
@@ -1145,6 +1174,7 @@ export default {
     env: TrendingEnv,
     _ctx: ExecutionContext
   ): Promise<void> {
+    const startedAt = Date.now();
     console.log('Trending Worker triggered at:', new Date().toISOString());
 
     // Collect all updated skill IDs for reclassification detection
@@ -1226,6 +1256,7 @@ export default {
       githubApiCalls: totalBatches,
       downloadsFlushed,
       premiumSecurityQueued,
+      durationMs: Date.now() - startedAt,
     });
 
     console.log('Trending update completed');

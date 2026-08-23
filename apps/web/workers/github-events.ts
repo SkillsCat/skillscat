@@ -50,7 +50,18 @@ const DEFAULT_DISCOVERY_LOCK_TTL_SECONDS = 240;
 const DEFAULT_REPO_QUEUE_DEDUP_TTL_SECONDS = 24 * 60 * 60;
 const DEFAULT_EVENT_QUEUE_DEDUP_TTL_SECONDS = 5 * 60;
 const DEFAULT_HTML_SEARCH_DISCOVERY_INTERVAL_SECONDS = 15 * 60;
-const DEFAULT_HTML_SEARCH_QUERIES = 'SKILL.md in:readme';
+const DEFAULT_HTML_SEARCH_QUERIES = 'SKILL.md in:readme,agent skills in:readme,.claude/skills in:readme';
+const DEFAULT_HTML_SEARCH_PAGES = 3;
+const DEFAULT_HTML_SEARCH_MAX_CANDIDATES = 200;
+const MAX_HTML_SEARCH_QUERIES = 8;
+const MAX_HTML_SEARCH_PAGES = 10;
+const MAX_HTML_SEARCH_CANDIDATES = 1000;
+const MAX_DISCOVERY_PAGES = 10;
+const MAX_DISCOVERY_PER_PAGE = 100;
+const MAX_DISCOVERY_QUEUED_REPOS = 100;
+const MAX_DISCOVERY_INTERVAL_SECONDS = 24 * 60 * 60;
+const MAX_DISCOVERY_LOCK_TTL_SECONDS = 15 * 60;
+const MAX_QUEUE_DEDUP_TTL_SECONDS = 7 * 24 * 60 * 60;
 const DEFAULT_SEARCH_BACKFILL_INTERVAL_SECONDS = 60 * 60;
 const DEFAULT_SEARCH_BACKFILL_START_DATE = '2025-01-01';
 const DEFAULT_SEARCH_BACKFILL_MIN_REMAINING = 5;
@@ -93,6 +104,7 @@ interface CodeSearchBackfillResult {
 interface HtmlSearchDiscoveryResult {
   scanned: number;
   queued: number;
+  pagesFetched: number;
   skippedReason?: string;
 }
 
@@ -156,6 +168,10 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
   return Math.floor(value);
 }
 
+function parseClampedPositiveInt(raw: string | undefined, fallback: number, max: number): number {
+  return Math.min(parsePositiveInt(raw, fallback), max);
+}
+
 function parseEnabled(raw: string | undefined, fallback: boolean = true): boolean {
   if (raw === undefined) return fallback;
   const normalized = raw.trim().toLowerCase();
@@ -201,7 +217,7 @@ function isGitHubRateLimited(response: Response): boolean {
 }
 
 function getEventsPerPage(env: GithubEventsEnv): number {
-  return parsePositiveInt(env.GITHUB_EVENTS_PER_PAGE, DEFAULT_EVENTS_PER_PAGE);
+  return parseClampedPositiveInt(env.GITHUB_EVENTS_PER_PAGE, DEFAULT_EVENTS_PER_PAGE, MAX_DISCOVERY_PER_PAGE);
 }
 
 function getEventsDiscoveryConfig(env: GithubEventsEnv): {
@@ -214,19 +230,21 @@ function getEventsDiscoveryConfig(env: GithubEventsEnv): {
   restReserve: number;
 } {
   return {
-    pages: parsePositiveInt(env.GITHUB_EVENTS_PAGES, DEFAULT_EVENTS_PAGES),
+    pages: parseClampedPositiveInt(env.GITHUB_EVENTS_PAGES, DEFAULT_EVENTS_PAGES, MAX_DISCOVERY_PAGES),
     perPage: getEventsPerPage(env),
     knownReposOnly: parseEnabled(
       env.GITHUB_EVENTS_KNOWN_REPOS_ONLY,
       DEFAULT_EVENTS_KNOWN_REPOS_ONLY
     ),
-    maxQueuedRepos: parsePositiveInt(
+    maxQueuedRepos: parseClampedPositiveInt(
       env.GITHUB_EVENTS_MAX_QUEUED_REPOS,
-      DEFAULT_EVENTS_MAX_QUEUED_REPOS
+      DEFAULT_EVENTS_MAX_QUEUED_REPOS,
+      MAX_DISCOVERY_QUEUED_REPOS
     ),
-    cronIntervalSeconds: parsePositiveInt(
+    cronIntervalSeconds: parseClampedPositiveInt(
       env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
-      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS
+      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
     ),
     minRestRemaining: parsePositiveInt(
       env.GITHUB_EVENTS_MIN_REST_REMAINING,
@@ -249,15 +267,17 @@ function getSearchDiscoveryConfig(env: GithubEventsEnv): {
   return {
     enabled: parseEnabled(env.GITHUB_SEARCH_DISCOVERY_ENABLED, true),
     query: (env.GITHUB_SEARCH_DISCOVERY_QUERY || DEFAULT_SEARCH_DISCOVERY_QUERY).trim() || DEFAULT_SEARCH_DISCOVERY_QUERY,
-    pages: parsePositiveInt(env.GITHUB_SEARCH_DISCOVERY_PAGES, DEFAULT_SEARCH_DISCOVERY_PAGES),
-    perPage: parsePositiveInt(env.GITHUB_SEARCH_DISCOVERY_PER_PAGE, DEFAULT_SEARCH_DISCOVERY_PER_PAGE),
-    intervalSeconds: parsePositiveInt(
+    pages: parseClampedPositiveInt(env.GITHUB_SEARCH_DISCOVERY_PAGES, DEFAULT_SEARCH_DISCOVERY_PAGES, MAX_DISCOVERY_PAGES),
+    perPage: parseClampedPositiveInt(env.GITHUB_SEARCH_DISCOVERY_PER_PAGE, DEFAULT_SEARCH_DISCOVERY_PER_PAGE, MAX_DISCOVERY_PER_PAGE),
+    intervalSeconds: parseClampedPositiveInt(
       env.GITHUB_SEARCH_DISCOVERY_INTERVAL_SECONDS,
-      DEFAULT_SEARCH_DISCOVERY_INTERVAL_SECONDS
+      DEFAULT_SEARCH_DISCOVERY_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
     ),
-    cronIntervalSeconds: parsePositiveInt(
+    cronIntervalSeconds: parseClampedPositiveInt(
       env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
-      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS
+      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
     ),
     minRestRemaining: parsePositiveInt(
       env.GITHUB_SEARCH_DISCOVERY_MIN_REMAINING,
@@ -271,15 +291,15 @@ function getSearchDiscoveryConfig(env: GithubEventsEnv): {
 }
 
 function getDiscoveryLockTtlSeconds(env: GithubEventsEnv): number {
-  return parsePositiveInt(env.GITHUB_DISCOVERY_LOCK_TTL_SECONDS, DEFAULT_DISCOVERY_LOCK_TTL_SECONDS);
+  return parseClampedPositiveInt(env.GITHUB_DISCOVERY_LOCK_TTL_SECONDS, DEFAULT_DISCOVERY_LOCK_TTL_SECONDS, MAX_DISCOVERY_LOCK_TTL_SECONDS);
 }
 
 function getRepoQueueDedupTtlSeconds(env: GithubEventsEnv): number {
-  return parsePositiveInt(env.GITHUB_REPO_QUEUE_DEDUP_TTL_SECONDS, DEFAULT_REPO_QUEUE_DEDUP_TTL_SECONDS);
+  return parseClampedPositiveInt(env.GITHUB_REPO_QUEUE_DEDUP_TTL_SECONDS, DEFAULT_REPO_QUEUE_DEDUP_TTL_SECONDS, MAX_QUEUE_DEDUP_TTL_SECONDS);
 }
 
 function getEventQueueDedupTtlSeconds(env: GithubEventsEnv): number {
-  return parsePositiveInt(env.GITHUB_EVENT_QUEUE_DEDUP_TTL_SECONDS, DEFAULT_EVENT_QUEUE_DEDUP_TTL_SECONDS);
+  return parseClampedPositiveInt(env.GITHUB_EVENT_QUEUE_DEDUP_TTL_SECONDS, DEFAULT_EVENT_QUEUE_DEDUP_TTL_SECONDS, MAX_QUEUE_DEDUP_TTL_SECONDS);
 }
 
 function parseDateOnly(raw: string | undefined, fallback: string): string {
@@ -301,6 +321,8 @@ function getHtmlSearchDiscoveryConfig(env: GithubEventsEnv): {
   intervalSeconds: number;
   cronIntervalSeconds: number;
   queries: string[];
+  pages: number;
+  maxCandidates: number;
 } {
   const rawQueries = (env.GITHUB_HTML_SEARCH_QUERIES || DEFAULT_HTML_SEARCH_QUERIES)
     .split(',')
@@ -308,15 +330,27 @@ function getHtmlSearchDiscoveryConfig(env: GithubEventsEnv): {
     .filter(Boolean);
   return {
     enabled: parseEnabled(env.GITHUB_HTML_SEARCH_DISCOVERY_ENABLED, true),
-    intervalSeconds: parsePositiveInt(
+    intervalSeconds: parseClampedPositiveInt(
       env.GITHUB_HTML_SEARCH_DISCOVERY_INTERVAL_SECONDS,
-      DEFAULT_HTML_SEARCH_DISCOVERY_INTERVAL_SECONDS
+      DEFAULT_HTML_SEARCH_DISCOVERY_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
     ),
-    cronIntervalSeconds: parsePositiveInt(
+    cronIntervalSeconds: parseClampedPositiveInt(
       env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
-      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS
+      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
     ),
-    queries: rawQueries.length > 0 ? rawQueries : [DEFAULT_HTML_SEARCH_QUERIES],
+    queries: rawQueries.length > 0
+      ? rawQueries.slice(0, MAX_HTML_SEARCH_QUERIES)
+      : [DEFAULT_HTML_SEARCH_QUERIES],
+    pages: Math.min(
+      parseClampedPositiveInt(env.GITHUB_HTML_SEARCH_PAGES, DEFAULT_HTML_SEARCH_PAGES, MAX_HTML_SEARCH_PAGES),
+      MAX_HTML_SEARCH_PAGES
+    ),
+    maxCandidates: Math.min(
+      parseClampedPositiveInt(env.GITHUB_HTML_SEARCH_MAX_CANDIDATES, DEFAULT_HTML_SEARCH_MAX_CANDIDATES, MAX_HTML_SEARCH_CANDIDATES),
+      MAX_HTML_SEARCH_CANDIDATES
+    ),
   };
 }
 
@@ -332,9 +366,10 @@ function getSearchBackfillConfig(env: GithubEventsEnv): {
 } {
   return {
     enabled: parseEnabled(env.GITHUB_SEARCH_BACKFILL_ENABLED, true),
-    intervalSeconds: parsePositiveInt(
+    intervalSeconds: parseClampedPositiveInt(
       env.GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS,
-      DEFAULT_SEARCH_BACKFILL_INTERVAL_SECONDS
+      DEFAULT_SEARCH_BACKFILL_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
     ),
     startDate: parseDateOnly(env.GITHUB_SEARCH_BACKFILL_START_DATE, DEFAULT_SEARCH_BACKFILL_START_DATE),
     minRemaining: parsePositiveInt(
@@ -342,11 +377,12 @@ function getSearchBackfillConfig(env: GithubEventsEnv): {
       DEFAULT_SEARCH_BACKFILL_MIN_REMAINING
     ),
     reserve: parsePositiveInt(env.GITHUB_SEARCH_BACKFILL_RESERVE, DEFAULT_SEARCH_BACKFILL_RESERVE),
-    maxPages: parsePositiveInt(env.GITHUB_SEARCH_BACKFILL_MAX_PAGES, DEFAULT_SEARCH_BACKFILL_MAX_PAGES),
-    perPage: parsePositiveInt(env.GITHUB_SEARCH_DISCOVERY_PER_PAGE, DEFAULT_SEARCH_DISCOVERY_PER_PAGE),
-    cronIntervalSeconds: parsePositiveInt(
+    maxPages: parseClampedPositiveInt(env.GITHUB_SEARCH_BACKFILL_MAX_PAGES, DEFAULT_SEARCH_BACKFILL_MAX_PAGES, MAX_DISCOVERY_PAGES),
+    perPage: parseClampedPositiveInt(env.GITHUB_SEARCH_DISCOVERY_PER_PAGE, DEFAULT_SEARCH_DISCOVERY_PER_PAGE, MAX_DISCOVERY_PER_PAGE),
+    cronIntervalSeconds: parseClampedPositiveInt(
       env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
-      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS
+      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
     ),
   };
 }
@@ -1321,7 +1357,7 @@ async function processHtmlRepoSearchDiscovery(
   nowMs: number = Date.now()
 ): Promise<HtmlSearchDiscoveryResult> {
   const config = getHtmlSearchDiscoveryConfig(env);
-  const baseResult: HtmlSearchDiscoveryResult = { scanned: 0, queued: 0 };
+  const baseResult: HtmlSearchDiscoveryResult = { scanned: 0, queued: 0, pagesFetched: 0 };
 
   if (!config.enabled) {
     return { ...baseResult, skippedReason: 'disabled' };
@@ -1335,64 +1371,77 @@ async function processHtmlRepoSearchDiscovery(
   const waitUntil = ctx ? (promise: Promise<unknown>) => ctx.waitUntil(promise) : undefined;
   let scanned = 0;
   let queued = 0;
+  let pagesFetched = 0;
+  const seenRepos = new Set<string>();
 
   for (const query of config.queries) {
-    if (!await renewDiscoveryRunLock(env, lockToken)) {
-      return { scanned, queued, skippedReason: 'lock_lost' };
-    }
-    let results;
-    try {
-      results = await fetchPublicSkillRepoSearchPage({ query, page: 1, waitUntil });
-    } catch (error) {
-      console.warn(
-        `HTML repo search discovery failed for query "${query}":`,
-        error instanceof PublicRepoSearchError ? `${error.reason} (status=${error.status ?? 'none'})` : error
-      );
-      continue;
-    }
-
-    for (const repo of results) {
-      scanned++;
-
+    for (let page = 1; page <= config.pages; page++) {
       if (!await renewDiscoveryRunLock(env, lockToken)) {
-        return { scanned, queued, skippedReason: 'lock_lost' };
+        return { scanned, queued, pagesFetched, skippedReason: 'lock_lost' };
       }
 
-      if (wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, undefined, nowMs)) {
-        continue;
-      }
-
-      let hasSkillMd = false;
+      let results;
       try {
-        hasSkillMd = await checkPublicSkillMdAtHead(repo.owner, repo.name, { waitUntil });
+        results = await fetchPublicSkillRepoSearchPage({ query, page, waitUntil });
+        pagesFetched++;
       } catch (error) {
-        console.warn(`HTML repo search candidate check failed for ${repo.owner}/${repo.name}:`, error);
+        console.warn(
+          `HTML repo search discovery failed for query "${query}" page ${page}:`,
+          error instanceof PublicRepoSearchError ? `${error.reason} (status=${error.status ?? 'none'})` : error
+        );
         continue;
       }
-      if (!hasSkillMd) {
-        continue;
+
+      for (const repo of results) {
+        scanned++;
+
+        if (!await renewDiscoveryRunLock(env, lockToken)) {
+          return { scanned, queued, pagesFetched, skippedReason: 'lock_lost' };
+        }
+
+        const repoIdentity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
+        if (seenRepos.has(repoIdentity)) continue;
+        seenRepos.add(repoIdentity);
+        if (seenRepos.size > config.maxCandidates) {
+          return { scanned, queued, pagesFetched, skippedReason: 'candidate_cap_reached' };
+        }
+
+        if (wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, undefined, nowMs)) {
+          continue;
+        }
+
+        let hasSkillMd = false;
+        try {
+          hasSkillMd = await checkPublicSkillMdAtHead(repo.owner, repo.name, { waitUntil });
+        } catch (error) {
+          console.warn(`HTML repo search candidate check failed for ${repo.owner}/${repo.name}:`, error);
+          continue;
+        }
+        if (!hasSkillMd) continue;
+
+        if (!await renewDiscoveryRunLock(env, lockToken)) {
+          return { scanned, queued, pagesFetched, skippedReason: 'lock_lost' };
+        }
+
+        const message: IndexingMessage = {
+          type: 'check_skill',
+          repoOwner: repo.owner,
+          repoName: repo.name,
+          skillPath: undefined,
+          discoverySource: 'github-repo-search-html',
+        };
+
+        await env.INDEXING_QUEUE.send(message);
+        markRepoQueued(repoDedupeState, repo.owner, repo.name, undefined, nowMs, dedupTtlSeconds);
+        queued++;
+        console.log(`Queued HTML-discovered repo for indexing: ${repo.owner}/${repo.name}`);
       }
 
-      if (!await renewDiscoveryRunLock(env, lockToken)) {
-        return { scanned, queued, skippedReason: 'lock_lost' };
-      }
-
-      const message: IndexingMessage = {
-        type: 'check_skill',
-        repoOwner: repo.owner,
-        repoName: repo.name,
-        skillPath: undefined,
-        discoverySource: 'github-repo-search-html',
-      };
-
-      await env.INDEXING_QUEUE.send(message);
-      markRepoQueued(repoDedupeState, repo.owner, repo.name, undefined, nowMs, dedupTtlSeconds);
-      queued++;
-      console.log(`Queued HTML-discovered repo for indexing: ${repo.owner}/${repo.name}`);
+      if (results.length === 0) break;
     }
   }
 
-  return { scanned, queued };
+  return { scanned, queued, pagesFetched };
 }
 
 function parseDiscoveryRunLockPayload(
@@ -1588,7 +1637,7 @@ export default {
       nowMs = Date.now();
       const htmlResult = await processHtmlRepoSearchDiscovery(runtimeEnv, repoDedupeState, _ctx, lockToken, nowMs);
       console.log(
-        `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_unknown_skipped=${eventsResult.unknownSkipped}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, backfill_scanned=${backfillResult.scanned}, backfill_queued=${backfillResult.queued}, backfill_pages=${backfillResult.pagesFetched}/${backfillResult.allowedPages}, backfill_date=${backfillResult.date || 'none'}, backfill_skipped=${backfillResult.skippedReason || 'none'}, html_scanned=${htmlResult.scanned}, html_queued=${htmlResult.queued}, html_skipped=${htmlResult.skippedReason || 'none'}, rest_snapshot_remaining=${restBeforeEvents?.remaining ?? 'unknown'}, search_snapshot_remaining=${searchBeforeDiscovery?.remaining ?? 'unknown'}`
+        `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_unknown_skipped=${eventsResult.unknownSkipped}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, backfill_scanned=${backfillResult.scanned}, backfill_queued=${backfillResult.queued}, backfill_pages=${backfillResult.pagesFetched}/${backfillResult.allowedPages}, backfill_date=${backfillResult.date || 'none'}, backfill_skipped=${backfillResult.skippedReason || 'none'}, html_scanned=${htmlResult.scanned}, html_queued=${htmlResult.queued}, html_pages=${htmlResult.pagesFetched}, html_skipped=${htmlResult.skippedReason || 'none'}, rest_snapshot_remaining=${restBeforeEvents?.remaining ?? 'unknown'}, search_snapshot_remaining=${searchBeforeDiscovery?.remaining ?? 'unknown'}`
       );
     } finally {
       if (repoDedupeState) {

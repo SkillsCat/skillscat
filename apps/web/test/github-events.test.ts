@@ -970,11 +970,13 @@ describe('github-events HTML repo search discovery', () => {
     const kv = new MemoryKv();
     const sent: unknown[] = [];
     const skillMdChecks: string[] = [];
+    const searchRequests: string[] = [];
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = requestUrl(input);
 
       if (url.startsWith('https://github.com/search?')) {
+        searchRequests.push(url);
         return new Response(searchFixtureHtml, {
           status: 200,
           headers: { 'content-type': 'text/html; charset=utf-8' },
@@ -1005,11 +1007,14 @@ describe('github-events HTML repo search discovery', () => {
         GITHUB_SEARCH_BACKFILL_ENABLED: '0',
         GITHUB_HTML_SEARCH_DISCOVERY_ENABLED: '1',
         GITHUB_HTML_SEARCH_DISCOVERY_INTERVAL_SECONDS: '1',
+        GITHUB_HTML_SEARCH_QUERIES: 'SKILL.md in:readme',
+        GITHUB_HTML_SEARCH_PAGES: '3',
       } as never,
       {} as ExecutionContext
     );
 
     expect(skillMdChecks.length).toBe(10);
+    expect(searchRequests).toHaveLength(3);
     expect(sent).toEqual([
       expect.objectContaining({
         type: 'check_skill',

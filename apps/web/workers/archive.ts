@@ -86,6 +86,11 @@ async function findArchiveCandidates(env: ArchiveEnv): Promise<SkillToArchive[]>
           AND stars < 5
           AND CASE WHEN last_accessed_at IS NULL THEN 0 ELSE last_accessed_at END < ?
           AND CASE WHEN last_commit_at IS NULL THEN 0 ELSE last_commit_at END < ?
+          AND COALESCE(access_count_7d, 0) = 0
+          AND COALESCE(access_count_30d, 0) = 0
+          AND COALESCE(download_count_7d, 0) = 0
+          AND COALESCE(download_count_30d, 0) = 0
+          AND COALESCE(download_count_90d, 0) = 0
         LIMIT ?
       )
       UNION ALL
@@ -99,6 +104,11 @@ async function findArchiveCandidates(env: ArchiveEnv): Promise<SkillToArchive[]>
           AND stars < 5
           AND CASE WHEN last_accessed_at IS NULL THEN 0 ELSE last_accessed_at END < ?
           AND CASE WHEN last_commit_at IS NULL THEN 0 ELSE last_commit_at END < ?
+          AND COALESCE(access_count_7d, 0) = 0
+          AND COALESCE(access_count_30d, 0) = 0
+          AND COALESCE(download_count_7d, 0) = 0
+          AND COALESCE(download_count_30d, 0) = 0
+          AND COALESCE(download_count_90d, 0) = 0
         LIMIT ?
       )
       UNION ALL
@@ -112,6 +122,11 @@ async function findArchiveCandidates(env: ArchiveEnv): Promise<SkillToArchive[]>
           AND stars < 5
           AND CASE WHEN last_accessed_at IS NULL THEN 0 ELSE last_accessed_at END < ?
           AND CASE WHEN last_commit_at IS NULL THEN 0 ELSE last_commit_at END < ?
+          AND COALESCE(access_count_7d, 0) = 0
+          AND COALESCE(access_count_30d, 0) = 0
+          AND COALESCE(download_count_7d, 0) = 0
+          AND COALESCE(download_count_30d, 0) = 0
+          AND COALESCE(download_count_90d, 0) = 0
         LIMIT ?
       )
       UNION ALL
@@ -125,6 +140,11 @@ async function findArchiveCandidates(env: ArchiveEnv): Promise<SkillToArchive[]>
           AND stars < 5
           AND CASE WHEN last_accessed_at IS NULL THEN 0 ELSE last_accessed_at END < ?
           AND CASE WHEN last_commit_at IS NULL THEN 0 ELSE last_commit_at END < ?
+          AND COALESCE(access_count_7d, 0) = 0
+          AND COALESCE(access_count_30d, 0) = 0
+          AND COALESCE(download_count_7d, 0) = 0
+          AND COALESCE(download_count_30d, 0) = 0
+          AND COALESCE(download_count_90d, 0) = 0
         LIMIT ?
       )
     )

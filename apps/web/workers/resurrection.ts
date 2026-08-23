@@ -21,6 +21,7 @@ interface ResurrectionEnv extends BaseEnv {}
 
 interface ArchivedSkill {
   id: string;
+  updated_at: number;
   repo_owner: string;
   repo_name: string;
 }
@@ -29,6 +30,13 @@ interface ArchivedSkill {
 const QUARTERLY_STAR_THRESHOLD = 50;
 const USER_ACCESS_STAR_THRESHOLD = 20;
 const RECENT_ACTIVITY_DAYS = 90;
+const RESURRECTION_BATCH_SIZE = 200;
+const RESURRECTION_CURSOR_KEY = 'resurrection:cursor';
+
+interface ResurrectionCursor {
+  updatedAt: number;
+  id: string;
+}
 
 /**
  * Check if a date is within recent activity window
@@ -155,7 +163,7 @@ async function checkAndResurrectSingle(
 
 function recordMetrics(
   env: ResurrectionEnv,
-  stats: { checked: number; resurrected: number; failed: number; githubCalls: number }
+  stats: { checked: number; resurrected: number; failed: number; githubCalls: number; durationMs: number }
 ): void {
   if (!env.WORKER_ANALYTICS) {
     return;
@@ -169,6 +177,7 @@ function recordMetrics(
         stats.resurrected,
         stats.failed,
         stats.githubCalls,
+        stats.durationMs,
       ],
       indexes: ['resurrection-run'],
     });
@@ -213,18 +222,45 @@ export default {
     env: ResurrectionEnv,
     _ctx: ExecutionContext
   ): Promise<void> {
+    const startedAt = Date.now();
     console.log('Resurrection Worker triggered at:', new Date().toISOString());
 
-    // Get all archived skills
-    const archived = await env.DB.prepare(`
-      SELECT id, repo_owner, repo_name
-      FROM skills
-      WHERE tier = 'archived'
-    `).all<ArchivedSkill>();
+    // Process a bounded keyset page so a large archive never becomes one
+    // unbounded Worker invocation.
+    const rawCursor = await env.KV.get(RESURRECTION_CURSOR_KEY);
+    let cursor: ResurrectionCursor | null = null;
+    if (rawCursor) {
+      try {
+        const parsed = JSON.parse(rawCursor) as Partial<ResurrectionCursor>;
+        if (Number.isFinite(parsed.updatedAt) && typeof parsed.id === 'string' && parsed.id) {
+          cursor = { updatedAt: Number(parsed.updatedAt), id: parsed.id };
+        }
+      } catch {
+        // Discard legacy id-only cursors; restarting avoids skipping rows.
+      }
+    }
+
+    const archived = cursor
+      ? await env.DB.prepare(`
+          SELECT id, updated_at, repo_owner, repo_name
+          FROM skills
+          WHERE tier = 'archived'
+            AND (updated_at > ? OR (updated_at = ? AND id > ?))
+          ORDER BY updated_at, id
+          LIMIT ?
+        `).bind(cursor.updatedAt, cursor.updatedAt, cursor.id, RESURRECTION_BATCH_SIZE).all<ArchivedSkill>()
+      : await env.DB.prepare(`
+          SELECT id, updated_at, repo_owner, repo_name
+          FROM skills
+          WHERE tier = 'archived'
+          ORDER BY updated_at, id
+          LIMIT ?
+        `).bind(RESURRECTION_BATCH_SIZE).all<ArchivedSkill>();
 
     console.log(`Found ${archived.results.length} archived skills to check`);
 
     if (archived.results.length === 0) {
+      await env.KV.delete(RESURRECTION_CURSOR_KEY);
       console.log('No archived skills to check');
       return;
     }
@@ -268,6 +304,17 @@ export default {
       }
     }
 
+    const lastRow = archived.results.at(-1);
+    if (lastRow && archived.results.length >= RESURRECTION_BATCH_SIZE) {
+      await env.KV.put(
+        RESURRECTION_CURSOR_KEY,
+        JSON.stringify({ updatedAt: lastRow.updated_at, id: lastRow.id } satisfies ResurrectionCursor),
+        { expirationTtl: 366 * 86400 }
+      );
+    } else {
+      await env.KV.delete(RESURRECTION_CURSOR_KEY);
+    }
+
     console.log(`Resurrection complete: ${resurrected} resurrected, ${failed} failed`);
 
     // Record metrics
@@ -276,6 +323,7 @@ export default {
       resurrected,
       failed,
       githubCalls,
+      durationMs: Date.now() - startedAt,
     });
 
     console.log('Resurrection Worker completed');
