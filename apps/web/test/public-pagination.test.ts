@@ -54,6 +54,19 @@ beforeEach(() => {
 });
 
 describe('public pagination bounds', () => {
+  it('rejects pages above the public-list cost ceiling before querying D1', async () => {
+    const { load } = await import('../src/routes/trending/+page.server');
+
+    await expect(
+      load({
+        ...createBaseInput('https://skills.cat/trending?page=101'),
+      } as never)
+    ).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(getTrendingSkillsPaginated).not.toHaveBeenCalled();
+  });
+
   it('returns 404 for out-of-range recent pages', async () => {
     getRecentSkillsPaginated.mockResolvedValue({
       skills: [],

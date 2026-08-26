@@ -1172,18 +1172,6 @@ async function saveClassification(
   ]);
 
   try {
-    await syncCategoryPublicStats(env.DB, affectedCategorySlugs, now);
-  } catch (error) {
-    log.error('Failed to sync category public stats:', error);
-  }
-
-  try {
-    await invalidateCategoryCaches(affectedCategorySlugs);
-  } catch (error) {
-    log.error('Failed to invalidate category caches after classification:', error);
-  }
-
-  try {
     await invalidateSkillCaches(skillId, env, knownSlug);
   } catch (error) {
     log.error(`Failed to invalidate skill caches after classification for ${skillId}:`, error);
@@ -1357,6 +1345,7 @@ export default {
       keyword: 0,
     };
     const indexNowUrls = new Set<string>();
+    const affectedCategorySlugs = new Set<string>();
 
     for (const message of batch.messages) {
       try {
@@ -1370,6 +1359,9 @@ export default {
           batchMetricStats.skipped += 1;
         } else {
           batchMetricStats[result.method] += 1;
+          for (const categorySlug of result.affectedCategorySlugs) {
+            affectedCategorySlugs.add(categorySlug);
+          }
           for (const url of buildIndexNowCategoryUrls(result.affectedCategorySlugs, env)) {
             indexNowUrls.add(url);
           }
@@ -1389,6 +1381,20 @@ export default {
       batchMetricStats,
       preloadStatus
     );
+
+    if (affectedCategorySlugs.size > 0) {
+      try {
+        await syncCategoryPublicStats(env.DB, affectedCategorySlugs);
+      } catch (error) {
+        log.error('Failed to sync category public stats for classification batch:', error);
+      }
+
+      try {
+        await invalidateCategoryCaches(affectedCategorySlugs);
+      } catch (error) {
+        log.error('Failed to invalidate category caches after classification batch:', error);
+      }
+    }
 
     if (indexNowUrls.size > 0) {
       const indexNowTask = scheduleIndexNowSubmission({

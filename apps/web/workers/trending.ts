@@ -51,6 +51,9 @@ const SKILL_REFRESH_SELECT_COLUMNS = getSkillRefreshSelectColumns();
 const DAILY_METRICS_RETENTION_DAYS = 95;
 const D1_SAFE_IN_CLAUSE_BATCH_SIZE = 90;
 const CATEGORY_STATS_SYNC_SKILL_BATCH_SIZE = D1_SAFE_IN_CLAUSE_BATCH_SIZE;
+const CATEGORY_STATS_LAST_SYNC_KEY = 'category-stats:last-sync-day';
+const CATEGORY_STATS_DIRTY_SLUGS_KEY = 'category-stats:dirty-slugs';
+const CATEGORY_STATS_STATE_TTL_SECONDS = 3 * 86400;
 const D1_SKILL_UPDATE_BATCH_SIZE = 50;
 const D1_REPO_REFRESH_LOOKUP_BATCH_SIZE = 40;
 const MAX_SIBLINGS_PER_REPO = 100;
@@ -591,6 +594,48 @@ export async function syncUpdatedSkillCategoryStats(
   return categorySlugs;
 }
 
+export async function syncUpdatedSkillCategoryStatsOncePerDay(
+  env: Pick<TrendingEnv, 'DB' | 'KV'>,
+  skillIds: string[],
+  now: number = Date.now()
+): Promise<string[]> {
+  const currentCategorySlugs = await loadUpdatedSkillCategorySlugs(env.DB, skillIds);
+  const syncDay = new Date(now).toISOString().slice(0, 10);
+  const lastSyncDay = await env.KV.get(CATEGORY_STATS_LAST_SYNC_KEY);
+
+  if (lastSyncDay === syncDay && currentCategorySlugs.length === 0) {
+    return [];
+  }
+
+  const storedDirtySlugs = await env.KV.get<string[]>(CATEGORY_STATS_DIRTY_SLUGS_KEY, 'json');
+  const dirtyCategorySlugs = Array.from(new Set([
+    ...(Array.isArray(storedDirtySlugs) ? storedDirtySlugs : []),
+    ...currentCategorySlugs,
+  ])).filter(Boolean);
+
+  if (lastSyncDay === syncDay) {
+    await env.KV.put(CATEGORY_STATS_DIRTY_SLUGS_KEY, JSON.stringify(dirtyCategorySlugs), {
+      expirationTtl: CATEGORY_STATS_STATE_TTL_SECONDS,
+    });
+    return [];
+  }
+
+  if (dirtyCategorySlugs.length === 0) {
+    return [];
+  }
+
+  await syncCategoryPublicStats(env.DB, dirtyCategorySlugs);
+  await Promise.all([
+    env.KV.put(CATEGORY_STATS_LAST_SYNC_KEY, syncDay, {
+      expirationTtl: CATEGORY_STATS_STATE_TTL_SECONDS,
+    }),
+    env.KV.put(CATEGORY_STATS_DIRTY_SLUGS_KEY, JSON.stringify([]), {
+      expirationTtl: CATEGORY_STATS_STATE_TTL_SECONDS,
+    }),
+  ]);
+  return dirtyCategorySlugs;
+}
+
 /**
  * Update skills by tier - only processes skills where next_update_at < now
  * This replaces the old recalculateAllScores() which read ALL skills
@@ -1079,7 +1124,7 @@ export async function queueTrendingHeadSecurityPremium(env: TrendingEnv): Promis
   const rows = await env.DB.prepare(`
     WITH trending_head AS (
       SELECT id, trending_score
-      FROM skills INDEXED BY skills_visibility_trending_desc_idx
+      FROM skills INDEXED BY skills_public_trending_id_idx
       WHERE visibility = 'public'
       ORDER BY trending_score DESC
       LIMIT ?
@@ -1205,11 +1250,11 @@ export default {
     // Mark updated skills as dirty for search score recomputation.
     if (uniqueUpdatedIds.length > 0) {
       await markSearchDirtyBatch(env.DB, uniqueUpdatedIds);
+    }
 
-      const syncedCategories = await syncUpdatedSkillCategoryStats(env.DB, uniqueUpdatedIds);
-      if (syncedCategories.length > 0) {
-        console.log(`Refreshed category stats for ${syncedCategories.length} categories`);
-      }
+    const syncedCategories = await syncUpdatedSkillCategoryStatsOncePerDay(env, uniqueUpdatedIds);
+    if (syncedCategories.length > 0) {
+      console.log(`Refreshed category stats for ${syncedCategories.length} categories`);
     }
 
     // 5. Detect skills needing AI reclassification (stars crossed threshold)

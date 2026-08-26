@@ -1,0 +1,1 @@
+CREATE INDEX `skills_public_trending_id_idx` ON `skills` (trending_score DESC,`id`) WHERE "skills"."visibility" = 'public';

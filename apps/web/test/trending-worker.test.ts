@@ -16,6 +16,7 @@ import {
   queueTrendingHeadSecurityPremium,
   shouldRegenerateTrendingListCaches,
   syncUpdatedSkillCategoryStats,
+  syncUpdatedSkillCategoryStatsOncePerDay,
 } from '../workers/trending';
 import type { SkillRecord } from '../workers/shared/types';
 
@@ -500,6 +501,91 @@ describe('syncUpdatedSkillCategoryStats', () => {
 
     await expect(syncUpdatedSkillCategoryStats(db, ['skill-1'])).resolves.toEqual([]);
     expect(syncCategoryPublicStatsMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('syncUpdatedSkillCategoryStatsOncePerDay', () => {
+  it('accumulates dirty categories and refreshes them at most once per UTC day', async () => {
+    const categoriesBySkillId: Record<string, string> = {
+      'skill-1': 'agents',
+      'skill-2': 'automation',
+      'skill-3': 'security',
+    };
+    const db = {
+      prepare: () => ({
+        bind: (...skillIds: string[]) => ({
+          all: async () => ({
+            results: skillIds.map((skillId) => ({
+              categorySlug: categoriesBySkillId[skillId],
+            })),
+          }),
+        }),
+      }),
+    };
+    const values = new Map<string, string>();
+    const kv = {
+      get: async (key: string, type?: string) => {
+        const value = values.get(key) ?? null;
+        return type === 'json' && value ? JSON.parse(value) : value;
+      },
+      put: async (key: string, value: string) => {
+        values.set(key, value);
+      },
+    };
+    const env = { DB: db, KV: kv } as never;
+
+    await expect(syncUpdatedSkillCategoryStatsOncePerDay(
+      env,
+      ['skill-1'],
+      Date.UTC(2026, 7, 27, 1)
+    )).resolves.toEqual(['agents']);
+    await expect(syncUpdatedSkillCategoryStatsOncePerDay(
+      env,
+      ['skill-2'],
+      Date.UTC(2026, 7, 27, 2)
+    )).resolves.toEqual([]);
+    await expect(syncUpdatedSkillCategoryStatsOncePerDay(
+      env,
+      ['skill-3'],
+      Date.UTC(2026, 7, 28, 1)
+    )).resolves.toEqual(['automation', 'security']);
+
+    expect(syncCategoryPublicStatsMock).toHaveBeenCalledTimes(2);
+    expect(syncCategoryPublicStatsMock).toHaveBeenNthCalledWith(1, db, ['agents']);
+    expect(syncCategoryPublicStatsMock).toHaveBeenNthCalledWith(2, db, ['automation', 'security']);
+  });
+
+  it('flushes categories carried from the previous day without requiring another skill update', async () => {
+    const db = {
+      prepare: () => ({
+        bind: () => ({
+          all: async () => ({ results: [] }),
+        }),
+      }),
+    };
+    const values = new Map<string, string>([
+      ['category-stats:last-sync-day', '2026-08-27'],
+      ['category-stats:dirty-slugs', JSON.stringify(['automation'])],
+    ]);
+    const kv = {
+      get: async (key: string, type?: string) => {
+        const value = values.get(key) ?? null;
+        return type === 'json' && value ? JSON.parse(value) : value;
+      },
+      put: async (key: string, value: string) => {
+        values.set(key, value);
+      },
+    };
+
+    await expect(syncUpdatedSkillCategoryStatsOncePerDay(
+      { DB: db, KV: kv } as never,
+      [],
+      Date.UTC(2026, 7, 28, 1)
+    )).resolves.toEqual(['automation']);
+
+    expect(syncCategoryPublicStatsMock).toHaveBeenCalledWith(db, ['automation']);
+    expect(values.get('category-stats:last-sync-day')).toBe('2026-08-28');
+    expect(values.get('category-stats:dirty-slugs')).toBe('[]');
   });
 });
 

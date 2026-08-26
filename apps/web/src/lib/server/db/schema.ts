@@ -158,6 +158,21 @@ export const skills = sqliteTable('skills', {
   index('skills_visibility_lower_slug_idx').on(table.visibility, sql.raw('LOWER(slug)')),
   index('skills_visibility_org_idx').on(table.visibility, table.orgId),
   index('skills_visibility_trending_desc_idx').on(table.visibility, table.trendingScore),
+  index('skills_public_trending_id_idx')
+    .on(sql.raw('trending_score DESC'), table.id)
+    .where(sql`${table.visibility} = 'public'`),
+  index('skills_public_category_rank_idx')
+    .on(
+      sql.raw(`CASE
+        WHEN classification_method = 'direct' THEN 0
+        WHEN classification_method = 'ai' THEN 1
+        WHEN classification_method = 'keyword' THEN 2
+        ELSE 3
+      END ASC`),
+      sql.raw('trending_score DESC'),
+      table.id
+    )
+    .where(sql`${table.visibility} = 'public'`),
   index('skills_visibility_stars_desc_idx').on(table.visibility, table.stars),
   index('skills_repo_visibility_trending_idx').on(table.repoOwner, table.visibility, table.trendingScore),
   index('skills_visibility_recent_expr_idx').on(

@@ -51,6 +51,9 @@ interface PublicStatsCachePayload {
 
 let pendingPredefinedCategoryStatsSync: Promise<void> | null = null;
 const CATEGORY_PUBLIC_TOP_SKILL_IDS_LIMIT = 96;
+// For broad categories, walking an ordered public index can stop at 96 matches.
+// Smaller categories are cheaper to read from the category-first covering index.
+const GLOBAL_RANK_SCAN_MIN_CATEGORY_SKILLS = 4096;
 const PUBLIC_STATS_CACHE_KEY = 'stats/public';
 const PUBLIC_STATS_CACHE_MAX_AGE_MS = LIST_CACHE_MAX_AGE_MS;
 const categoryPublicStatsColumnSupportCache = new WeakMap<object, CategoryPublicStatsColumnSupport>();
@@ -119,9 +122,32 @@ async function loadCategoryAggregates(
 async function loadTopSkillIdsForCategory(
   db: D1Database,
   categorySlug: string,
-  limit: number = CATEGORY_PUBLIC_TOP_SKILL_IDS_LIMIT
+  limit: number = CATEGORY_PUBLIC_TOP_SKILL_IDS_LIMIT,
+  categorySkillCount: number = 0
 ): Promise<string[]> {
   if (!categorySlug || limit <= 0) return [];
+
+  if (categorySkillCount >= GLOBAL_RANK_SCAN_MIN_CATEGORY_SKILLS) {
+    const result = await db.prepare(`
+      SELECT s.id as skillId
+      FROM skills s INDEXED BY skills_public_trending_id_idx
+      WHERE s.visibility = 'public'
+        AND EXISTS (
+          SELECT 1
+          FROM skill_categories sc
+          WHERE sc.skill_id = s.id
+            AND sc.category_slug = ?
+        )
+      ORDER BY s.trending_score DESC
+      LIMIT ?
+    `)
+      .bind(categorySlug, limit)
+      .all<CategoryTopSkillRow>();
+
+    return (result.results || [])
+      .map((row) => row.skillId)
+      .filter((skillId): skillId is string => typeof skillId === 'string' && skillId.length > 0);
+  }
 
   const result = await db.prepare(`
     SELECT sc.skill_id as skillId
@@ -144,9 +170,38 @@ async function loadTopSkillIdsForCategory(
 async function loadTopRankedSkillIdsForCategory(
   db: D1Database,
   categorySlug: string,
-  limit: number = CATEGORY_PUBLIC_TOP_SKILL_IDS_LIMIT
+  limit: number = CATEGORY_PUBLIC_TOP_SKILL_IDS_LIMIT,
+  categorySkillCount: number = 0
 ): Promise<string[]> {
   if (!categorySlug || limit <= 0) return [];
+
+  if (categorySkillCount >= GLOBAL_RANK_SCAN_MIN_CATEGORY_SKILLS) {
+    const result = await db.prepare(`
+      SELECT s.id as skillId
+      FROM skills s INDEXED BY skills_public_category_rank_idx
+      WHERE s.visibility = 'public'
+        AND EXISTS (
+          SELECT 1
+          FROM skill_categories sc
+          WHERE sc.skill_id = s.id
+            AND sc.category_slug = ?
+        )
+      ORDER BY CASE
+        WHEN s.classification_method = 'direct' THEN 0
+        WHEN s.classification_method = 'ai' THEN 1
+        WHEN s.classification_method = 'keyword' THEN 2
+        ELSE 3
+      END ASC,
+      s.trending_score DESC
+      LIMIT ?
+    `)
+      .bind(categorySlug, limit)
+      .all<CategoryTopSkillRow>();
+
+    return (result.results || [])
+      .map((row) => row.skillId)
+      .filter((skillId): skillId is string => typeof skillId === 'string' && skillId.length > 0);
+  }
 
   const result = await db.prepare(`
     SELECT sc.skill_id as skillId
@@ -401,10 +456,10 @@ export async function syncCategoryPublicStats(
     const count = aggregate?.count ?? 0;
     const maxTs = aggregate?.maxTs ?? null;
     const topSkillIdsJson = includeTopSkillIds && count > 0
-      ? JSON.stringify(await loadTopSkillIdsForCategory(db, slug))
+      ? JSON.stringify(await loadTopSkillIdsForCategory(db, slug, CATEGORY_PUBLIC_TOP_SKILL_IDS_LIMIT, count))
       : JSON.stringify([]);
     const topRankedSkillIdsJson = includeTopRankedSkillIds && count > 0
-      ? JSON.stringify(await loadTopRankedSkillIdsForCategory(db, slug))
+      ? JSON.stringify(await loadTopRankedSkillIdsForCategory(db, slug, CATEGORY_PUBLIC_TOP_SKILL_IDS_LIMIT, count))
       : JSON.stringify([]);
 
     if (includeTopSkillIds && includeTopRankedSkillIds) {

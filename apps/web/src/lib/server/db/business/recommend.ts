@@ -54,6 +54,8 @@ const MAX_CATEGORY_SEED_IDS = 192;
 const D1_SAFE_VARIABLE_LIMIT = 90;
 const MAX_RECOMMEND_SIGNAL_CATEGORIES = 12;
 const MAX_RECOMMEND_SIGNAL_TAGS = 32;
+const MAX_RECOMMEND_CATEGORY_PAIRS = 3;
+const MAX_RECOMMEND_PAIR_TRENDING_POOL = 2048;
 const RECOMMEND_SKILL_COLUMNS_BASE = `
   s.id, s.name, s.slug, s.description,
   s.repo_owner as repoOwner, s.repo_name as repoName,
@@ -272,6 +274,7 @@ async function loadRecommendDiscoveryCategories(
 async function loadRecommendMultiCategoryCandidates(
   db: D1Database,
   orderedCategories: string[],
+  publicSkillCounts: ReadonlyMap<string, number>,
   excludeIds: string[],
   skillColumnsBase: string,
   limit: number,
@@ -279,7 +282,8 @@ async function loadRecommendMultiCategoryCandidates(
 ): Promise<RecommendSkillCandidateRow[]> {
   if (orderedCategories.length < 2 || limit <= 0) return [];
 
-  const categoryPairs = buildRecommendCategoryPairs(orderedCategories);
+  const categoryPairs = buildRecommendCategoryPairs(orderedCategories)
+    .slice(0, MAX_RECOMMEND_CATEGORY_PAIRS);
   if (categoryPairs.length === 0) return [];
 
   const perPairLimit = Math.max(4, Math.min(12, limit * 2));
@@ -287,10 +291,54 @@ async function loadRecommendMultiCategoryCandidates(
 
   for (const pair of categoryPairs) {
     const exPh = excludeIds.map(() => '?').join(',');
+    const firstCategoryCount = publicSkillCounts.get(pair.firstCategory);
+    const useBoundedTrendingPool = firstCategoryCount === undefined
+      || firstCategoryCount > EXACT_CATEGORY_OVERLAP_POOL_MAX;
     const result = await timedTask(
       timingCollector,
       'rel_t1_pairs',
-      () => db.prepare(`
+      () => useBoundedTrendingPool
+        ? db.prepare(`
+        WITH trending_pool AS MATERIALIZED (
+          SELECT id, trending_score as trendingScore
+          FROM skills INDEXED BY skills_public_trending_id_idx
+          WHERE visibility = 'public'
+          ORDER BY trending_score DESC
+          LIMIT ?
+        ), matched_ids AS (
+          SELECT pool.id, pool.trendingScore
+          FROM trending_pool pool
+          WHERE pool.id NOT IN (${exPh})
+            AND EXISTS (
+              SELECT 1
+              FROM skill_categories sc1
+              WHERE sc1.skill_id = pool.id
+                AND sc1.category_slug = ?
+            )
+            AND EXISTS (
+              SELECT 1
+              FROM skill_categories sc2
+              WHERE sc2.skill_id = pool.id
+                AND sc2.category_slug = ?
+            )
+          ORDER BY pool.trendingScore DESC
+          LIMIT ?
+        )
+        SELECT
+          ${skillColumnsBase}
+        FROM matched_ids matched
+        CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
+        WHERE s.visibility = 'public'
+          AND s.id = matched.id
+        ORDER BY matched.trendingScore DESC
+      `).bind(
+          MAX_RECOMMEND_PAIR_TRENDING_POOL,
+          ...excludeIds,
+          pair.firstCategory,
+          pair.secondCategory,
+          perPairLimit
+        ).all<RecommendSkillCandidateRow>()
+        : db.prepare(`
         SELECT
           ${skillColumnsBase}
         FROM skill_categories sc1 INDEXED BY skill_categories_category_skill_idx
@@ -449,7 +497,7 @@ export async function getLightweightRecommendedSkills(
       'rel_lw_trending',
       () => db.prepare(`
         SELECT ${RECOMMEND_SKILL_COLUMNS_BASE}
-        FROM skills s INDEXED BY skills_visibility_trending_desc_idx
+        FROM skills s INDEXED BY skills_public_trending_id_idx
         WHERE s.visibility = 'public'
           AND s.id NOT IN (${exPh})
         ORDER BY s.trending_score DESC
@@ -638,12 +686,16 @@ export async function getRecommendedSkills(
         seededTier1Candidates = true;
       }
 
-      if (discovery.orderedCategories.length > 1) {
+      if (
+        discovery.orderedCategories.length > 1
+        && candidateMap.size < MIN_CANDIDATES
+      ) {
         const multiCategoryLimit = Math.max(6, Math.min(MAX_SCORING_CANDIDATES, limit * 2));
         const multiCategoryRows = await loadRecommendMultiCategoryCandidates(
           db,
           discovery.orderedCategories,
-          [skillId],
+          discovery.publicSkillCounts,
+          excludeIds,
           SKILL_COLUMNS_BASE,
           multiCategoryLimit,
           timingCollector
@@ -699,7 +751,7 @@ export async function getRecommendedSkills(
         SELECT
           ${SKILL_COLUMNS_BASE}
         , NULL as authorAvatar
-        FROM skills s INDEXED BY skills_visibility_trending_desc_idx
+        FROM skills s INDEXED BY skills_public_trending_id_idx
         WHERE s.visibility = 'public'
           AND s.id NOT IN (${exPh})
           AND EXISTS (
@@ -785,7 +837,7 @@ export async function getRecommendedSkills(
       () => db.prepare(`
       SELECT ${SKILL_COLUMNS_BASE}
       , NULL as authorAvatar
-      FROM skills s INDEXED BY skills_visibility_trending_desc_idx
+      FROM skills s INDEXED BY skills_public_trending_id_idx
       WHERE s.id NOT IN (${exPh})
         AND s.visibility = 'public'
       ORDER BY s.trending_score DESC

@@ -6,6 +6,7 @@ import { getCategoryPageCacheKey } from '$lib/server/cache/categories';
 import { setPublicPageCache } from '$lib/server/cache/page';
 import { resolvePublicSkillDataCache } from '$lib/server/cache/public-skill-data';
 import { MIN_INDEXABLE_DYNAMIC_CATEGORY_SKILLS } from '$lib/seo/constants';
+import { PUBLIC_LIST_MAX_PAGE } from '$lib/server/db/shared/constants';
 
 const ITEMS_PER_PAGE = 24;
 
@@ -36,6 +37,9 @@ export const load: PageServerLoad = async ({ params, url, platform, setHeaders, 
     R2: platform?.env?.R2,
   };
   const page = parsePage(url.searchParams.get('page'));
+  if (page > PUBLIC_LIST_MAX_PAGE) {
+    throw error(404, 'Page not found');
+  }
   const { data } = await resolvePublicSkillDataCache({
     db: env.DB,
     cacheKey: getCategoryPageCacheKey(params.slug, page),
@@ -86,7 +90,7 @@ export const load: PageServerLoad = async ({ params, url, platform, setHeaders, 
         };
       }
 
-      const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
+      const totalPages = Math.min(PUBLIC_LIST_MAX_PAGE, Math.ceil(total / ITEMS_PER_PAGE));
       const lastPage = Math.max(1, totalPages);
 
       if (page > lastPage) {

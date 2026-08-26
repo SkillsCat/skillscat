@@ -38,9 +38,12 @@ class SqliteD1Statement {
 }
 
 class SqliteD1Database {
+  readonly queries: string[] = [];
+
   constructor(private readonly db: DatabaseSync) {}
 
   prepare(sql: string) {
+    this.queries.push(sql.replace(/\s+/g, ' ').trim());
     return new SqliteD1Statement(this.db, sql);
   }
 }
@@ -94,6 +97,9 @@ function createRecommendDb(): DatabaseSync {
       ON skills (visibility, id);
     CREATE INDEX skills_visibility_trending_desc_idx
       ON skills (visibility, trending_score DESC);
+    CREATE INDEX skills_public_trending_id_idx
+      ON skills (trending_score DESC, id)
+      WHERE visibility = 'public';
     CREATE INDEX skills_repo_visibility_trending_idx
       ON skills (repo_owner, visibility, trending_score DESC);
     CREATE INDEX authors_username_idx
@@ -199,9 +205,10 @@ describe('orderRecommendDiscoveryCategories', () => {
         ('seeded', 2, '["skill-seeded"]', 1000, 1000);
     `);
 
+    const db = new SqliteD1Database(sqlite);
     const results = await getRecommendedSkills(
       {
-        DB: new SqliteD1Database(sqlite) as never,
+        DB: db as never,
         R2: undefined,
       },
       'skill-current',
@@ -248,9 +255,10 @@ describe('orderRecommendDiscoveryCategories', () => {
         ('beta', 3000, '["skill-beta-hot"]', 1000, 1000);
     `);
 
+    const db = new SqliteD1Database(sqlite);
     const results = await getRecommendedSkills(
       {
-        DB: new SqliteD1Database(sqlite) as never,
+        DB: db as never,
         R2: undefined,
       },
       'skill-current',
@@ -264,6 +272,55 @@ describe('orderRecommendDiscoveryCategories', () => {
 
     expect(results).toHaveLength(2);
     expect(results.map((skill) => skill.id)).toContain('skill-multi');
+    expect(db.queries.some((sql) => sql.includes('WITH trending_pool AS MATERIALIZED'))).toBe(true);
+    expect(db.queries.some((sql) => sql.includes('JOIN skill_categories sc2'))).toBe(false);
+  });
+
+  it('skips multi-category scans when precomputed seeds fill the candidate pool', async () => {
+    const sqlite = createRecommendDb();
+    sqlite.exec(`
+      INSERT INTO skills (
+        id, name, slug, description, repo_owner, repo_name, visibility,
+        stars, forks, trending_score, last_commit_at, updated_at, indexed_at
+      )
+      VALUES
+        ('skill-current', 'Current', 'current', NULL, 'owner-current', 'repo-current', 'public', 10, 1, 5, 1000, 1000, 1000),
+        ('skill-a', 'A', 'a', NULL, 'owner-a', 'repo-a', 'public', 100, 5, 50, 1000, 1000, 1000),
+        ('skill-b', 'B', 'b', NULL, 'owner-b', 'repo-b', 'public', 90, 4, 40, 1000, 1000, 1000),
+        ('skill-c', 'C', 'c', NULL, 'owner-c', 'repo-c', 'public', 80, 3, 30, 1000, 1000, 1000),
+        ('skill-d', 'D', 'd', NULL, 'owner-d', 'repo-d', 'public', 70, 2, 20, 1000, 1000, 1000);
+
+      INSERT INTO skill_categories (skill_id, category_slug)
+      VALUES
+        ('skill-current', 'alpha'),
+        ('skill-current', 'beta'),
+        ('skill-a', 'alpha'),
+        ('skill-b', 'alpha'),
+        ('skill-c', 'beta'),
+        ('skill-d', 'beta');
+
+      INSERT INTO category_public_stats (
+        category_slug, public_skill_count, top_skill_ids_json, max_freshness_ts, updated_at
+      )
+      VALUES
+        ('alpha', 3000, '["skill-a","skill-b"]', 1000, 1000),
+        ('beta', 3000, '["skill-c","skill-d"]', 1000, 1000);
+    `);
+
+    const db = new SqliteD1Database(sqlite);
+    const results = await getRecommendedSkills(
+      { DB: db as never, R2: undefined },
+      'skill-current',
+      ['alpha', 'beta'],
+      '',
+      2,
+      undefined,
+      false,
+      []
+    );
+
+    expect(results).toHaveLength(2);
+    expect(db.queries.some((sql) => sql.includes('JOIN skill_categories sc2'))).toBe(false);
   });
 
   it('uses low-cost category seeds before same-author and trending fallbacks', async () => {
