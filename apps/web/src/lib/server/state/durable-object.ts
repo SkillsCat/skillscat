@@ -76,6 +76,7 @@ const PENALTY_TTL_SECONDS: Record<number, number> = {
 };
 const CLEANUP_CURSOR_KEY = '__maintenance:expiry-cleanup-cursor:v1';
 const CLEANUP_BATCH_SIZE = 256;
+const STORAGE_DELETE_BATCH_SIZE = 128;
 const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const CLEANUP_BACKLOG_INTERVAL_MS = 5 * 60 * 1000;
 const CLEANUP_FAILURE_INTERVAL_MS = 60 * 60 * 1000;
@@ -236,7 +237,11 @@ export class SkillscatStateDurableObject {
     }
 
     if (expiredKeys.length > 0) {
-      await this.state.storage.delete(expiredKeys);
+      for (let index = 0; index < expiredKeys.length; index += STORAGE_DELETE_BATCH_SIZE) {
+        await this.state.storage.delete(
+          expiredKeys.slice(index, index + STORAGE_DELETE_BATCH_SIZE)
+        );
+      }
     }
 
     const hasMore = records.size === CLEANUP_BATCH_SIZE;

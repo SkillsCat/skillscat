@@ -40,6 +40,9 @@ class MemoryStorage {
 
   async delete(keyOrKeys: string | string[]): Promise<number | boolean> {
     if (Array.isArray(keyOrKeys)) {
+      if (keyOrKeys.length > 128) {
+        throw new RangeError('Durable Object storage deletes support up to 128 keys');
+      }
       let deleted = 0;
       for (const key of keyOrKeys) {
         if (this.store.delete(key)) deleted += 1;
