@@ -38,9 +38,12 @@ class SqliteD1Statement {
 }
 
 class SqliteD1Database {
+  readonly queries: string[] = [];
+
   constructor(private readonly db: DatabaseSync) {}
 
   prepare(sql: string) {
+    this.queries.push(sql.replace(/\s+/g, ' ').trim());
     return new SqliteD1Statement(this.db, sql);
   }
 }
@@ -90,6 +93,23 @@ function createCategoryStatsDb(): DatabaseSync {
       ON skill_categories (category_slug, skill_id);
     CREATE INDEX skills_visibility_id_idx
       ON skills (visibility, id);
+    CREATE INDEX skills_visibility_trending_desc_idx
+      ON skills (visibility, trending_score DESC);
+    CREATE INDEX skills_public_trending_id_idx
+      ON skills (trending_score DESC, id)
+      WHERE visibility = 'public';
+    CREATE INDEX skills_public_category_rank_idx
+      ON skills (
+        CASE
+          WHEN classification_method = 'direct' THEN 0
+          WHEN classification_method = 'ai' THEN 1
+          WHEN classification_method = 'keyword' THEN 2
+          ELSE 3
+        END ASC,
+        trending_score DESC,
+        id
+      )
+      WHERE visibility = 'public';
   `);
 
   return sqlite;
@@ -225,6 +245,83 @@ describe('category public stats', () => {
         skillCount: 8,
       },
     ]);
+  });
+
+  it('uses ordered public-skill indexes for large category snapshots', async () => {
+    const sqlite = createCategoryStatsDb();
+    sqlite.exec(`
+      INSERT INTO categories (id, slug, name, description, type)
+      VALUES ('cat-broad', 'broad', 'Broad', NULL, 'ai-suggested');
+
+      WITH RECURSIVE seq(n) AS (
+        SELECT 1
+        UNION ALL
+        SELECT n + 1 FROM seq WHERE n < 4096
+      )
+      INSERT INTO skills (
+        id, visibility, classification_method, trending_score,
+        last_commit_at, updated_at, indexed_at
+      )
+      SELECT
+        printf('skill-%05d', n),
+        'public',
+        CASE n % 3 WHEN 0 THEN 'direct' WHEN 1 THEN 'ai' ELSE 'keyword' END,
+        5000 - n,
+        1000,
+        1000,
+        1000
+      FROM seq;
+
+      INSERT INTO skill_categories (skill_id, category_slug)
+      SELECT id, 'broad' FROM skills;
+    `);
+
+    const db = new SqliteD1Database(sqlite);
+    await syncCategoryPublicStats(db as never, ['broad'], 5000);
+
+    expect(db.queries.some((sql) => sql.includes('INDEXED BY skills_public_trending_id_idx'))).toBe(true);
+    expect(db.queries.some((sql) => sql.includes('INDEXED BY skills_public_category_rank_idx'))).toBe(true);
+
+    const trendingPlan = sqlite.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT s.id
+      FROM skills s INDEXED BY skills_public_trending_id_idx
+      WHERE s.visibility = 'public'
+        AND EXISTS (
+          SELECT 1
+          FROM skill_categories sc
+          WHERE sc.skill_id = s.id AND sc.category_slug = 'broad'
+        )
+      ORDER BY s.trending_score DESC
+      LIMIT 96
+    `).all() as { detail: string }[];
+    expect(trendingPlan.some((row) => (
+      row.detail.includes('COVERING INDEX skills_public_trending_id_idx')
+    ))).toBe(true);
+    expect(trendingPlan.some((row) => row.detail.includes('TEMP B-TREE'))).toBe(false);
+
+    const plan = sqlite.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT s.id
+      FROM skills s INDEXED BY skills_public_category_rank_idx
+      WHERE s.visibility = 'public'
+        AND EXISTS (
+          SELECT 1
+          FROM skill_categories sc
+          WHERE sc.skill_id = s.id AND sc.category_slug = 'broad'
+        )
+      ORDER BY CASE
+        WHEN s.classification_method = 'direct' THEN 0
+        WHEN s.classification_method = 'ai' THEN 1
+        WHEN s.classification_method = 'keyword' THEN 2
+        ELSE 3
+      END ASC,
+      s.trending_score DESC
+      LIMIT 96
+    `).all() as { detail: string }[];
+
+    expect(plan.some((row) => row.detail.includes('skills_public_category_rank_idx'))).toBe(true);
+    expect(plan.some((row) => row.detail.includes('TEMP B-TREE'))).toBe(false);
   });
 
   it('backfills predefined category snapshot rows on first read', async () => {

@@ -211,6 +211,20 @@
       "when": 1785873319498,
       "tag": "0029_steady_wallop",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1787767647867,
+      "tag": "0030_flowery_doorman",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1787768447274,
+      "tag": "0031_melodic_blue_marvel",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,7 @@
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { getTopSkillsPaginated } from '$lib/server/db/business/lists';
+import { PUBLIC_LIST_MAX_PAGE } from '$lib/server/db/shared/constants';
 import { resolvePublicSkillDataCache } from '$lib/server/cache/public-skill-data';
 import { setPublicPageCache } from '$lib/server/cache/page';
 
@@ -31,6 +32,9 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
   };
 
   const page = parsePage(url.searchParams.get('page'));
+  if (page > PUBLIC_LIST_MAX_PAGE) {
+    throw error(404, 'Page not found');
+  }
   const { data } = await resolvePublicSkillDataCache({
     db: env.DB,
     cacheKey: `page:top:v1:${page}`,
@@ -40,7 +44,7 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
     waitUntil: platform?.context?.waitUntil?.bind(platform.context),
   });
   const { skills, total } = data;
-  const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
+  const totalPages = Math.min(PUBLIC_LIST_MAX_PAGE, Math.ceil(total / ITEMS_PER_PAGE));
   const lastPage = Math.max(1, totalPages);
 
   if (page > lastPage) {
