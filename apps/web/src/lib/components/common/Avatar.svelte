@@ -45,12 +45,14 @@
     xl: 120,
   };
 
+  const avatarSize = $derived(sizeMap[size]);
+
   const imageSources = $derived(
     resolvePublicAvatarSources({
       src,
       fallback,
       useGithubFallback,
-      displaySize: sizeMap[size],
+      displaySize: avatarSize,
     }),
   );
 
@@ -70,7 +72,7 @@
   class="avatar-container {shape} size-{size} {className}"
   class:border
   class:shadow
-  style="--avatar-size: {sizeMap[size]}px"
+  style="--avatar-size: {avatarSize}px; width: {avatarSize}px; height: {avatarSize}px;"
 >
   {#if imageSources.src && !imageError}
     <img
@@ -80,8 +82,8 @@
       {loading}
       {fetchpriority}
       decoding="async"
-      width={sizeMap[size]}
-      height={sizeMap[size]}
+      width={avatarSize}
+      height={avatarSize}
       class="avatar-image"
       onerror={() => {
         imageError = true;
