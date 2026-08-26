@@ -797,7 +797,13 @@
 
   const highlightedCommand = $derived(highlightCommand(currentCommand));
   const canonicalSkillUrl = $derived(
-    data.skill ? `${SITE_URL}/skills/${encodeSkillSlugForPath(data.skill.slug)}` : SITE_URL
+    data.skill
+      ? `${SITE_URL}/skills/${encodeSkillSlugForPath(
+          data.skill.originRelationType === 'historical_copy_of' && data.skill.originSlug
+            ? data.skill.originSlug
+            : data.skill.slug
+        )}`
+      : SITE_URL
   );
   const skillErrorKind = $derived(
     data.errorKind === 'temporary_failure' ? 'temporary_failure' : 'not_found'
