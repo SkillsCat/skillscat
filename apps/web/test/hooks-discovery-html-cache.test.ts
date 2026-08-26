@@ -45,13 +45,16 @@ function discoveryEvent(input: {
   pathname: string;
   routeId: string;
   cookieLocale?: string;
+  cookie?: string;
   waitUntil: (promise: Promise<unknown>) => void;
   params?: Record<string, string>;
 }) {
   const url = new URL(`https://skills.cat${input.pathname}`);
   return {
     url,
-    request: new Request(url),
+    request: new Request(url, {
+      headers: input.cookie ? { cookie: input.cookie } : undefined,
+    }),
     route: { id: input.routeId },
     params: input.params ?? {},
     platform: {
@@ -118,6 +121,11 @@ describe('discovery HTML cache', () => {
     expect(response.headers.get('X-Cache')).toBe('HIT');
     expect(response.headers.get('Content-Language')).toBe('en');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(response.headers.get('Cloudflare-CDN-Cache-Control')).toBe(
+      'public, max-age=300, stale-while-revalidate=600'
+    );
+    expect(response.headers.get('Vary')).toBe('Cookie, Host, Accept');
+    expect(response.headers.get('set-cookie')).toBeNull();
     expect(resolve).not.toHaveBeenCalled();
     expect(mocks.createAuth).not.toHaveBeenCalled();
     expect(mocks.getCurrentSkillVisibility).not.toHaveBeenCalled();
@@ -137,6 +145,11 @@ describe('discovery HTML cache', () => {
 
     expect(body).toContain('fresh discovery');
     expect(response.headers.get('X-Cache')).toBe('MISS');
+    expect(response.headers.get('Cloudflare-CDN-Cache-Control')).toBe(
+      'public, max-age=300, stale-while-revalidate=600'
+    );
+    expect(response.headers.get('Vary')).toBe('Cookie, Host, Accept');
+    expect(response.headers.get('set-cookie')).toBeNull();
     expect(waitUntil).toHaveBeenCalled();
     expect(mocks.putCachedText).toHaveBeenCalledWith(
       'page:discovery:html:v1:trending:en',
@@ -159,11 +172,20 @@ describe('discovery HTML cache', () => {
     await drain();
 
     expect(response.headers.get('X-Cache')).toBe('MISS');
+    expect(response.headers.get('Link')).toContain(
+      '</.well-known/api-catalog>; rel="api-catalog"'
+    );
+    expect(response.headers.get('Link')).toContain('rel="service-desc"');
+    expect(response.headers.get('Link')).toContain('rel="service-doc"');
+    expect(response.headers.get('Link')).toContain('rel="describedby"');
     expect(mocks.putCachedText).toHaveBeenCalledWith(
       'page:home:html:v1:en',
       '<html>fresh home</html>',
       60,
       expect.objectContaining({ contentType: 'text/html; charset=utf-8' })
+    );
+    expect(response.headers.get('Cloudflare-CDN-Cache-Control')).toBe(
+      'public, max-age=60, stale-while-revalidate=120'
     );
   });
 
@@ -215,6 +237,28 @@ describe('discovery HTML cache', () => {
       expect.anything(),
       expect.anything()
     );
+  });
+
+  it('does not make cookie-bearing public SSR cacheable at the CDN', async () => {
+    const { handle } = await import('../src/hooks.server');
+    const { waitUntil, drain } = createWaitUntil();
+    const resolve = htmlResolve();
+
+    const response = await handle({
+      event: discoveryEvent({
+        pathname: '/trending',
+        routeId: '/trending',
+        cookie: 'sc_locale=zh-CN',
+        waitUntil,
+      }),
+      resolve,
+    } as never);
+    await response.text();
+    await drain();
+
+    expect(response.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+    expect(response.headers.get('Vary')).toBe('Cookie, Host, Accept');
+    expect(resolve).toHaveBeenCalledOnce();
   });
 
   it('bypasses the shared cache for paginated discovery pages', async () => {
