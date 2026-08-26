@@ -4,6 +4,7 @@ import { SkillscatStateDurableObject } from '../src/lib/server/state/durable-obj
 
 class MemoryStorage {
   private readonly store = new Map<string, unknown>();
+  private alarmTime: number | null = null;
   readonly getCalls: Array<string | string[]> = [];
   readonly putCalls: Array<Record<string, unknown>> = [];
 
@@ -37,8 +38,40 @@ class MemoryStorage {
     }
   }
 
-  async delete(key: string): Promise<void> {
-    this.store.delete(key);
+  async delete(keyOrKeys: string | string[]): Promise<number | boolean> {
+    if (Array.isArray(keyOrKeys)) {
+      let deleted = 0;
+      for (const key of keyOrKeys) {
+        if (this.store.delete(key)) deleted += 1;
+      }
+      return deleted;
+    }
+
+    return this.store.delete(keyOrKeys);
+  }
+
+  async list<T>(options?: { startAfter?: string; limit?: number }): Promise<Map<string, T>> {
+    const keys = [...this.store.keys()]
+      .filter((key) => !options?.startAfter || key > options.startAfter)
+      .sort()
+      .slice(0, options?.limit);
+    return new Map(keys.map((key) => [key, this.store.get(key) as T]));
+  }
+
+  async getAlarm(): Promise<number | null> {
+    return this.alarmTime;
+  }
+
+  async setAlarm(scheduledTime: number | Date): Promise<void> {
+    this.alarmTime = scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime;
+  }
+
+  has(key: string): boolean {
+    return this.store.has(key);
+  }
+
+  get scheduledAlarm(): number | null {
+    return this.alarmTime;
   }
 
   async transaction<T>(closure: (transaction: MemoryStorage) => Promise<T>): Promise<T> {
@@ -48,7 +81,10 @@ class MemoryStorage {
 
 function createHarness() {
   const storage = new MemoryStorage();
-  const durableObject = new SkillscatStateDurableObject({ storage } as never);
+  const durableObject = new SkillscatStateDurableObject({
+    storage,
+    blockConcurrencyWhile: async (callback: () => Promise<unknown>) => await callback(),
+  } as never);
 
   const call = async (operation: string, body: unknown): Promise<{ status: number; json: unknown }> => {
     const response = await durableObject.fetch(new Request(`https://state.internal/${operation}`, {
@@ -124,6 +160,60 @@ describe('SkillscatStateDurableObject rate-limit/check', () => {
     expect(batchedWrite?.['rate-limit:test:abuser:penalty']).toEqual(expect.objectContaining({
       value: 1,
     }));
+  });
+});
+
+describe('SkillscatStateDurableObject expiry cleanup', () => {
+  it('schedules a low-frequency cleanup alarm when the object starts', async () => {
+    const { storage } = createHarness();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(storage.scheduledAlarm).toBe(Date.now() + 6 * 60 * 60 * 1000);
+  });
+
+  it('deletes expired records while retaining live and persistent state', async () => {
+    const { storage, call } = createHarness();
+
+    await call('kv/put', { key: 'expired', value: 'old', expirationTtl: 30 });
+    await call('kv/put', { key: 'live', value: 'new', expirationTtl: 300 });
+    await call('kv/put', { key: 'persistent', value: 'keep' });
+    vi.setSystemTime(new Date('2026-01-01T00:01:00Z'));
+
+    const durableObject = new SkillscatStateDurableObject({
+      storage,
+      blockConcurrencyWhile: async (callback: () => Promise<unknown>) => await callback(),
+    } as never);
+    await durableObject.alarm();
+
+    expect(storage.has('kv:expired')).toBe(false);
+    expect(storage.has('kv:live')).toBe(true);
+    expect(storage.has('kv:persistent')).toBe(true);
+    expect(storage.scheduledAlarm).toBe(Date.now() + 6 * 60 * 60 * 1000);
+  });
+
+  it('bounds each cleanup pass and drains backlog before returning to the long interval', async () => {
+    const { storage } = createHarness();
+    for (let index = 0; index < 260; index++) {
+      await storage.put(`rate-limit:expired:${String(index).padStart(3, '0')}`, {
+        expiresAtEpochMs: Date.now() - 1,
+      });
+    }
+
+    const durableObject = new SkillscatStateDurableObject({
+      storage,
+      blockConcurrencyWhile: async (callback: () => Promise<unknown>) => await callback(),
+    } as never);
+    await durableObject.alarm();
+
+    expect(storage.scheduledAlarm).toBe(Date.now() + 5 * 60 * 1000);
+
+    await durableObject.alarm();
+
+    expect(storage.scheduledAlarm).toBe(Date.now() + 6 * 60 * 60 * 1000);
+    for (let index = 0; index < 260; index++) {
+      expect(storage.has(`rate-limit:expired:${String(index).padStart(3, '0')}`)).toBe(false);
+    }
   });
 });
 
