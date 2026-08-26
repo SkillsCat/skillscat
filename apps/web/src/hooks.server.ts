@@ -31,6 +31,7 @@ import { getPublicDiscoveryHtmlCacheKey } from '$lib/server/cache/public-html';
 import { resolveTokenBackedIdentity } from '$lib/server/auth/request-user';
 import type { SkillAccessPrincipal } from '$lib/server/auth/permissions';
 import { getCurrentSkillVisibility } from '$lib/server/skill/visibility';
+import { withHomeAgentDiscoveryLinks } from '$lib/server/agent/discovery-links';
 
 const NO_INDEX_VALUE = 'noindex, nofollow, noarchive';
 const STATUS_OVERRIDE_HEADER = 'X-Skillscat-Status-Override';
@@ -45,6 +46,7 @@ const SKILL_HTML_CACHE_TTL_SECONDS = 5 * 60;
 const SKILL_PUBLIC_HINT_CACHE_TTL_SECONDS = 60;
 const HOME_HTML_CACHE_TTL_SECONDS = 60;
 const DISCOVERY_HTML_CACHE_TTL_SECONDS = 5 * 60;
+const PUBLIC_HTML_CDN_CACHE_HEADER = 'Cloudflare-CDN-Cache-Control';
 const OPENCLAW_HOME_CACHE_KEY = 'ua:openclaw:home:v1';
 const OPENCLAW_HOME_CACHE_TTL_SECONDS = 3600;
 const OPENCLAW_SKILL_CACHE_TTL_SECONDS = 300;
@@ -192,33 +194,52 @@ function isPublicDiscoveryHtmlCacheableRequest(event: Parameters<Handle>[0]['eve
 function applySharedPublicHtmlCacheHeaders(
   response: Response,
   locale: SupportedLocale,
-  cacheStatus: 'HIT' | 'MISS'
+  cacheStatus: 'HIT' | 'MISS',
+  ttlSeconds: number,
+  hasRequestCookie: boolean
 ): Response {
   return cloneResponseWithHeaders(response, {
     // Shared caching is handled explicitly through the Worker Cache API with
     // locale-aware keys. Keep the HTTP response itself out of generic URL-based
     // caches so locale cookie variants cannot bleed across users.
     'Cache-Control': 'no-store',
+    // Workers Cache reads this Cloudflare-only directive before invoking the
+    // Worker. Keep browser caching disabled while allowing a short-lived,
+    // anonymous response to be served directly from the edge.
+    [PUBLIC_HTML_CDN_CACHE_HEADER]: hasRequestCookie
+      ? 'no-store'
+      : `public, max-age=${ttlSeconds}, stale-while-revalidate=${ttlSeconds * 2}`,
     'Content-Language': locale,
     'Content-Type': response.headers.get('Content-Type') || 'text/html; charset=utf-8',
-    Vary: null,
+    // Cookie partitions anonymous responses from sessions and locale choices;
+    // Host prevents the cache from sharing a response across canonical and
+    // redirecting hostnames (Workers Cache otherwise keys by path, not host).
+    Vary: 'Cookie, Host',
     'X-Cache': cacheStatus,
   });
+}
+
+function getPublicDiscoveryHtmlCacheTtl(event: Parameters<Handle>[0]['event']): number {
+  return event.route.id === '/' ? HOME_HTML_CACHE_TTL_SECONDS : DISCOVERY_HTML_CACHE_TTL_SECONDS;
 }
 
 function applySkillHtmlCacheHeaders(
   response: Response,
   locale: SupportedLocale,
-  cacheStatus: 'HIT' | 'MISS'
+  cacheStatus: 'HIT' | 'MISS',
+  hasRequestCookie: boolean
 ): Response {
   return cloneResponseWithHeaders(response, {
     // Shared caching is handled explicitly through the Worker Cache API with
     // locale-aware keys. Keep the HTTP response itself out of generic URL-based
     // caches so locale or auth cookie variants cannot bleed across users.
     'Cache-Control': 'no-store',
+    [PUBLIC_HTML_CDN_CACHE_HEADER]: hasRequestCookie
+      ? 'no-store'
+      : 'public, max-age=300, stale-while-revalidate=600',
     'Content-Language': locale,
     'Content-Type': response.headers.get('Content-Type') || 'text/html; charset=utf-8',
-    Vary: null,
+    Vary: 'Cookie, Host',
     'X-Cache': cacheStatus,
     [PUBLIC_SKILL_HTML_CACHE_HEADER]: null,
   });
@@ -226,6 +247,143 @@ function applySkillHtmlCacheHeaders(
 
 function isHtmlResponse(response: Response): boolean {
   return (response.headers.get('content-type') || '').includes('text/html');
+}
+
+/**
+ * Return true when the client explicitly allows the Markdown representation.
+ * A q=0 entry is an opt-out and must not trigger conversion.
+ */
+export function acceptsMarkdown(request: Request): boolean {
+  return (request.headers.get('accept') || '').split(',').some((part) => {
+    const [mediaType, ...parameters] = part.trim().toLowerCase().split(';');
+    if (mediaType.trim() !== 'text/markdown') {
+      return false;
+    }
+
+    const quality = parameters
+      .map((parameter) => parameter.trim().match(/^q\s*=\s*(.+)$/)?.[1])
+      .find((value) => value !== undefined);
+    return quality ? Number.parseFloat(quality) > 0 : true;
+  });
+}
+
+function decodeHtmlEntities(value: string): string {
+  const decodeCodePoint = (codePoint: number, fallback: string): string =>
+    Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+      ? String.fromCodePoint(codePoint)
+      : fallback;
+
+  return value
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (entity: string, code: string) => decodeCodePoint(Number(code), entity))
+    .replace(/&#x([\da-f]+);/gi, (entity: string, code: string) =>
+      decodeCodePoint(Number.parseInt(code, 16), entity));
+}
+
+/** Convert the semantic page content to a compact Markdown document. */
+export function htmlToMarkdown(html: string): string {
+  const metadata = new Map<string, string>();
+  for (const match of html.matchAll(/<meta\s+[^>]*?(?:name|property)=["']([^"']+)["'][^>]*?content=["']([^"']*)["'][^>]*>/gi)) {
+    metadata.set(match[1].toLowerCase(), decodeHtmlEntities(match[2]).trim());
+  }
+
+  const title = metadata.get('title') || metadata.get('og:title');
+  const description = metadata.get('description') || metadata.get('og:description');
+  const image = metadata.get('og:image');
+  const frontmatter = [
+    title && `title: ${JSON.stringify(title)}`,
+    description && `description: ${JSON.stringify(description)}`,
+    image && `image: ${JSON.stringify(image)}`,
+  ]
+    .filter((value): value is string => Boolean(value));
+
+  // SvelteKit pages place their useful content in <main>; removing global
+  // chrome keeps the result useful to agents without navigation noise.
+  const mainMatch = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
+  let content = mainMatch?.[1] || html;
+  content = content
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(?:script|style|noscript|template|svg|header|footer|nav|aside|form)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript|template|svg|header|footer|nav|aside|form)>/gi, '')
+    .replace(/<input\b[^>]*>|<button\b[^>]*>[\s\S]*?<\/button>/gi, '');
+
+  content = content
+    // Keep code escaped until after HTML tags are removed, otherwise examples
+    // such as &lt;main&gt; would be mistaken for page markup.
+    .replace(/<pre\b[^>]*>\s*<code\b[^>]*>([\s\S]*?)<\/code>\s*<\/pre>/gi, (_, code: string) => `\n\n\`\`\`\n${code.trim()}\n\`\`\`\n\n`)
+    .replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_, code: string) => `\`${code.trim()}\``)
+    .replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_, level: string, text: string) => `\n\n${'#'.repeat(Number(level))} ${text}\n\n`)
+    .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href: string, text: string) => `[${text}](${href})`)
+    .replace(/<img\b[^>]*alt=["']([^"']*)["'][^>]*src=["']([^"']+)["'][^>]*>/gi, '![$1]($2)')
+    .replace(/<img\b[^>]*src=["']([^"']+)["'][^>]*alt=["']([^"']*)["'][^>]*>/gi, '![$2]($1)')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, '\n- $1\n')
+    .replace(/<\/(?:p|div|section|article|blockquote|ul|ol|table|tr|h[1-6])\s*>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .split('\n')
+    .map((line) => decodeHtmlEntities(line).replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const body = frontmatter.length > 0 ? `---\n${frontmatter.join('\n')}\n---\n\n${content}` : content;
+  return body.trim();
+}
+
+function estimateMarkdownTokens(markdown: string): number {
+  return Math.ceil(markdown.trim().length / 4);
+}
+
+function appendVary(headers: Headers, value: string): void {
+  const values = (headers.get('Vary') || '').split(',').map((item) => item.trim()).filter(Boolean);
+  if (values.includes('*')) {
+    return;
+  }
+  if (!values.some((item) => item.toLowerCase() === value.toLowerCase())) {
+    values.push(value);
+  }
+  headers.set('Vary', values.join(', '));
+}
+
+export async function withMarkdownNegotiation(
+  request: Request,
+  response: Response
+): Promise<Response> {
+  if (!isHtmlResponse(response) || (request.method !== 'GET' && request.method !== 'HEAD')) {
+    return response;
+  }
+
+  const headers = new Headers(response.headers);
+  appendVary(headers, 'Accept');
+
+  if (!acceptsMarkdown(request)) {
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
+  const markdown = htmlToMarkdown(await response.clone().text());
+  headers.set('Content-Type', 'text/markdown; charset=utf-8');
+  // The CDN policy applies to the HTML representation only. Markdown is an
+  // explicit content-negotiated response and must execute this negotiation
+  // path on every request rather than being served as an HTML cache variant.
+  headers.delete(PUBLIC_HTML_CDN_CACHE_HEADER);
+  headers.set('x-markdown-tokens', String(estimateMarkdownTokens(markdown)));
+  for (const header of ['Content-Encoding', 'Content-Length', 'Content-Range', 'ETag', 'Last-Modified', 'Transfer-Encoding']) {
+    headers.delete(header);
+  }
+
+  return new Response(request.method === 'HEAD' || response.body === null ? null : markdown, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 type SkillPageVisibility = 'public' | 'private' | 'unlisted' | null;
@@ -316,7 +474,8 @@ async function maybeRespondWithCachedSkillHtml(
       },
     }),
     event.locals.locale,
-    'HIT'
+    'HIT',
+    Boolean(event.request.headers.get('cookie'))
   );
 }
 
@@ -360,7 +519,9 @@ async function maybeRespondWithCachedDiscoveryHtml(
       },
     }),
     event.locals.locale,
-    'HIT'
+    'HIT',
+    getPublicDiscoveryHtmlCacheTtl(event),
+    Boolean(event.request.headers.get('cookie'))
   );
 }
 
@@ -387,9 +548,7 @@ function maybeWriteDiscoveryHtmlCache(
     return;
   }
 
-  const ttlSeconds = event.route.id === '/'
-    ? HOME_HTML_CACHE_TTL_SECONDS
-    : DISCOVERY_HTML_CACHE_TTL_SECONDS;
+  const ttlSeconds = getPublicDiscoveryHtmlCacheTtl(event);
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
   const cacheWrite = (async () => {
     const html = await response.text();
@@ -805,9 +964,20 @@ const baseHandle: Handle = async ({ event, resolve }) => {
     const shouldApplySkillHtmlOptimization = response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) === '1'
       && isHtmlResponse(response);
     const optimizedResponse = shouldApplySharedPublicHtmlOptimization
-      ? applySharedPublicHtmlCacheHeaders(response, event.locals.locale, 'MISS')
+      ? applySharedPublicHtmlCacheHeaders(
+        response,
+        event.locals.locale,
+        'MISS',
+        getPublicDiscoveryHtmlCacheTtl(event),
+        Boolean(event.request.headers.get('cookie'))
+      )
       : shouldApplySkillHtmlOptimization
-        ? applySkillHtmlCacheHeaders(response, event.locals.locale, 'MISS')
+        ? applySkillHtmlCacheHeaders(
+          response,
+          event.locals.locale,
+          'MISS',
+          Boolean(event.request.headers.get('cookie'))
+        )
         : response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) === '1'
           ? cloneResponseWithoutHeader(response, PUBLIC_SKILL_HTML_CACHE_HEADER)
           : response;
@@ -930,7 +1100,12 @@ const baseHandle: Handle = async ({ event, resolve }) => {
   const shouldApplySkillHtmlOptimization = response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) === '1'
     && isHtmlResponse(response);
   const optimizedResponse = shouldApplySkillHtmlOptimization
-    ? applySkillHtmlCacheHeaders(response, event.locals.locale, 'MISS')
+    ? applySkillHtmlCacheHeaders(
+      response,
+      event.locals.locale,
+      'MISS',
+      Boolean(event.request.headers.get('cookie'))
+    )
     : response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) === '1'
       ? cloneResponseWithoutHeader(response, PUBLIC_SKILL_HTML_CACHE_HEADER)
       : response;
@@ -959,6 +1134,11 @@ const SESSION_REQUEST_COOKIE_PATTERN = /(?:^|;\s*)(?:__Secure-)?better-auth\.ses
 const AUTH_HINT_SET_VALUE = `${AUTH_HINT_COOKIE_NAME}=1; Path=/; Max-Age=${60 * 60 * 24 * 30}; Secure; SameSite=Lax`;
 const AUTH_HINT_DELETE_VALUE = `${AUTH_HINT_COOKIE_NAME}=; Path=/; Max-Age=0; Secure; SameSite=Lax`;
 
+function isPublicHtmlCdnCacheable(response: Response): boolean {
+  return response.headers.get(PUBLIC_HTML_CDN_CACHE_HEADER)?.trim().toLowerCase()
+    .startsWith('public') ?? false;
+}
+
 export function withAuthHintCookie(request: Request, pathname: string, response: Response): Response {
   if (pathname.startsWith('/api/auth')) {
     return response;
@@ -971,7 +1151,10 @@ export function withAuthHintCookie(request: Request, pathname: string, response:
   const headers = new Headers(response.headers);
   if (hasSessionCookie) {
     headers.append('set-cookie', AUTH_HINT_SET_VALUE);
-  } else {
+  } else if (!isPublicHtmlCdnCacheable(response)) {
+    // A deletion cookie would make an otherwise anonymous public SSR response
+    // uncacheable at the CDN. Public responses are intentionally anonymous;
+    // the hint is refreshed on the next authenticated HTML response.
     headers.append('set-cookie', AUTH_HINT_DELETE_VALUE);
   }
   return new Response(response.body, {
@@ -981,8 +1164,29 @@ export function withAuthHintCookie(request: Request, pathname: string, response:
   });
 }
 
-export const handle: Handle = async (input) => withAuthHintCookie(
-  input.event.request,
-  input.event.url.pathname,
-  await baseHandle(input)
+/**
+ * Workers Cache heuristically stores successful responses with no cache policy.
+ * Make every response opt out unless the public SSR path explicitly opted in.
+ */
+export function withWorkersCacheSafety(response: Response): Response {
+  if (response.headers.has(PUBLIC_HTML_CDN_CACHE_HEADER)) {
+    return response;
+  }
+
+  return cloneResponseWithHeader(response, PUBLIC_HTML_CDN_CACHE_HEADER, 'no-store');
+}
+
+export const handle: Handle = async (input) => withWorkersCacheSafety(
+  withHomeAgentDiscoveryLinks(
+    input.event.request,
+    input.event.url.pathname,
+    await withMarkdownNegotiation(
+      input.event.request,
+      withAuthHintCookie(
+        input.event.request,
+        input.event.url.pathname,
+        await baseHandle(input)
+      )
+    )
+  )
 );

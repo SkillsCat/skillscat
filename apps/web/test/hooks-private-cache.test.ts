@@ -131,6 +131,7 @@ describe('skill HTML cache visibility hint', () => {
 
     expect(body).toContain('private response');
     expect(body).not.toContain('stale public content');
+    expect(response.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
     expect(mocks.getCurrentSkillVisibility).not.toHaveBeenCalled();
     expect(mocks.createAuth).toHaveBeenCalledOnce();
     expect(resolve).toHaveBeenCalledOnce();

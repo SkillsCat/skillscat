@@ -10,6 +10,12 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = false
 preview_urls = false
 
+# Keep the default entrypoint uncached outside production. Production enables
+# Workers Cache below so only responses carrying the Cloudflare CDN policy are
+# eligible for a pre-Worker edge hit.
+[cache]
+enabled = false
+
 [observability]
 enabled = true
 head_sampling_rate = 1
@@ -73,6 +79,9 @@ RATE_LIMIT_PENALTY_TTL_LEVEL_3_SECONDS = "1800"
 
 [env.production]
 name = "skillscat-web-production"
+
+[env.production.cache]
+enabled = true
 
 [env.production.assets]
 binding = "ASSETS"

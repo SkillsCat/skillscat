@@ -9,6 +9,7 @@ export const DISCOVERY_HTML_CACHE_KEY_PREFIX = 'page:discovery:html:v1';
 export const SKILL_HTML_CACHE_KEY_PREFIX = 'page:skill:html:v1';
 export const SKILL_PUBLIC_HINT_CACHE_KEY_PREFIX = 'page:skill:public:v1';
 export const PUBLIC_SKILLS_STATS_CACHE_KEY = 'stats:public-skills:v1';
+export const AGENT_SKILLS_DISCOVERY_INDEX_CACHE_KEY = 'agent-skills:discovery-index:v1';
 export const ORG_PAGE_SNAPSHOT_CACHE_KEY_PREFIX = 'page:org:snapshot:v1';
 export const SKILL_SOURCE_CACHE_KEY_PREFIX = 'api:skill-source:v1';
 export const PUBLIC_SKILL_FILE_CACHE_KEY_PREFIX = 'api:skill-file:v1';
@@ -104,6 +105,7 @@ export function getPublicSkillDownloadCacheKey(
 
 export function getSkillPageCacheInvalidationKeys(slug: string): string[] {
   return [
+    AGENT_SKILLS_DISCOVERY_INDEX_CACHE_KEY,
     getSkillPublicHintCacheKey(slug),
     ...getSkillHtmlCacheKeys(slug),
   ];
@@ -127,6 +129,7 @@ export const PUBLIC_DISCOVERY_PAGE_CACHE_KEYS = [
   ...TOP_HTML_CACHE_KEYS,
   ...CATEGORIES_HTML_CACHE_KEYS,
   PUBLIC_SKILLS_STATS_CACHE_KEY,
+  AGENT_SKILLS_DISCOVERY_INDEX_CACHE_KEY,
   CATEGORIES_API_CACHE_KEY,
   'page:trending:v1:1',
   'page:recent:v1:1',
