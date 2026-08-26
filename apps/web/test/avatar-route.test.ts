@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildAvatarProxyUrl,
   normalizePublicAvatarUrl,
+  resolvePublicAvatarSources,
   resolvePublicAvatarUrl,
 } from '../src/lib/avatar';
 
@@ -52,6 +53,28 @@ describe('avatar helpers', () => {
       useGithubFallback: true,
       requestedSize: 64,
     })).toBe(buildAvatarProxyUrl('https://avatars.githubusercontent.com/octocat?s=64', 64));
+  });
+
+  it('creates cached 1x and 2x variants matching the rendered avatar size', () => {
+    expect(resolvePublicAvatarSources({
+      src: 'https://avatars.githubusercontent.com/u/1?v=4',
+      displaySize: 32,
+    })).toEqual({
+      src: '/avatar?u=https%3A%2F%2Favatars.githubusercontent.com%2Fu%2F1%3Fv%3D4%26s%3D32&s=32',
+      srcset: [
+        '/avatar?u=https%3A%2F%2Favatars.githubusercontent.com%2Fu%2F1%3Fv%3D4%26s%3D32&s=32 1x',
+        '/avatar?u=https%3A%2F%2Favatars.githubusercontent.com%2Fu%2F1%3Fv%3D4%26s%3D64&s=64 2x',
+      ].join(', '),
+    });
+  });
+
+  it('does not create redundant density variants for unproxied avatar URLs', () => {
+    expect(resolvePublicAvatarSources({
+      src: 'https://cdn.example.com/avatar.png',
+      displaySize: 32,
+    })).toEqual({
+      src: 'https://cdn.example.com/avatar.png',
+    });
   });
 });
 

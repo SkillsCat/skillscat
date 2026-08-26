@@ -97,3 +97,29 @@ export function resolvePublicAvatarUrl(options: {
 
   return buildAvatarProxyUrl(normalized, size);
 }
+
+export function resolvePublicAvatarSources(options: {
+  src?: string | null;
+  fallback?: string | null;
+  useGithubFallback?: boolean;
+  displaySize: number;
+}): { src: string | null; srcset?: string } {
+  const src = resolvePublicAvatarUrl({
+    ...options,
+    requestedSize: options.displaySize,
+  });
+
+  if (!src) return { src: null };
+
+  const highDensitySrc = resolvePublicAvatarUrl({
+    ...options,
+    requestedSize: options.displaySize * 2,
+  });
+
+  if (!highDensitySrc || highDensitySrc === src) return { src };
+
+  return {
+    src,
+    srcset: `${src} 1x, ${highDensitySrc} 2x`,
+  };
+}
