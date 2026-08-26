@@ -62,6 +62,10 @@ interface RateLimitCheckBody {
   nowEpochSec?: number;
 }
 
+interface CleanupCursor {
+  startAfter: string;
+}
+
 const BURST_VIOLATION_WINDOW_SECONDS = 120;
 const BURST_VIOLATION_THRESHOLD = 3;
 const MAX_PENALTY_LEVEL = 3;
@@ -70,6 +74,11 @@ const PENALTY_TTL_SECONDS: Record<number, number> = {
   2: 15 * 60,
   3: 30 * 60,
 };
+const CLEANUP_CURSOR_KEY = '__maintenance:expiry-cleanup-cursor:v1';
+const CLEANUP_BATCH_SIZE = 256;
+const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const CLEANUP_BACKLOG_INTERVAL_MS = 5 * 60 * 1000;
+const CLEANUP_FAILURE_INTERVAL_MS = 60 * 60 * 1000;
 
 function jsonResponse(body: unknown, status: number = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -142,7 +151,36 @@ function parseExpirationMs(body: Record<string, unknown>, nowMs: number): number
 }
 
 export class SkillscatStateDurableObject {
-  constructor(private readonly state: DurableObjectState) {}
+  constructor(private readonly state: DurableObjectState) {
+    const blockConcurrencyWhile = this.state.blockConcurrencyWhile?.bind(this.state);
+    if (blockConcurrencyWhile) {
+      void blockConcurrencyWhile(async () => {
+        try {
+          const existingAlarm = await this.state.storage.getAlarm();
+          if (existingAlarm === null) {
+            await this.state.storage.setAlarm(Date.now() + CLEANUP_INTERVAL_MS);
+          }
+        } catch (error) {
+          console.error('Failed to schedule state Durable Object expiry cleanup:', error);
+        }
+      });
+    }
+  }
+
+  async alarm(): Promise<void> {
+    let nextIntervalMs = CLEANUP_INTERVAL_MS;
+
+    try {
+      if (await this.cleanupExpiredStorageBatch()) {
+        nextIntervalMs = CLEANUP_BACKLOG_INTERVAL_MS;
+      }
+    } catch (error) {
+      console.error('State Durable Object expiry cleanup failed:', error);
+      nextIntervalMs = CLEANUP_FAILURE_INTERVAL_MS;
+    } finally {
+      await this.state.storage.setAlarm(Date.now() + nextIntervalMs);
+    }
+  }
 
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'POST') {
@@ -174,6 +212,44 @@ export class SkillscatStateDurableObject {
       default:
         return jsonResponse({ error: 'unknown_operation' }, 404);
     }
+  }
+
+  private async cleanupExpiredStorageBatch(): Promise<boolean> {
+    const nowMs = Date.now();
+    const cursor = await this.state.storage.get<CleanupCursor>(CLEANUP_CURSOR_KEY);
+    const records = await this.state.storage.list<unknown>({
+      startAfter: cursor?.startAfter,
+      limit: CLEANUP_BATCH_SIZE,
+    });
+    const keys = [...records.keys()];
+    const expiredKeys: string[] = [];
+
+    for (const [key, value] of records) {
+      if (key === CLEANUP_CURSOR_KEY || !isObject(value)) {
+        continue;
+      }
+
+      const expiresAtEpochMs = Number(value.expiresAtEpochMs);
+      if (Number.isFinite(expiresAtEpochMs) && expiresAtEpochMs <= nowMs) {
+        expiredKeys.push(key);
+      }
+    }
+
+    if (expiredKeys.length > 0) {
+      await this.state.storage.delete(expiredKeys);
+    }
+
+    const hasMore = records.size === CLEANUP_BATCH_SIZE;
+    const lastKey = keys.at(-1);
+    if (hasMore && lastKey) {
+      await this.state.storage.put<CleanupCursor>(CLEANUP_CURSOR_KEY, {
+        startAfter: lastKey,
+      });
+    } else if (cursor) {
+      await this.state.storage.delete(CLEANUP_CURSOR_KEY);
+    }
+
+    return hasMore;
   }
 
   private async handleKvGet(body: Record<string, unknown>): Promise<Response> {

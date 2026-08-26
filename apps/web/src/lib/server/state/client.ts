@@ -1,9 +1,11 @@
+export type StateDurableObjectName = 'github-rate-limit' | 'rate-limit-global';
+
 export interface DurableObjectKvStoreOptions {
   /**
    * 红线:objectName 只允许固定常量,禁止按 key/租户动态命名。
    * DO 实例数直接决定时长计费,按 key 哈希命名会产生几千个常驻实例。
    */
-  objectName: string;
+  objectName: StateDurableObjectName;
 }
 
 export interface DurableObjectKvPutOptions {
@@ -94,10 +96,14 @@ export function createMemoizedDurableObjectKvStore(
 
 export async function callStateDurableObject<T>(
   namespace: DurableObjectNamespace,
-  objectName: string,
+  objectName: StateDurableObjectName,
   operation: string,
   body: unknown
 ): Promise<T> {
+  if (objectName !== 'github-rate-limit' && objectName !== 'rate-limit-global') {
+    throw new Error(`Unsupported state Durable Object name: ${String(objectName)}`);
+  }
+
   const id = namespace.idFromName(objectName);
   const stub = namespace.get(id);
   const response = await stub.fetch(`https://state.skillscat.internal/${operation}`, {
