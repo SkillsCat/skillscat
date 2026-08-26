@@ -3,6 +3,7 @@ export function buildSeoIndexableSkillWhere(alias = 's'): string {
   return `
     ${alias}.visibility = 'public'
     AND COALESCE(${alias}.tier, 'cold') <> 'archived'
+    AND COALESCE(${alias}.origin_relation_type, '') <> 'historical_copy_of'
     AND (
       TRIM(COALESCE(${alias}.description, '')) <> ''
       OR TRIM(COALESCE(${alias}.readme, '')) <> ''

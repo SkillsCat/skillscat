@@ -51,6 +51,8 @@ describe('isSeoIndexableSkill', () => {
     expect(isSeoIndexableSkill({ ...base, visibility: 'unlisted' })).toBe(false);
     expect(isSeoIndexableSkill({ ...base, description: ' ', readme: null })).toBe(false);
     expect(isSeoIndexableSkill({ ...base, description: null, readme: '  ' })).toBe(false);
+    expect(isSeoIndexableSkill({ ...base, originRelationType: 'historical_copy_of' })).toBe(false);
+    expect(isSeoIndexableSkill({ ...base, originRelationType: 'modified_from' })).toBe(true);
   });
 });
 
@@ -60,6 +62,7 @@ describe('buildSeoIndexableSkillWhere', () => {
 
     expect(sql).toContain("skill.visibility = 'public'");
     expect(sql).toContain("COALESCE(skill.tier, 'cold') <> 'archived'");
+    expect(sql).toContain("COALESCE(skill.origin_relation_type, '') <> 'historical_copy_of'");
     expect(sql).toContain("TRIM(COALESCE(skill.description, '')) <> ''");
     expect(sql).toContain("TRIM(COALESCE(skill.readme, '')) <> ''");
   });
