@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { resolvePublicAvatarUrl } from '$lib/avatar';
+  import { resolvePublicAvatarSources } from '$lib/avatar';
 
   type Size = "xs" | "sm" | "md" | "lg" | "xl";
   type Shape = "circle" | "squircle";
@@ -37,20 +37,20 @@
 
   let imageError = $state(false);
 
-  const sizeMap: Record<Size, { px: number; github: number }> = {
-    xs: { px: 24, github: 48 },
-    sm: { px: 32, github: 64 },
-    md: { px: 48, github: 96 },
-    lg: { px: 80, github: 160 },
-    xl: { px: 120, github: 240 },
+  const sizeMap: Record<Size, number> = {
+    xs: 24,
+    sm: 32,
+    md: 48,
+    lg: 80,
+    xl: 120,
   };
 
-  const imageUrl = $derived(
-    resolvePublicAvatarUrl({
+  const imageSources = $derived(
+    resolvePublicAvatarSources({
       src,
       fallback,
       useGithubFallback,
-      requestedSize: sizeMap[size].github,
+      displaySize: sizeMap[size],
     }),
   );
 
@@ -58,9 +58,10 @@
     alt ? alt[0].toUpperCase() : fallback?.[0]?.toUpperCase() || "?",
   );
 
-  // Reset error state when src changes
+  // Retry when a prop change resolves to a different image variant.
   $effect(() => {
-    src;
+    imageSources.src;
+    imageSources.srcset;
     imageError = false;
   });
 </script>
@@ -69,17 +70,18 @@
   class="avatar-container {shape} size-{size} {className}"
   class:border
   class:shadow
-  style="--avatar-size: {sizeMap[size].px}px"
+  style="--avatar-size: {sizeMap[size]}px"
 >
-  {#if imageUrl && !imageError}
+  {#if imageSources.src && !imageError}
     <img
-      src={imageUrl}
+      src={imageSources.src}
+      srcset={imageSources.srcset}
       {alt}
       {loading}
       {fetchpriority}
       decoding="async"
-      width={sizeMap[size].px}
-      height={sizeMap[size].px}
+      width={sizeMap[size]}
+      height={sizeMap[size]}
       class="avatar-image"
       onerror={() => {
         imageError = true;
