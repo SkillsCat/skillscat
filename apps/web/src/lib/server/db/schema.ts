@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer, real, primaryKey, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
-import { sql } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 import { buildRecentActivitySortSql, buildTopRatedSortScoreSql } from '../ranking';
 
 const TOP_RATED_SORT_SCORE_SQL = buildTopRatedSortScoreSql('stars', 'download_count_90d', 'trending_score');
@@ -34,6 +34,8 @@ export const session = sqliteTable('session', {
 export const account = sqliteTable('account', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  // Required by better-auth >= 1.7: OAuth identities are keyed by (issuer, accountId).
+  issuer: text('issuer'),
   accountId: text('account_id').notNull(),
   providerId: text('provider_id').notNull(),
   accessToken: text('access_token'),
@@ -48,7 +50,24 @@ export const account = sqliteTable('account', {
 }, (table) => [
   index('account_user_idx').on(table.userId),
   index('account_provider_account_idx').on(table.providerId, table.accountId),
+  uniqueIndex('account_issuer_account_idx').on(table.issuer, table.accountId),
 ]);
+
+// Relations required by better-auth >= 1.7 adapter joins (findAccountOwnerByKey,
+// findUserByEmail with includeAccounts). The adapter pluralizes join keys, so the
+// `one` side is exposed as `users` / `accounts`.
+export const userRelations = relations(user, ({ many }) => ({
+  accounts: many(account),
+  sessions: many(session),
+}));
+
+export const sessionRelations = relations(session, ({ one }) => ({
+  users: one(user, { fields: [session.userId], references: [user.id] }),
+}));
+
+export const accountRelations = relations(account, ({ one }) => ({
+  users: one(user, { fields: [account.userId], references: [user.id] }),
+}));
 
 export const verification = sqliteTable('verification', {
   id: text('id').primaryKey(),

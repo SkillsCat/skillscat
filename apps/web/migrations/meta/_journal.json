@@ -225,6 +225,13 @@
       "when": 1787768447274,
       "tag": "0031_melodic_blue_marvel",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1787840250901,
+      "tag": "0032_magical_franklin_storm",
+      "breakpoints": true
     }
   ]
 }
