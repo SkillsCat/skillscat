@@ -9,6 +9,11 @@ export interface RepoSource {
   refKind?: 'tree' | 'blob';
   hasExplicitRef?: boolean;
   originalInput?: string;
+  /**
+   * Skill name extracted from aggregator URLs (e.g. https://skills.sh/owner/repo/skill-name).
+   * Treated like a `--skill` filter since the in-repo path cannot be derived from the URL.
+   */
+  skillNameHint?: string;
 }
 
 export interface SkillInfo {
@@ -60,6 +65,24 @@ export function parseSource(source: string): RepoSource | null {
   try {
     const url = new URL(source);
     const host = url.hostname.toLowerCase();
+    // skills.sh URL: https://skills.sh/owner/repo or https://skills.sh/owner/repo/skill-name
+    if (host === 'skills.sh' || host === 'www.skills.sh') {
+      const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+      if (
+        parts.length >= 2
+        && parts.length <= 3
+        && parts.every((segment) => segment !== '.' && segment !== '..')
+      ) {
+        return {
+          platform: 'github',
+          owner: parts[0],
+          repo: parts[1].replace(/\.git$/, ''),
+          skillNameHint: parts[2],
+          originalInput: source
+        };
+      }
+      return null;
+    }
     if (host === 'github.com' || host === 'www.github.com') {
       const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
       if (parts.length >= 2) {
