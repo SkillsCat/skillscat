@@ -173,7 +173,7 @@ async function resolveRecommendSkills(
     return data;
   }
 
-  return fetchRecommendedSkills(db, skill, 'full');
+  return fetchRecommendedSkills(db, skill, getRealtimeRecommendMode(skill.visibility, options?.tier, false));
 }
 
 async function fetchSkillDetailPayload(

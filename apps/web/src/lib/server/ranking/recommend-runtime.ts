@@ -12,11 +12,20 @@ export function getRealtimeRecommendMode(
   tier: string | null | undefined,
   forceRefresh: boolean
 ): RealtimeRecommendMode {
-  if (forceRefresh || visibility !== 'public') {
+  // Precompute refreshes keep the full pipeline so stored payloads stay
+  // category/tag-driven regardless of the serving mode.
+  if (forceRefresh) {
     return 'full';
   }
 
-  return tier === 'hot' || tier === 'warm' ? 'full' : 'lightweight';
+  // Recommendation CTR is low, so realtime serving defaults to the
+  // lightweight path (category seeds / same author / trending) to keep D1
+  // row reads near zero. Only hot public skills justify the full pipeline.
+  if (visibility !== 'public') {
+    return 'lightweight';
+  }
+
+  return tier === 'hot' ? 'full' : 'lightweight';
 }
 
 export function shouldLoadRecommendSignals(mode: RealtimeRecommendMode): boolean {
