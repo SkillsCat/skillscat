@@ -90,6 +90,69 @@ function mockGitHubFetch(content: string, sha = 'sha1') {
   return fetchMock;
 }
 
+const SKILL_MD_KEBAB = `---
+name: Kebab Skill
+description: Kebab-named skill
+---
+# Kebab Skill
+Hello from kebab.
+`;
+
+const SKILL_MD_OTHER = `---
+name: other-skill
+description: Other skill
+---
+# Other Skill
+Hello from other.
+`;
+
+function mockGitHubMultiSkillFetch() {
+  const encodedKebab = Buffer.from(SKILL_MD_KEBAB).toString('base64');
+  const encodedOther = Buffer.from(SKILL_MD_OTHER).toString('base64');
+
+  const fetchMock = vi.fn(async (input: unknown) => {
+    const url = toUrlString(input);
+
+    if (url === `${REGISTRY_URL}/skill/testowner/testrepo`) {
+      return mockResponse({ error: 'Not found' }, 404);
+    }
+
+    if (url === `${REGISTRY_URL}/repo/testowner/testrepo` || url.startsWith(`${REGISTRY_URL}/repo/testowner/testrepo?`)) {
+      return mockResponse({ skills: [], total: 0 }, 200);
+    }
+
+    if (url.includes('https://api.github.com/repos/testowner/testrepo')) {
+      if (url.includes('/git/trees/')) {
+        return mockResponse({
+          tree: [
+            { path: 'skills/kebab-skill/SKILL.md', type: 'blob', sha: 'sha-kebab' },
+            { path: 'skills/other-skill/SKILL.md', type: 'blob', sha: 'sha-other' },
+          ],
+        }, 200);
+      }
+
+      if (url.includes('/contents/skills/kebab-skill/SKILL.md')) {
+        return mockResponse({ content: encodedKebab, encoding: 'base64', sha: 'sha-kebab' }, 200);
+      }
+
+      if (url.includes('/contents/skills/other-skill/SKILL.md')) {
+        return mockResponse({ content: encodedOther, encoding: 'base64', sha: 'sha-other' }, 200);
+      }
+
+      return mockResponse({ default_branch: 'main' }, 200);
+    }
+
+    if (url.endsWith('/api/submit')) {
+      return mockResponse({ success: true, message: 'queued' }, 200);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+  return fetchMock;
+}
+
 function mockGitHubCompanionSkillFetch() {
   const encodedSkill = Buffer.from(SKILL_MD_V1).toString('base64');
 
@@ -593,6 +656,65 @@ describe('CLI commands with mocked network', () => {
     expect(existsSync(skillFile)).toBe(true);
     expect(readFileSync(skillFile, 'utf-8')).toContain('Hello from v1');
     expect(fetchMock.mock.calls.map((call) => toUrlString(call[0]))).not.toContain('http://localhost:3000/api/submit');
+  });
+
+  it('parses skills.sh URLs into GitHub sources with an optional skill hint', async () => {
+    const { parseSource } = await import('../src/utils/source/source');
+
+    const repoPage = parseSource('https://skills.sh/testowner/testrepo');
+    expect(repoPage).toMatchObject({
+      platform: 'github',
+      owner: 'testowner',
+      repo: 'testrepo',
+    });
+    expect(repoPage?.skillNameHint).toBeUndefined();
+
+    const skillPage = parseSource('https://skills.sh/testowner/testrepo/kebab-skill');
+    expect(skillPage).toMatchObject({
+      platform: 'github',
+      owner: 'testowner',
+      repo: 'testrepo',
+      skillNameHint: 'kebab-skill',
+    });
+
+    const wwwSkillPage = parseSource('https://www.skills.sh/testowner/testrepo/kebab-skill');
+    expect(wwwSkillPage?.skillNameHint).toBe('kebab-skill');
+
+    expect(parseSource('https://skills.sh/testowner')).toBeNull();
+    expect(parseSource('https://skills.sh/testowner/testrepo/a/b')).toBeNull();
+  });
+
+  it('installs skills from a skills.sh repository URL', async () => {
+    mockGitHubFetch(SKILL_MD_V1, 'sha-skills-sh');
+
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() =>
+      add('https://skills.sh/testowner/testrepo', { yes: true })
+    );
+
+    expect(result.exitCode).toBeNull();
+
+    const skillFile = join(process.cwd(), '.agents', 'Test Skill', 'SKILL.md');
+    expect(existsSync(skillFile)).toBe(true);
+    expect(readFileSync(skillFile, 'utf-8')).toContain('Hello from v1');
+  });
+
+  it('installs only the hinted skill from a skills.sh skill URL', async () => {
+    mockGitHubMultiSkillFetch();
+
+    const { add } = await import('../src/commands/add');
+
+    const result = await runCommand(() =>
+      add('https://skills.sh/testowner/testrepo/kebab-skill', { yes: true })
+    );
+
+    expect(result.exitCode).toBeNull();
+
+    const skillFile = join(process.cwd(), '.agents', 'Kebab Skill', 'SKILL.md');
+    expect(existsSync(skillFile)).toBe(true);
+    expect(readFileSync(skillFile, 'utf-8')).toContain('Hello from kebab');
+    expect(existsSync(join(process.cwd(), '.agents', 'other-skill', 'SKILL.md'))).toBe(false);
   });
 
   it('installs companion files and resolves GitHub symlinked files inside the skill directory', async () => {

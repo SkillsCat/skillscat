@@ -80,7 +80,18 @@ export async function add(source: string, options: AddOptions): Promise<void> {
     console.log(pc.dim('  owner/repo'));
     console.log(pc.dim('  https://github.com/owner/repo'));
     console.log(pc.dim('  https://gitlab.com/owner/repo'));
+    console.log(pc.dim('  https://skills.sh/owner/repo[/skill]'));
     process.exit(1);
+  }
+
+  // Aggregator URLs (e.g. skills.sh/owner/repo/skill) carry a skill name that
+  // cannot be mapped to an in-repo path; treat it like a `--skill` filter.
+  const requestedSkillNames = [...(options.skill ?? [])];
+  if (
+    repoSource.skillNameHint
+    && !requestedSkillNames.some((name) => name.toLowerCase() === repoSource.skillNameHint!.toLowerCase())
+  ) {
+    requestedSkillNames.push(repoSource.skillNameHint);
   }
 
   const globalAgentIds = options.globalAgent?.filter((id) => id.trim()) ?? [];
@@ -115,7 +126,7 @@ export async function add(source: string, options: AddOptions): Promise<void> {
     const resolution = await resolveInstallSkills({
       sourceInput: source,
       repoSource,
-      requestedSkillNames: options.skill ?? [],
+      requestedSkillNames,
       explicitRepoInstall,
       explicitRefBypassRegistry: isExplicitGitHubRefSource,
       githubSnapshot,
@@ -136,7 +147,7 @@ export async function add(source: string, options: AddOptions): Promise<void> {
     process.exit(1);
   }
 
-  const missingRequestedNames = getMissingRequestedNames(options.skill ?? [], resolvedSkills);
+  const missingRequestedNames = getMissingRequestedNames(requestedSkillNames, resolvedSkills);
   if (missingRequestedNames.length > 0) {
     error(`No skills found matching: ${missingRequestedNames.join(', ')}`);
     if (resolvedSkills.length > 0) {
@@ -167,7 +178,7 @@ export async function add(source: string, options: AddOptions): Promise<void> {
     return;
   }
 
-  if (selectionMode === 'install-all' && !options.yes && (!options.skill || options.skill.length === 0)) {
+  if (selectionMode === 'install-all' && !options.yes && requestedSkillNames.length === 0) {
     console.log();
     if (explicitRepoInstall) {
       info(`Treating ${pc.cyan(sourceLabel)} as a repository install.`);
@@ -189,13 +200,14 @@ export async function add(source: string, options: AddOptions): Promise<void> {
 
   // Final name filter (safety net after mixed registry+git resolution)
   let selectedEntries = resolvedSkills;
-  if (options.skill && options.skill.length > 0) {
+  if (requestedSkillNames.length > 0) {
+    const requestedNamesLower = new Set(requestedSkillNames.map((name) => name.toLowerCase()));
     selectedEntries = resolvedSkills.filter((entry) =>
-      options.skill!.some((name) => entry.skill.name.toLowerCase() === name.toLowerCase())
+      skillMatchesRequestedName(entry.skill.name, entry.skill.path, requestedNamesLower)
     );
 
     if (selectedEntries.length === 0) {
-      error(`No skills found matching: ${options.skill.join(', ')}`);
+      error(`No skills found matching: ${requestedSkillNames.join(', ')}`);
       console.log(pc.dim('Available skills:'));
       for (const entry of resolvedSkills) {
         console.log(pc.dim(`  - ${entry.skill.name}`));
@@ -443,7 +455,9 @@ async function resolveInstallSkills({
 
         let selectedSummaries = summaries;
         if (requestedNamesLower.size > 0) {
-          selectedSummaries = summaries.filter((item) => requestedNamesLower.has(item.name.toLowerCase()));
+          selectedSummaries = summaries.filter((item) =>
+            skillMatchesRequestedName(item.name, item.skillPath, requestedNamesLower)
+          );
         } else if (preferRepoSelection) {
           selectionMode = 'install-all';
         }
@@ -462,9 +476,12 @@ async function resolveInstallSkills({
     }
   }
 
-  const missingRequestedNames = requestedSkillNames.filter((name) =>
-    !resolved.some((entry) => entry.skill.name.toLowerCase() === name.toLowerCase())
-  );
+  const missingRequestedNames = requestedSkillNames.filter((name) => {
+    const nameLower = name.toLowerCase();
+    return !resolved.some((entry) =>
+      skillNameOrPathMatches(entry.skill.name, entry.skill.path, nameLower)
+    );
+  });
 
   const shouldRunGitDiscovery =
     explicitRefBypassRegistry ||
@@ -482,9 +499,13 @@ async function resolveInstallSkills({
 
       if (missingRequestedNames.length > 0) {
         const missingLower = new Set(missingRequestedNames.map((name) => name.toLowerCase()));
-        gitResolved = gitResolved.filter((entry) => missingLower.has(entry.skill.name.toLowerCase()));
+        gitResolved = gitResolved.filter((entry) =>
+          skillMatchesRequestedName(entry.skill.name, entry.skill.path, missingLower)
+        );
       } else if (requestedNamesLower.size > 0 && resolved.length === 0) {
-        gitResolved = gitResolved.filter((entry) => requestedNamesLower.has(entry.skill.name.toLowerCase()));
+        gitResolved = gitResolved.filter((entry) =>
+          skillMatchesRequestedName(entry.skill.name, entry.skill.path, requestedNamesLower)
+        );
       } else if (registrySummariesNeedingGitBackfill.length > 0) {
         const backfillKeys = new Set(registrySummariesNeedingGitBackfill.map((summary) => getRegistrySummaryIdentityKey(summary)));
         gitResolved = gitResolved.filter((entry) => backfillKeys.has(getResolvedSkillIdentityKey(entry)));
@@ -527,7 +548,9 @@ async function resolveInstallSkills({
   }
 
   if (requestedNamesLower.size > 0 && resolved.length > 0) {
-    resolved = resolved.filter((entry) => requestedNamesLower.has(entry.skill.name.toLowerCase()));
+    resolved = resolved.filter((entry) =>
+      skillMatchesRequestedName(entry.skill.name, entry.skill.path, requestedNamesLower)
+    );
   }
 
   return {
@@ -577,6 +600,31 @@ async function fetchRegistryResolvedSkills(
     resolved,
     missingSummaries,
   };
+}
+
+/**
+ * Match a requested skill name (from `--skill` or an aggregator URL hint) against
+ * a skill's frontmatter name or the last segment of its in-repo path. skills.sh
+ * URLs identify skills by directory name, which may differ from the display name.
+ */
+function skillNameOrPathMatches(name: string, skillPath: string | undefined, requestedNameLower: string): boolean {
+  if (name.toLowerCase() === requestedNameLower) {
+    return true;
+  }
+  const normalizedPath = normalizeSkillPath(skillPath);
+  if (!normalizedPath) {
+    return false;
+  }
+  return normalizedPath.split('/').pop()!.toLowerCase() === requestedNameLower;
+}
+
+function skillMatchesRequestedName(name: string, skillPath: string | undefined, requestedNamesLower: Set<string>): boolean {
+  for (const requested of requestedNamesLower) {
+    if (skillNameOrPathMatches(name, skillPath, requested)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function mergeResolvedSkills(existing: ResolvedInstallSkill[], incoming: ResolvedInstallSkill[]): ResolvedInstallSkill[] {
@@ -1041,13 +1089,15 @@ function getRegistrySlug(skill: SkillRegistryItem, fallback: string): string {
 function getMissingRequestedNames(requestedSkillNames: string[], resolved: ResolvedInstallSkill[]): string[] {
   if (requestedSkillNames.length === 0) return [];
 
-  const foundNames = new Set(resolved.map((entry) => entry.skill.name.toLowerCase()));
   const missing: string[] = [];
   const seenMissing = new Set<string>();
 
   for (const requested of requestedSkillNames) {
     const key = requested.toLowerCase();
-    if (foundNames.has(key) || seenMissing.has(key)) {
+    const found = resolved.some((entry) =>
+      skillNameOrPathMatches(entry.skill.name, entry.skill.path, key)
+    );
+    if (found || seenMissing.has(key)) {
       continue;
     }
     seenMissing.add(key);
