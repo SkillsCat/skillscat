@@ -23,6 +23,22 @@
   const copy = $derived(getSettingsCopy(i18n.locale()));
 
   let searchQuery = $state('');
+  let showLoginDialog = $state(false);
+  let LoginDialogComponent = $state<typeof import('$lib/components/dialog/LoginDialog.svelte').default | null>(null);
+
+  async function openLoginDialog(): Promise<void> {
+    if (!LoginDialogComponent) {
+      try {
+        const module = await import('$lib/components/dialog/LoginDialog.svelte');
+        LoginDialogComponent = module.default;
+      } catch (error) {
+        console.error('Failed to load login dialog:', error);
+        return;
+      }
+    }
+
+    showLoginDialog = true;
+  }
 
   const filteredBookmarks = $derived(
     searchQuery
@@ -61,7 +77,7 @@
       title={copy.bookmarks.signInTitle}
       description={copy.bookmarks.signInDescription}
       actionText={messages.common.signIn}
-      actionHref="/api/auth/signin"
+      actionOnClick={() => void openLoginDialog()}
     >
       {#snippet icon()}
         <HugeiconsIcon icon={SecurityLockIcon} size={40} strokeWidth={1.5} />
@@ -114,6 +130,13 @@
     </EmptyState>
   {/if}
 </div>
+
+{#if LoginDialogComponent}
+  <LoginDialogComponent
+    isOpen={showLoginDialog}
+    onClose={() => (showLoginDialog = false)}
+  />
+{/if}
 
 <style>
   .page-title {

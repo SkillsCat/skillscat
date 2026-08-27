@@ -25,6 +25,18 @@ describe('withAuthHintCookie', () => {
     expect(response.headers.get('set-cookie')).not.toContain('HttpOnly');
   });
 
+  it('sets the marker when an HTML response issues a session cookie', () => {
+    const request = new Request('https://skills.cat/');
+    const response = withAuthHintCookie(request, '/', new Response('<html></html>', {
+      status: 200,
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'set-cookie': '__Secure-better-auth.session_token=session123; Path=/; HttpOnly; Secure; SameSite=Lax',
+      },
+    }));
+    expect(response.headers.get('set-cookie')).toContain(`${AUTH_HINT_COOKIE_NAME}=1`);
+  });
+
   it('expires the marker cookie when the request has no session cookie', () => {
     const request = new Request('https://skills.cat/');
     const response = withAuthHintCookie(request, '/', htmlResponse());
@@ -44,7 +56,31 @@ describe('withAuthHintCookie', () => {
     expect(response.headers.get('set-cookie')).toBeNull();
   });
 
-  it('leaves /api/auth responses untouched so better-auth owns its cookie flow', () => {
+  it('mirrors a session cookie issued by the OAuth callback', () => {
+    const request = new Request('https://skills.cat/api/auth/callback/github');
+    const response = withAuthHintCookie(request, '/api/auth/callback/github', new Response(null, {
+      status: 302,
+      headers: {
+        location: '/',
+        'set-cookie': '__Secure-better-auth.session_token=session123; Path=/; HttpOnly; Secure; SameSite=Lax',
+      },
+    }));
+    expect(response.headers.get('set-cookie')).toContain('__Secure-better-auth.session_token=session123');
+    expect(response.headers.get('set-cookie')).toContain(`${AUTH_HINT_COOKIE_NAME}=1`);
+  });
+
+  it('mirrors session cookie deletion on auth routes', () => {
+    const request = new Request('https://skills.cat/api/auth/sign-out');
+    const response = withAuthHintCookie(request, '/api/auth/sign-out', new Response(null, {
+      status: 200,
+      headers: {
+        'set-cookie': '__Secure-better-auth.session_token=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax',
+      },
+    }));
+    expect(response.headers.get('set-cookie')).toContain(`${AUTH_HINT_COOKIE_NAME}=;`);
+  });
+
+  it('leaves auth responses without session cookie changes untouched', () => {
     const request = new Request('https://skills.cat/api/auth/sign-out', {
       headers: { cookie: '__Secure-better-auth.session_token=abc123' },
     });

@@ -9,9 +9,10 @@
     description?: string;
     actionText?: string;
     actionHref?: string;
+    actionOnClick?: () => void;
   }
 
-  let { emoji, icon, title, description, actionText, actionHref }: Props = $props();
+  let { emoji, icon, title, description, actionText, actionHref, actionOnClick }: Props = $props();
 </script>
 
 <div class="empty-state">
@@ -26,8 +27,8 @@
   {#if description}
     <p class="empty-state-description">{description}</p>
   {/if}
-  {#if actionText && actionHref}
-    <Button href={actionHref} variant="cute">
+  {#if actionText && (actionHref || actionOnClick)}
+    <Button href={actionHref} onclick={actionOnClick} variant="cute">
       {actionText}
     </Button>
   {/if}
