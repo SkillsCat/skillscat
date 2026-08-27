@@ -1126,11 +1126,13 @@ const baseHandle: Handle = async ({ event, resolve }) => {
  * decide whether loading the auth client is worthwhile; this mirrors the
  * session cookie's presence into a non-HttpOnly hint cookie.
  *
- * Applied per response (never baked into shared HTML caches): attached only
- * to HTML responses and skipped for /api/auth/*, which better-auth owns.
+ * Applied per response (never baked into shared HTML caches). Better Auth
+ * callback responses are also inspected so the marker is available on the
+ * first page load after OAuth redirects.
  */
 export const AUTH_HINT_COOKIE_NAME = 'sc_auth_hint';
 const SESSION_REQUEST_COOKIE_PATTERN = /(?:^|;\s*)(?:__Secure-)?better-auth\.session_token=/;
+const SESSION_RESPONSE_COOKIE_PATTERN = /(?:^|,\s*)(?:__Secure-)?better-auth\.session_token=([^;,]*)(?:;|,|$)/g;
 const AUTH_HINT_SET_VALUE = `${AUTH_HINT_COOKIE_NAME}=1; Path=/; Max-Age=${60 * 60 * 24 * 30}; Secure; SameSite=Lax`;
 const AUTH_HINT_DELETE_VALUE = `${AUTH_HINT_COOKIE_NAME}=; Path=/; Max-Age=0; Secure; SameSite=Lax`;
 
@@ -1139,17 +1141,58 @@ function isPublicHtmlCdnCacheable(response: Response): boolean {
     .startsWith('public') ?? false;
 }
 
-export function withAuthHintCookie(request: Request, pathname: string, response: Response): Response {
-  if (pathname.startsWith('/api/auth')) {
-    return response;
+function getSessionCookieMutation(response: Response): 'set' | 'delete' | null {
+  const getSetCookie = (response.headers as Headers & {
+    getSetCookie?: () => string[];
+  }).getSetCookie;
+  const values = typeof getSetCookie === 'function'
+    ? getSetCookie.call(response.headers)
+    : [response.headers.get('set-cookie') ?? ''];
+
+  for (const value of values) {
+    SESSION_RESPONSE_COOKIE_PATTERN.lastIndex = 0;
+    const match = SESSION_RESPONSE_COOKIE_PATTERN.exec(value);
+    if (match) {
+      return match[1] ? 'set' : 'delete';
+    }
   }
+
+  return null;
+}
+
+export function withAuthHintCookie(request: Request, pathname: string, response: Response): Response {
+  const hasSessionCookie = SESSION_REQUEST_COOKIE_PATTERN.test(request.headers.get('cookie') ?? '');
+  const sessionCookieMutation = getSessionCookieMutation(response);
+  const isAuthRoute = pathname.startsWith('/api/auth');
+
+  // OAuth callback responses are redirects rather than HTML. Mirror the
+  // session cookie Better Auth just issued so the first redirected page can
+  // start the lazy client session loader immediately.
+  if (isAuthRoute) {
+    if (!sessionCookieMutation) {
+      return response;
+    }
+
+    const headers = new Headers(response.headers);
+    headers.append(
+      'set-cookie',
+      sessionCookieMutation === 'set' ? AUTH_HINT_SET_VALUE : AUTH_HINT_DELETE_VALUE
+    );
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
   if (!isHtmlResponse(response)) {
     return response;
   }
 
-  const hasSessionCookie = SESSION_REQUEST_COOKIE_PATTERN.test(request.headers.get('cookie') ?? '');
   const headers = new Headers(response.headers);
-  if (hasSessionCookie) {
+  if (sessionCookieMutation === 'delete') {
+    headers.append('set-cookie', AUTH_HINT_DELETE_VALUE);
+  } else if (hasSessionCookie || sessionCookieMutation === 'set') {
     headers.append('set-cookie', AUTH_HINT_SET_VALUE);
   } else if (!isPublicHtmlCdnCacheable(response)) {
     // A deletion cookie would make an otherwise anonymous public SSR response
