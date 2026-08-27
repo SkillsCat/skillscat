@@ -1316,6 +1316,64 @@ describe('submit route', () => {
     expect(payload.path).toBe('');
   });
 
+  it('resolves skills.sh URLs to the underlying GitHub repository during submit precheck', async () => {
+    const githubRequest = vi.fn(async (url: string) => {
+      if (url === 'https://api.github.com/repos/forker/toolbox') {
+        return jsonResponse({
+          name: 'toolbox',
+          default_branch: 'main',
+          fork: false,
+        });
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
+        return jsonResponse({
+          name: 'SKILL.md',
+          path: 'SKILL.md',
+          type: 'file',
+        });
+      }
+
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+
+    vi.doMock('../src/lib/server/github-client/request', () => ({ githubRequest }));
+    vi.doMock('../src/lib/server/auth/middleware', () => ({
+      getAuthContext: vi.fn(async () => ({
+        userId: 'user_1',
+        user: { id: 'user_1' },
+      })),
+      requireSubmitPublishScope: vi.fn(),
+    }));
+
+    const { GET } = await import('../src/routes/api/submit/+server');
+    const skillsShUrl = encodeURIComponent('https://skills.sh/forker/toolbox/my-skill');
+    const response = await GET({
+      locals: { locale: 'en' },
+      platform: {
+        env: {
+          DB: undefined,
+          GITHUB_TOKEN: 'test-token',
+        },
+      },
+      request: new Request(`https://skills.cat/api/submit?url=${skillsShUrl}`),
+      url: new URL(`https://skills.cat/api/submit?url=${skillsShUrl}`),
+    } as never);
+
+    const payload = await response.json() as {
+      valid: boolean;
+      owner: string;
+      repo: string;
+      path: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.valid).toBe(true);
+    expect(payload.owner).toBe('forker');
+    expect(payload.repo).toBe('toolbox');
+    expect(payload.path).toBe('');
+  });
+
   it('treats existing skills as valid during submit precheck', async () => {
     const db = buildDbMock({
       '': {
