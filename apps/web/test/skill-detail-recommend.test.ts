@@ -155,9 +155,10 @@ describe('resolveSkillDetail recommend fallback', () => {
 
     expect(result.status).toBe(200);
     expect(checkSkillAccess).toHaveBeenCalled();
-    expect(getRecommendedSkills).toHaveBeenCalledTimes(1);
+    expect(getLightweightRecommendedSkills).toHaveBeenCalledTimes(1);
+    expect(getRecommendedSkills).not.toHaveBeenCalled();
     expect(checkSkillAccess.mock.invocationCallOrder[0]).toBeLessThan(
-      getRecommendedSkills.mock.invocationCallOrder[0]
+      getLightweightRecommendedSkills.mock.invocationCallOrder[0]
     );
   });
 

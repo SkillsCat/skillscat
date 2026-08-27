@@ -276,6 +276,98 @@ describe('orderRecommendDiscoveryCategories', () => {
     expect(db.queries.some((sql) => sql.includes('JOIN skill_categories sc2'))).toBe(false);
   });
 
+  it('shares category-pair intersection reads across recommend computations', async () => {
+    const sqlite = createRecommendDb();
+
+    sqlite.exec(`
+      INSERT INTO skills (
+        id, name, slug, description, repo_owner, repo_name, visibility,
+        stars, forks, trending_score, last_commit_at, updated_at, indexed_at
+      )
+      VALUES
+        ('skill-current', 'Current', 'current', NULL, 'owner-current', 'repo-current', 'public', 10, 1, 5, 1000, 1000, 1000),
+        ('skill-alpha-hot', 'Alpha Hot', 'alpha-hot', NULL, 'owner-alpha', 'repo-alpha', 'public', 300, 10, 100, 1000, 1000, 1000),
+        ('skill-beta-hot', 'Beta Hot', 'beta-hot', NULL, 'owner-beta', 'repo-beta', 'public', 250, 9, 90, 1000, 1000, 1000),
+        ('skill-multi', 'Multi Match', 'multi-match', NULL, 'owner-multi', 'repo-multi', 'public', 5, 1, 5, 1000, 1000, 1000);
+
+      INSERT INTO skill_categories (skill_id, category_slug)
+      VALUES
+        ('skill-current', 'alpha'),
+        ('skill-current', 'beta'),
+        ('skill-alpha-hot', 'alpha'),
+        ('skill-beta-hot', 'beta'),
+        ('skill-multi', 'alpha'),
+        ('skill-multi', 'beta');
+
+      INSERT INTO category_public_stats (
+        category_slug, public_skill_count, top_skill_ids_json, max_freshness_ts, updated_at
+      )
+      VALUES
+        ('alpha', 3000, '["skill-alpha-hot"]', 1000, 1000),
+        ('beta', 3000, '["skill-beta-hot"]', 1000, 1000);
+    `);
+
+    const store = new Map<string, string>();
+    const fakeCache = {
+      match: async (request: Request) => {
+        const body = store.get(request.url);
+        return body === undefined
+          ? undefined
+          : new Response(body, { headers: { 'Content-Type': 'application/json' } });
+      },
+      put: async (request: Request, response: Response) => {
+        store.set(request.url, await response.text());
+      },
+      delete: async (request: Request) => store.delete(request.url),
+    };
+    const globalRef = globalThis as { caches?: unknown };
+    const originalCaches = globalRef.caches;
+    globalRef.caches = { default: fakeCache };
+
+    try {
+      const firstDb = new SqliteD1Database(sqlite);
+      const first = await getRecommendedSkills(
+        { DB: firstDb as never, R2: undefined },
+        'skill-current',
+        ['alpha', 'beta'],
+        '',
+        2,
+        undefined,
+        false,
+        []
+      );
+      expect(first.map((skill) => skill.id)).toContain('skill-multi');
+      expect(firstDb.queries.some((sql) => sql.includes('WITH trending_pool AS MATERIALIZED'))).toBe(true);
+
+      // Flush the fire-and-forget cache write from the first computation.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const secondDb = new SqliteD1Database(sqlite);
+      const second = await getRecommendedSkills(
+        { DB: secondDb as never, R2: undefined },
+        'skill-current',
+        ['alpha', 'beta'],
+        '',
+        2,
+        undefined,
+        false,
+        []
+      );
+      expect(second.map((skill) => skill.id)).toContain('skill-multi');
+      // The pair intersection scan is served from the cache; only bounded
+      // hydration queries remain.
+      expect(secondDb.queries.some((sql) => sql.includes('WITH trending_pool AS MATERIALIZED'))).toBe(false);
+      expect(secondDb.queries.some((sql) => sql.includes('JOIN skill_categories sc2'))).toBe(false);
+      expect(secondDb.queries.some((sql) => sql.includes('FROM skills s INDEXED BY skills_visibility_id_idx WHERE s.visibility = \'public\' AND s.id IN'))).toBe(true);
+    } finally {
+      if (originalCaches === undefined) {
+        delete globalRef.caches;
+      } else {
+        globalRef.caches = originalCaches;
+      }
+    }
+  });
+
   it('skips multi-category scans when precomputed seeds fill the candidate pool', async () => {
     const sqlite = createRecommendDb();
     sqlite.exec(`

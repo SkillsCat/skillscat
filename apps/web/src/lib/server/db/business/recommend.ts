@@ -1,5 +1,6 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import type { SkillCardData } from '$lib/types';
+import { getCached } from '$lib/server/cache';
 import { addAuthorAvatarsToSkills, addCategoriesToSkills } from '$lib/server/db/shared/skills';
 import { timedTask } from '$lib/server/db/shared/timing';
 import type { DbEnv, SkillListRow, TimingCollector } from '$lib/server/db/shared/types';
@@ -56,6 +57,13 @@ const MAX_RECOMMEND_SIGNAL_CATEGORIES = 12;
 const MAX_RECOMMEND_SIGNAL_TAGS = 32;
 const MAX_RECOMMEND_CATEGORY_PAIRS = 3;
 const MAX_RECOMMEND_PAIR_TRENDING_POOL = 2048;
+// Category-pair intersection results are shared across every skill in the same
+// pair, so they are cached per pair instead of re-scanned per recommend compute.
+const RECOMMEND_PAIR_CACHE_KEY_VERSION = 'v1';
+const RECOMMEND_PAIR_CACHE_TTL_SECONDS = 6 * 60 * 60;
+// Pairs only run when seeds left < MIN_CANDIDATES exclusions, so a modest margin
+// over perPairLimit absorbs the exclusions that are filtered out after the read.
+const RECOMMEND_PAIR_CACHE_FETCH_LIMIT = 48;
 const RECOMMEND_SKILL_COLUMNS_BASE = `
   s.id, s.name, s.slug, s.description,
   s.repo_owner as repoOwner, s.repo_name as repoName,
@@ -271,6 +279,79 @@ async function loadRecommendDiscoveryCategories(
   }
 }
 
+function buildRecommendPairCacheKey(firstCategory: string, secondCategory: string): string {
+  const [first, second] = firstCategory <= secondCategory
+    ? [firstCategory, secondCategory]
+    : [secondCategory, firstCategory];
+  return `recommend:pair:${RECOMMEND_PAIR_CACHE_KEY_VERSION}:${first}/${second}`;
+}
+
+/**
+ * Top skills of a category-pair intersection, ordered by trending score.
+ *
+ * The result is per-pair (not per-skill), so it is cached and shared by every
+ * recommend compute touching the same pair. Per-request exclusions are applied
+ * in JS afterwards, which keeps the expensive scan out of the request path.
+ */
+async function loadRecommendPairSkillIds(
+  db: D1Database,
+  pair: RecommendCategoryPair,
+  publicSkillCounts: ReadonlyMap<string, number>
+): Promise<string[]> {
+  const firstCategoryCount = publicSkillCounts.get(pair.firstCategory);
+  const useBoundedTrendingPool = firstCategoryCount === undefined
+    || firstCategoryCount > EXACT_CATEGORY_OVERLAP_POOL_MAX;
+
+  const result = useBoundedTrendingPool
+    ? await db.prepare(`
+        WITH trending_pool AS MATERIALIZED (
+          SELECT id, trending_score as trendingScore
+          FROM skills INDEXED BY skills_public_trending_id_idx
+          WHERE visibility = 'public'
+          ORDER BY trending_score DESC
+          LIMIT ?
+        )
+        SELECT pool.id
+        FROM trending_pool pool
+        WHERE EXISTS (
+          SELECT 1
+          FROM skill_categories sc1
+          WHERE sc1.skill_id = pool.id
+            AND sc1.category_slug = ?
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM skill_categories sc2
+          WHERE sc2.skill_id = pool.id
+            AND sc2.category_slug = ?
+        )
+        ORDER BY pool.trendingScore DESC
+        LIMIT ?
+      `).bind(
+        MAX_RECOMMEND_PAIR_TRENDING_POOL,
+        pair.firstCategory,
+        pair.secondCategory,
+        RECOMMEND_PAIR_CACHE_FETCH_LIMIT
+      ).all<{ id: string }>()
+    : await db.prepare(`
+        SELECT s.id
+        FROM skill_categories sc1 INDEXED BY skill_categories_category_skill_idx
+        JOIN skill_categories sc2 INDEXED BY skill_categories_category_skill_idx
+          ON sc2.skill_id = sc1.skill_id
+         AND sc2.category_slug = ?
+        CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
+        WHERE sc1.category_slug = ?
+          AND s.id = sc1.skill_id
+          AND s.visibility = 'public'
+        ORDER BY s.trending_score DESC
+        LIMIT ?
+      `).bind(pair.secondCategory, pair.firstCategory, RECOMMEND_PAIR_CACHE_FETCH_LIMIT).all<{ id: string }>();
+
+  return result.results
+    .map((row) => row.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+}
+
 async function loadRecommendMultiCategoryCandidates(
   db: D1Database,
   orderedCategories: string[],
@@ -287,76 +368,47 @@ async function loadRecommendMultiCategoryCandidates(
   if (categoryPairs.length === 0) return [];
 
   const perPairLimit = Math.max(4, Math.min(12, limit * 2));
+  const initiallyExcludedIds = new Set(excludeIds);
   const merged = new Map<string, { row: RecommendSkillCandidateRow; pairOrder: number }>();
+  let newCandidateCount = 0;
 
   for (const pair of categoryPairs) {
-    const exPh = excludeIds.map(() => '?').join(',');
-    const firstCategoryCount = publicSkillCounts.get(pair.firstCategory);
-    const useBoundedTrendingPool = firstCategoryCount === undefined
-      || firstCategoryCount > EXACT_CATEGORY_OVERLAP_POOL_MAX;
-    const result = await timedTask(
+    // Later pairs sort after earlier ones (pairOrder wins the final sort), so
+    // once enough new candidates are collected, remaining pairs cannot make
+    // the cut and their scans/hydration are skipped entirely.
+    if (newCandidateCount >= limit) break;
+
+    const rows = await timedTask(
       timingCollector,
       'rel_t1_pairs',
-      () => useBoundedTrendingPool
-        ? db.prepare(`
-        WITH trending_pool AS MATERIALIZED (
-          SELECT id, trending_score as trendingScore
-          FROM skills INDEXED BY skills_public_trending_id_idx
-          WHERE visibility = 'public'
-          ORDER BY trending_score DESC
-          LIMIT ?
-        ), matched_ids AS (
-          SELECT pool.id, pool.trendingScore
-          FROM trending_pool pool
-          WHERE pool.id NOT IN (${exPh})
-            AND EXISTS (
-              SELECT 1
-              FROM skill_categories sc1
-              WHERE sc1.skill_id = pool.id
-                AND sc1.category_slug = ?
-            )
-            AND EXISTS (
-              SELECT 1
-              FROM skill_categories sc2
-              WHERE sc2.skill_id = pool.id
-                AND sc2.category_slug = ?
-            )
-          ORDER BY pool.trendingScore DESC
-          LIMIT ?
-        )
-        SELECT
-          ${skillColumnsBase}
-        FROM matched_ids matched
-        CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
-        WHERE s.visibility = 'public'
-          AND s.id = matched.id
-        ORDER BY matched.trendingScore DESC
-      `).bind(
-          MAX_RECOMMEND_PAIR_TRENDING_POOL,
-          ...excludeIds,
-          pair.firstCategory,
-          pair.secondCategory,
-          perPairLimit
-        ).all<RecommendSkillCandidateRow>()
-        : db.prepare(`
-        SELECT
-          ${skillColumnsBase}
-        FROM skill_categories sc1 INDEXED BY skill_categories_category_skill_idx
-        JOIN skill_categories sc2 INDEXED BY skill_categories_category_skill_idx
-          ON sc2.skill_id = sc1.skill_id
-         AND sc2.category_slug = ?
-        CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
-        WHERE sc1.category_slug = ?
-          AND s.id = sc1.skill_id
-          AND s.id NOT IN (${exPh})
-          AND s.visibility = 'public'
-        ORDER BY s.trending_score DESC
-        LIMIT ?
-      `).bind(pair.secondCategory, pair.firstCategory, ...excludeIds, perPairLimit).all<RecommendSkillCandidateRow>(),
+      async (): Promise<RecommendSkillCandidateRow[]> => {
+        const { data } = await getCached<string[]>(
+          buildRecommendPairCacheKey(pair.firstCategory, pair.secondCategory),
+          () => loadRecommendPairSkillIds(db, pair, publicSkillCounts),
+          RECOMMEND_PAIR_CACHE_TTL_SECONDS
+        );
+        const pairIds = Array.isArray(data) ? data : [];
+        const neededIds = pairIds
+          .filter((id) => !initiallyExcludedIds.has(id) && !merged.has(id))
+          .slice(0, perPairLimit);
+        if (neededIds.length === 0) return [];
+
+        const idPh = neededIds.map(() => '?').join(',');
+        // Hydration re-checks visibility, so ids that went private since the
+        // pair cache was written simply drop out here.
+        const hydrated = await db.prepare(`
+          SELECT
+            ${skillColumnsBase}
+          FROM skills s INDEXED BY skills_visibility_id_idx
+          WHERE s.visibility = 'public'
+            AND s.id IN (${idPh})
+        `).bind(...neededIds).all<RecommendSkillCandidateRow>();
+        return hydrated.results;
+      },
       `tier1 multi-category supplement (${pair.firstCategory}+${pair.secondCategory})`
     );
 
-    for (const row of result.results) {
+    for (const row of rows) {
       const existing = merged.get(row.id);
       if (existing) continue;
 
@@ -367,6 +419,7 @@ async function loadRecommendMultiCategoryCandidates(
         },
         pairOrder: pair.pairOrder,
       });
+      newCandidateCount += 1;
     }
   }
 

@@ -144,7 +144,7 @@ describe('recommend route crawler fallback policy', () => {
       scopes: ['read'],
     });
     checkSkillAccess.mockResolvedValue(true);
-    getRecommendedSkills.mockResolvedValue([
+    getLightweightRecommendedSkills.mockResolvedValue([
       {
         id: 'skill_related',
         name: 'Related',
