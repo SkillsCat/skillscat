@@ -51,6 +51,37 @@ describe('parseGitHubRepoUrl', () => {
     });
     expect(isValidGitHubRepoUrlForSubmit('https://github.com/demo/repo/%')).toBe(true);
   });
+
+  it('maps skills.sh repo URLs to the underlying GitHub repository', () => {
+    expect(parseGitHubRepoUrl('https://skills.sh/demo/repo')).toEqual({
+      owner: 'demo',
+      repo: 'repo',
+      path: '',
+    });
+    expect(parseGitHubRepoUrl('https://www.skills.sh/demo/repo')).toEqual({
+      owner: 'demo',
+      repo: 'repo',
+      path: '',
+    });
+    expect(isValidGitHubRepoUrlForSubmit('https://skills.sh/demo/repo')).toBe(true);
+  });
+
+  it('drops the skill name segment from skills.sh skill URLs', () => {
+    // The third segment is a catalog skill name, not an in-repo path; the whole
+    // repository is submitted so every SKILL.md in it gets indexed.
+    expect(parseGitHubRepoUrl('https://skills.sh/demo/repo/my-skill')).toEqual({
+      owner: 'demo',
+      repo: 'repo',
+      path: '',
+    });
+  });
+
+  it('rejects malformed skills.sh URLs', () => {
+    expect(parseGitHubRepoUrl('https://skills.sh/demo')).toBeNull();
+    expect(parseGitHubRepoUrl('https://skills.sh/demo/repo/a/b')).toBeNull();
+    expect(parseGitHubRepoUrl('https://skills.sh/./repo')).toBeNull();
+    expect(isValidGitHubRepoUrlForSubmit('https://skills.sh/demo')).toBe(false);
+  });
 });
 
 describe('parseGitHubRepoShorthand', () => {

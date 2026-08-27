@@ -32,14 +32,35 @@ export function parseGitHubRepoUrl(url: string): ParsedGitHubRepoUrl | null {
     return null;
   }
 
-  if (!['github.com', 'www.github.com'].includes(parsed.hostname.toLowerCase())) {
-    return null;
-  }
+  const host = parsed.hostname.toLowerCase();
 
   const segments = parsed.pathname
     .split('/')
     .filter(Boolean)
     .map((segment) => safeDecodeURIComponent(segment));
+
+  // skills.sh mirrors GitHub-hosted skills:
+  // https://skills.sh/owner/repo or https://skills.sh/owner/repo/skill-name.
+  // The third segment is a skill name, not an in-repo path, so the whole
+  // repository is submitted and every SKILL.md in it gets indexed.
+  if (host === 'skills.sh' || host === 'www.skills.sh') {
+    if (segments.length < 2 || segments.length > 3) {
+      return null;
+    }
+
+    const owner = segments[0];
+    const repo = segments[1].replace(/\.git$/, '');
+
+    if (!owner || !repo || segments.some((segment) => segment === '.' || segment === '..')) {
+      return null;
+    }
+
+    return { owner, repo, path: '' };
+  }
+
+  if (!['github.com', 'www.github.com'].includes(host)) {
+    return null;
+  }
 
   if (segments.length < 2) {
     return null;
