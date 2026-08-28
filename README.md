@@ -44,7 +44,7 @@ SkillsCat is a Cloudflare-first registry and CLI for reusable AI agent skills.
 | Surface | What it does | Entry point |
 | --- | --- | --- |
 | Native SkillsCat registry | Search, inspect, install, publish, and manage skills via the website and `skillscat` CLI | `https://skills.cat/registry`, `https://skills.cat/api`, `npx skillscat ...` |
-| Claude Code Marketplace feed | Exposes public GitHub-backed skills as Claude Marketplace-compatible plugins | `https://skills.cat/marketplace.json` |
+| Claude Code Marketplace feed | Exposes up to 1,000 top-ranked public GitHub-backed skills as Claude Marketplace-compatible plugins | `https://skills.cat/marketplace.json` |
 | ClawHub-compatible registry | Lets `clawhub` CLI and OpenClaw clients discover, install, update, and publish against SkillsCat | `https://skills.cat/.well-known/clawhub.json`, `https://skills.cat/openclaw` |
 | Local agent installs | Materializes skills into Claude Code, OpenClaw, Cursor, Codex, and other local agent layouts | `npx skillscat add <source> --agent <agent>` |
 
