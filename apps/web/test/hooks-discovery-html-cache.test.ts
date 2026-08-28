@@ -239,6 +239,33 @@ describe('discovery HTML cache', () => {
     );
   });
 
+  it('never writes status-override error pages to the shared cache', async () => {
+    const { handle } = await import('../src/hooks.server');
+    const { waitUntil, drain } = createWaitUntil();
+    const resolve = htmlResolve('<html>not found</html>', { 'X-Skillscat-Status-Override': '404' });
+
+    const response = await handle({
+      event: discoveryEvent({
+        pathname: '/category/nope',
+        routeId: '/category/[slug]',
+        params: { slug: 'nope' },
+        waitUntil,
+      }),
+      resolve,
+    } as never);
+    await response.text();
+    await drain();
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('X-Skillscat-Status-Override')).toBeNull();
+    expect(mocks.putCachedText).not.toHaveBeenCalledWith(
+      expect.stringContaining('page:category:html'),
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
   it('does not make cookie-bearing public SSR cacheable at the CDN', async () => {
     const { handle } = await import('../src/hooks.server');
     const { waitUntil, drain } = createWaitUntil();
