@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { buildOgImageUrl, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
+  import { buildOgImageUrl, HOME_OG_IMAGE_URL, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
   import { SITE_NAME, SITE_URL } from '$lib/seo/constants';
   import { getSeoLocaleMetadata } from '$lib/i18n/seo';
   import { useI18n } from '$lib/i18n/runtime';
@@ -39,7 +39,7 @@
     url = '',
     prevUrl = '',
     nextUrl = '',
-    image = buildOgImageUrl({ type: 'page', slug: 'home' }),
+    image = HOME_OG_IMAGE_URL,
     imageAlt = title,
     type = 'website',
     publishedTime,
@@ -126,6 +126,7 @@
   <meta property="og:locale" content={localeMeta.ogLocale} />
   <meta property="og:image" content={fullImage} />
   <meta property="og:image:secure_url" content={fullImage} />
+  <meta property="og:image:type" content="image/png" />
   <meta property="og:image:width" content={String(OG_IMAGE_WIDTH)} />
   <meta property="og:image:height" content={String(OG_IMAGE_HEIGHT)} />
   <meta property="og:image:alt" content={imageAlt} />
