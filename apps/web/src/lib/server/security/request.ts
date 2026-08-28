@@ -439,7 +439,7 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
 }
 
 export function shouldNoIndexPath(pathname: string): boolean {
-  if (pathname === '/mcp') {
+  if (pathname === '/mcp' || pathname === '/a2a') {
     return true;
   }
 

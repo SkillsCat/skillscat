@@ -192,6 +192,7 @@ describe('request security', () => {
     expect(shouldNoIndexPath('/openclaw/api/v1/skills')).toBe(true);
     expect(shouldNoIndexPath('/.well-known/clawhub.json')).toBe(true);
     expect(shouldNoIndexPath('/openclaw/.well-known/clawhub.json')).toBe(true);
+    expect(shouldNoIndexPath('/a2a')).toBe(true);
   });
 
   it('keeps search result links followable while excluding the result page', () => {
