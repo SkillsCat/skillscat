@@ -46,9 +46,13 @@ const STATIC_PAGES: Record<string, OgData> = {
   top: { title: 'Top Rated Skills', subtitle: SITE_DESCRIPTION, tag: 'Top Rated', author: '', avatarUrl: '', stars: 0, installCommand: '' },
   recent: { title: 'Recently Added Skills', subtitle: SITE_DESCRIPTION, tag: 'Recent', author: '', avatarUrl: '', stars: 0, installCommand: '' },
   categories: { title: 'Categories', subtitle: SITE_DESCRIPTION, tag: 'Categories', author: '', avatarUrl: '', stars: 0, installCommand: '' },
+  docs: { title: 'Documentation', subtitle: SITE_DESCRIPTION, tag: 'Docs', author: '', avatarUrl: '', stars: 0, installCommand: '' },
+  'docs-cli': { title: 'SkillsCat CLI', subtitle: SITE_DESCRIPTION, tag: 'Docs', author: '', avatarUrl: '', stars: 0, installCommand: '' },
+  'docs-openclaw': { title: 'OpenClaw Integration', subtitle: SITE_DESCRIPTION, tag: 'Docs', author: '', avatarUrl: '', stars: 0, installCommand: '' },
   privacy: { title: 'Privacy Policy', subtitle: SITE_DESCRIPTION, tag: 'Policy', author: '', avatarUrl: '', stars: 0, installCommand: '' },
   terms: { title: 'Terms of Service', subtitle: SITE_DESCRIPTION, tag: 'Policy', author: '', avatarUrl: '', stars: 0, installCommand: '' },
   '404': { title: 'Page Not Found', subtitle: 'The requested page does not exist.', tag: '404', author: '', avatarUrl: '', stars: 0, installCommand: '' },
+  '500': { title: 'Something Went Wrong', subtitle: 'A temporary error occurred. Please try again later.', tag: '500', author: '', avatarUrl: '', stars: 0, installCommand: '' },
 };
 
 const DEFAULT_OG: OgData = {

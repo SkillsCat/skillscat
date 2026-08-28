@@ -2,7 +2,7 @@ import { SITE_URL } from './constants';
 
 export const OG_IMAGE_WIDTH = 1200;
 export const OG_IMAGE_HEIGHT = 630;
-export const OG_IMAGE_VERSION = '2026-08-28';
+export const OG_IMAGE_VERSION = '2026-08-28.2';
 /** The homepage uses a pre-rendered image so social crawlers never depend on Worker rendering. */
 export const HOME_OG_IMAGE_URL = '/og/home.png';
 
