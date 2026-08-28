@@ -67,6 +67,15 @@ const DEFAULT_SEARCH_BACKFILL_START_DATE = '2025-01-01';
 const DEFAULT_SEARCH_BACKFILL_MIN_REMAINING = 5;
 const DEFAULT_SEARCH_BACKFILL_RESERVE = 5;
 const DEFAULT_SEARCH_BACKFILL_MAX_PAGES = 3;
+const DEFAULT_X_SEARCH_QUERY = '("SKILL.md" OR "agent skill") (github.com OR github) -is:retweet has:links';
+const DEFAULT_X_SEARCH_MAX_RESULTS = 50;
+const DEFAULT_X_SEARCH_MAX_TWEETS = 200;
+const DEFAULT_X_SEARCH_INTERVAL_SECONDS = 15 * 60;
+const DEFAULT_X_SEARCH_MAX_QUEUED_REPOS = 50;
+const DEFAULT_X_SEARCH_MAX_REQUESTS_PER_DAY = 1;
+const DEFAULT_X_SEARCH_MAX_REQUESTS_PER_MONTH = 30;
+const MAX_X_SEARCH_REQUESTS_PER_DAY = 1000;
+const MAX_X_SEARCH_REQUESTS_PER_MONTH = 10000;
 
 const RATE_LIMIT_SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
 const D1_MAX_BOUND_PARAMETERS = 100;
@@ -80,6 +89,8 @@ const CODE_SEARCH_CURSOR_KEY = 'github-events:code-search:last-head';
 const CODE_SEARCH_BACKFILL_CURSOR_KEY = 'github-events:code-search:backfill-cursor';
 const EVENT_REPLAY_STATE_KEY = 'github-events:event-replay-state';
 const REPO_QUEUE_DEDUP_WINDOW_KEY = 'github-events:repo-queued-window';
+const X_SEARCH_SINCE_ID_KEY = 'github-events:x-search:since-id';
+const X_SEARCH_BUDGET_KEY_PREFIX = 'github-events:x-search:budget:';
 
 interface SearchDiscoveryResult {
   scanned: number;
@@ -107,6 +118,11 @@ interface HtmlSearchDiscoveryResult {
   pagesFetched: number;
   skippedReason?: string;
 }
+
+interface XSearchDiscoveryResult { scanned: number; queued: number; tweets: number; skippedReason?: string }
+interface XSearchTweet { id?: string; text?: string; entities?: { urls?: Array<{ expanded_url?: string; url?: string }> } }
+interface XSearchResponse { data?: XSearchTweet[]; meta?: { next_token?: string; newest_id?: string } }
+interface XSearchBudgetConfig { maxRequestsPerDay: number; maxRequestsPerMonth: number }
 
 interface EventsDiscoveryResult {
   processed: number;
@@ -187,6 +203,40 @@ function parseRepoFullName(fullName: string | undefined): RepoIdentity | null {
   const [owner, name] = fullName.split('/');
   if (!owner || !name) return null;
   return { owner, name };
+}
+
+/** Extract a canonical github.com owner/repo from a tweet URL. */
+export function parseGitHubRepoUrl(raw: string | undefined): RepoIdentity | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    if (url.hostname.toLowerCase() !== 'github.com') return null;
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts.length < 2) return null;
+    const invalid = new Set(['issues', 'pull', 'pulls', 'releases', 'actions', 'wiki', 'commit', 'commits', 'discussions', 'security', 'settings']);
+    if (invalid.has(parts[0].toLowerCase()) || invalid.has(parts[1].toLowerCase())) return null;
+    if (parts[2] && invalid.has(parts[2].toLowerCase())) return null;
+    if (!/^[A-Za-z0-9_.-]+$/.test(parts[0]) || !/^[A-Za-z0-9_.-]+(?:\.git)?$/.test(parts[1])) return null;
+    return { owner: parts[0], name: parts[1].replace(/\.git$/, '') };
+  } catch { return null; }
+}
+
+export function extractGitHubReposFromTweet(tweet: XSearchTweet): RepoIdentity[] {
+  const urls = tweet.entities?.urls || [];
+  const seen = new Set<string>();
+  const repos: RepoIdentity[] = [];
+  const candidates = urls.map((entry) => entry.expanded_url || entry.url);
+  if (tweet.text) {
+    candidates.push(...(tweet.text.match(/https?:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:[^\s<>]*)?/gi) || []));
+  }
+  for (const candidate of candidates) {
+    const repo = parseGitHubRepoUrl(candidate);
+    if (!repo) continue;
+    const identity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
+    if (!seen.has(identity)) { seen.add(identity); repos.push(repo); }
+  }
+  return repos;
 }
 
 function getSkillPathFromSkillMdPath(path: string): string | undefined {
@@ -352,6 +402,61 @@ function getHtmlSearchDiscoveryConfig(env: GithubEventsEnv): {
       MAX_HTML_SEARCH_CANDIDATES
     ),
   };
+}
+
+function getXSearchDiscoveryConfig(env: GithubEventsEnv): {
+  enabled: boolean; query: string; maxResults: number; maxTweets: number;
+  intervalSeconds: number; maxQueuedRepos: number; cronIntervalSeconds: number;
+  budget: XSearchBudgetConfig;
+} {
+  return {
+    enabled: parseEnabled(env.X_SEARCH_ENABLED, false) && Boolean(env.X_BEARER_TOKEN?.trim()),
+    query: (env.X_SEARCH_QUERY || DEFAULT_X_SEARCH_QUERY).trim() || DEFAULT_X_SEARCH_QUERY,
+    maxResults: Math.min(Math.max(parsePositiveInt(env.X_SEARCH_MAX_RESULTS, DEFAULT_X_SEARCH_MAX_RESULTS), 10), 100),
+    maxTweets: Math.min(parseClampedPositiveInt(env.X_SEARCH_MAX_TWEETS, DEFAULT_X_SEARCH_MAX_TWEETS, MAX_HTML_SEARCH_CANDIDATES), MAX_HTML_SEARCH_CANDIDATES),
+    intervalSeconds: parseClampedPositiveInt(env.X_SEARCH_INTERVAL_SECONDS, DEFAULT_X_SEARCH_INTERVAL_SECONDS, MAX_DISCOVERY_INTERVAL_SECONDS),
+    maxQueuedRepos: parseClampedPositiveInt(env.X_SEARCH_MAX_QUEUED_REPOS, DEFAULT_X_SEARCH_MAX_QUEUED_REPOS, MAX_DISCOVERY_QUEUED_REPOS),
+    cronIntervalSeconds: parseClampedPositiveInt(env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS, DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS, MAX_DISCOVERY_INTERVAL_SECONDS),
+    budget: {
+      maxRequestsPerDay: parseClampedPositiveInt(
+        env.X_SEARCH_MAX_REQUESTS_PER_DAY,
+        DEFAULT_X_SEARCH_MAX_REQUESTS_PER_DAY,
+        MAX_X_SEARCH_REQUESTS_PER_DAY
+      ),
+      maxRequestsPerMonth: parseClampedPositiveInt(
+        env.X_SEARCH_MAX_REQUESTS_PER_MONTH,
+        DEFAULT_X_SEARCH_MAX_REQUESTS_PER_MONTH,
+        MAX_X_SEARCH_REQUESTS_PER_MONTH
+      ),
+    },
+  };
+}
+
+export async function reserveXSearchRequest(
+  store: KVNamespace,
+  budget: XSearchBudgetConfig,
+  nowMs: number
+): Promise<boolean> {
+  const date = new Date(nowMs);
+  const day = date.toISOString().slice(0, 10);
+  const month = day.slice(0, 7);
+  const dayKey = `${X_SEARCH_BUDGET_KEY_PREFIX}day:${day}`;
+  const monthKey = `${X_SEARCH_BUDGET_KEY_PREFIX}month:${month}`;
+  const [dayRaw, monthRaw] = await Promise.all([store.get(dayKey), store.get(monthKey)]);
+  const dayCount = Number(dayRaw || 0);
+  const monthCount = Number(monthRaw || 0);
+  if (
+    !Number.isFinite(dayCount) || !Number.isFinite(monthCount)
+    || dayCount >= budget.maxRequestsPerDay
+    || monthCount >= budget.maxRequestsPerMonth
+  ) {
+    return false;
+  }
+  await Promise.all([
+    store.put(dayKey, String(dayCount + 1), { expirationTtl: 2 * 86400 }),
+    store.put(monthKey, String(monthCount + 1), { expirationTtl: 32 * 86400 }),
+  ]);
+  return true;
 }
 
 function getSearchBackfillConfig(env: GithubEventsEnv): {
@@ -1444,6 +1549,119 @@ async function processHtmlRepoSearchDiscovery(
   return { scanned, queued, pagesFetched };
 }
 
+async function processXSearchDiscovery(
+  env: GithubEventsEnv,
+  repoDedupeState: RepoQueueDedupeState,
+  lockToken: string,
+  nowMs: number = Date.now()
+): Promise<XSearchDiscoveryResult> {
+  const config = getXSearchDiscoveryConfig(env);
+  const base = { scanned: 0, queued: 0, tweets: 0 };
+  if (!config.enabled) {
+    return {
+      ...base,
+      skippedReason: env.X_BEARER_TOKEN?.trim() ? 'disabled' : 'missing_bearer_token',
+    };
+  }
+  if (!shouldRunSearchDiscoveryThisTick(nowMs, config.cronIntervalSeconds, config.intervalSeconds)) {
+    return { ...base, skippedReason: 'interval_throttled' };
+  }
+
+  const store = getGithubEventsStateStore(env);
+  const sinceId = await store.get(X_SEARCH_SINCE_ID_KEY);
+  const tweets: XSearchTweet[] = [];
+  let nextToken: string | undefined;
+  let newestId: string | undefined;
+  let partialFailure: string | undefined;
+
+  do {
+    if (!await reserveXSearchRequest(store, config.budget, nowMs)) {
+      partialFailure = 'budget_exhausted';
+      break;
+    }
+    const params = new URLSearchParams({
+      query: config.query,
+      max_results: String(config.maxResults),
+      'tweet.fields': 'entities,created_at',
+    });
+    if (sinceId) params.set('since_id', sinceId);
+    if (nextToken) params.set('next_token', nextToken);
+
+    let response: Response;
+    try {
+      response = await fetch(`https://api.x.com/2/tweets/search/recent?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${env.X_BEARER_TOKEN}` },
+      });
+    } catch (error) {
+      console.warn('X search request failed:', error);
+      partialFailure = 'request_failed';
+      break;
+    }
+    if (!response.ok) {
+      console.warn(`X search request failed: ${response.status}`);
+      partialFailure = response.status === 429 ? 'rate_limited' : 'request_failed';
+      break;
+    }
+
+    let payload: XSearchResponse;
+    try {
+      payload = await response.json() as XSearchResponse;
+    } catch {
+      partialFailure = 'invalid_response';
+      break;
+    }
+    if (!newestId) newestId = payload.meta?.newest_id;
+    const pageTweets = Array.isArray(payload.data) ? payload.data : [];
+    tweets.push(...pageTweets.slice(0, config.maxTweets - tweets.length));
+    nextToken = payload.meta?.next_token;
+    if (nextToken && !await renewDiscoveryRunLock(env, lockToken)) {
+      partialFailure = 'lock_lost';
+      break;
+    }
+  } while (nextToken && tweets.length < config.maxTweets);
+
+  if (tweets.length === 0 && partialFailure) return { ...base, skippedReason: partialFailure };
+  const candidates = new Map<string, RepoIdentity>();
+  for (const tweet of tweets) {
+    for (const repo of extractGitHubReposFromTweet(tweet)) {
+      candidates.set(`${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`, repo);
+    }
+  }
+  let known = new Set<string>();
+  if (candidates.size > 0) {
+    try {
+      known = await loadKnownGitHubRepoIdentities(env.DB, [...candidates.values()]);
+    } catch (error) {
+      console.warn('Failed to filter X search candidates against known repositories:', error);
+      return { scanned: candidates.size, queued: 0, tweets: tweets.length, skippedReason: 'known_repo_lookup_failed' };
+    }
+  }
+  const dedupTtlSeconds = getRepoQueueDedupTtlSeconds(env);
+  let queued = 0;
+  for (const tweet of tweets) {
+    for (const repo of extractGitHubReposFromTweet(tweet)) {
+      const identity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
+      if (known.has(identity) || queued >= config.maxQueuedRepos) continue;
+      if (!await renewDiscoveryRunLock(env, lockToken)) return { scanned: tweets.length, queued, tweets: tweets.length, skippedReason: 'lock_lost' };
+      if (wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, undefined, nowMs)) continue;
+      const message: IndexingMessage = {
+        type: 'check_skill', repoOwner: repo.owner, repoName: repo.name,
+        discoverySource: 'x-search', discoveryFingerprint: tweet.id ? `x:${tweet.id}` : undefined,
+      };
+      await env.INDEXING_QUEUE.send(message);
+      markRepoQueued(repoDedupeState, repo.owner, repo.name, undefined, nowMs, dedupTtlSeconds);
+      queued++;
+    }
+  }
+  // Only advance the since_id cursor after every requested page succeeds.
+  // Advancing it after a partial failure would permanently skip older tweets
+  // that were present on pages we did not process.
+  if (newestId && !partialFailure) {
+    await store.put(X_SEARCH_SINCE_ID_KEY, newestId, { expirationTtl: 30 * 86400 });
+  }
+  return { scanned: candidates.size, queued, tweets: tweets.length, skippedReason: partialFailure };
+}
+
 function parseDiscoveryRunLockPayload(
   raw: string | null,
   ttlSeconds: number
@@ -1636,8 +1854,10 @@ export default {
 
       nowMs = Date.now();
       const htmlResult = await processHtmlRepoSearchDiscovery(runtimeEnv, repoDedupeState, _ctx, lockToken, nowMs);
+      nowMs = Date.now();
+      const xResult = await processXSearchDiscovery(runtimeEnv, repoDedupeState, lockToken, nowMs);
       console.log(
-        `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_unknown_skipped=${eventsResult.unknownSkipped}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, backfill_scanned=${backfillResult.scanned}, backfill_queued=${backfillResult.queued}, backfill_pages=${backfillResult.pagesFetched}/${backfillResult.allowedPages}, backfill_date=${backfillResult.date || 'none'}, backfill_skipped=${backfillResult.skippedReason || 'none'}, html_scanned=${htmlResult.scanned}, html_queued=${htmlResult.queued}, html_pages=${htmlResult.pagesFetched}, html_skipped=${htmlResult.skippedReason || 'none'}, rest_snapshot_remaining=${restBeforeEvents?.remaining ?? 'unknown'}, search_snapshot_remaining=${searchBeforeDiscovery?.remaining ?? 'unknown'}`
+        `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_unknown_skipped=${eventsResult.unknownSkipped}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, backfill_scanned=${backfillResult.scanned}, backfill_queued=${backfillResult.queued}, backfill_pages=${backfillResult.pagesFetched}/${backfillResult.allowedPages}, backfill_date=${backfillResult.date || 'none'}, backfill_skipped=${backfillResult.skippedReason || 'none'}, html_scanned=${htmlResult.scanned}, html_queued=${htmlResult.queued}, html_pages=${htmlResult.pagesFetched}, html_skipped=${htmlResult.skippedReason || 'none'}, x_scanned=${xResult.scanned}, x_queued=${xResult.queued}, x_tweets=${xResult.tweets}, x_skipped=${xResult.skippedReason || 'none'}, rest_snapshot_remaining=${restBeforeEvents?.remaining ?? 'unknown'}, search_snapshot_remaining=${searchBeforeDiscovery?.remaining ?? 'unknown'}`
       );
     } finally {
       if (repoDedupeState) {

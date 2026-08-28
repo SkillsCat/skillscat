@@ -50,6 +50,15 @@ export interface GithubEventsEnv extends BaseEnv {
   GITHUB_SEARCH_BACKFILL_MIN_REMAINING?: string;
   GITHUB_SEARCH_BACKFILL_RESERVE?: string;
   GITHUB_SEARCH_BACKFILL_MAX_PAGES?: string;
+  X_BEARER_TOKEN?: string;
+  X_SEARCH_ENABLED?: string;
+  X_SEARCH_QUERY?: string;
+  X_SEARCH_MAX_RESULTS?: string;
+  X_SEARCH_MAX_TWEETS?: string;
+  X_SEARCH_INTERVAL_SECONDS?: string;
+  X_SEARCH_MAX_QUEUED_REPOS?: string;
+  X_SEARCH_MAX_REQUESTS_PER_DAY?: string;
+  X_SEARCH_MAX_REQUESTS_PER_MONTH?: string;
 }
 
 export interface IndexingEnv extends BaseEnv {
