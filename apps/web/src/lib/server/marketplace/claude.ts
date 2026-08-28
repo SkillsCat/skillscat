@@ -1,8 +1,15 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { SITE_URL } from '$lib/seo/constants';
 import { buildSkillPath, parseSkillSlug } from '$lib/skill-path';
+import { getCached } from '$lib/server/cache';
 
 const MARKETPLACE_NAME = 'SkillsCat Marketplace';
+// Claude marketplace clients need a bounded manifest. Returning the entire
+// registry would make the Worker serialize tens of thousands of plugins and
+// can exceed response/CPU limits as the catalog grows.
+const MAX_MARKETPLACE_PLUGINS = 1000;
+const MARKETPLACE_CACHE_KEY = 'marketplace:claude:v1';
+const MARKETPLACE_CACHE_TTL_SECONDS = 10 * 60;
 const GITHUB_SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
 interface MarketplaceSkillRow {
@@ -243,6 +250,7 @@ async function fetchMarketplaceSkills(db: D1Database): Promise<MarketplaceSkillR
       AND s.repo_name IS NOT NULL
       AND s.repo_name != ''
     ORDER BY s.trending_score DESC, s.updated_at DESC, s.slug ASC
+    LIMIT ${MAX_MARKETPLACE_PLUGINS}
   `).all<MarketplaceSkillRow>();
 
   return result.results || [];
@@ -261,6 +269,7 @@ function buildMarketplacePayload(rows: MarketplaceSkillRow[]): ClaudeMarketplace
 
 export async function resolveClaudeMarketplace({
   db,
+  waitUntil,
 }: {
   db: D1Database | undefined;
   waitUntil?: (promise: Promise<unknown>) => void;
@@ -275,10 +284,17 @@ export async function resolveClaudeMarketplace({
     };
   }
 
+  const { data, hit } = await getCached(
+    MARKETPLACE_CACHE_KEY,
+    async () => buildMarketplacePayload(await fetchMarketplaceSkills(db)),
+    MARKETPLACE_CACHE_TTL_SECONDS,
+    { waitUntil }
+  );
+
   return {
-    data: buildMarketplacePayload(await fetchMarketplaceSkills(db)),
+    data,
     cacheControl: 'private, no-cache',
-    cacheStatus: 'BYPASS',
+    cacheStatus: hit ? 'HIT' : 'MISS',
     status: 200,
   };
 }

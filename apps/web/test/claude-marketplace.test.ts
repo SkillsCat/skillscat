@@ -69,6 +69,7 @@ describe('claude marketplace mapping', () => {
       prepare: vi.fn((sql: string) => ({
         all: async () => {
           expect(sql).toContain("WHERE s.visibility = 'public'");
+          expect(sql).toContain('LIMIT 1000');
           return {
             results: [{
               slug: 'test-owner/demo-skill',
@@ -88,7 +89,7 @@ describe('claude marketplace mapping', () => {
     const { resolveClaudeMarketplace } = await import('../src/lib/server/marketplace/claude');
     const result = await resolveClaudeMarketplace({ db: db as never });
 
-    expect(result.cacheStatus).toBe('BYPASS');
+    expect(result.cacheStatus).toBe('MISS');
     expect(result.cacheControl).toBe('private, no-cache');
     expect(result.data?.plugins).toHaveLength(1);
   });
