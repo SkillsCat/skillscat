@@ -108,7 +108,7 @@
       <div class="flex items-center gap-4">
         <LocaleSwitcher />
         <a
-          href="https://github.com/backrunner/skillscat"
+          href="https://github.com/skillscat/skillscat"
           target="_blank"
           rel="noopener noreferrer"
           class="text-fg-subtle hover:text-fg transition-colors"

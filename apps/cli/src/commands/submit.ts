@@ -343,7 +343,7 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
       if (result.code === 'no_skill_md_found') {
         console.log();
         console.log(pc.dim('Make sure your repository has a SKILL.md file in the repository root or a supported subdirectory, including dot folders.'));
-        console.log(pc.dim('Learn more: https://skillscat.com/docs/skill-format'));
+        console.log(pc.dim('Learn more: https://skills.cat/docs/cli#publish-and-submit'));
       }
       if (result.code === 'fork_no_unique_commits') {
         console.log();
