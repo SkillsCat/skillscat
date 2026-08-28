@@ -13,3 +13,19 @@ Disallow: /registry/
 Disallow: /openclaw/api/
 Disallow: /.well-known/
 Disallow: /openclaw/.well-known/
+
+# AI answer/search crawlers may read the public HTML and machine discovery
+# documents. Keep operational APIs out of crawl queues and search indexes.
+User-agent: OAI-SearchBot
+User-agent: Claude-SearchBot
+User-agent: PerplexityBot
+Allow: /
+Allow: /llm.txt
+Allow: /llms.txt
+Allow: /.well-known/agent-card.json
+Allow: /.well-known/api-catalog
+Disallow: /api/
+Disallow: /registry/
+Disallow: /openclaw/api/
+Disallow: /.well-known/
+Disallow: /openclaw/.well-known/

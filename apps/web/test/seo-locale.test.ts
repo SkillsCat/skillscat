@@ -48,6 +48,7 @@ describe('shouldUseDefaultLocaleForIndexablePage', () => {
     expect(shouldUseDefaultLocaleForIndexablePage('/sitemap.xml', 'GET')).toBe(false);
     expect(shouldUseDefaultLocaleForIndexablePage('/api/search', 'GET')).toBe(false);
     expect(shouldUseDefaultLocaleForIndexablePage('/llm.txt', 'GET')).toBe(false);
+    expect(shouldUseDefaultLocaleForIndexablePage('/llms.txt', 'GET')).toBe(false);
     expect(shouldUseDefaultLocaleForIndexablePage('/trending', 'POST')).toBe(false);
   });
 });

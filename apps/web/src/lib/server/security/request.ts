@@ -84,6 +84,8 @@ const ALLOWED_CRAWLER_UA = [
   /\bgptbot\b/i,
   /\bchatgpt-user\b/i,
   /\boai-searchbot\b/i,
+  /\bclaude-searchbot\b/i,
+  /\bclaude-user\b/i,
   /\bperplexitybot\b/i,
   /\bclaudebot\b/i,
   /\banthropic-ai\b/i,

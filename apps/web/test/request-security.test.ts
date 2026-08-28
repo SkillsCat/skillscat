@@ -120,6 +120,25 @@ describe('request security', () => {
     }
   });
 
+  it('allows AI search crawler variants on protected machine endpoints', async () => {
+    const userAgents = [
+      'Mozilla/5.0 (compatible; Claude-SearchBot/1.0; +https://www.anthropic.com)',
+      'Claude-User/1.0',
+      'PerplexityBot/1.0',
+      'OAI-SearchBot/1.4',
+    ];
+
+    for (const userAgent of userAgents) {
+      const response = await runRequestSecurity(createEvent({
+        pathname: '/api/skills/testowner%2Fdemo/files',
+        routeId: '/api/skills/[slug]/files',
+        userAgent,
+      }));
+
+      expect(response).toBeNull();
+    }
+  });
+
   it('does not apply native UA protection to OpenClaw compat endpoints', async () => {
     const response = await runRequestSecurity(createEvent({
       pathname: '/openclaw/api/v1/search',

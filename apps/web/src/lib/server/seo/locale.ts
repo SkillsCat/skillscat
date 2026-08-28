@@ -14,6 +14,7 @@ const NON_HTML_EXACT_PATHS = new Set([
   '/mcp',
   '/sitemap.xml',
   '/llm.txt',
+  '/llms.txt',
   '/marketplace.json',
 ]);
 

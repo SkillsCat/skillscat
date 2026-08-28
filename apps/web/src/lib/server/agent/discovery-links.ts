@@ -7,11 +7,13 @@ export const API_CATALOG_CONTENT_TYPE =
   `application/linkset+json; profile="${API_CATALOG_PROFILE}"`;
 
 const MACHINE_GUIDE_PATH = '/llm.txt';
+const MACHINE_GUIDE_COMPAT_PATH = '/llms.txt';
 const SERVICE_DOC_PATH = '/docs';
 
 export const HOME_AGENT_DISCOVERY_LINK_HEADER = [
   `<${API_CATALOG_PATH}>; rel="api-catalog"; type="application/linkset+json"`,
   `<${MACHINE_GUIDE_PATH}>; rel="service-desc"; type="text/plain"`,
+  `<${MACHINE_GUIDE_COMPAT_PATH}>; rel="alternate"; type="text/plain"`,
   `<${SERVICE_DOC_PATH}>; rel="service-doc"; type="text/html"`,
   `<${MACHINE_GUIDE_PATH}>; rel="describedby"; type="text/plain"`,
 ].join(', ');

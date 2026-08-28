@@ -10,6 +10,10 @@ declare global {
         KV: KVNamespace;
         STATE_DO?: DurableObjectNamespace;
         PUBLIC_APP_URL?: string;
+        /** Cloudflare Access team-domain/OIDC issuer for protected-resource metadata. */
+        CLOUDFLARE_ACCESS_ISSUER?: string;
+        CLOUDFLARE_ACCESS_TEAM_DOMAIN?: string;
+        CF_ACCESS_TEAM_DOMAIN?: string;
         INDEXING_QUEUE: Queue;
         CLASSIFICATION_QUEUE: Queue;
         CLASSIFICATION_ANALYTICS?: AnalyticsEngineDataset;
