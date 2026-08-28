@@ -543,6 +543,13 @@ function maybeWriteDiscoveryHtmlCache(
     return;
   }
 
+  // Pages signal error states through the status-override header while the
+  // response itself is still a 200. Caching one would serve a stale error
+  // page as a fresh 200, so never write them to the shared cache.
+  if (response.headers.has(STATUS_OVERRIDE_HEADER)) {
+    return;
+  }
+
   const cacheKey = resolvePublicDiscoveryHtmlCacheKey(event);
   if (!cacheKey) {
     return;

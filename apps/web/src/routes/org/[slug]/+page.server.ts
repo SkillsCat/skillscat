@@ -1,5 +1,4 @@
 import type { PageServerLoad } from './$types';
-import { setPublicPageCache } from '$lib/server/cache/page';
 import {
   resolveOrgPagePayload,
   type OrgPageErrorKind,
@@ -9,17 +8,11 @@ import {
 } from '$lib/server/org/page';
 import { redirect } from '@sveltejs/kit';
 
-export const load: PageServerLoad = async ({ params, platform, setHeaders, locals, request }) => {
-  setPublicPageCache({
-    setHeaders,
-    request,
-    isAuthenticated: Boolean(locals.user),
-    sMaxAge: 120,
-    staleWhileRevalidate: 600,
-    varyByLanguageHeader: false,
-  });
+export const load: PageServerLoad = async ({ params, platform, setHeaders, locals }) => {
   // The page embeds a mutable public skill list. Keep the server-side snapshot
   // cache, but never let a generic edge cache outlive a visibility mutation.
+  // Note: setHeaders throws when Cache-Control is set twice, so this must be
+  // the only place this load sets it.
   setHeaders({
     'Cache-Control': 'no-store',
     'CDN-Cache-Control': 'no-store',
