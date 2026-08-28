@@ -7,9 +7,18 @@ import githubEventsWorker from '../workers/github-events';
 import {
   buildRepoQueuedDedupIdentity,
   computeAllowedSearchPages,
+  extractGitHubReposFromBskyPost,
+  extractGitHubReposFromText,
   extractGitHubReposFromTweet,
+  extractReposFromGitHubTopicsHtml,
+  getAwesomeListsDiscoveryConfig,
+  getBskySearchDiscoveryConfig,
+  getGithubTopicsDiscoveryConfig,
   loadKnownGitHubRepoIdentities,
   parseGitHubRepoUrl,
+  processAwesomeListsDiscovery,
+  processBskySearchDiscovery,
+  processGithubTopicsDiscovery,
   reserveXSearchRequest,
   shouldRunSearchDiscoveryThisTick,
 } from '../workers/github-events';
@@ -1146,5 +1155,486 @@ describe('github-events HTML repo search discovery', () => {
 
     expect(sent).toEqual([]);
     expect(warnSpy).toHaveBeenCalled();
+  });
+});
+
+function seedDiscoveryRunLock(kv: MemoryKv, token: string = 'test-lock'): void {
+  const now = Date.now();
+  kv.store.set('github-discovery:run-lock', JSON.stringify({
+    token,
+    acquiredAtEpochMs: now,
+    expiresAtEpochMs: now + 240_000,
+  }));
+}
+
+function freshDedupeState() {
+  return {
+    recentUntilByIdentity: new Map<string, number>(),
+    queuedInRun: new Set<string>(),
+    dirty: false,
+  } as never;
+}
+
+function knownReposDb(known: Array<[string, string]>): D1Database {
+  return {
+    prepare: () => ({
+      bind: () => ({
+        all: async () => ({
+          results: known.map(([repoOwner, repoName]) => ({ repoOwner, repoName })),
+        }),
+      }),
+    }),
+  } as unknown as D1Database;
+}
+
+describe('github-events topics discovery', () => {
+  it('extracts two-segment repository links from a topics page and skips reserved paths', () => {
+    const html = [
+      '<a href="/Acme/Toolbox">repo</a>',
+      '<a href="/acme/toolbox">duplicate</a>',
+      '<a href="/Other/Skill.git">repo</a>',
+      '<a href="/topics/claude-skills">reserved</a>',
+      '<a href="/login/oauth">reserved</a>',
+      '<a href="/marketplace/actions">reserved</a>',
+      '<a href="/explore">one segment</a>',
+      '<a href="/Acme/Toolbox/issues">three segments</a>',
+      '<a href="/Acme/Bad%20Name">invalid chars</a>',
+    ].join('');
+
+    expect(extractReposFromGitHubTopicsHtml(html)).toEqual([
+      { owner: 'Acme', name: 'Toolbox' },
+      { owner: 'Other', name: 'Skill' },
+    ]);
+  });
+
+  it('parses topics discovery config defaults and overrides', () => {
+    const defaults = getGithubTopicsDiscoveryConfig({} as never);
+    expect(defaults).toEqual({
+      enabled: true,
+      topics: ['claude-code-skill', 'claude-skills', 'agent-skills'],
+      pagesPerTopic: 2,
+      intervalSeconds: 3600,
+      maxQueuedRepos: 50,
+      cronIntervalSeconds: 300,
+    });
+
+    const overrides = getGithubTopicsDiscoveryConfig({
+      GITHUB_TOPICS_ENABLED: '0',
+      GITHUB_TOPICS_LIST: 'topic-a, topic-b',
+      GITHUB_TOPICS_PAGES_PER_TOPIC: '9',
+      GITHUB_TOPICS_INTERVAL_SECONDS: '60',
+      GITHUB_TOPICS_MAX_QUEUED_REPOS: '5',
+    } as never);
+    expect(overrides.enabled).toBe(false);
+    expect(overrides.topics).toEqual(['topic-a', 'topic-b']);
+    expect(overrides.pagesPerTopic).toBe(5);
+    expect(overrides.intervalSeconds).toBe(60);
+    expect(overrides.maxQueuedRepos).toBe(5);
+  });
+
+  it('skips topics discovery when disabled without fetching', async () => {
+    const kv = new MemoryKv();
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const send = vi.fn(async () => undefined);
+
+    const result = await processGithubTopicsDiscovery(
+      {
+        KV: kv as never,
+        INDEXING_QUEUE: { send },
+        GITHUB_TOPICS_ENABLED: '0',
+      } as never,
+      freshDedupeState(),
+      'test-lock'
+    );
+
+    expect(result).toEqual({ scanned: 0, queued: 0, pagesFetched: 0, skippedReason: 'disabled' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('queues no repositories when topics pages contain no repo links', async () => {
+    const kv = new MemoryKv();
+    seedDiscoveryRunLock(kv);
+    const send = vi.fn(async () => undefined);
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = requestUrl(input);
+      if (url.startsWith('https://github.com/topics/')) {
+        return new Response('<a href="/topics/other">reserved</a>', { status: 200 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const result = await processGithubTopicsDiscovery(
+      {
+        KV: kv as never,
+        DB: knownReposDb([]),
+        INDEXING_QUEUE: { send },
+        GITHUB_TOPICS_LIST: 'claude-code-skill',
+        GITHUB_TOPICS_PAGES_PER_TOPIC: '1',
+        GITHUB_TOPICS_INTERVAL_SECONDS: '1',
+      } as never,
+      freshDedupeState(),
+      'test-lock'
+    );
+
+    expect(result).toEqual({ scanned: 0, queued: 0, pagesFetched: 1 });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('queues only unknown topics candidates within the dedupe window', async () => {
+    const kv = new MemoryKv();
+    seedDiscoveryRunLock(kv);
+    const sent: unknown[] = [];
+    const state = {
+      recentUntilByIdentity: new Map<string, number>(),
+      queuedInRun: new Set<string>(),
+      dirty: false,
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = requestUrl(input);
+      if (url.startsWith('https://github.com/topics/')) {
+        return new Response(
+          '<a href="/Known/Repo">k</a><a href="/Fresh/Repo">f</a><a href="/Recently/Queued">r</a>',
+          { status: 200 }
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const nowMs = Date.now();
+    state.recentUntilByIdentity.set('recently/queued:', nowMs + 60_000);
+
+    const result = await processGithubTopicsDiscovery(
+      {
+        KV: kv as never,
+        DB: knownReposDb([['Known', 'Repo']]),
+        INDEXING_QUEUE: { send: async (message: unknown) => sent.push(message) },
+        GITHUB_TOPICS_LIST: 'claude-code-skill',
+        GITHUB_TOPICS_PAGES_PER_TOPIC: '1',
+        GITHUB_TOPICS_INTERVAL_SECONDS: '1',
+      } as never,
+      state as never,
+      'test-lock',
+      nowMs
+    );
+
+    expect(result).toEqual({ scanned: 3, queued: 1, pagesFetched: 1 });
+    expect(sent).toEqual([
+      expect.objectContaining({
+        type: 'check_skill',
+        repoOwner: 'Fresh',
+        repoName: 'Repo',
+        discoverySource: 'github-topics',
+      }),
+    ]);
+    expect(state.queuedInRun.has('fresh/repo:')).toBe(true);
+  });
+});
+
+describe('github-events awesome lists discovery', () => {
+  it('extracts repository links from arbitrary markdown text', () => {
+    const text = [
+      '- [Toolbox](https://github.com/Acme/Toolbox) - skills',
+      '- duplicate https://github.com/acme/toolbox',
+      '- issues link https://github.com/Acme/Toolbox/issues/1',
+      '- other host https://gitlab.com/Acme/Toolbox',
+      '- dot git https://github.com/Other/Skill.git',
+    ].join('\n');
+
+    expect(extractGitHubReposFromText(text)).toEqual([
+      { owner: 'Acme', name: 'Toolbox' },
+      { owner: 'Other', name: 'Skill' },
+    ]);
+  });
+
+  it('parses awesome lists config defaults and overrides', () => {
+    const defaults = getAwesomeListsDiscoveryConfig({} as never);
+    expect(defaults.enabled).toBe(true);
+    expect(defaults.urls).toEqual([
+      'https://raw.githubusercontent.com/hesreallyhim/awesome-claude-code/main/README.md',
+    ]);
+    expect(defaults.intervalSeconds).toBe(86400);
+    expect(defaults.maxQueuedRepos).toBe(50);
+    expect(defaults.maxLists).toBe(5);
+
+    const overrides = getAwesomeListsDiscoveryConfig({
+      AWESOME_LISTS_ENABLED: '0',
+      AWESOME_LIST_URLS: 'https://a.example/one.md, https://a.example/two.md, https://a.example/three.md',
+      AWESOME_LISTS_MAX_LISTS: '2',
+      AWESOME_LISTS_INTERVAL_SECONDS: '3600',
+      AWESOME_LISTS_MAX_QUEUED_REPOS: '10',
+    } as never);
+    expect(overrides.enabled).toBe(false);
+    expect(overrides.urls).toEqual(['https://a.example/one.md', 'https://a.example/two.md']);
+    expect(overrides.intervalSeconds).toBe(3600);
+    expect(overrides.maxQueuedRepos).toBe(10);
+  });
+
+  it('skips awesome lists discovery when disabled without fetching', async () => {
+    const kv = new MemoryKv();
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const send = vi.fn(async () => undefined);
+
+    const result = await processAwesomeListsDiscovery(
+      {
+        KV: kv as never,
+        INDEXING_QUEUE: { send },
+        AWESOME_LISTS_ENABLED: '0',
+      } as never,
+      freshDedupeState(),
+      'test-lock'
+    );
+
+    expect(result).toEqual({ scanned: 0, queued: 0, listsFetched: 0, skippedReason: 'disabled' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('reports request_failed when every awesome list fetch fails', async () => {
+    const kv = new MemoryKv();
+    seedDiscoveryRunLock(kv);
+    const send = vi.fn(async () => undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('nope', { status: 404 }));
+
+    const result = await processAwesomeListsDiscovery(
+      {
+        KV: kv as never,
+        DB: knownReposDb([]),
+        INDEXING_QUEUE: { send },
+        AWESOME_LIST_URLS: 'https://example.com/awesome.md',
+        AWESOME_LISTS_INTERVAL_SECONDS: '1',
+      } as never,
+      freshDedupeState(),
+      'test-lock'
+    );
+
+    expect(result).toEqual({ scanned: 0, queued: 0, listsFetched: 0, skippedReason: 'request_failed' });
+    expect(send).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('queues unknown repositories found in awesome list markdown', async () => {
+    const kv = new MemoryKv();
+    seedDiscoveryRunLock(kv);
+    const sent: unknown[] = [];
+    const markdown = [
+      '# Awesome',
+      '- [Known](https://github.com/Known/Repo)',
+      '- [Fresh](https://github.com/Fresh/Repo) - new skills',
+    ].join('\n');
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = requestUrl(input);
+      if (url === 'https://example.com/awesome.md') {
+        return new Response(markdown, { status: 200 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const result = await processAwesomeListsDiscovery(
+      {
+        KV: kv as never,
+        DB: knownReposDb([['Known', 'Repo']]),
+        INDEXING_QUEUE: { send: async (message: unknown) => sent.push(message) },
+        AWESOME_LIST_URLS: 'https://example.com/awesome.md',
+        AWESOME_LISTS_INTERVAL_SECONDS: '1',
+      } as never,
+      freshDedupeState(),
+      'test-lock'
+    );
+
+    expect(result).toEqual({ scanned: 2, queued: 1, listsFetched: 1 });
+    expect(sent).toEqual([
+      expect.objectContaining({
+        type: 'check_skill',
+        repoOwner: 'Fresh',
+        repoName: 'Repo',
+        discoverySource: 'awesome-lists',
+      }),
+    ]);
+  });
+});
+
+describe('github-events bluesky search discovery', () => {
+  it('extracts repository links from post text and link facets', () => {
+    const repos = extractGitHubReposFromBskyPost({
+      uri: 'at://did:plc:abc/app.bsky.feed.post/xyz',
+      record: {
+        text: 'new SKILL.md at https://github.com/Acme/Toolbox and duplicate https://github.com/acme/toolbox',
+        facets: [
+          {
+            features: [
+              { $type: 'app.bsky.richtext.facet#link', uri: 'https://github.com/Facet/Repo' },
+              { $type: 'app.bsky.richtext.facet#mention', did: 'did:plc:someone' },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(repos).toEqual([
+      { owner: 'Acme', name: 'Toolbox' },
+      { owner: 'Facet', name: 'Repo' },
+    ]);
+    expect(extractGitHubReposFromBskyPost({ uri: 'at://empty', record: { text: 'no links' } })).toEqual([]);
+  });
+
+  it('parses bluesky search config defaults and overrides', () => {
+    const defaults = getBskySearchDiscoveryConfig({} as never);
+    expect(defaults).toEqual({
+      enabled: false,
+      query: '"SKILL.md" github',
+      intervalSeconds: 900,
+      maxResults: 50,
+      maxQueuedRepos: 50,
+      cronIntervalSeconds: 300,
+    });
+
+    const overrides = getBskySearchDiscoveryConfig({
+      BSKY_SEARCH_ENABLED: '1',
+      BSKY_SEARCH_QUERY: 'agent skills',
+      BSKY_SEARCH_INTERVAL_SECONDS: '60',
+      BSKY_SEARCH_MAX_RESULTS: '500',
+      BSKY_SEARCH_MAX_QUEUED_REPOS: '10',
+    } as never);
+    expect(overrides.enabled).toBe(true);
+    expect(overrides.query).toBe('agent skills');
+    expect(overrides.intervalSeconds).toBe(60);
+    expect(overrides.maxResults).toBe(100);
+    expect(overrides.maxQueuedRepos).toBe(10);
+  });
+
+  it('skips bluesky search when disabled without fetching', async () => {
+    const kv = new MemoryKv();
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const send = vi.fn(async () => undefined);
+
+    const result = await processBskySearchDiscovery(
+      {
+        KV: kv as never,
+        INDEXING_QUEUE: { send },
+      } as never,
+      freshDedupeState(),
+      'test-lock'
+    );
+
+    expect(result).toEqual({ scanned: 0, queued: 0, posts: 0, skippedReason: 'disabled' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('maps bluesky 403 responses to auth_required without advancing the cursor', async () => {
+    const kv = new MemoryKv();
+    seedDiscoveryRunLock(kv);
+    const send = vi.fn(async () => undefined);
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = requestUrl(input);
+      if (url.startsWith('https://api.bsky.app/xrpc/app.bsky.feed.searchPosts?')) {
+        return new Response('forbidden', { status: 403 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const result = await processBskySearchDiscovery(
+      {
+        KV: kv as never,
+        INDEXING_QUEUE: { send },
+        BSKY_SEARCH_ENABLED: '1',
+        BSKY_SEARCH_INTERVAL_SECONDS: '1',
+      } as never,
+      freshDedupeState(),
+      'test-lock'
+    );
+
+    expect(result).toEqual({ scanned: 0, queued: 0, posts: 0, skippedReason: 'auth_required' });
+    expect(send).not.toHaveBeenCalled();
+    expect(kv.store.has('github-events:bsky-search:since')).toBe(false);
+  });
+
+  it('queues unknown repositories and advances the since cursor on success', async () => {
+    const kv = new MemoryKv();
+    seedDiscoveryRunLock(kv);
+    const sent: unknown[] = [];
+    const nowMs = Date.parse('2026-08-28T12:00:00Z');
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = requestUrl(input);
+      if (url.startsWith('https://api.bsky.app/xrpc/app.bsky.feed.searchPosts?')) {
+        return jsonResponse({
+          posts: [
+            {
+              uri: 'at://did:plc:abc/app.bsky.feed.post/xyz',
+              record: { text: 'try https://github.com/Fresh/BskyRepo' },
+            },
+            {
+              uri: 'at://did:plc:abc/app.bsky.feed.post/known',
+              record: {
+                text: 'known repo',
+                facets: [
+                  { features: [{ $type: 'app.bsky.richtext.facet#link', uri: 'https://github.com/Known/Repo' }] },
+                ],
+              },
+            },
+            { uri: 'at://did:plc:abc/app.bsky.feed.post/none', record: { text: 'no links here' } },
+          ],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const result = await processBskySearchDiscovery(
+      {
+        KV: kv as never,
+        DB: knownReposDb([['Known', 'Repo']]),
+        INDEXING_QUEUE: { send: async (message: unknown) => sent.push(message) },
+        BSKY_SEARCH_ENABLED: '1',
+        BSKY_SEARCH_INTERVAL_SECONDS: '1',
+      } as never,
+      freshDedupeState(),
+      'test-lock',
+      nowMs
+    );
+
+    expect(result).toEqual({ scanned: 2, queued: 1, posts: 3 });
+    expect(sent).toEqual([
+      expect.objectContaining({
+        type: 'check_skill',
+        repoOwner: 'Fresh',
+        repoName: 'BskyRepo',
+        discoverySource: 'bluesky-search',
+        discoveryFingerprint: 'bsky:at://did:plc:abc/app.bsky.feed.post/xyz',
+      }),
+    ]);
+    expect(kv.store.get('github-events:bsky-search:since')).toBe('2026-08-28T12:00:00.000Z');
+  });
+
+  it('advances the since cursor even when no post yields a repository', async () => {
+    const kv = new MemoryKv();
+    seedDiscoveryRunLock(kv);
+    const send = vi.fn(async () => undefined);
+    const nowMs = Date.parse('2026-08-28T13:00:00Z');
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({ posts: [] }));
+
+    const result = await processBskySearchDiscovery(
+      {
+        KV: kv as never,
+        INDEXING_QUEUE: { send },
+        BSKY_SEARCH_ENABLED: '1',
+        BSKY_SEARCH_INTERVAL_SECONDS: '1',
+      } as never,
+      freshDedupeState(),
+      'test-lock',
+      nowMs
+    );
+
+    expect(result).toEqual({ scanned: 0, queued: 0, posts: 0 });
+    expect(send).not.toHaveBeenCalled();
+    expect(kv.store.get('github-events:bsky-search:since')).toBe('2026-08-28T13:00:00.000Z');
   });
 });

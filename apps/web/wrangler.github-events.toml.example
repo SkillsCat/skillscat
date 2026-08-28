@@ -5,6 +5,9 @@
 #   2. Code Search 追头（sort=indexed）+ 日期切片回填（created:<date>..<date>），严格受 search 预算约束
 #   3. HTML 仓库搜索爬虫（github.com/search），零 API 配额，入队前用 raw/HEAD/SKILL.md 校验候选
 #   4. X Recent Search（需要 X_BEARER_TOKEN secret），从推文链接发现仓库
+#   5. GitHub Topics HTML 爬虫（github.com/topics），零 API 配额
+#   6. Awesome 列表解析（raw markdown），零 API 配额
+#   7. Bluesky 搜索（无鉴权，属非官方容忍行为，默认禁用）
 # GitHub API 鉴权请通过 wrangler secret 设置 `GITHUB_TOKEN` 或 `GITHUB_TOKENS`
 
 name = "skillscat-github-events"
@@ -84,6 +87,24 @@ X_SEARCH_INTERVAL_SECONDS = "900"
 X_SEARCH_MAX_QUEUED_REPOS = "50"
 X_SEARCH_MAX_REQUESTS_PER_DAY = "1"
 X_SEARCH_MAX_REQUESTS_PER_MONTH = "30"
+# GitHub Topics HTML 爬虫：零 API 配额，抓 topics 页面发现仓库
+GITHUB_TOPICS_ENABLED = "1"
+GITHUB_TOPICS_LIST = "claude-code-skill,claude-skills,agent-skills"
+GITHUB_TOPICS_PAGES_PER_TOPIC = "2"
+GITHUB_TOPICS_INTERVAL_SECONDS = "3600"
+GITHUB_TOPICS_MAX_QUEUED_REPOS = "50"
+# Awesome 列表解析：零 API 配额，从 raw markdown 中提取 GitHub 仓库链接
+AWESOME_LISTS_ENABLED = "1"
+AWESOME_LIST_URLS = "https://raw.githubusercontent.com/hesreallyhim/awesome-claude-code/main/README.md"
+AWESOME_LISTS_INTERVAL_SECONDS = "86400"
+AWESOME_LISTS_MAX_QUEUED_REPOS = "50"
+AWESOME_LISTS_MAX_LISTS = "5"
+# Bluesky 搜索：无鉴权访问属于 Bluesky 非官方容忍行为，随时可能 403，默认禁用
+BSKY_SEARCH_ENABLED = "0"
+BSKY_SEARCH_QUERY = '"SKILL.md" github'
+BSKY_SEARCH_INTERVAL_SECONDS = "900"
+BSKY_SEARCH_MAX_RESULTS = "50"
+BSKY_SEARCH_MAX_QUEUED_REPOS = "50"
 GITHUB_SEARCH_BACKFILL_ENABLED = "1"
 GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS = "3600"
 GITHUB_SEARCH_BACKFILL_START_DATE = "2025-01-01"
@@ -150,6 +171,24 @@ X_SEARCH_INTERVAL_SECONDS = "900"
 X_SEARCH_MAX_QUEUED_REPOS = "50"
 X_SEARCH_MAX_REQUESTS_PER_DAY = "1"
 X_SEARCH_MAX_REQUESTS_PER_MONTH = "30"
+# GitHub Topics HTML 爬虫：零 API 配额，抓 topics 页面发现仓库
+GITHUB_TOPICS_ENABLED = "1"
+GITHUB_TOPICS_LIST = "claude-code-skill,claude-skills,agent-skills"
+GITHUB_TOPICS_PAGES_PER_TOPIC = "2"
+GITHUB_TOPICS_INTERVAL_SECONDS = "3600"
+GITHUB_TOPICS_MAX_QUEUED_REPOS = "50"
+# Awesome 列表解析：零 API 配额，从 raw markdown 中提取 GitHub 仓库链接
+AWESOME_LISTS_ENABLED = "1"
+AWESOME_LIST_URLS = "https://raw.githubusercontent.com/hesreallyhim/awesome-claude-code/main/README.md"
+AWESOME_LISTS_INTERVAL_SECONDS = "86400"
+AWESOME_LISTS_MAX_QUEUED_REPOS = "50"
+AWESOME_LISTS_MAX_LISTS = "5"
+# Bluesky 搜索：无鉴权访问属于 Bluesky 非官方容忍行为，随时可能 403，默认禁用
+BSKY_SEARCH_ENABLED = "0"
+BSKY_SEARCH_QUERY = '"SKILL.md" github'
+BSKY_SEARCH_INTERVAL_SECONDS = "900"
+BSKY_SEARCH_MAX_RESULTS = "50"
+BSKY_SEARCH_MAX_QUEUED_REPOS = "50"
 GITHUB_SEARCH_BACKFILL_ENABLED = "1"
 GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS = "3600"
 GITHUB_SEARCH_BACKFILL_START_DATE = "2025-01-01"

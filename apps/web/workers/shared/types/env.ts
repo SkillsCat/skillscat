@@ -59,6 +59,21 @@ export interface GithubEventsEnv extends BaseEnv {
   X_SEARCH_MAX_QUEUED_REPOS?: string;
   X_SEARCH_MAX_REQUESTS_PER_DAY?: string;
   X_SEARCH_MAX_REQUESTS_PER_MONTH?: string;
+  GITHUB_TOPICS_ENABLED?: string;
+  GITHUB_TOPICS_LIST?: string;
+  GITHUB_TOPICS_PAGES_PER_TOPIC?: string;
+  GITHUB_TOPICS_INTERVAL_SECONDS?: string;
+  GITHUB_TOPICS_MAX_QUEUED_REPOS?: string;
+  AWESOME_LISTS_ENABLED?: string;
+  AWESOME_LIST_URLS?: string;
+  AWESOME_LISTS_INTERVAL_SECONDS?: string;
+  AWESOME_LISTS_MAX_QUEUED_REPOS?: string;
+  AWESOME_LISTS_MAX_LISTS?: string;
+  BSKY_SEARCH_ENABLED?: string;
+  BSKY_SEARCH_QUERY?: string;
+  BSKY_SEARCH_INTERVAL_SECONDS?: string;
+  BSKY_SEARCH_MAX_RESULTS?: string;
+  BSKY_SEARCH_MAX_QUEUED_REPOS?: string;
 }
 
 export interface IndexingEnv extends BaseEnv {
