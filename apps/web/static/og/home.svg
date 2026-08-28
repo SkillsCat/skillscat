@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <clipPath id="cardClip">
+      <rect x="40" y="36" width="1120" height="558" rx="16"/>
+    </clipPath>
+    <clipPath id="mascotClip">
+      <circle cx="972" cy="302" r="158"/>
+    </clipPath>
+  </defs>
+
+  <!-- background -->
+  <rect width="1200" height="630" fill="#f7f3ee"/>
+
+  <!-- hero card: hard sketch shadow + sketch border, matching homepage hero-card -->
+  <rect x="46" y="42" width="1120" height="558" rx="16" fill="#c9a87a"/>
+  <rect x="40" y="36" width="1120" height="558" rx="16" fill="#fdfcfa" stroke="#c9a87a" stroke-width="3"/>
+
+  <g clip-path="url(#cardClip)">
+    <!-- decorative corner circles, like the homepage hero -->
+    <circle cx="1160" cy="36" r="84" fill="#d4842a"/>
+    <circle cx="40" cy="594" r="64" fill="#d98cb3"/>
+
+    <!-- brand row -->
+    <image href="/favicon-128x128.png" x="96" y="80" width="56" height="56" preserveAspectRatio="xMidYMid meet"/>
+    <text x="168" y="117" font-family="Poppins, Arial, sans-serif" font-size="19" font-weight="800" letter-spacing="4" fill="#d4842a">SKILLSCAT</text>
+
+    <!-- headline -->
+    <text x="96" y="238" font-family="Poppins, Arial, sans-serif" font-size="62" font-weight="800" fill="#3d3830">AI agent skills,</text>
+    <text x="96" y="316" font-family="Poppins, Arial, sans-serif" font-size="62" font-weight="800" fill="#d4842a">ready to use.</text>
+
+    <!-- subtitle -->
+    <text x="96" y="372" font-family="Poppins, Arial, sans-serif" font-size="22" font-weight="500" fill="#6e6660">Discover, share, and install reusable agent skills.</text>
+
+    <!-- agent compatibility chips -->
+    <g font-family="Poppins, Arial, sans-serif" font-size="17" font-weight="600">
+      <rect x="96" y="404" width="142" height="38" rx="19" fill="#fdf0e2" stroke="#d4842a" stroke-width="2"/>
+      <text x="167" y="429" text-anchor="middle" fill="#d4842a">Claude Code</text>
+      <rect x="250" y="404" width="113" height="38" rx="19" fill="#fdfcfa" stroke="#c9a87a" stroke-width="2"/>
+      <text x="306" y="429" text-anchor="middle" fill="#6e6660">OpenClaw</text>
+      <rect x="375" y="404" width="103" height="38" rx="19" fill="#fdfcfa" stroke="#c9a87a" stroke-width="2"/>
+      <text x="426" y="429" text-anchor="middle" fill="#6e6660">ClawBot</text>
+      <rect x="490" y="404" width="161" height="38" rx="19" fill="#fdfcfa" stroke="#c9a87a" stroke-width="2"/>
+      <text x="570" y="429" text-anchor="middle" fill="#6e6660">+ more agents</text>
+    </g>
+
+    <!-- terminal command bar -->
+    <rect x="100" y="491" width="600" height="64" rx="14" fill="#c9a87a"/>
+    <rect x="96" y="486" width="600" height="64" rx="14" fill="#3d3830"/>
+    <circle cx="124" cy="518" r="5.5" fill="#d98cb3"/>
+    <circle cx="146" cy="518" r="5.5" fill="#f9a64d"/>
+    <circle cx="168" cy="518" r="5.5" fill="#fff4e8"/>
+    <text x="196" y="525" font-family="'JetBrains Mono', monospace" font-size="20" font-weight="700"><tspan fill="#d98cb3">$ </tspan><tspan fill="#fff4e8">npx skillscat add </tspan><tspan fill="#f9a64d">&lt;skill&gt;</tspan></text>
+
+    <!-- mascot badge: half-body artwork is clipped by the circle so its bottom edge never shows -->
+    <circle cx="972" cy="302" r="162" fill="#f9a64d" stroke="#fff4e8" stroke-width="5"/>
+    <image href="/favicon-512x512.png" x="822" y="172" width="300" height="300" clip-path="url(#mascotClip)" preserveAspectRatio="xMidYMid meet"/>
+
+    <!-- floating trending pill -->
+    <g transform="rotate(-7 890 160)">
+      <rect x="818" y="141" width="150" height="44" rx="22" fill="#c9a87a"/>
+      <rect x="815" y="138" width="150" height="44" rx="22" fill="#fdfcfa" stroke="#3d3830" stroke-width="3"/>
+      <path d="M0 -9 L2.6 -2.6 9 0 2.6 2.6 0 9 -2.6 2.6 -9 0 -2.6 -2.6 Z" transform="translate(845 160)" fill="#d4842a"/>
+      <text x="906" y="167" text-anchor="middle" font-family="Poppins, Arial, sans-serif" font-size="18" font-weight="800" fill="#3d3830">Trending</text>
+    </g>
+
+    <!-- sparkles -->
+    <path d="M0 -16 L4.5 -4.5 16 0 4.5 4.5 0 16 -4.5 4.5 -16 0 -4.5 -4.5 Z" transform="translate(830 420)" fill="#d4842a"/>
+    <path d="M0 -13 L3.5 -3.5 13 0 3.5 3.5 0 13 -3.5 3.5 -13 0 -3.5 -3.5 Z" transform="translate(1108 210)" fill="#d98cb3"/>
+    <path d="M0 -10 L3 -3 10 0 3 3 0 10 -3 3 -10 0 -3 -3 Z" transform="translate(1122 436)" fill="#d4842a"/>
+
+    <!-- domain pill -->
+    <rect x="1015" y="535" width="132" height="42" rx="21" fill="#c9a87a"/>
+    <rect x="1012" y="532" width="132" height="42" rx="21" fill="#d4842a"/>
+    <text x="1078" y="559" text-anchor="middle" font-family="Poppins, Arial, sans-serif" font-size="18" font-weight="700" fill="#fff4e8">skills.cat</text>
+  </g>
+</svg>

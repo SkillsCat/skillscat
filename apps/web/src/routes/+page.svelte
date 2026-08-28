@@ -13,7 +13,7 @@
     HeartbreakIcon
   } from '@hugeicons/core-free-icons';
   import type { SkillCardData } from '$lib/types';
-  import { buildOgImageUrl } from '$lib/seo/og';
+  import { HOME_OG_IMAGE_URL } from '$lib/seo/og';
   import { SITE_URL } from '$lib/seo/constants';
 
   interface Props {
@@ -29,7 +29,7 @@
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
   let displayCount = $derived(i18n.formatNumber(data.stats.totalSkills));
-  const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'home' });
+  const ogImageUrl = HOME_OG_IMAGE_URL;
   const homeTitle = 'SkillsCat | AI Agent Skill Registry and CLI';
   const homeDescription =
     'SkillsCat is an AI agent skill registry and CLI for discovering, installing, and publishing reusable skills for OpenClaw, ClawBot, Claude Code, and local agent workflows.';
