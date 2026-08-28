@@ -54,7 +54,7 @@
         '@type': 'Organization',
         name: 'SkillsCat',
         url: SITE_URL,
-        sameAs: ['https://github.com/backrunner/skillscat'],
+        sameAs: ['https://github.com/skillscat/skillscat'],
       },
     ],
   });

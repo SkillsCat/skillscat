@@ -7,7 +7,7 @@
   const description =
     'Documentation hub for SkillsCat: understand the product, learn the CLI, and connect OpenClaw to SkillsCat.';
   const ogImageUrl = buildOgImageUrl({ type: 'page', slug: 'docs' });
-  const repoUrl = 'https://github.com/backrunner/skillscat';
+  const repoUrl = 'https://github.com/skillscat/skillscat';
 
   const docs = [
     {

@@ -26,7 +26,7 @@ interface LegalCopy {
 }
 
 const GITHUB_REPO_LINK =
-  '<a href="https://github.com/backrunner/skillscat" target="_blank" rel="noopener noreferrer">GitHub repository</a>';
+  '<a href="https://github.com/skillscat/skillscat" target="_blank" rel="noopener noreferrer">GitHub repository</a>';
 
 const en = {
   privacy: {
