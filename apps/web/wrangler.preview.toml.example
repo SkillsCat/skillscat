@@ -65,6 +65,9 @@ queue = "skillscat-metrics"
 # Environment Variables (set via Cloudflare dashboard or wrangler secret)
 [vars]
 PUBLIC_APP_URL = "http://localhost:3000"
+# Set this to your Cloudflare Access team-domain/OIDC issuer in deployments
+# that use the default *.cloudflareaccess.com authorization server.
+# CLOUDFLARE_ACCESS_ISSUER = "https://<your-team-name>.cloudflareaccess.com"
 CACHE_VERSION = "v2"
 GITHUB_HTML_SUBMIT_FALLBACK_ENABLED = "1"
 SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
@@ -123,6 +126,7 @@ queue = "skillscat-metrics"
 
 [env.production.vars]
 PUBLIC_APP_URL = "https://your-domain.com"
+# CLOUDFLARE_ACCESS_ISSUER = "https://<your-team-name>.cloudflareaccess.com"
 CACHE_VERSION = "v2"
 GITHUB_HTML_SUBMIT_FALLBACK_ENABLED = "1"
 SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"

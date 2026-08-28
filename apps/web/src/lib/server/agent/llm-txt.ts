@@ -44,6 +44,7 @@ PURPOSE: Discover, inspect, and install AI agent skills.
 SUMMARY:
 SkillsCat is a registry and website for AI agent skills.
 Prefer the JSON endpoints below over scraping HTML pages.
+The standards-proposed /llms.txt filename is an alias for this canonical guide.
 Use the returned skill "slug" as the canonical identifier for follow-up requests and installs.
 Send a descriptive User-Agent on machine requests; missing or generic scraping UAs may be blocked by abuse protection.
 

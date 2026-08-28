@@ -13,6 +13,9 @@ describe('agent discovery links', () => {
     expect(HOME_AGENT_DISCOVERY_LINK_HEADER).toContain(
       `<${API_CATALOG_PATH}>; rel="api-catalog"`
     );
+    expect(HOME_AGENT_DISCOVERY_LINK_HEADER).toContain(
+      '</llms.txt>; rel="alternate"; type="text/plain"'
+    );
     expect(HOME_AGENT_DISCOVERY_LINK_HEADER).toContain('rel="service-desc"');
     expect(HOME_AGENT_DISCOVERY_LINK_HEADER).toContain('rel="service-doc"');
     expect(HOME_AGENT_DISCOVERY_LINK_HEADER).toContain('rel="describedby"');

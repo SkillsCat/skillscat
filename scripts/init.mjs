@@ -772,6 +772,9 @@ queue = "skillscat-metrics"
 
 [env.production.vars]
 PUBLIC_APP_URL = "https://your-domain.com"
+# Set this to your Cloudflare Access team-domain/OIDC issuer when Access
+# protects the deployed app (for example, https://<your-team-name>.cloudflareaccess.com).
+# CLOUDFLARE_ACCESS_ISSUER = "https://<your-team-name>.cloudflareaccess.com"
 CACHE_VERSION = "v2"
 GITHUB_HTML_SUBMIT_FALLBACK_ENABLED = "1"
 SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = "3600"
