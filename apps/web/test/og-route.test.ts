@@ -117,8 +117,8 @@ describe('og route caching', () => {
     expect(privateResponse.status).toBe(200);
     expect(privateResponse.headers.get('etag')).not.toBe(publicEtag);
     expect(cacheKeys).toEqual([
-      'og:image:2026-08-28:skill:acme%2Fdemo-skill:1712345678',
-      'og:image:2026-08-28:page:404:2026-08-28',
+      'og:image:2026-08-28.2:skill:acme%2Fdemo-skill:1712345678',
+      'og:image:2026-08-28.2:page:404:2026-08-28.2',
     ]);
   });
 
@@ -184,7 +184,7 @@ describe('og route caching', () => {
     expect(response.headers.get('x-cache')).toBe('MISS');
     expect(response.headers.get('content-type')).toBe('image/png');
     expect(capturedTtl).toBe(31536000);
-    expect(capturedKey).toBe('og:image:2026-08-28:skill:acme%2Fdemo-skill:1712345678');
+    expect(capturedKey).toBe('og:image:2026-08-28.2:skill:acme%2Fdemo-skill:1712345678');
     expect(capturedWaitUntil).toEqual(expect.any(Function));
     expect(prepare).toHaveBeenCalledTimes(2);
     expect(bind).toHaveBeenCalledTimes(2);
