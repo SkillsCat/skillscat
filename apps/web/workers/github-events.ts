@@ -2,7 +2,8 @@
  * GitHub Events Worker
  *
  * 轮询 GitHub Events API 刷新已知仓库，并在预算允许时使用 Code Search 发现新仓库
- * （追头 + 日期切片回填），另有零 API 配额的 HTML 仓库搜索爬虫补充发现
+ * （追头 + 日期切片回填），另有零 API 配额的 HTML 仓库搜索爬虫、GitHub Topics
+ * 爬虫、Awesome 列表解析、X Recent Search 与 Bluesky 搜索补充发现
  * 通过 Cron Trigger 默认每 5 分钟执行一次
  */
 
@@ -76,6 +77,24 @@ const DEFAULT_X_SEARCH_MAX_REQUESTS_PER_DAY = 1;
 const DEFAULT_X_SEARCH_MAX_REQUESTS_PER_MONTH = 30;
 const MAX_X_SEARCH_REQUESTS_PER_DAY = 1000;
 const MAX_X_SEARCH_REQUESTS_PER_MONTH = 10000;
+const DEFAULT_TOPICS_LIST = 'claude-code-skill,claude-skills,agent-skills';
+const DEFAULT_TOPICS_PAGES_PER_TOPIC = 2;
+const DEFAULT_TOPICS_INTERVAL_SECONDS = 60 * 60;
+const DEFAULT_TOPICS_MAX_QUEUED_REPOS = 50;
+const MAX_TOPICS = 10;
+const MAX_TOPICS_PAGES_PER_TOPIC = 5;
+const DEFAULT_AWESOME_LIST_URLS = 'https://raw.githubusercontent.com/hesreallyhim/awesome-claude-code/main/README.md';
+const DEFAULT_AWESOME_LISTS_INTERVAL_SECONDS = 24 * 60 * 60;
+const DEFAULT_AWESOME_LISTS_MAX_QUEUED_REPOS = 50;
+const DEFAULT_AWESOME_LISTS_MAX_LISTS = 5;
+const MAX_AWESOME_LISTS = 20;
+const AWESOME_LIST_MAX_BYTES = 2 * 1024 * 1024;
+const DEFAULT_BSKY_SEARCH_QUERY = '"SKILL.md" github';
+const DEFAULT_BSKY_SEARCH_INTERVAL_SECONDS = 15 * 60;
+const DEFAULT_BSKY_SEARCH_MAX_RESULTS = 50;
+const DEFAULT_BSKY_SEARCH_MAX_QUEUED_REPOS = 50;
+const MAX_BSKY_SEARCH_RESULTS = 100;
+const DISCOVERY_FETCH_TIMEOUT_MS = 15_000;
 
 const RATE_LIMIT_SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
 const D1_MAX_BOUND_PARAMETERS = 100;
@@ -91,6 +110,7 @@ const EVENT_REPLAY_STATE_KEY = 'github-events:event-replay-state';
 const REPO_QUEUE_DEDUP_WINDOW_KEY = 'github-events:repo-queued-window';
 const X_SEARCH_SINCE_ID_KEY = 'github-events:x-search:since-id';
 const X_SEARCH_BUDGET_KEY_PREFIX = 'github-events:x-search:budget:';
+const BSKY_SEARCH_SINCE_KEY = 'github-events:bsky-search:since';
 
 interface SearchDiscoveryResult {
   scanned: number;
@@ -123,6 +143,14 @@ interface XSearchDiscoveryResult { scanned: number; queued: number; tweets: numb
 interface XSearchTweet { id?: string; text?: string; entities?: { urls?: Array<{ expanded_url?: string; url?: string }> } }
 interface XSearchResponse { data?: XSearchTweet[]; meta?: { next_token?: string; newest_id?: string } }
 interface XSearchBudgetConfig { maxRequestsPerDay: number; maxRequestsPerMonth: number }
+
+interface GithubTopicsDiscoveryResult { scanned: number; queued: number; pagesFetched: number; skippedReason?: string }
+interface AwesomeListsDiscoveryResult { scanned: number; queued: number; listsFetched: number; skippedReason?: string }
+interface BskySearchDiscoveryResult { scanned: number; queued: number; posts: number; skippedReason?: string }
+interface BskyPostRecordFacetFeature { $type?: string; uri?: string }
+interface BskyPostRecord { text?: string; facets?: Array<{ features?: BskyPostRecordFacetFeature[] }> }
+export interface BskyPost { uri?: string; record?: BskyPostRecord }
+interface BskySearchResponse { posts?: BskyPost[] }
 
 interface EventsDiscoveryResult {
   processed: number;
@@ -235,6 +263,75 @@ export function extractGitHubReposFromTweet(tweet: XSearchTweet): RepoIdentity[]
     if (!repo) continue;
     const identity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
     if (!seen.has(identity)) { seen.add(identity); repos.push(repo); }
+  }
+  return repos;
+}
+
+const GITHUB_TOPICS_PAGE_RESERVED_SEGMENTS = new Set([
+  'topics', 'login', 'explore', 'features', 'marketplace', 'pricing', 'search',
+  'settings', 'organizations', 'trending', 'collections', 'sponsors', 'about',
+  'join', 'new', 'notifications', 'signup', 'site', 'support', 'contact', 'events',
+]);
+
+/**
+ * 从 github.com/topics/<topic> 页面 HTML 提取仓库链接 href="/owner/repo"
+ * (恰好两段路径,排除保留段),复用 parseGitHubRepoUrl 做字符与 .git 校验。
+ */
+export function extractReposFromGitHubTopicsHtml(html: string): RepoIdentity[] {
+  const seen = new Set<string>();
+  const repos: RepoIdentity[] = [];
+  for (const match of html.matchAll(/href="\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)"/g)) {
+    const [, owner, name] = match;
+    if (GITHUB_TOPICS_PAGE_RESERVED_SEGMENTS.has(owner.toLowerCase())) continue;
+    const repo = parseGitHubRepoUrl(`https://github.com/${owner}/${name}`);
+    if (!repo) continue;
+    const identity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    repos.push(repo);
+  }
+  return repos;
+}
+
+/** 从任意文本(markdown 等)中提取 github.com owner/repo 链接并去重。 */
+export function extractGitHubReposFromText(text: string): RepoIdentity[] {
+  const seen = new Set<string>();
+  const repos: RepoIdentity[] = [];
+  const candidates = text.match(/https?:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:[^\s<>"'()\[\]]*)?/gi) || [];
+  for (const candidate of candidates) {
+    const repo = parseGitHubRepoUrl(candidate);
+    if (!repo) continue;
+    const identity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    repos.push(repo);
+  }
+  return repos;
+}
+
+/** 从 Bluesky 帖子的 record.text 与 link facets 中提取 GitHub 仓库并去重。 */
+export function extractGitHubReposFromBskyPost(post: BskyPost): RepoIdentity[] {
+  const seen = new Set<string>();
+  const repos: RepoIdentity[] = [];
+  const candidates: Array<string | undefined> = [];
+  const record = post.record;
+  if (record?.text) {
+    candidates.push(...(record.text.match(/https?:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:[^\s<>]*)?/gi) || []));
+  }
+  for (const facet of record?.facets || []) {
+    for (const feature of facet.features || []) {
+      if (feature.$type === 'app.bsky.richtext.facet#link') {
+        candidates.push(feature.uri);
+      }
+    }
+  }
+  for (const candidate of candidates) {
+    const repo = parseGitHubRepoUrl(candidate);
+    if (!repo) continue;
+    const identity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    repos.push(repo);
   }
   return repos;
 }
@@ -429,6 +526,105 @@ function getXSearchDiscoveryConfig(env: GithubEventsEnv): {
         MAX_X_SEARCH_REQUESTS_PER_MONTH
       ),
     },
+  };
+}
+
+export function getGithubTopicsDiscoveryConfig(env: GithubEventsEnv): {
+  enabled: boolean; topics: string[]; pagesPerTopic: number;
+  intervalSeconds: number; maxQueuedRepos: number; cronIntervalSeconds: number;
+} {
+  const rawTopics = (env.GITHUB_TOPICS_LIST || DEFAULT_TOPICS_LIST)
+    .split(',')
+    .map((topic) => topic.trim())
+    .filter(Boolean);
+  return {
+    enabled: parseEnabled(env.GITHUB_TOPICS_ENABLED, true),
+    topics: (rawTopics.length > 0 ? rawTopics : [DEFAULT_TOPICS_LIST]).slice(0, MAX_TOPICS),
+    pagesPerTopic: parseClampedPositiveInt(
+      env.GITHUB_TOPICS_PAGES_PER_TOPIC,
+      DEFAULT_TOPICS_PAGES_PER_TOPIC,
+      MAX_TOPICS_PAGES_PER_TOPIC
+    ),
+    intervalSeconds: parseClampedPositiveInt(
+      env.GITHUB_TOPICS_INTERVAL_SECONDS,
+      DEFAULT_TOPICS_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
+    ),
+    maxQueuedRepos: parseClampedPositiveInt(
+      env.GITHUB_TOPICS_MAX_QUEUED_REPOS,
+      DEFAULT_TOPICS_MAX_QUEUED_REPOS,
+      MAX_DISCOVERY_QUEUED_REPOS
+    ),
+    cronIntervalSeconds: parseClampedPositiveInt(
+      env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
+      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
+    ),
+  };
+}
+
+export function getAwesomeListsDiscoveryConfig(env: GithubEventsEnv): {
+  enabled: boolean; urls: string[]; intervalSeconds: number;
+  maxQueuedRepos: number; maxLists: number; cronIntervalSeconds: number;
+} {
+  const rawUrls = (env.AWESOME_LIST_URLS || DEFAULT_AWESOME_LIST_URLS)
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean);
+  const maxLists = parseClampedPositiveInt(
+    env.AWESOME_LISTS_MAX_LISTS,
+    DEFAULT_AWESOME_LISTS_MAX_LISTS,
+    MAX_AWESOME_LISTS
+  );
+  return {
+    enabled: parseEnabled(env.AWESOME_LISTS_ENABLED, true),
+    urls: (rawUrls.length > 0 ? rawUrls : [DEFAULT_AWESOME_LIST_URLS]).slice(0, maxLists),
+    intervalSeconds: parseClampedPositiveInt(
+      env.AWESOME_LISTS_INTERVAL_SECONDS,
+      DEFAULT_AWESOME_LISTS_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
+    ),
+    maxQueuedRepos: parseClampedPositiveInt(
+      env.AWESOME_LISTS_MAX_QUEUED_REPOS,
+      DEFAULT_AWESOME_LISTS_MAX_QUEUED_REPOS,
+      MAX_DISCOVERY_QUEUED_REPOS
+    ),
+    maxLists,
+    cronIntervalSeconds: parseClampedPositiveInt(
+      env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
+      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
+    ),
+  };
+}
+
+export function getBskySearchDiscoveryConfig(env: GithubEventsEnv): {
+  enabled: boolean; query: string; intervalSeconds: number;
+  maxResults: number; maxQueuedRepos: number; cronIntervalSeconds: number;
+} {
+  return {
+    enabled: parseEnabled(env.BSKY_SEARCH_ENABLED, false),
+    query: (env.BSKY_SEARCH_QUERY || DEFAULT_BSKY_SEARCH_QUERY).trim() || DEFAULT_BSKY_SEARCH_QUERY,
+    intervalSeconds: parseClampedPositiveInt(
+      env.BSKY_SEARCH_INTERVAL_SECONDS,
+      DEFAULT_BSKY_SEARCH_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
+    ),
+    maxResults: parseClampedPositiveInt(
+      env.BSKY_SEARCH_MAX_RESULTS,
+      DEFAULT_BSKY_SEARCH_MAX_RESULTS,
+      MAX_BSKY_SEARCH_RESULTS
+    ),
+    maxQueuedRepos: parseClampedPositiveInt(
+      env.BSKY_SEARCH_MAX_QUEUED_REPOS,
+      DEFAULT_BSKY_SEARCH_MAX_QUEUED_REPOS,
+      MAX_DISCOVERY_QUEUED_REPOS
+    ),
+    cronIntervalSeconds: parseClampedPositiveInt(
+      env.GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS,
+      DEFAULT_DISCOVERY_CRON_INTERVAL_SECONDS,
+      MAX_DISCOVERY_INTERVAL_SECONDS
+    ),
   };
 }
 
@@ -1662,6 +1858,302 @@ async function processXSearchDiscovery(
   return { scanned: candidates.size, queued, tweets: tweets.length, skippedReason: partialFailure };
 }
 
+/** 零配额发现渠道的匿名文本抓取约定:UA、超时、无凭据,任何失败由调用方降级处理。 */
+async function fetchDiscoveryTextPage(url: string, accept: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DISCOVERY_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      headers: { Accept: accept, 'User-Agent': 'SkillsCat/1.0' },
+      credentials: 'omit',
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * GitHub Topics HTML 爬虫:抓 topics 页面前几页提取 owner/repo 链接(零 API 配额)。
+ * 无状态,靠已知仓库过滤 + 去重窗口控制重复;抓取失败只记日志跳过。
+ */
+export async function processGithubTopicsDiscovery(
+  env: GithubEventsEnv,
+  repoDedupeState: RepoQueueDedupeState,
+  lockToken: string,
+  nowMs: number = Date.now()
+): Promise<GithubTopicsDiscoveryResult> {
+  const config = getGithubTopicsDiscoveryConfig(env);
+  const base = { scanned: 0, queued: 0, pagesFetched: 0 };
+  if (!config.enabled) {
+    return { ...base, skippedReason: 'disabled' };
+  }
+  if (!shouldRunSearchDiscoveryThisTick(nowMs, config.cronIntervalSeconds, config.intervalSeconds)) {
+    return { ...base, skippedReason: 'interval_throttled' };
+  }
+
+  const candidates = new Map<string, RepoIdentity>();
+  let scanned = 0;
+  let pagesFetched = 0;
+
+  for (const topic of config.topics) {
+    for (let page = 1; page <= config.pagesPerTopic; page++) {
+      if (!await renewDiscoveryRunLock(env, lockToken)) {
+        return { scanned, queued: 0, pagesFetched, skippedReason: 'lock_lost' };
+      }
+      const url = `https://github.com/topics/${encodeURIComponent(topic)}?page=${page}`;
+      let response: Response;
+      try {
+        response = await fetchDiscoveryTextPage(url, 'text/html');
+      } catch (error) {
+        console.warn(`GitHub topics discovery request failed for topic "${topic}" page ${page}:`, error);
+        break;
+      }
+      if (!response.ok) {
+        console.warn(`GitHub topics discovery failed for topic "${topic}" page ${page}: ${response.status}`);
+        break;
+      }
+      let html: string;
+      try {
+        html = await response.text();
+      } catch (error) {
+        console.warn(`GitHub topics discovery could not read topic "${topic}" page ${page}:`, error);
+        break;
+      }
+      pagesFetched++;
+      for (const repo of extractReposFromGitHubTopicsHtml(html)) {
+        scanned++;
+        candidates.set(`${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`, repo);
+      }
+    }
+  }
+
+  if (pagesFetched === 0) {
+    return { scanned, queued: 0, pagesFetched, skippedReason: 'request_failed' };
+  }
+
+  let known = new Set<string>();
+  if (candidates.size > 0) {
+    try {
+      known = await loadKnownGitHubRepoIdentities(env.DB, [...candidates.values()]);
+    } catch (error) {
+      console.warn('Failed to filter GitHub topics candidates against known repositories:', error);
+      return { scanned, queued: 0, pagesFetched, skippedReason: 'known_repo_lookup_failed' };
+    }
+  }
+
+  const dedupTtlSeconds = getRepoQueueDedupTtlSeconds(env);
+  let queued = 0;
+  for (const repo of candidates.values()) {
+    if (queued >= config.maxQueuedRepos) break;
+    const identity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
+    if (known.has(identity)) continue;
+    if (wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, undefined, nowMs)) continue;
+    const message: IndexingMessage = {
+      type: 'check_skill',
+      repoOwner: repo.owner,
+      repoName: repo.name,
+      discoverySource: 'github-topics',
+    };
+    await env.INDEXING_QUEUE.send(message);
+    markRepoQueued(repoDedupeState, repo.owner, repo.name, undefined, nowMs, dedupTtlSeconds);
+    queued++;
+    console.log(`Queued topics-discovered repo for indexing: ${repo.owner}/${repo.name}`);
+  }
+
+  return { scanned, queued, pagesFetched };
+}
+
+/**
+ * Awesome 列表解析:拉取配置的 raw markdown 列表并提取 github.com 仓库链接(零 API 配额)。
+ * 无状态,靠去重窗口控制重复;单文件超 2MB 或抓取失败只记日志跳过。
+ */
+export async function processAwesomeListsDiscovery(
+  env: GithubEventsEnv,
+  repoDedupeState: RepoQueueDedupeState,
+  lockToken: string,
+  nowMs: number = Date.now()
+): Promise<AwesomeListsDiscoveryResult> {
+  const config = getAwesomeListsDiscoveryConfig(env);
+  const base = { scanned: 0, queued: 0, listsFetched: 0 };
+  if (!config.enabled) {
+    return { ...base, skippedReason: 'disabled' };
+  }
+  if (!shouldRunSearchDiscoveryThisTick(nowMs, config.cronIntervalSeconds, config.intervalSeconds)) {
+    return { ...base, skippedReason: 'interval_throttled' };
+  }
+
+  const candidates = new Map<string, RepoIdentity>();
+  let scanned = 0;
+  let listsFetched = 0;
+
+  for (const listUrl of config.urls) {
+    if (!await renewDiscoveryRunLock(env, lockToken)) {
+      return { scanned, queued: 0, listsFetched, skippedReason: 'lock_lost' };
+    }
+    let response: Response;
+    try {
+      response = await fetchDiscoveryTextPage(listUrl, 'text/plain');
+    } catch (error) {
+      console.warn(`Awesome list discovery request failed for ${listUrl}:`, error);
+      continue;
+    }
+    if (!response.ok) {
+      console.warn(`Awesome list discovery failed for ${listUrl}: ${response.status}`);
+      continue;
+    }
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      console.warn(`Awesome list discovery could not read ${listUrl}:`, error);
+      continue;
+    }
+    listsFetched++;
+    if (text.length > AWESOME_LIST_MAX_BYTES) {
+      console.warn(`Awesome list skipped for exceeding ${AWESOME_LIST_MAX_BYTES} bytes: ${listUrl}`);
+      continue;
+    }
+    for (const repo of extractGitHubReposFromText(text)) {
+      scanned++;
+      candidates.set(`${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`, repo);
+    }
+  }
+
+  if (listsFetched === 0) {
+    return { scanned, queued: 0, listsFetched, skippedReason: 'request_failed' };
+  }
+
+  let known = new Set<string>();
+  if (candidates.size > 0) {
+    try {
+      known = await loadKnownGitHubRepoIdentities(env.DB, [...candidates.values()]);
+    } catch (error) {
+      console.warn('Failed to filter awesome list candidates against known repositories:', error);
+      return { scanned, queued: 0, listsFetched, skippedReason: 'known_repo_lookup_failed' };
+    }
+  }
+
+  const dedupTtlSeconds = getRepoQueueDedupTtlSeconds(env);
+  let queued = 0;
+  for (const repo of candidates.values()) {
+    if (queued >= config.maxQueuedRepos) break;
+    const identity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
+    if (known.has(identity)) continue;
+    if (wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, undefined, nowMs)) continue;
+    const message: IndexingMessage = {
+      type: 'check_skill',
+      repoOwner: repo.owner,
+      repoName: repo.name,
+      discoverySource: 'awesome-lists',
+    };
+    await env.INDEXING_QUEUE.send(message);
+    markRepoQueued(repoDedupeState, repo.owner, repo.name, undefined, nowMs, dedupTtlSeconds);
+    queued++;
+    console.log(`Queued awesome-list-discovered repo for indexing: ${repo.owner}/${repo.name}`);
+  }
+
+  return { scanned, queued, listsFetched };
+}
+
+/**
+ * Bluesky 搜索发现:无鉴权调用 app.bsky.feed.searchPosts(非官方容忍行为,随时可能 403),
+ * 从帖子文本与 link facets 提取 GitHub 仓库。since 游标只在完全成功后推进。
+ */
+export async function processBskySearchDiscovery(
+  env: GithubEventsEnv,
+  repoDedupeState: RepoQueueDedupeState,
+  lockToken: string,
+  nowMs: number = Date.now()
+): Promise<BskySearchDiscoveryResult> {
+  const config = getBskySearchDiscoveryConfig(env);
+  const base = { scanned: 0, queued: 0, posts: 0 };
+  if (!config.enabled) {
+    return { ...base, skippedReason: 'disabled' };
+  }
+  if (!shouldRunSearchDiscoveryThisTick(nowMs, config.cronIntervalSeconds, config.intervalSeconds)) {
+    return { ...base, skippedReason: 'interval_throttled' };
+  }
+
+  const store = getGithubEventsStateStore(env);
+  const since = await store.get(BSKY_SEARCH_SINCE_KEY);
+  const params = new URLSearchParams({
+    q: config.query,
+    sort: 'latest',
+    limit: String(config.maxResults),
+  });
+  if (since) params.set('since', since);
+
+  let response: Response;
+  try {
+    response = await fetch(`https://api.bsky.app/xrpc/app.bsky.feed.searchPosts?${params.toString()}`, {
+      headers: { Accept: 'application/json', 'User-Agent': 'SkillsCat/1.0' },
+    });
+  } catch (error) {
+    console.warn('Bluesky search request failed:', error);
+    return { ...base, skippedReason: 'request_failed' };
+  }
+  if (!response.ok) {
+    console.warn(`Bluesky search request failed: ${response.status}`);
+    if (response.status === 401 || response.status === 403) {
+      return { ...base, skippedReason: 'auth_required' };
+    }
+    return { ...base, skippedReason: response.status === 429 ? 'rate_limited' : 'request_failed' };
+  }
+
+  let payload: BskySearchResponse;
+  try {
+    payload = await response.json() as BskySearchResponse;
+  } catch {
+    return { ...base, skippedReason: 'invalid_response' };
+  }
+
+  const posts = Array.isArray(payload.posts) ? payload.posts : [];
+  const candidates = new Map<string, RepoIdentity>();
+  for (const post of posts) {
+    for (const repo of extractGitHubReposFromBskyPost(post)) {
+      candidates.set(`${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`, repo);
+    }
+  }
+
+  let known = new Set<string>();
+  if (candidates.size > 0) {
+    try {
+      known = await loadKnownGitHubRepoIdentities(env.DB, [...candidates.values()]);
+    } catch (error) {
+      console.warn('Failed to filter Bluesky search candidates against known repositories:', error);
+      return { scanned: candidates.size, queued: 0, posts: posts.length, skippedReason: 'known_repo_lookup_failed' };
+    }
+  }
+
+  const dedupTtlSeconds = getRepoQueueDedupTtlSeconds(env);
+  let queued = 0;
+  for (const post of posts) {
+    for (const repo of extractGitHubReposFromBskyPost(post)) {
+      const identity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
+      if (known.has(identity) || queued >= config.maxQueuedRepos) continue;
+      if (!await renewDiscoveryRunLock(env, lockToken)) {
+        return { scanned: candidates.size, queued, posts: posts.length, skippedReason: 'lock_lost' };
+      }
+      if (wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, undefined, nowMs)) continue;
+      const message: IndexingMessage = {
+        type: 'check_skill', repoOwner: repo.owner, repoName: repo.name,
+        discoverySource: 'bluesky-search',
+        discoveryFingerprint: post.uri ? `bsky:${post.uri}` : undefined,
+      };
+      await env.INDEXING_QUEUE.send(message);
+      markRepoQueued(repoDedupeState, repo.owner, repo.name, undefined, nowMs, dedupTtlSeconds);
+      queued++;
+    }
+  }
+
+  // Only advance the since cursor after a fully successful run.
+  // Advancing it after a partial failure would permanently skip older posts.
+  await store.put(BSKY_SEARCH_SINCE_KEY, new Date(nowMs).toISOString(), { expirationTtl: 30 * 86400 });
+  return { scanned: candidates.size, queued, posts: posts.length };
+}
+
 function parseDiscoveryRunLockPayload(
   raw: string | null,
   ttlSeconds: number
@@ -1856,8 +2348,14 @@ export default {
       const htmlResult = await processHtmlRepoSearchDiscovery(runtimeEnv, repoDedupeState, _ctx, lockToken, nowMs);
       nowMs = Date.now();
       const xResult = await processXSearchDiscovery(runtimeEnv, repoDedupeState, lockToken, nowMs);
+      nowMs = Date.now();
+      const topicsResult = await processGithubTopicsDiscovery(runtimeEnv, repoDedupeState, lockToken, nowMs);
+      nowMs = Date.now();
+      const awesomeResult = await processAwesomeListsDiscovery(runtimeEnv, repoDedupeState, lockToken, nowMs);
+      nowMs = Date.now();
+      const bskyResult = await processBskySearchDiscovery(runtimeEnv, repoDedupeState, lockToken, nowMs);
       console.log(
-        `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_unknown_skipped=${eventsResult.unknownSkipped}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, backfill_scanned=${backfillResult.scanned}, backfill_queued=${backfillResult.queued}, backfill_pages=${backfillResult.pagesFetched}/${backfillResult.allowedPages}, backfill_date=${backfillResult.date || 'none'}, backfill_skipped=${backfillResult.skippedReason || 'none'}, html_scanned=${htmlResult.scanned}, html_queued=${htmlResult.queued}, html_pages=${htmlResult.pagesFetched}, html_skipped=${htmlResult.skippedReason || 'none'}, x_scanned=${xResult.scanned}, x_queued=${xResult.queued}, x_tweets=${xResult.tweets}, x_skipped=${xResult.skippedReason || 'none'}, rest_snapshot_remaining=${restBeforeEvents?.remaining ?? 'unknown'}, search_snapshot_remaining=${searchBeforeDiscovery?.remaining ?? 'unknown'}`
+        `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_unknown_skipped=${eventsResult.unknownSkipped}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, backfill_scanned=${backfillResult.scanned}, backfill_queued=${backfillResult.queued}, backfill_pages=${backfillResult.pagesFetched}/${backfillResult.allowedPages}, backfill_date=${backfillResult.date || 'none'}, backfill_skipped=${backfillResult.skippedReason || 'none'}, html_scanned=${htmlResult.scanned}, html_queued=${htmlResult.queued}, html_pages=${htmlResult.pagesFetched}, html_skipped=${htmlResult.skippedReason || 'none'}, x_scanned=${xResult.scanned}, x_queued=${xResult.queued}, x_tweets=${xResult.tweets}, x_skipped=${xResult.skippedReason || 'none'}, topics_scanned=${topicsResult.scanned}, topics_queued=${topicsResult.queued}, topics_skipped=${topicsResult.skippedReason || 'none'}, awesome_scanned=${awesomeResult.scanned}, awesome_queued=${awesomeResult.queued}, awesome_skipped=${awesomeResult.skippedReason || 'none'}, bsky_scanned=${bskyResult.scanned}, bsky_queued=${bskyResult.queued}, bsky_posts=${bskyResult.posts}, bsky_skipped=${bskyResult.skippedReason || 'none'}, rest_snapshot_remaining=${restBeforeEvents?.remaining ?? 'unknown'}, search_snapshot_remaining=${searchBeforeDiscovery?.remaining ?? 'unknown'}`
       );
     } finally {
       if (repoDedupeState) {
