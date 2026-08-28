@@ -4,6 +4,7 @@
 #   1. Events 轮询仅刷新 registry 已知仓库
 #   2. Code Search 追头（sort=indexed）+ 日期切片回填（created:<date>..<date>），严格受 search 预算约束
 #   3. HTML 仓库搜索爬虫（github.com/search），零 API 配额，入队前用 raw/HEAD/SKILL.md 校验候选
+#   4. X Recent Search（需要 X_BEARER_TOKEN secret），从推文链接发现仓库
 # GitHub API 鉴权请通过 wrangler secret 设置 `GITHUB_TOKEN` 或 `GITHUB_TOKENS`
 
 name = "skillscat-github-events"
@@ -50,6 +51,9 @@ binding = "INDEXING_QUEUE"
 queue = "skillscat-indexing"
 
 [vars]
+# X API 为可选付费渠道。启用前请先在 X 开发者后台设置账户级消费上限，
+# 再执行: wrangler secret put X_BEARER_TOKEN
+# 请求预算是应用侧硬上限：默认每天 1 次、每月 30 次（分页请求也计数）。
 GITHUB_EVENTS_PER_PAGE = "100"
 GITHUB_EVENTS_PAGES = "1"
 GITHUB_EVENTS_KNOWN_REPOS_ONLY = "1"
@@ -72,6 +76,14 @@ GITHUB_HTML_SEARCH_DISCOVERY_INTERVAL_SECONDS = "900"
 GITHUB_HTML_SEARCH_QUERIES = "SKILL.md in:readme,agent skills in:readme,.claude/skills in:readme"
 GITHUB_HTML_SEARCH_PAGES = "3"
 GITHUB_HTML_SEARCH_MAX_CANDIDATES = "200"
+X_SEARCH_ENABLED = "0"
+X_SEARCH_QUERY = '("SKILL.md" OR "agent skill") (github.com OR github) -is:retweet has:links'
+X_SEARCH_MAX_RESULTS = "50"
+X_SEARCH_MAX_TWEETS = "200"
+X_SEARCH_INTERVAL_SECONDS = "900"
+X_SEARCH_MAX_QUEUED_REPOS = "50"
+X_SEARCH_MAX_REQUESTS_PER_DAY = "1"
+X_SEARCH_MAX_REQUESTS_PER_MONTH = "30"
 GITHUB_SEARCH_BACKFILL_ENABLED = "1"
 GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS = "3600"
 GITHUB_SEARCH_BACKFILL_START_DATE = "2025-01-01"
@@ -130,6 +142,14 @@ GITHUB_HTML_SEARCH_DISCOVERY_INTERVAL_SECONDS = "900"
 GITHUB_HTML_SEARCH_QUERIES = "SKILL.md in:readme,agent skills in:readme,.claude/skills in:readme"
 GITHUB_HTML_SEARCH_PAGES = "3"
 GITHUB_HTML_SEARCH_MAX_CANDIDATES = "200"
+X_SEARCH_ENABLED = "0"
+X_SEARCH_QUERY = '("SKILL.md" OR "agent skill") (github.com OR github) -is:retweet has:links'
+X_SEARCH_MAX_RESULTS = "50"
+X_SEARCH_MAX_TWEETS = "200"
+X_SEARCH_INTERVAL_SECONDS = "900"
+X_SEARCH_MAX_QUEUED_REPOS = "50"
+X_SEARCH_MAX_REQUESTS_PER_DAY = "1"
+X_SEARCH_MAX_REQUESTS_PER_MONTH = "30"
 GITHUB_SEARCH_BACKFILL_ENABLED = "1"
 GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS = "3600"
 GITHUB_SEARCH_BACKFILL_START_DATE = "2025-01-01"

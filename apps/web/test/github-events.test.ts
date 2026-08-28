@@ -7,7 +7,10 @@ import githubEventsWorker from '../workers/github-events';
 import {
   buildRepoQueuedDedupIdentity,
   computeAllowedSearchPages,
+  extractGitHubReposFromTweet,
   loadKnownGitHubRepoIdentities,
+  parseGitHubRepoUrl,
+  reserveXSearchRequest,
   shouldRunSearchDiscoveryThisTick,
 } from '../workers/github-events';
 
@@ -51,6 +54,84 @@ afterEach(() => {
 });
 
 describe('github-events helpers', () => {
+  it('parses canonical GitHub repository URLs from X links', () => {
+    expect(parseGitHubRepoUrl('https://github.com/Acme/Toolbox')).toEqual({
+      owner: 'Acme',
+      name: 'Toolbox',
+    });
+    expect(parseGitHubRepoUrl('https://github.com/Acme/Toolbox.git/')).toEqual({
+      owner: 'Acme',
+      name: 'Toolbox',
+    });
+    expect(parseGitHubRepoUrl('https://github.com/Acme/Toolbox?utm_source=x')).toEqual({
+      owner: 'Acme',
+      name: 'Toolbox',
+    });
+  });
+
+  it('rejects non-repository GitHub URLs and unrelated hosts', () => {
+    expect(parseGitHubRepoUrl(undefined)).toBeNull();
+    expect(parseGitHubRepoUrl('https://github.com/Acme')).toBeNull();
+    expect(parseGitHubRepoUrl('https://github.com/Acme/Toolbox/issues/1')).toBeNull();
+    expect(parseGitHubRepoUrl('https://github.com/Acme/Toolbox/pull/2')).toBeNull();
+    expect(parseGitHubRepoUrl('https://gitlab.com/Acme/Toolbox')).toBeNull();
+    expect(parseGitHubRepoUrl('ftp://github.com/Acme/Toolbox')).toBeNull();
+    expect(parseGitHubRepoUrl('not a URL')).toBeNull();
+  });
+
+  it('extracts, deduplicates, and normalizes repository links from a tweet', () => {
+    const repos = extractGitHubReposFromTweet({
+      id: 'tweet-1',
+      text: 'New skills',
+      entities: {
+        urls: [
+          { url: 'https://t.co/first', expanded_url: 'https://github.com/Acme/Toolbox' },
+          { url: 'https://github.com/acme/toolbox' },
+          { url: 'https://github.com/Acme/Toolbox/issues/1' },
+          { url: 'https://example.com/skills' },
+          { url: 'https://t.co/unexpanded' },
+          { url: 'https://github.com/Other/Skill.git' },
+        ],
+      },
+    });
+
+    expect(repos).toEqual([
+      { owner: 'Acme', name: 'Toolbox' },
+      { owner: 'Other', name: 'Skill' },
+    ]);
+  });
+
+  it('handles tweets without URL entities', () => {
+    expect(extractGitHubReposFromTweet({ id: 'tweet-empty', text: 'No links' })).toEqual([]);
+    expect(extractGitHubReposFromTweet({ id: 'tweet-empty', entities: { urls: [] } })).toEqual([]);
+  });
+
+  it('enforces independent daily and monthly X request budgets', async () => {
+    const kv = new MemoryKv();
+    const now = Date.parse('2026-08-28T00:00:00Z');
+    const dailyBudget = { maxRequestsPerDay: 2, maxRequestsPerMonth: 10 };
+
+    expect(await reserveXSearchRequest(kv as unknown as KVNamespace, dailyBudget, now)).toBe(true);
+    expect(await reserveXSearchRequest(kv as unknown as KVNamespace, dailyBudget, now)).toBe(true);
+    expect(await reserveXSearchRequest(kv as unknown as KVNamespace, dailyBudget, now)).toBe(false);
+    const monthlyBudget = { maxRequestsPerDay: 10, maxRequestsPerMonth: 2 };
+    expect(await reserveXSearchRequest(
+      kv as unknown as KVNamespace,
+      monthlyBudget,
+      Date.parse('2026-09-01T00:00:00Z')
+    )).toBe(true);
+    expect(await reserveXSearchRequest(
+      kv as unknown as KVNamespace,
+      monthlyBudget,
+      Date.parse('2026-09-02T00:00:00Z')
+    )).toBe(true);
+    expect(await reserveXSearchRequest(
+      kv as unknown as KVNamespace,
+      monthlyBudget,
+      Date.parse('2026-09-03T00:00:00Z')
+    )).toBe(false);
+  });
+
   it('throttles code search to one run per configured interval window', () => {
     expect(shouldRunSearchDiscoveryThisTick(0, 300, 900)).toBe(true);
     expect(shouldRunSearchDiscoveryThisTick(300_000, 300, 900)).toBe(false);

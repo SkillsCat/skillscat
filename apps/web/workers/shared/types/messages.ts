@@ -16,7 +16,7 @@ export interface IndexingMessage {
   queuedAsPending?: boolean;
   /** Internal counter for bounded self-requeue backoff before native Queue retries take over. */
   rateLimitDeferrals?: number;
-  discoverySource?: 'github-events' | 'github-code-search' | 'github-repo-search-html';
+  discoverySource?: 'github-events' | 'github-code-search' | 'github-repo-search-html' | 'x-search';
   discoveryFingerprint?: string;
 }
 
