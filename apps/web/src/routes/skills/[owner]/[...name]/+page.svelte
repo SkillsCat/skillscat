@@ -1051,6 +1051,8 @@
                 alt={getAuthorDisplayName()}
                 fallback={data.skill.repoOwner}
                 size="md"
+                loading="eager"
+                fetchpriority="high"
                 useGithubFallback
               />
             </a>

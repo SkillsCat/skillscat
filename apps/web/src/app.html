@@ -11,6 +11,8 @@
         }
       })();
     </script>
+    <!-- Header avatar and README images load from GitHub's avatar CDN -->
+    <link rel="preconnect" href="https://avatars.githubusercontent.com" crossorigin />
     <link
       rel="preload"
       as="font"
@@ -23,6 +25,14 @@
       as="font"
       type="font/woff2"
       href="/fonts/poppins-latin-700.woff2"
+      crossorigin
+    />
+    <!-- Skill detail <h1> (LCP element) uses Poppins 800 -->
+    <link
+      rel="preload"
+      as="font"
+      type="font/woff2"
+      href="/fonts/poppins-latin-800.woff2"
       crossorigin
     />
     <!-- Favicons -->
