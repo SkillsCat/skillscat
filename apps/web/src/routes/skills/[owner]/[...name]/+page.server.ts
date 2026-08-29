@@ -169,6 +169,58 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
 
     const shouldDeferUserState = skill.visibility === 'public';
     const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
+
+    // Start the readme and bookmark work immediately: neither depends on the
+    // recommend cache read below, so they should overlap with it instead of
+    // waiting for one extra R2 round trip before they can begin.
+    const renderedReadmePromise = timed(
+      'readme_html',
+      async (): Promise<string> => {
+        const loadRawReadme = async () => skill.readme ?? await loadSkillReadmeFromR2(env, skill);
+
+        if (skill.visibility !== 'public') {
+          // Private skills never touch shared caches; highlight per request.
+          const rawReadme = await loadRawReadme();
+          return rawReadme ? renderHighlightedReadmeMarkdown(rawReadme) : '';
+        }
+
+        // Version-keyed (updatedAt/indexedAt) so entries are immutable after a
+        // skill update: colo-local Cache API in front of the R2 derived object.
+        const readmeVersion = skill.updatedAt ?? skill.indexedAt ?? 0;
+        const { data } = await getCached(
+          `readme:html:hl:${skill.id}:${readmeVersion}`,
+          () => getOrRenderHighlightedReadme({
+            r2: env.R2,
+            skillId: skill.id,
+            readmeVersion,
+            waitUntil,
+            render: async () => {
+              const rawReadme = await loadRawReadme();
+              return rawReadme ? renderHighlightedReadmeMarkdown(rawReadme) : '';
+            },
+          }),
+          README_HTML_CACHE_TTL,
+          { waitUntil }
+        );
+        return data;
+      },
+      'secondary'
+    );
+
+    const isBookmarkedPromise = shouldDeferUserState
+      ? Promise.resolve(false)
+      : timed(
+        'bookmark',
+        async () => {
+          if (!userId || !env.DB) return false;
+          const bookmark = await env.DB.prepare(
+            'SELECT 1 FROM favorites WHERE user_id = ? AND skill_id = ?'
+          ).bind(userId, skill.id).first();
+          return !!bookmark;
+        },
+        'secondary'
+      );
+
     const cachedRecommendSkillsResult = skill.visibility === 'public'
       ? await timed(
         'recommend_cached',
@@ -290,54 +342,6 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       },
       'secondary'
     );
-
-    const renderedReadmePromise = timed(
-      'readme_html',
-      async (): Promise<string> => {
-        const loadRawReadme = async () => skill.readme ?? await loadSkillReadmeFromR2(env, skill);
-
-        if (skill.visibility !== 'public') {
-          // Private skills never touch shared caches; highlight per request.
-          const rawReadme = await loadRawReadme();
-          return rawReadme ? renderHighlightedReadmeMarkdown(rawReadme) : '';
-        }
-
-        // Version-keyed (updatedAt/indexedAt) so entries are immutable after a
-        // skill update: colo-local Cache API in front of the R2 derived object.
-        const readmeVersion = skill.updatedAt ?? skill.indexedAt ?? 0;
-        const { data } = await getCached(
-          `readme:html:hl:${skill.id}:${readmeVersion}`,
-          () => getOrRenderHighlightedReadme({
-            r2: env.R2,
-            skillId: skill.id,
-            readmeVersion,
-            waitUntil,
-            render: async () => {
-              const rawReadme = await loadRawReadme();
-              return rawReadme ? renderHighlightedReadmeMarkdown(rawReadme) : '';
-            },
-          }),
-          README_HTML_CACHE_TTL,
-          { waitUntil }
-        );
-        return data;
-      },
-      'secondary'
-    );
-
-    const isBookmarkedPromise = shouldDeferUserState
-      ? Promise.resolve(false)
-      : timed(
-        'bookmark',
-        async () => {
-          if (!userId || !env.DB) return false;
-          const bookmark = await env.DB.prepare(
-            'SELECT 1 FROM favorites WHERE user_id = ? AND skill_id = ?'
-          ).bind(userId, skill.id).first();
-          return !!bookmark;
-        },
-        'secondary'
-      );
 
     const [recommendSkillsResult, renderedReadmeResult, isBookmarkedResult] = await Promise.allSettled([
       recommendSkillsPromise,
