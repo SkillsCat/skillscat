@@ -1,6 +1,7 @@
 <script lang="ts">
   import Grid from '$lib/components/layout/Grid.svelte';
   import VisibilityBadge from '$lib/components/ui/VisibilityBadge.svelte';
+  import SkillManageDialog from '$lib/components/settings/SkillManageDialog.svelte';
   import { useI18n } from '$lib/i18n/runtime';
   import { getSettingsCopy } from '$lib/i18n/settings';
   import { buildSkillPath } from '$lib/skill-path';
@@ -25,6 +26,7 @@
     emptyHint?: string;
     onRetry?: () => void;
     onUnpublish?: (skill: Skill) => void;
+    onSkillUpdated?: () => void | Promise<void>;
   }
 
   let {
@@ -37,11 +39,13 @@
     emptyHint,
     onRetry,
     onUnpublish,
+    onSkillUpdated,
   }: Props = $props();
   const i18n = useI18n();
   const copy = $derived(getSettingsCopy(i18n.locale()));
 
   let searchQuery = $state('');
+  let manageTarget = $state<Skill | null>(null);
 
   const filteredSkills = $derived(
     skills.filter(skill =>
@@ -84,17 +88,34 @@
           </svg>
         {/if}
       </a>
-      {#if skill.visibility === 'private' && onUnpublish}
-        <button
-          class="unpublish-btn"
-          title={copy.skillsList.unpublishSkill}
-          aria-label={copy.skillsList.unpublishSkill}
-          onclick={() => onUnpublish(skill)}
-        >
-          <svg class="trash-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-          </svg>
-        </button>
+      {#if onSkillUpdated || (skill.visibility === 'private' && onUnpublish)}
+        <div class="card-actions" class:card-actions-grid={layout === 'grid'}>
+          {#if onSkillUpdated}
+            <button
+              class="manage-btn"
+              title={copy.skillManage.manageSkill}
+              aria-label={copy.skillManage.manageSkill}
+              onclick={() => (manageTarget = skill)}
+            >
+              <svg class="manage-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+          {/if}
+          {#if skill.visibility === 'private' && onUnpublish}
+            <button
+              class="unpublish-btn"
+              title={copy.skillsList.unpublishSkill}
+              aria-label={copy.skillsList.unpublishSkill}
+              onclick={() => onUnpublish(skill)}
+            >
+              <svg class="trash-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          {/if}
+        </div>
       {/if}
     </div>
   {/each}
@@ -154,6 +175,14 @@
       <p class="search-scope-hint">{copy.skillsList.searchScopeHint}</p>
     </div>
   {/if}
+{/if}
+
+{#if onSkillUpdated}
+  <SkillManageDialog
+    skill={manageTarget}
+    onClose={() => (manageTarget = null)}
+    onVisibilityChanged={onSkillUpdated}
+  />
 {/if}
 
 <style>
@@ -321,13 +350,24 @@
     flex-shrink: 0;
   }
 
-  .unpublish-btn {
+  .card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-right: 1rem;
+    flex-shrink: 0;
+  }
+
+  .card-actions-grid {
+    margin-right: 0.75rem;
+  }
+
+  .manage-btn {
     display: flex;
     align-items: center;
     justify-content: center;
     width: 2rem;
     height: 2rem;
-    margin-right: 1rem;
     border: 2px solid var(--border);
     border-radius: var(--radius-full);
     background: var(--background);
@@ -338,8 +378,43 @@
     transition: color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   }
 
-  .skill-card-grid .unpublish-btn {
-    margin-right: 0.75rem;
+  .manage-btn:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+    box-shadow: 0 4px 0 0 var(--primary);
+    transform: translateY(-1px);
+  }
+
+  .manage-btn:active {
+    box-shadow: 0 1px 0 0 var(--primary);
+    transform: translateY(2px);
+  }
+
+  .manage-btn:focus-visible {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-subtle);
+  }
+
+  .manage-icon {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .unpublish-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-full);
+    background: var(--background);
+    color: var(--muted-foreground);
+    cursor: pointer;
+    flex-shrink: 0;
+    box-shadow: 0 3px 0 0 var(--border);
+    transition: color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   }
 
   .unpublish-btn:hover {

@@ -196,6 +196,7 @@
       emptyDescription={copy.orgSkills.emptyDescription}
       onRetry={() => loadSkills(currentPage)}
       onUnpublish={handleUnpublishClick}
+      onSkillUpdated={() => loadSkills(currentPage)}
     />
 
     <!-- Desktop: Pagination -->
