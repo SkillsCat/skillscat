@@ -102,6 +102,66 @@ export const POST: RequestHandler = async ({ locals, platform, request, params }
     expiresInDays
   );
 
+  // Best-effort: notify the grantee in-app if they are a registered user.
+  // Notification failures must not fail the share itself.
+  try {
+    const granteeUser = granteeType === 'user'
+      ? await db.prepare(`
+          SELECT id FROM user WHERE id = ? LIMIT 1
+        `).bind(granteeId).first<{ id: string }>()
+      : await db.prepare(`
+          SELECT id FROM user WHERE LOWER(email) = LOWER(?) LIMIT 1
+        `).bind(granteeId).first<{ id: string }>();
+
+    // Never notify the sharer about their own share
+    if (granteeUser && granteeUser.id !== auth.userId) {
+      const skill = await db.prepare(`
+        SELECT name, slug FROM skills WHERE id = ? LIMIT 1
+      `).bind(skillId).first<{ name: string; slug: string }>();
+
+      let sharerName = auth.user?.name || auth.user?.email || null;
+      if (!sharerName && auth.userId) {
+        const sharer = await db.prepare(`
+          SELECT name, email FROM user WHERE id = ? LIMIT 1
+        `).bind(auth.userId).first<{ name: string | null; email: string | null }>();
+        sharerName = sharer?.name || sharer?.email || null;
+      }
+      if (!sharerName) {
+        sharerName = 'Someone';
+      }
+
+      const skillName = skill?.name || skillId;
+      const expiresAt = expiresInDays === undefined
+        ? null
+        : Date.now() + expiresInDays * 24 * 60 * 60 * 1000;
+      const metadata = JSON.stringify({
+        skillId,
+        skillSlug: skill?.slug ?? null,
+        skillName,
+        sharerId: auth.principalId,
+        sharerName,
+        permission,
+        expiresAt,
+      });
+
+      await db.prepare(`
+        INSERT INTO notifications (id, user_id, type, title, message, metadata, read, processed, created_at)
+        VALUES (?, ?, 'skill_shared', ?, ?, ?, 0, 0, ?)
+      `)
+        .bind(
+          crypto.randomUUID(),
+          granteeUser.id,
+          `Skill shared: ${skillName}`,
+          `${sharerName} shared "${skillName}" with you with ${permission} access.`,
+          metadata,
+          Date.now()
+        )
+        .run();
+    }
+  } catch (notificationError) {
+    console.error('Failed to create skill_shared notification:', notificationError);
+  }
+
   return json({
     success: true,
     message: `Permission granted to ${granteeId}`,
