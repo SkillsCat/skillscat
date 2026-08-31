@@ -239,6 +239,7 @@
       {emptyDescription}
       {emptyHint}
       onUnpublish={isSubmittedView ? undefined : handleUnpublishClick}
+      onSkillUpdated={() => invalidateAll()}
     />
 
     <!-- Desktop: Pagination -->
