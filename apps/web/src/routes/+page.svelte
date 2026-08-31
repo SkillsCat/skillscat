@@ -20,8 +20,8 @@
     data: {
       stats: { totalSkills: number };
       trending: SkillCardData[];
-      recent: Promise<SkillCardData[]> | SkillCardData[];
-      top: Promise<SkillCardData[]> | SkillCardData[];
+      recent: SkillCardData[];
+      top: SkillCardData[];
     };
   }
 
@@ -143,27 +143,21 @@
             <span aria-hidden="true">-></span>
           </a>
         </div>
-        {#await data.recent}
-          <div class="home-loading-state">
-            <p>{messages.common.loading}</p>
-          </div>
-        {:then recent}
-          {#if recent.length > 0}
-            <Grid cols={3} gap="xl">
-              {#each recent as skill (skill.id)}
-                <SkillCard {skill} />
-              {/each}
-            </Grid>
-          {:else}
-            <div class="home-empty-state">
-              <div class="home-empty-state-icon">
-                <HugeiconsIcon icon={Sad01Icon} size={40} strokeWidth={1.5} />
-              </div>
-              <h3 class="home-empty-state-title">{messages.home.recentEmptyTitle}</h3>
-              <p class="home-empty-state-description">{messages.home.recentEmptyDescription}</p>
+        {#if data.recent.length > 0}
+          <Grid cols={3} gap="xl">
+            {#each data.recent as skill (skill.id)}
+              <SkillCard {skill} />
+            {/each}
+          </Grid>
+        {:else}
+          <div class="home-empty-state">
+            <div class="home-empty-state-icon">
+              <HugeiconsIcon icon={Sad01Icon} size={40} strokeWidth={1.5} />
             </div>
-          {/if}
-        {/await}
+            <h3 class="home-empty-state-title">{messages.home.recentEmptyTitle}</h3>
+            <p class="home-empty-state-description">{messages.home.recentEmptyDescription}</p>
+          </div>
+        {/if}
       </section>
     </div>
 
@@ -182,27 +176,21 @@
             <span aria-hidden="true">-></span>
           </a>
         </div>
-        {#await data.top}
-          <div class="home-loading-state">
-            <p>{messages.common.loading}</p>
-          </div>
-        {:then top}
-          {#if top.length > 0}
-            <Grid cols={3} gap="xl">
-              {#each top as skill (skill.id)}
-                <SkillCard {skill} />
-              {/each}
-            </Grid>
-          {:else}
-            <div class="home-empty-state">
-              <div class="home-empty-state-icon">
-                <HugeiconsIcon icon={HeartbreakIcon} size={40} strokeWidth={1.5} />
-              </div>
-              <h3 class="home-empty-state-title">{messages.home.topEmptyTitle}</h3>
-              <p class="home-empty-state-description">{messages.home.topEmptyDescription}</p>
+        {#if data.top.length > 0}
+          <Grid cols={3} gap="xl">
+            {#each data.top as skill (skill.id)}
+              <SkillCard {skill} />
+            {/each}
+          </Grid>
+        {:else}
+          <div class="home-empty-state">
+            <div class="home-empty-state-icon">
+              <HugeiconsIcon icon={HeartbreakIcon} size={40} strokeWidth={1.5} />
             </div>
-          {/if}
-        {/await}
+            <h3 class="home-empty-state-title">{messages.home.topEmptyTitle}</h3>
+            <p class="home-empty-state-description">{messages.home.topEmptyDescription}</p>
+          </div>
+        {/if}
       </section>
     </div>
   </div>
@@ -407,15 +395,7 @@
 
   .deferred-home-section {
     content-visibility: auto;
-    contain-intrinsic-size: 1px 1200px;
-  }
-
-  .home-loading-state {
-    min-height: 4rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--fg-muted);
+    contain-intrinsic-size: auto 1000px;
   }
 
   @media (min-width: 768px) {

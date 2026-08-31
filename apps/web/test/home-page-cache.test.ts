@@ -70,8 +70,8 @@ describe('home page caching', () => {
       request: new Request('https://skills.cat/'),
     } as never);
 
-    await expect(result.recent).resolves.toEqual([{ slug: 'demo/recent' }]);
-    await expect(result.top).resolves.toEqual([{ slug: 'demo/top' }]);
+    expect(result.recent).toEqual([{ slug: 'demo/recent' }]);
+    expect(result.top).toEqual([{ slug: 'demo/top' }]);
 
     expect(getCached).toHaveBeenCalledWith(
       HOME_CRITICAL_CACHE_KEY,
@@ -125,8 +125,8 @@ describe('home page caching', () => {
     // Cached payloads are returned as-is without refetching.
     expect(result.trending).toEqual(criticalPayload.trending);
     expect(result.stats).toEqual(criticalPayload.stats);
-    await expect(result.recent).resolves.toEqual(recentPayload);
-    await expect(result.top).resolves.toEqual(topPayload);
+    expect(result.recent).toEqual(recentPayload);
+    expect(result.top).toEqual(topPayload);
     expect(getTrendingSkills).not.toHaveBeenCalled();
     expect(getRecentSkills).not.toHaveBeenCalled();
     expect(getTopSkills).not.toHaveBeenCalled();
