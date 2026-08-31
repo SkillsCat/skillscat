@@ -189,7 +189,7 @@ async function updateVirusTotalState(
     .run();
 }
 
-async function loadPendingSkills(db: D1Database, now: number): Promise<PendingVirusTotalRow[]> {
+export async function loadPendingSkills(db: D1Database, now: number): Promise<PendingVirusTotalRow[]> {
   const result = await db.prepare(`
     SELECT
       ss.skill_id,
@@ -216,6 +216,7 @@ async function loadPendingSkills(db: D1Database, now: number): Promise<PendingVi
     INNER JOIN skills s ON s.id = ss.skill_id
     WHERE ss.vt_eligibility = 'eligible'
       AND ss.vt_status IN ('pending_lookup', 'pending_upload', 'pending_analysis_poll')
+      AND s.visibility = 'public'
       AND (ss.vt_next_attempt_at IS NULL OR ss.vt_next_attempt_at <= ?)
     ORDER BY ss.vt_priority DESC,
              ss.open_security_report_count DESC,
