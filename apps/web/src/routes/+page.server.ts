@@ -88,9 +88,11 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
     });
   }
 
+  // All payloads are already resolved above; return plain arrays so SSR can
+  // render the sections directly instead of a client-side {#await} swap.
   return {
     ...critical,
-    recent: Promise.resolve(recent),
-    top: Promise.resolve(top),
+    recent,
+    top,
   };
 };
