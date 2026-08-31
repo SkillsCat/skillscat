@@ -222,6 +222,86 @@ export const POST: RequestHandler = async ({ locals, platform, params, request }
 };
 
 /**
+ * PATCH /api/orgs/[slug]/members - Change a member's role (member <-> owner)
+ */
+export const PATCH: RequestHandler = async ({ locals, platform, params, request }) => {
+  const session = await locals.auth?.();
+  if (!session?.user) {
+    throw error(401, 'Authentication required');
+  }
+
+  const db = platform?.env?.DB;
+  if (!db) {
+    throw error(500, 'Database not available');
+  }
+
+  const slug = params.slug?.trim().toLowerCase();
+  if (!slug) {
+    throw error(400, 'Organization slug is required');
+  }
+
+  const body = await readMemberRequest(request);
+  const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
+  if (!userId) {
+    throw error(400, 'userId is required');
+  }
+  const role = body.role;
+  if (role !== 'owner' && role !== 'member') {
+    throw error(400, 'role must be "owner" or "member"');
+  }
+
+  // Get org and check permissions
+  const org = await db.prepare(`
+    SELECT id, owner_id FROM organizations WHERE slug = ? COLLATE NOCASE
+  `)
+    .bind(slug)
+    .first<{ id: string; owner_id: string }>();
+
+  if (!org) {
+    throw error(404, 'Organization not found');
+  }
+
+  const requesterMembership = await db.prepare(`
+    SELECT role FROM org_members WHERE org_id = ? AND user_id = ?
+  `)
+    .bind(org.id, session.user.id)
+    .first<{ role: string }>();
+
+  if (requesterMembership?.role !== 'owner') {
+    throw error(403, 'Only the organization owner can change member roles');
+  }
+
+  if (userId === session.user.id) {
+    throw error(400, 'You cannot change your own role');
+  }
+
+  // The member referenced by organizations.owner_id must always keep the owner role
+  // so the organization never loses its creator-aligned owner.
+  if (userId === org.owner_id && role !== 'owner') {
+    throw error(400, 'Cannot demote the organization creator');
+  }
+
+  const result = await db.prepare(`
+    UPDATE org_members SET role = ? WHERE org_id = ? AND user_id = ?
+  `)
+    .bind(role, org.id, userId)
+    .run();
+
+  if (result.meta.changes === 0) {
+    throw error(404, 'Member not found');
+  }
+
+  await touchOrganizationUpdatedAt(db, org.id);
+
+  await invalidateCache(getOrgPageSnapshotCacheKey(slug));
+
+  return json({
+    success: true,
+    message: 'Member role updated successfully',
+  });
+};
+
+/**
  * DELETE /api/orgs/[slug]/members - Remove a member
  */
 export const DELETE: RequestHandler = async ({ locals, platform, params, request }) => {

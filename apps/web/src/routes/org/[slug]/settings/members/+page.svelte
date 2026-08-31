@@ -23,11 +23,13 @@
 
   interface Org {
     userRole: string | null;
+    ownerId: string;
   }
 
   interface Props {
     data: {
       org: Org;
+      currentUserId: string;
       members: Member[];
     };
   }
@@ -56,10 +58,13 @@
   let inviteSuccess = $state<string | null>(null);
   let removeTarget = $state<Member | null>(null);
   let removing = $state(false);
+  let roleTarget = $state<Member | null>(null);
+  let changingRole = $state(false);
 
   const slug = $derived($page.params.slug);
   const isOwner = $derived(org?.userRole === "owner");
   const canManageMembers = $derived(org?.userRole === "owner");
+  const currentUserId = $derived(data.currentUserId);
   function getMemberProfileHref(member: Member): string {
     const handle = member.githubUsername?.trim() || member.name?.trim();
     return handle ? `/u/${encodeURIComponent(handle)}` : '#';
@@ -183,6 +188,64 @@
         })
       : ''
   );
+
+  const roleTargetNewRole = $derived<'owner' | 'member'>(
+    roleTarget?.role === 'owner' ? 'member' : 'owner'
+  );
+  const roleTargetName = $derived(
+    roleTarget
+      ? roleTarget.name || roleTarget.githubUsername || roleTarget.userId
+      : ''
+  );
+  const roleChangeTitle = $derived(
+    roleTargetNewRole === 'owner' ? copy.orgMembers.promoteTitle : copy.orgMembers.demoteTitle
+  );
+  const roleChangeDescription = $derived(
+    roleTarget
+      ? i18n.t(
+          roleTargetNewRole === 'owner'
+            ? copy.orgMembers.promoteDescription
+            : copy.orgMembers.demoteDescription,
+          { name: roleTargetName }
+        )
+      : ''
+  );
+
+  function canChangeRole(member: Member): boolean {
+    if (!isOwner || !org || member.userId === currentUserId) return false;
+    // The creator referenced by organizations.owner_id must stay an owner.
+    if (member.userId === org.ownerId && member.role === 'owner') return false;
+    return true;
+  }
+
+  async function confirmChangeRole() {
+    if (!roleTarget || changingRole) return;
+
+    changingRole = true;
+    try {
+      const res = await fetch(`/api/orgs/${slug}/members`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: roleTarget.userId, role: roleTargetNewRole }),
+      });
+      const result = await res.json() as { message?: string };
+      if (!res.ok) {
+        toast(result.message || copy.orgMembers.roleUpdateFailed, 'error');
+        return;
+      }
+
+      const changedUserId = roleTarget.userId;
+      members = members.map((member) =>
+        member.userId === changedUserId ? { ...member, role: roleTargetNewRole } : member
+      );
+      roleTarget = null;
+      toast(copy.orgMembers.roleUpdateSuccess, 'success');
+    } catch {
+      toast(copy.orgMembers.roleUpdateFailed, 'error');
+    } finally {
+      changingRole = false;
+    }
+  }
 </script>
 
 <div class="members-page">
@@ -254,17 +317,30 @@
               <p class="member-email">{member.email}</p>
               <p class="member-joined">{i18n.t(copy.orgMembers.joinedOn, { date: formatDate(member.joinedAt) })}</p>
             </div>
-            {#if isOwner && member.role !== "owner"}
+            {#if isOwner && member.userId !== currentUserId}
               <div class="member-actions">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onclick={() => { removeTarget = member; }}
-                  aria-label={i18n.t(copy.orgMembers.removeAction, { name: member.name })}
-                  title={i18n.t(copy.orgMembers.removeAction, { name: member.name })}
-                >
-                  <HugeiconsIcon icon={Delete02Icon} size={16} />
-                </Button>
+                {#if canChangeRole(member)}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onclick={() => { roleTarget = member; }}
+                    aria-label={i18n.t(member.role === 'owner' ? copy.orgMembers.demoteAction : copy.orgMembers.promoteAction, { name: member.name })}
+                    title={i18n.t(member.role === 'owner' ? copy.orgMembers.demoteAction : copy.orgMembers.promoteAction, { name: member.name })}
+                  >
+                    {member.role === 'owner' ? copy.orgMembers.makeMember : copy.orgMembers.makeOwner}
+                  </Button>
+                {/if}
+                {#if member.role !== "owner"}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onclick={() => { removeTarget = member; }}
+                    aria-label={i18n.t(copy.orgMembers.removeAction, { name: member.name })}
+                    title={i18n.t(copy.orgMembers.removeAction, { name: member.name })}
+                  >
+                    <HugeiconsIcon icon={Delete02Icon} size={16} />
+                  </Button>
+                {/if}
               </div>
             {/if}
           </div>
@@ -339,6 +415,16 @@
   loading={removing}
   onConfirm={confirmRemoveMember}
   onCancel={() => { removeTarget = null; }}
+/>
+
+<ConfirmDialog
+  open={!!roleTarget}
+  title={roleChangeTitle}
+  description={roleChangeDescription}
+  danger={roleTargetNewRole === 'member'}
+  loading={changingRole}
+  onConfirm={confirmChangeRole}
+  onCancel={() => { roleTarget = null; }}
 />
 
 <style>
