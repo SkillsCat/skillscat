@@ -38,17 +38,59 @@ async function runVisibilityUpdate(
   db: D1Database,
   statement: D1PreparedStatement,
   orgId: string | null,
-  now: number
+  now: number,
+  extraStatements: D1PreparedStatement[] = []
 ): Promise<void> {
+  const statements = [statement, ...extraStatements];
   if (orgId) {
-    await db.batch([
-      statement,
-      buildTouchOrganizationStatement(db, orgId, now),
-    ]);
+    statements.push(buildTouchOrganizationStatement(db, orgId, now));
+  }
+  if (statements.length === 1) {
+    await statement.run();
     return;
   }
 
-  await statement.run();
+  await db.batch(statements);
+}
+
+/**
+ * Keep VirusTotal processing in sync with visibility changes. Leaving public
+ * stops any queued VT work so private bundles are never uploaded; returning to
+ * public re-arms the state so security analysis re-evaluates eligibility.
+ * Historical VT fields (analysis id, bundle sha256, stats) are preserved.
+ */
+function buildVirusTotalStateStatement(
+  db: D1Database,
+  skillId: string,
+  previousVisibility: string,
+  nextVisibility: 'public' | 'private' | 'unlisted',
+  now: number
+): D1PreparedStatement | null {
+  if (previousVisibility === 'public' && nextVisibility !== 'public') {
+    return db.prepare(`
+      UPDATE skill_security_state
+      SET vt_eligibility = 'skipped_visibility',
+          vt_status = 'skipped',
+          vt_priority = 0,
+          vt_next_attempt_at = NULL,
+          updated_at = ?
+      WHERE skill_id = ?
+    `).bind(now, skillId);
+  }
+
+  if (previousVisibility !== 'public' && nextVisibility === 'public') {
+    return db.prepare(`
+      UPDATE skill_security_state
+      SET vt_eligibility = 'unknown',
+          vt_status = 'pending',
+          vt_priority = 0,
+          vt_next_attempt_at = NULL,
+          updated_at = ?
+      WHERE skill_id = ?
+    `).bind(now, skillId);
+  }
+
+  return null;
 }
 
 /**
@@ -215,6 +257,8 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
   }, platform?.env);
   const becamePublic = skill.visibility !== 'public' && visibility === 'public';
   const now = Date.now();
+  const vtStateStatement = buildVirusTotalStateStatement(db, skillId, skill.visibility, visibility, now);
+  const vtExtraStatements = vtStateStatement ? [vtStateStatement] : [];
 
   // Every transition into public requires verification for uploaded skills.
   if (becamePublic && skill.source_type === 'upload') {
@@ -226,7 +270,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
       await runVisibilityUpdate(db, db.prepare(`
         UPDATE skills SET visibility = ?, updated_at = ?, indexed_at = ? WHERE id = ?
       `)
-        .bind(visibility, now, now, skillId), skill.org_id, now);
+        .bind(visibility, now, now, skillId), skill.org_id, now, vtExtraStatements);
     } else {
       if (!auth.userId) {
         throw error(400, 'A user account is required to verify this uploaded skill');
@@ -265,7 +309,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
         SET visibility = ?, verified_repo_url = ?, updated_at = ?, indexed_at = ?
         WHERE id = ?
       `)
-        .bind(visibility, verification.normalizedUrl, now, now, skillId), skill.org_id, now);
+        .bind(visibility, verification.normalizedUrl, now, now, skillId), skill.org_id, now, vtExtraStatements);
     }
   } else {
     // GitHub-sourced skills and transitions away from public do not need
@@ -273,7 +317,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
     await runVisibilityUpdate(db, db.prepare(`
       UPDATE skills SET visibility = ?, updated_at = ?, indexed_at = ? WHERE id = ?
     `)
-      .bind(visibility, now, becamePublic ? now : skill.indexed_at, skillId), skill.org_id, now);
+      .bind(visibility, now, becamePublic ? now : skill.indexed_at, skillId), skill.org_id, now, vtExtraStatements);
   }
 
   const categoryRows = await db.prepare(`

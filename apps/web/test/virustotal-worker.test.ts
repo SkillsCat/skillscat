@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { parseRetryAfterMs, tryClaimVirusTotalWork, tryConsumeBudget } from '../workers/virustotal';
+import { loadPendingSkills, parseRetryAfterMs, tryClaimVirusTotalWork, tryConsumeBudget } from '../workers/virustotal';
 
 function createKv(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial));
@@ -76,6 +76,31 @@ describe('virustotal worker helpers', () => {
 
     expect(parsed).toBeGreaterThanOrEqual(15_000);
     expect(parsed).toBeLessThanOrEqual(60_000);
+  });
+
+  it('only loads pending VT work for public skills', async () => {
+    let capturedSql = '';
+    let capturedBindings: unknown[] = [];
+    const db = {
+      prepare: (sql: string) => {
+        capturedSql = sql;
+        return {
+          bind: (...args: unknown[]) => {
+            capturedBindings = args;
+            return {
+              all: async () => ({ results: [] }),
+            };
+          },
+        };
+      },
+    };
+
+    const rows = await loadPendingSkills(db as never, 1_234);
+
+    expect(rows).toEqual([]);
+    expect(capturedSql).toContain("ss.vt_eligibility = 'eligible'");
+    expect(capturedSql).toContain("s.visibility = 'public'");
+    expect(capturedBindings).toEqual([1_234]);
   });
 
   it('claims VT work only when the row is due and unchanged', async () => {

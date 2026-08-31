@@ -102,6 +102,7 @@ function createDb(skillOverrides: Partial<SkillRow> = {}, accountId: string | nu
     ...skillOverrides,
   };
   const updates: unknown[][] = [];
+  const securityUpdates: Array<{ sql: string; bindings: unknown[] }> = [];
   const touchedOrgIds: unknown[] = [];
 
   const db = {
@@ -125,6 +126,10 @@ function createDb(skillOverrides: Partial<SkillRow> = {}, accountId: string | nu
             updates.push(bindings);
             return { meta: { changes: 1 } };
           }
+          if (sql.includes('UPDATE skill_security_state')) {
+            securityUpdates.push({ sql, bindings });
+            return { meta: { changes: 1 } };
+          }
           if (sql.includes('UPDATE organizations')) {
             touchedOrgIds.push(bindings[2]);
             return { meta: { changes: 1 } };
@@ -142,7 +147,7 @@ function createDb(skillOverrides: Partial<SkillRow> = {}, accountId: string | nu
     }),
   };
 
-  return { db, updates, touchedOrgIds };
+  return { db, updates, securityUpdates, touchedOrgIds };
 }
 
 function visibilityRequest(
@@ -344,4 +349,75 @@ describe('uploaded skill visibility transitions', () => {
       }));
     }
   );
+
+  it.each(['private', 'unlisted'] as const)(
+    'blocks queued VirusTotal work when a public skill becomes %s',
+    async (visibility) => {
+      const { db, updates, securityUpdates } = createDb({
+        visibility: 'public',
+        source_type: 'github',
+        repo_owner: 'acme',
+        repo_name: 'demo',
+      });
+      const { PUT } = await import('../src/routes/api/skills/[id]/visibility/+server');
+
+      const response = await PUT({
+        locals: {},
+        platform: { env: { DB: db } },
+        params: { id: 'skill-1' },
+        request: visibilityRequest(undefined, visibility),
+      } as never);
+
+      expect(response.status).toBe(200);
+      expect(updates).toHaveLength(1);
+      expect(securityUpdates).toHaveLength(1);
+      expect(securityUpdates[0].sql).toContain("vt_eligibility = 'skipped_visibility'");
+      expect(securityUpdates[0].sql).toContain("vt_status = 'skipped'");
+      expect(securityUpdates[0].sql).toContain('vt_next_attempt_at = NULL');
+      expect(securityUpdates[0].bindings[1]).toBe('skill-1');
+      // Visibility flip and VT reset must land in one atomic batch.
+      expect(db.batch).toHaveBeenCalledTimes(1);
+      expect(db.batch.mock.calls[0][0]).toHaveLength(2);
+    }
+  );
+
+  it('re-arms VirusTotal evaluation when a skill returns to public', async () => {
+    mocks.getRepo.mockResolvedValue(new Response(JSON.stringify({
+      owner: { id: 123, type: 'User' },
+      fork: false,
+    }), { status: 200 }));
+    const { db, updates, securityUpdates } = createDb({ visibility: 'private' });
+    const { PUT } = await import('../src/routes/api/skills/[id]/visibility/+server');
+
+    const response = await PUT({
+      locals: {},
+      platform: { env: { DB: db } },
+      params: { id: 'skill-1' },
+      request: visibilityRequest('https://github.com/alice/demo'),
+    } as never);
+
+    expect(response.status).toBe(200);
+    expect(updates).toHaveLength(1);
+    expect(securityUpdates).toHaveLength(1);
+    expect(securityUpdates[0].sql).toContain("vt_eligibility = 'unknown'");
+    expect(securityUpdates[0].sql).toContain("vt_status = 'pending'");
+    expect(securityUpdates[0].sql).toContain('vt_next_attempt_at = NULL');
+    expect(securityUpdates[0].bindings[1]).toBe('skill-1');
+  });
+
+  it('leaves VirusTotal state untouched for transitions that never leave private scope', async () => {
+    const { db, updates, securityUpdates } = createDb({ visibility: 'private' });
+    const { PUT } = await import('../src/routes/api/skills/[id]/visibility/+server');
+
+    const response = await PUT({
+      locals: {},
+      platform: { env: { DB: db } },
+      params: { id: 'skill-1' },
+      request: visibilityRequest(undefined, 'unlisted'),
+    } as never);
+
+    expect(response.status).toBe(200);
+    expect(updates).toHaveLength(1);
+    expect(securityUpdates).toHaveLength(0);
+  });
 });
