@@ -356,6 +356,134 @@ describe('organization member removal', () => {
   });
 });
 
+describe('organization member role changes', () => {
+  function addInviteeMember(db: SqliteD1Database, role: 'owner' | 'member' = 'member') {
+    db.sqlite.prepare(`
+      INSERT INTO org_members (org_id, user_id, role, invited_by, joined_at)
+      VALUES ('org-1', 'invitee', ?, 'owner', 2)
+    `).run(role);
+  }
+
+  function patchRequest(userId: string, role: unknown) {
+    return new Request('https://skills.cat/api/orgs/acme/members', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId, role }),
+    });
+  }
+
+  function memberRole(db: SqliteD1Database, userId: string) {
+    return db.sqlite.prepare(`
+      SELECT role FROM org_members WHERE org_id = 'org-1' AND user_id = ?
+    `).get(userId) as { role: string } | undefined;
+  }
+
+  it('rejects role changes from non-owners', async () => {
+    const db = createDb();
+    addInviteeMember(db);
+    const { PATCH } = await import('../src/routes/api/orgs/[slug]/members/+server');
+
+    await expect(PATCH({
+      locals: session('invitee'),
+      platform: { env: { DB: db } },
+      params: { slug: 'acme' },
+      request: patchRequest('invitee', 'owner'),
+    } as never)).rejects.toMatchObject({ status: 403 });
+
+    expect(memberRole(db, 'invitee')).toEqual({ role: 'member' });
+    expect(invalidateCache).not.toHaveBeenCalled();
+  });
+
+  it('rejects changing your own role', async () => {
+    const db = createDb();
+    const { PATCH } = await import('../src/routes/api/orgs/[slug]/members/+server');
+
+    await expect(PATCH({
+      locals: session('owner'),
+      platform: { env: { DB: db } },
+      params: { slug: 'acme' },
+      request: patchRequest('owner', 'member'),
+    } as never)).rejects.toMatchObject({ status: 400 });
+
+    expect(memberRole(db, 'owner')).toEqual({ role: 'owner' });
+  });
+
+  it('rejects demoting the member referenced by organizations.owner_id', async () => {
+    const db = createDb();
+    addInviteeMember(db, 'owner');
+    const { PATCH } = await import('../src/routes/api/orgs/[slug]/members/+server');
+
+    // 'invitee' is now an owner, but 'owner' is the creator (owner_id) and must stay owner.
+    await expect(PATCH({
+      locals: session('invitee'),
+      platform: { env: { DB: db } },
+      params: { slug: 'acme' },
+      request: patchRequest('owner', 'member'),
+    } as never)).rejects.toMatchObject({ status: 400 });
+
+    expect(memberRole(db, 'owner')).toEqual({ role: 'owner' });
+  });
+
+  it('round-trips a member to owner and back, touching the org and invalidating cache', async () => {
+    const db = createDb();
+    addInviteeMember(db);
+    const { PATCH } = await import('../src/routes/api/orgs/[slug]/members/+server');
+
+    const promote = await PATCH({
+      locals: session('owner'),
+      platform: { env: { DB: db } },
+      params: { slug: 'acme' },
+      request: patchRequest('invitee', 'owner'),
+    } as never);
+
+    expect(promote.status).toBe(200);
+    expect(memberRole(db, 'invitee')).toEqual({ role: 'owner' });
+
+    const demote = await PATCH({
+      locals: session('owner'),
+      platform: { env: { DB: db } },
+      params: { slug: 'acme' },
+      request: patchRequest('invitee', 'member'),
+    } as never);
+
+    expect(demote.status).toBe(200);
+    expect(memberRole(db, 'invitee')).toEqual({ role: 'member' });
+    expect(db.sqlite.prepare(`
+      SELECT updated_at FROM organizations WHERE id = 'org-1'
+    `).get()).not.toEqual({ updated_at: 1 });
+    expect(invalidateCache).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns 404 when the target is not a member', async () => {
+    const db = createDb();
+    const { PATCH } = await import('../src/routes/api/orgs/[slug]/members/+server');
+
+    await expect(PATCH({
+      locals: session('owner'),
+      platform: { env: { DB: db } },
+      params: { slug: 'acme' },
+      request: patchRequest('ghost', 'member'),
+    } as never)).rejects.toMatchObject({ status: 404 });
+
+    expect(invalidateCache).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid role value', async () => {
+    const db = createDb();
+    addInviteeMember(db);
+    const { PATCH } = await import('../src/routes/api/orgs/[slug]/members/+server');
+
+    await expect(PATCH({
+      locals: session('owner'),
+      platform: { env: { DB: db } },
+      params: { slug: 'acme' },
+      request: patchRequest('invitee', 'admin'),
+    } as never)).rejects.toMatchObject({ status: 400 });
+
+    expect(memberRole(db, 'invitee')).toEqual({ role: 'member' });
+  });
+});
+
 describe('organization deletion', () => {
   it('keeps the organization intact when it still owns a skill', async () => {
     const db = createDb();

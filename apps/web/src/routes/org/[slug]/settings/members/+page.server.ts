@@ -19,13 +19,13 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
 
     // Get org info and user's role
     const orgData = await db.prepare(`
-    SELECT o.id, o.slug, om.role as user_role
+    SELECT o.id, o.slug, o.owner_id, om.role as user_role
     FROM organizations o
     LEFT JOIN org_members om ON o.id = om.org_id AND om.user_id = ?
     WHERE o.slug = ? COLLATE NOCASE
   `)
         .bind(session.user.id, slug)
-        .first<{ id: string; slug: string; user_role: string | null }>();
+        .first<{ id: string; slug: string; owner_id: string; user_role: string | null }>();
 
     if (!orgData) {
         throw error(404, 'Organization not found');
@@ -60,7 +60,9 @@ export const load: PageServerLoad = async ({ locals, platform, params }) => {
     return {
         org: {
             userRole: orgData.user_role,
+            ownerId: orgData.owner_id,
         },
+        currentUserId: session.user.id,
         members: results.results.map(m => ({
             userId: m.user_id,
             role: (m.role === 'owner' ? 'owner' : 'member') as 'owner' | 'member',

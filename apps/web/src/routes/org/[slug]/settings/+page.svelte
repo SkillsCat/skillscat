@@ -30,6 +30,12 @@
   let deleteError = $state<string | null>(null);
   let connecting = $state(false);
   let connectError = $state<string | null>(null);
+  let showEditDialog = $state(false);
+  let editDisplayName = $state('');
+  let editDescription = $state('');
+  let editAvatarUrl = $state('');
+  let saving = $state(false);
+  let editError = $state<string | null>(null);
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
   const copy = $derived(getSettingsCopy(i18n.locale()));
@@ -82,6 +88,56 @@
       connectError = copy.orgProfile.connectFailed;
     } finally {
       connecting = false;
+    }
+  }
+
+  function openEditDialog() {
+    if (!org) return;
+    editDisplayName = org.displayName || org.name || '';
+    editDescription = org.description || '';
+    editAvatarUrl = org.avatarUrl || '';
+    editError = null;
+    showEditDialog = true;
+  }
+
+  function closeEditDialog() {
+    showEditDialog = false;
+    editError = null;
+  }
+
+  async function handleSaveProfile() {
+    if (!org || saving) return;
+
+    const displayName = editDisplayName.trim();
+    if (!displayName) {
+      editError = copy.orgProfile.displayNameRequired;
+      return;
+    }
+
+    saving = true;
+    editError = null;
+    try {
+      const res = await fetch(`/api/orgs/${slug}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          displayName,
+          // Empty strings clear these optional fields on the server.
+          description: editDescription.trim(),
+          avatarUrl: editAvatarUrl.trim(),
+        }),
+      });
+      const result = await res.json() as { message?: string };
+      if (res.ok) {
+        showEditDialog = false;
+        await loadOrg();
+      } else {
+        editError = result.message || copy.orgProfile.updateFailed;
+      }
+    } catch {
+      editError = copy.orgProfile.updateFailed;
+    } finally {
+      saving = false;
     }
   }
 
@@ -150,12 +206,22 @@
             </span>
           {/if}
         </div>
-        <Button variant="cute" size="sm" href="/org/{slug}">
-          {copy.orgProfile.viewPublicProfile}
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-          </svg>
-        </Button>
+        <div class="profile-actions">
+          {#if isOwner}
+            <Button variant="ghost" size="sm" onclick={openEditDialog}>
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+              </svg>
+              {copy.orgProfile.editAction}
+            </Button>
+          {/if}
+          <Button variant="cute" size="sm" href="/org/{slug}">
+            {copy.orgProfile.viewPublicProfile}
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </Button>
+        </div>
       </div>
     </SettingsSection>
 
@@ -222,6 +288,62 @@
     {/if}
   {/if}
 </div>
+
+<!-- Edit Profile Dialog -->
+{#if showEditDialog && org}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="dialog-overlay" role="presentation" onclick={closeEditDialog}>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="edit-dialog-title" tabindex="-1" onclick={(e) => e.stopPropagation()}>
+      <h2 id="edit-dialog-title" class="edit-dialog-title">{copy.orgProfile.editDialogTitle}</h2>
+      <div class="form-group">
+        <label for="edit-display-name">{copy.orgProfile.displayNameLabel}</label>
+        <input
+          id="edit-display-name"
+          type="text"
+          bind:value={editDisplayName}
+          placeholder={org.name}
+          class="edit-input"
+          maxlength="100"
+          disabled={saving}
+        />
+      </div>
+      <div class="form-group">
+        <label for="edit-description">{copy.orgProfile.descriptionLabel}</label>
+        <textarea
+          id="edit-description"
+          bind:value={editDescription}
+          placeholder={copy.orgProfile.descriptionPlaceholder}
+          class="edit-input edit-textarea"
+          maxlength="500"
+          rows="3"
+          disabled={saving}
+        ></textarea>
+      </div>
+      <div class="form-group">
+        <label for="edit-avatar-url">{copy.orgProfile.avatarUrlLabel}</label>
+        <input
+          id="edit-avatar-url"
+          type="url"
+          bind:value={editAvatarUrl}
+          placeholder={copy.orgProfile.avatarUrlPlaceholder}
+          class="edit-input"
+          disabled={saving}
+        />
+      </div>
+      {#if editError}
+        <p class="edit-error">{editError}</p>
+      {/if}
+      <div class="dialog-actions">
+        <Button variant="ghost" onclick={closeEditDialog} disabled={saving}>
+          {messages.common.cancel}
+        </Button>
+        <Button variant="cute" onclick={handleSaveProfile} disabled={saving || !editDisplayName.trim()}>
+          {saving ? messages.common.processing : copy.orgProfile.saveAction}
+        </Button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <!-- Delete Confirmation Dialog -->
 {#if showDeleteConfirm && org}
@@ -318,6 +440,13 @@
   .profile-info {
     flex: 1;
     min-width: 0;
+  }
+
+  .profile-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex-shrink: 0;
   }
 
   .profile-name {
@@ -482,6 +611,58 @@
     font-weight: 600;
     margin-bottom: 1rem;
     color: #ef4444;
+  }
+
+  .dialog h2.edit-dialog-title {
+    color: var(--foreground);
+  }
+
+  /* Edit Profile Dialog */
+  .form-group {
+    margin-bottom: 1rem;
+  }
+
+  .form-group label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+  }
+
+  .edit-input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--background);
+    color: var(--foreground);
+    font-size: 0.9375rem;
+    font-family: inherit;
+    box-shadow: 0 3px 0 0 oklch(75% 0.02 85);
+    transition: all 0.15s ease;
+    box-sizing: border-box;
+  }
+
+  :global(.dark) .edit-input {
+    box-shadow: 0 3px 0 0 oklch(25% 0.02 85);
+  }
+
+  .edit-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 1px 0 0 var(--primary);
+    transform: translateY(2px);
+  }
+
+  .edit-textarea {
+    resize: vertical;
+    min-height: 4.5rem;
+  }
+
+  .edit-error {
+    font-size: 0.875rem;
+    color: #ef4444;
+    margin-bottom: 1rem;
   }
 
   .dialog-warning {
