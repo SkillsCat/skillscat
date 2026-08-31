@@ -1,3 +1,5 @@
+import { DatabaseSync } from 'node:sqlite';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -21,7 +23,85 @@ vi.mock('../src/lib/server/auth/permissions', () => ({
   listSkillPermissions: mocks.listSkillPermissions,
 }));
 
-const db = {} as D1Database;
+class SqliteD1Statement {
+  private params: unknown[] = [];
+
+  constructor(
+    private readonly db: DatabaseSync,
+    private readonly sql: string
+  ) {}
+
+  bind(...params: unknown[]) {
+    this.params = params;
+    return this;
+  }
+
+  async first<T>() {
+    return (this.db.prepare(this.sql).get(...this.params) as T | undefined) ?? null;
+  }
+
+  async all<T>() {
+    return { results: this.db.prepare(this.sql).all(...this.params) as T[] };
+  }
+
+  async run() {
+    const result = this.db.prepare(this.sql).run(...this.params);
+    return { meta: { changes: Number(result.changes) } };
+  }
+}
+
+class SqliteD1Database {
+  constructor(readonly sqlite: DatabaseSync) {}
+
+  prepare(sql: string) {
+    return new SqliteD1Statement(this.sqlite, sql);
+  }
+}
+
+function createDb(options: { withNotifications?: boolean } = {}) {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(`
+    CREATE TABLE user (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT,
+      email TEXT
+    );
+
+    CREATE TABLE skills (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      slug TEXT NOT NULL
+    );
+
+    INSERT INTO user (id, name, email) VALUES
+      ('owner', 'Owner', 'owner@example.com'),
+      ('grantee', 'Grantee User', 'Grantee@Example.com');
+
+    INSERT INTO skills (id, name, slug) VALUES
+      ('skill-1', 'Cool Skill', 'cool-skill');
+  `);
+
+  if (options.withNotifications !== false) {
+    sqlite.exec(`
+      CREATE TABLE notifications (
+        id TEXT PRIMARY KEY NOT NULL,
+        user_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT,
+        metadata TEXT,
+        read INTEGER NOT NULL DEFAULT 0,
+        processed INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        processed_at INTEGER
+      );
+    `);
+  }
+
+  return new SqliteD1Database(sqlite);
+}
+
+const db = createDb() as unknown as D1Database;
 
 function request(method: string, body?: unknown): Request {
   return new Request('https://skills.cat/api/skills/skill-1/share', {
@@ -39,6 +119,19 @@ function orgAuth() {
     principalId: 'org-1',
     user: null,
     authMethod: 'token',
+    tokenInfo: null,
+    scopes: ['read', 'write'],
+  };
+}
+
+function userAuth(userId: string, name: string) {
+  return {
+    userId,
+    orgId: null,
+    principalType: 'user',
+    principalId: userId,
+    user: { id: userId, name },
+    authMethod: 'session',
     tokenInfo: null,
     scopes: ['read', 'write'],
   };
@@ -192,5 +285,129 @@ describe('skill share route', () => {
       status: 400,
       body: { message: 'JSON body must be an object' },
     });
+  });
+});
+
+
+describe('skill share notifications', () => {
+  function shareAsOwner(db: D1Database, body: unknown) {
+    return import('../src/routes/api/skills/[id]/share/+server').then(({ POST }) => POST({
+      locals: {},
+      platform: { env: { DB: db } },
+      params: { id: 'skill-1' },
+      request: request('POST', body),
+    } as never));
+  }
+
+  function notificationsFor(database: SqliteD1Database, userId: string) {
+    return database.sqlite.prepare(`
+      SELECT user_id, type, title, message, metadata
+      FROM notifications WHERE user_id = ?
+    `).all(userId) as Array<{
+      user_id: string;
+      type: string;
+      title: string;
+      message: string | null;
+      metadata: string | null;
+    }>;
+  }
+
+  it('creates a skill_shared notification with full metadata for a userId grant', async () => {
+    const database = createDb();
+    mocks.getAuthContext.mockResolvedValueOnce(userAuth('owner', 'Owner'));
+
+    const response = await shareAsOwner(database as unknown as D1Database, {
+      userId: 'grantee',
+      permission: 'write',
+      expiresInDays: 30,
+    });
+
+    expect(response.status).toBe(200);
+    const rows = notificationsFor(database, 'grantee');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].type).toBe('skill_shared');
+    expect(rows[0].title).toBe('Skill shared: Cool Skill');
+    expect(rows[0].message).toBe('Owner shared "Cool Skill" with you with write access.');
+    expect(JSON.parse(rows[0].metadata!)).toEqual({
+      skillId: 'skill-1',
+      skillSlug: 'cool-skill',
+      skillName: 'Cool Skill',
+      sharerId: 'owner',
+      sharerName: 'Owner',
+      permission: 'write',
+      expiresAt: expect.any(Number),
+    });
+  });
+
+  it('resolves email grants to registered users case-insensitively', async () => {
+    const database = createDb();
+    mocks.getAuthContext.mockResolvedValueOnce(userAuth('owner', 'Owner'));
+
+    const response = await shareAsOwner(database as unknown as D1Database, {
+      email: 'grantee@example.com',
+    });
+
+    expect(response.status).toBe(200);
+    const rows = notificationsFor(database, 'grantee');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].type).toBe('skill_shared');
+    expect(JSON.parse(rows[0].metadata!)).toMatchObject({
+      skillId: 'skill-1',
+      skillSlug: 'cool-skill',
+      skillName: 'Cool Skill',
+      sharerId: 'owner',
+      sharerName: 'Owner',
+      permission: 'read',
+      expiresAt: null,
+    });
+  });
+
+  it('does not create a notification when the email matches no registered user', async () => {
+    const database = createDb();
+    mocks.getAuthContext.mockResolvedValueOnce(userAuth('owner', 'Owner'));
+
+    const response = await shareAsOwner(database as unknown as D1Database, {
+      email: 'stranger@example.com',
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.grantSkillPermission).toHaveBeenCalledWith(
+      'skill-1',
+      'email',
+      'stranger@example.com',
+      'read',
+      'owner',
+      expect.anything(),
+      undefined
+    );
+    expect(database.sqlite.prepare(`SELECT COUNT(*) AS count FROM notifications`).get())
+      .toEqual({ count: 0 });
+  });
+
+  it('does not notify the sharer when sharing with themselves', async () => {
+    const database = createDb();
+    mocks.getAuthContext.mockResolvedValueOnce(userAuth('owner', 'Owner'));
+
+    const response = await shareAsOwner(database as unknown as D1Database, { userId: 'owner' });
+
+    expect(response.status).toBe(200);
+    expect(database.sqlite.prepare(`SELECT COUNT(*) AS count FROM notifications`).get())
+      .toEqual({ count: 0 });
+  });
+
+  it('still succeeds when notification creation fails', async () => {
+    const database = createDb({ withNotifications: false });
+    mocks.getAuthContext.mockResolvedValueOnce(userAuth('owner', 'Owner'));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const response = await shareAsOwner(database as unknown as D1Database, { userId: 'grantee' });
+
+      expect(response.status).toBe(200);
+      expect(mocks.grantSkillPermission).toHaveBeenCalled();
+      expect(consoleError).toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
