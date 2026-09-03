@@ -279,6 +279,19 @@ export async function readOpenClawVersionFiles(
   return listTextFilesFromPrefix(r2, buildOpenClawVersionPrefix(compatSlug, version));
 }
 
+/** Read one immutable version file without listing or loading the rest of the bundle. */
+export async function readOpenClawVersionFile(
+  r2: R2Bucket | undefined,
+  compatSlug: string,
+  version: string,
+  path: string
+): Promise<string | null> {
+  if (!r2 || !path) return null;
+
+  const object = await r2.get(`${buildOpenClawVersionPrefix(compatSlug, version)}${path.replace(/^\/+/, '')}`);
+  return object ? object.text() : null;
+}
+
 export async function readOpenClawCurrentFiles(
   r2: R2Bucket | undefined,
   nativeSlug: string

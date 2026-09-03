@@ -22,7 +22,6 @@ import {
   resolveOpenRouterFreeModelCandidates,
 } from './shared/ai/openrouter';
 import {
-  buildSkillBundleFiles,
   getSkillDirectoryFiles,
   loadSecuritySkill,
   loadSecuritySkills,
@@ -1557,8 +1556,10 @@ async function processSecurityMessage(
   const totalScore = computeSecurityTotalScore(dimensions);
   const riskLevel = getSecurityRiskLevel(totalScore);
   const scanId = generateId();
-  const bundleFiles = await buildSkillBundleFiles(skill, env);
-  const bundleSize = bundleFiles.reduce((sum, file) => sum + (file.bytes?.byteLength || 0), 0);
+  // File metadata already contains the indexed sizes. Re-reading the entire
+  // bundle here only to calculate the VirusTotal eligibility size would double
+  // the R2 reads performed by this analysis.
+  const bundleSize = directoryFiles.reduce((sum, file) => sum + Math.max(0, file.size || 0), 0);
   const vtDecision = computeVirusTotalDecision({
     visibility: skill.visibility,
     pureText: heuristic.pureText,

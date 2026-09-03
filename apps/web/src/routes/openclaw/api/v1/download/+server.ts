@@ -111,17 +111,16 @@ export const GET: RequestHandler = async ({ url, platform, request, locals }) =>
 
   try {
     const buildZipBuffer = async () => {
-      const fallbackFiles = await resolveOpenClawBundleFiles({
-        skill,
-        r2,
-        githubToken,
-        githubRateLimitKV: getGitHubRateLimitKVFromEnv(platform?.env),
-      });
       const files = await resolveOpenClawFilesForVersion({
         r2,
         compatSlug,
         selectedVersion,
-        fallbackFiles,
+        fallbackFiles: () => resolveOpenClawBundleFiles({
+          skill,
+          r2,
+          githubToken,
+          githubRateLimitKV: getGitHubRateLimitKVFromEnv(platform?.env),
+        }),
       });
 
       return createStoredZip(files, { modifiedAt: selectedVersion.createdAt });

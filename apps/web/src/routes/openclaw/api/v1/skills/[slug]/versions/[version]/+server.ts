@@ -83,17 +83,16 @@ export const GET: RequestHandler = async ({ params, platform, request, locals })
   const r2 = platform?.env?.R2;
   const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
   const buildPayload = async () => {
-    const fallbackFiles = await resolveOpenClawBundleFiles({
-      skill,
-      r2,
-      githubToken,
-      githubRateLimitKV: getGitHubRateLimitKVFromEnv(platform?.env),
-    });
     const versionFiles = await resolveOpenClawFilesForVersion({
       r2,
       compatSlug: params.slug,
       selectedVersion,
-      fallbackFiles,
+      fallbackFiles: () => resolveOpenClawBundleFiles({
+        skill,
+        r2,
+        githubToken,
+        githubRateLimitKV: getGitHubRateLimitKVFromEnv(platform?.env),
+      }),
     });
 
     return {
