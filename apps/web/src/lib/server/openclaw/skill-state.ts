@@ -91,7 +91,7 @@ export async function resolveOpenClawFilesForVersion(input: {
   r2: R2Bucket | undefined;
   compatSlug: string;
   selectedVersion: OpenClawCompatVersionEntry | null;
-  fallbackFiles: SkillFile[];
+  fallbackFiles: SkillFile[] | (() => Promise<SkillFile[]>);
 }): Promise<SkillFile[]> {
   if (!input.selectedVersion) {
     return [];
@@ -103,5 +103,11 @@ export async function resolveOpenClawFilesForVersion(input: {
     input.selectedVersion.version
   );
 
-  return versionFiles.length > 0 ? versionFiles : input.fallbackFiles;
+  if (versionFiles.length > 0) {
+    return versionFiles;
+  }
+
+  return typeof input.fallbackFiles === 'function'
+    ? input.fallbackFiles()
+    : input.fallbackFiles;
 }

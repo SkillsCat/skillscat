@@ -12,6 +12,7 @@ import {
   resolveOpenClawVersionState,
 } from '$lib/server/openclaw/skill-state';
 import { resolveOpenClawBundleFiles } from '$lib/server/openclaw/bundle-files';
+import { readOpenClawVersionFile } from '$lib/server/openclaw/compat-store';
 import {
   buildOpenClawFileCacheKey,
   getOpenClawSelectedVersionContentToken,
@@ -80,18 +81,31 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
   const compatSlug = encodeClawHubCompatSlug(skill.slug);
   const contentType = guessOpenClawTextContentType(path);
   const buildFileContent = async () => {
+    // Published OpenClaw versions use immutable, addressable object keys. Read
+    // only the requested file and avoid listing/downloading the whole bundle.
+    if (versionState.usesManifest && r2) {
+      const directContent = await readOpenClawVersionFile(
+        r2,
+        compatSlug,
+        selectedVersion.version,
+        path
+      );
+      if (directContent !== null) {
+        return directContent;
+      }
+    }
+
     const githubToken = getGitHubRequestAuthFromEnv(platform?.env).token as string | undefined;
-    const fallbackFiles = await resolveOpenClawBundleFiles({
-      skill,
-      r2,
-      githubToken,
-      githubRateLimitKV: getGitHubRateLimitKVFromEnv(platform?.env),
-    });
     const files = await resolveOpenClawFilesForVersion({
       r2,
       compatSlug,
       selectedVersion,
-      fallbackFiles,
+      fallbackFiles: () => resolveOpenClawBundleFiles({
+        skill,
+        r2,
+        githubToken,
+        githubRateLimitKV: getGitHubRateLimitKVFromEnv(platform?.env),
+      }),
     });
 
     const matched = files.find((file) => file.path === path);

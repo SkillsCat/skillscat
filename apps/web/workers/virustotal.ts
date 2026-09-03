@@ -104,6 +104,28 @@ export async function tryConsumeBudget(env: VirusTotalEnv, amount: number = 1): 
   return true;
 }
 
+/**
+ * Check whether the next VirusTotal request can fit in the current budget
+ * without reserving it. This prevents expensive bundle reads when the worker
+ * is already rate limited; the consuming check still happens immediately
+ * before the actual API request.
+ */
+export async function hasBudgetCapacity(env: VirusTotalEnv, amount: number = 1): Promise<boolean> {
+  const now = new Date();
+  const dayBucket = formatDayKey(now);
+  const minuteBucket = formatMinuteKey(now);
+  const dailyLimit = parsePositiveInt(env.VT_DAILY_REQUEST_BUDGET, DEFAULT_DAILY_REQUEST_BUDGET);
+  const minuteLimit = parsePositiveInt(env.VT_MINUTE_REQUEST_BUDGET, DEFAULT_MINUTE_REQUEST_BUDGET);
+  const budgetStore = getVirusTotalBudgetStore(env);
+
+  const [dayCount, minuteCount] = await Promise.all([
+    getBudgetCount(budgetStore, 'vt:budget:day', dayBucket),
+    getBudgetCount(budgetStore, 'vt:budget:minute', minuteBucket),
+  ]);
+
+  return dayCount + amount <= dailyLimit && minuteCount + amount <= minuteLimit;
+}
+
 function buildHeaders(apiKey: string): HeadersInit {
   return {
     'x-apikey': apiKey,
@@ -357,7 +379,13 @@ async function processPendingSkill(
   let bundleBytes: Uint8Array | null = null;
   let bundleSize = 0;
 
-  if (!bundleSha256 || row.vt_status === 'pending_lookup' || row.vt_status === 'pending_upload') {
+  // A cached SHA is enough for report lookup. Only pending uploads (or rows
+  // without a SHA) need the bundle bytes before the first API call.
+  if (row.vt_status !== 'pending_analysis_poll' && (!bundleSha256 || row.vt_status === 'pending_upload')) {
+    if (!await hasBudgetCapacity(env, 1)) {
+      return;
+    }
+
     const bundleFiles = await buildSkillBundleFiles(skill, env);
     if (bundleFiles.length === 0) {
       await updateVirusTotalState(env.DB, {
@@ -491,6 +519,20 @@ async function processPendingSkill(
   }
 
   if (!bundleBytes) {
+    // The report lookup consumed one request. Do not read and build the bundle
+    // if the upload request cannot fit in the remaining budget.
+    if (!await hasBudgetCapacity(env, 1)) {
+      await updateVirusTotalState(env.DB, {
+        skillId: row.skill_id,
+        status: 'pending_upload',
+        bundleSha256,
+        nextAttemptAt: now + 60 * 1000,
+        lastAttemptAt: now,
+        errorMessage: null,
+      });
+      return;
+    }
+
     const bundleFiles = await buildSkillBundleFiles(skill, env);
     bundleBytes = buildStoredZip(
       bundleFiles
