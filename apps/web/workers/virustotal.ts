@@ -377,7 +377,9 @@ async function processPendingSkill(
 
   let bundleSha256 = row.vt_bundle_sha256;
   let bundleBytes: Uint8Array | null = null;
-  let bundleSize = 0;
+  // Null until the bundle is actually read in this run, so state updates keep
+  // the stored vt_bundle_size via COALESCE instead of overwriting it with 0.
+  let bundleSize: number | null = null;
 
   // A cached SHA is enough for report lookup. Only pending uploads (or rows
   // without a SHA) need the bundle bytes before the first API call.
