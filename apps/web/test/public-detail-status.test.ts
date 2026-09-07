@@ -59,6 +59,7 @@ function createHeadersRecorder() {
   const headers = new Map<string, string>();
   const setHeaders = vi.fn((next: Record<string, string>) => {
     for (const [key, value] of Object.entries(next)) {
+      if (headers.has(key)) throw new Error(`"${key}" header is already set`);
       headers.set(key, value);
     }
   });
