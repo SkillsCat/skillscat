@@ -70,7 +70,6 @@ export const load: PageServerLoad = async ({ params, url, platform, setHeaders, 
       }
 
       if (!category) {
-        setHeaders({ 'X-Skillscat-Status-Override': '404' });
         return {
           category: null,
           skills: [],

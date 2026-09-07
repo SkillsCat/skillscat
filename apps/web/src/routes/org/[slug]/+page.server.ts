@@ -51,7 +51,6 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
       } else {
         setHeaders({
           'X-Skillscat-Status-Override': '500',
-          'Cache-Control': 'no-store',
         });
       }
     }
@@ -68,7 +67,6 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
   } catch {
     setHeaders({
       'X-Skillscat-Status-Override': '500',
-      'Cache-Control': 'no-store',
     });
     return fallback;
   }
