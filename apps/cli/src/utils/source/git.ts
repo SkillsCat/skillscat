@@ -247,7 +247,7 @@ async function fetchGitHubTree(owner: string, repo: string, branch: string): Pro
   }
 
   const response = await githubRequest(
-    `${GITHUB_API}/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+    `${GITHUB_API}/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
     {
       userAgent: 'skillscat-cli/1.0',
     }
@@ -283,7 +283,7 @@ async function fetchGitHubBlobBytesBySha(owner: string, repo: string, sha: strin
   }
 
   const data = await response.json() as GitHubBlob;
-  if (data.encoding !== 'base64' || !data.content) {
+  if (data.encoding !== 'base64' || typeof data.content !== 'string') {
     throw new Error(`Unexpected blob encoding for ${sha}`);
   }
 
@@ -307,8 +307,8 @@ async function fetchGitHubFileBytes(
   ref?: string
 ): Promise<{ bytes: Buffer; sha?: string }> {
   const url = ref
-    ? `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}?ref=${ref}`
-    : `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}`;
+    ? `${GITHUB_API}/repos/${owner}/${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(ref)}`
+    : `${GITHUB_API}/repos/${owner}/${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
 
   const response = await githubRequest(url, {
     userAgent: 'skillscat-cli/1.0',
@@ -326,7 +326,7 @@ async function fetchGitHubFileBytes(
   if (contentType !== 'file' && contentType !== 'symlink') {
     throw new Error(`Unexpected GitHub content type for ${path}: ${String(data.type)}`);
   }
-  if (data.encoding !== 'base64' || !data.content) {
+  if (data.encoding !== 'base64' || typeof data.content !== 'string') {
     throw new Error(`Unexpected file encoding: ${data.encoding}`);
   }
 
@@ -402,45 +402,25 @@ async function readResponseBytes(response: Response): Promise<Buffer> {
 /**
  * Fetch file content from GitLab
  */
-async function fetchGitLabFile(owner: string, repo: string, path: string, ref?: string): Promise<string> {
+async function fetchGitLabFileBytes(owner: string, repo: string, path: string, ref: string): Promise<Buffer> {
   const projectPath = encodeURIComponent(`${owner}/${repo}`);
-  const filePath = encodeURIComponent(path);
-  const branch = ref || 'main';
-
   const response = await fetchWithTimeout(
-    `${GITLAB_API}/projects/${projectPath}/repository/files/${filePath}?ref=${branch}`,
-    {
-      headers: { 'User-Agent': 'skillscat-cli/1.0' }
-    }
+    `${GITLAB_API}/projects/${projectPath}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(ref)}`,
+    { headers: { 'User-Agent': 'skillscat-cli/1.0' } }
   );
-
   if (!response.ok) {
-    // Try master branch
-    const masterResponse = await fetchWithTimeout(
-      `${GITLAB_API}/projects/${projectPath}/repository/files/${filePath}?ref=master`,
-      {
-        headers: { 'User-Agent': 'skillscat-cli/1.0' }
-      }
-    );
-
-    if (!masterResponse.ok) {
-      throw new Error(`File not found: ${path}`);
-    }
-
-    const data = await masterResponse.json() as GitLabFile;
-    if (data.encoding === 'base64' && data.content) {
-      return Buffer.from(data.content, 'base64').toString('utf-8');
-    }
-    throw new Error(`Unexpected file encoding`);
+    if (response.status === 404) throw new Error(`File not found: ${path}`);
+    throw new Error(`Failed to fetch file from GitLab (${response.status}): ${path}`);
   }
-
   const data = await response.json() as GitLabFile;
-
-  if (data.encoding === 'base64' && data.content) {
-    return Buffer.from(data.content, 'base64').toString('utf-8');
+  if (data.encoding !== 'base64' || typeof data.content !== 'string') {
+    throw new Error('Unexpected file encoding');
   }
+  return Buffer.from(data.content, 'base64');
+}
 
-  throw new Error(`Unexpected file encoding`);
+async function fetchGitLabFile(owner: string, repo: string, path: string, ref: string): Promise<string> {
+  return (await fetchGitLabFileBytes(owner, repo, path, ref)).toString('utf-8');
 }
 
 /**
@@ -453,13 +433,13 @@ async function fetchGitLabTree(owner: string, repo: string, branch: string): Pro
 
   while (true) {
     const response = await fetchWithTimeout(
-      `${GITLAB_API}/projects/${projectPath}/repository/tree?ref=${branch}&recursive=true&per_page=100&page=${page}`,
+      `${GITLAB_API}/projects/${projectPath}/repository/tree?ref=${encodeURIComponent(branch)}&recursive=true&per_page=100&page=${page}`,
       {
         headers: { 'User-Agent': 'skillscat-cli/1.0' }
       }
     );
 
-    if (!response.ok) break;
+    if (!response.ok) throw new Error(`Failed to fetch GitLab repository tree (${response.status})`);
 
     const data = await response.json() as { path: string; type: string }[];
     if (data.length === 0) break;
@@ -545,7 +525,7 @@ export async function discoverSkills(
 
     // Find all SKILL.md files
     const skillFiles = tree.filter(item =>
-      item.path.endsWith('SKILL.md') &&
+      (item.path === 'SKILL.md' || item.path.endsWith('/SKILL.md')) &&
       (item.type === 'blob' || item.type === 'file')
     );
 
@@ -606,8 +586,19 @@ export async function fetchSkillCompanionFilesWithOptions(
     return [];
   }
 
-  if (source.platform !== 'github') {
-    return [];
+  if (source.platform === 'gitlab') {
+    const branch = source.branch || await getGitLabDefaultBranch(source.owner, source.repo);
+    const tree = await fetchGitLabTree(source.owner, source.repo, branch);
+    const skillDir = getRepoDirPath(skillFilePath);
+    const files: SkillCompanionFile[] = [];
+    for (const item of tree) {
+      if (item.type !== 'blob' || item.path === skillFilePath || !isPathWithinDirectory(item.path, skillDir)) continue;
+      files.push({
+        path: toRelativeSkillPath(item.path, skillDir),
+        content: await fetchGitLabFileBytes(source.owner, source.repo, item.path, branch),
+      });
+    }
+    return files;
   }
 
   const snapshot = getMatchingGitHubSnapshot(source, options?.githubSnapshot) ?? createGitHubRepoSnapshot(source);

@@ -9,7 +9,7 @@ import {
   fetchSkillFiles,
   RegistryRequestError,
 } from '../utils/api/registry';
-import { companionFilesAreUpToDate, syncCompanionFiles } from './add';
+import { assertSkillFilesSafe, companionFilesAreUpToDate, syncCompanionFiles } from './add';
 import { success, error, warn, info, spinner } from '../utils/core/ui';
 import { cacheSkill, calculateContentHash } from '../utils/storage/cache';
 import { verboseLog } from '../utils/core/verbose';
@@ -220,6 +220,10 @@ export async function update(skillName: string | undefined, options: UpdateOptio
 
         const latestHash = latestSkill.contentHash || calculateContentHash(latestSkill.content);
         const companionResult = await fetchUpdatedCompanionFiles('registry', skill, skill.path, slug);
+        if (companionResult.failed) {
+          checkFailures += 1;
+          warn(`${skill.name}: Companion files could not be checked; update remains incomplete.`);
+        }
         const hasContentUpdate = options.agent && options.agent.length > 0
           ? hasSelectedAgentContentChanges(skill, latestSkill.content, agents)
           : (skill.contentHash ? latestHash !== skill.contentHash : true);
@@ -233,8 +237,8 @@ export async function update(skillName: string | undefined, options: UpdateOptio
           );
 
         if (!hasUpdate) {
-          checkSpinner.stop(true);
-          console.log(pc.dim(`  ${skill.name}: Up to date`));
+          checkSpinner.stop(!companionResult.failed);
+          if (!companionResult.failed) console.log(pc.dim(`  ${skill.name}: Up to date`));
           continue;
         }
 
@@ -260,7 +264,7 @@ export async function update(skillName: string | undefined, options: UpdateOptio
         continue;
       }
 
-      const latestSkill = await fetchGitSkill(skill.source, skill.name);
+      const latestSkill = await fetchGitSkill({ ...skill.source, path: skill.path }, skill.name);
 
       if (!latestSkill) {
         checkSpinner.stop(false);
@@ -272,6 +276,10 @@ export async function update(skillName: string | undefined, options: UpdateOptio
       // Compare by contentHash first, then by SHA
       const latestHash = latestSkill.contentHash || calculateContentHash(latestSkill.content);
       const companionResult = await fetchUpdatedCompanionFiles('git', skill, skill.path);
+      if (companionResult.failed) {
+        checkFailures += 1;
+        warn(`${skill.name}: Companion files could not be checked; update remains incomplete.`);
+      }
       const hasContentUpdate = options.agent && options.agent.length > 0
         ? hasSelectedAgentContentChanges(skill, latestSkill.content, agents)
         : skill.contentHash
@@ -286,8 +294,8 @@ export async function update(skillName: string | undefined, options: UpdateOptio
       );
 
       if (!hasUpdate) {
-        checkSpinner.stop(true);
-        console.log(pc.dim(`  ${skill.name}: Up to date`));
+        checkSpinner.stop(!companionResult.failed);
+        if (!companionResult.failed) console.log(pc.dim(`  ${skill.name}: Up to date`));
         continue;
       }
 
@@ -369,6 +377,10 @@ export async function update(skillName: string | undefined, options: UpdateOptio
       const skillFile = join(skillDir, 'SKILL.md');
 
       try {
+        assertSkillFilesSafe(skillDir, {
+          name: skill.name, description: skill.description, path: skill.path,
+          content: newContent, companionFiles: companionFiles ?? undefined,
+        });
         mkdirSync(dirname(skillFile), { recursive: true });
         writeFileSync(skillFile, newContent, 'utf-8');
         if (!companionFilesHydrationFailed && companionFiles !== null && companionFiles !== undefined) {
@@ -407,7 +419,8 @@ export async function update(skillName: string | undefined, options: UpdateOptio
     // A partial write must remain retryable on the next invocation.
     const updatedAllTrackedAgents = skillAgents.length === skill.agents.length
       && successfulWrites === skillAgents.length
-      && skillAgents.length > 0;
+      && skillAgents.length > 0
+      && !companionFilesHydrationFailed;
     if (updatedAllTrackedAgents) {
       recordInstallation({
         ...skill,

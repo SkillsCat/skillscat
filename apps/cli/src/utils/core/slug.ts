@@ -6,7 +6,7 @@
  */
 export function parseSlug(slug: string): { owner: string; name: string } {
   const match = slug.match(/^([^/]+)\/(.+)$/);
-  if (!match) {
+  if (!match || slug.split('/').some((segment) => !segment || segment === '.' || segment === '..' || /[\\\s?#]/.test(segment))) {
     throw new Error(`Invalid slug format: ${slug}. Expected format: owner/name`);
   }
   return { owner: match[1], name: match[2] };

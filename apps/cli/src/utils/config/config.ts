@@ -120,7 +120,11 @@ export function loadSettings(): Settings {
     const settingsPath = getSettingsPath();
     if (existsSync(settingsPath)) {
       const content = readFileSync(settingsPath, 'utf-8');
-      return JSON.parse(content) as Settings;
+      const parsed: unknown = JSON.parse(content);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const settings = parsed as Record<string, unknown>;
+        return typeof settings.registry === 'string' ? { registry: settings.registry } : {};
+      }
     }
   } catch {
     // Ignore errors, return empty settings

@@ -1,6 +1,6 @@
 {
   "name": "skillscat",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "CLI for installing AI agent skills from SkillsCat registry",
   "type": "module",
   "bin": {
@@ -22,7 +22,8 @@
   "dependencies": {
     "commander": "^15.0.0",
     "inquirer": "^14.1.0",
-    "picocolors": "^1.1.1"
+    "picocolors": "^1.1.1",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^16.0.3",
