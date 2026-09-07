@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('$lib/server/skill/quality-discovery', () => ({
+  filterQualityEligibleSkills: vi.fn(async (_db: unknown, rows: unknown[]) => rows),
+}));
+
 const getCached = vi.fn();
 const invalidateCache = vi.fn();
 const getAuthContext = vi.fn();

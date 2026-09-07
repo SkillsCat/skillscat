@@ -1,7 +1,8 @@
 import { CACHE_VERSION_PATTERN } from '$lib/server/db/shared/constants';
 
 export function buildListCacheKeys(key: string, cacheVersion?: string): string[] {
-  if (key === 'recent') key = 'recent-v2';
+  if (key === 'top') key = 'top-quality-v1';
+  if (key === 'recent') key = 'recent-quality-v1';
   const normalizedVersion = (cacheVersion || '').trim();
   const keys: string[] = [];
 

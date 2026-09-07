@@ -305,7 +305,7 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
 
     await Promise.all([
       r2?.delete(TRENDING_SNAPSHOT_KEY),
-      invalidateCache('lists:trending:snapshot:v2'),
+      invalidateCache('lists:trending:snapshot:v3'),
       ...Array.from(categoryCacheKeys, (cacheKey) => invalidateCache(cacheKey)),
       invalidateOpenClawSkillCaches(skill.id, skill.slug, skillRow?.org_slug, {
         owner: skill.repoOwner,

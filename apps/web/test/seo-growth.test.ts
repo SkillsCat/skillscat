@@ -127,6 +127,7 @@ describe('growth integration regressions', () => {
     sqlite.exec(`WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<50)
       INSERT INTO skills(id,name,slug,repo_owner,repo_name,skill_path,description)
       SELECT CAST(n AS TEXT),'Skill','acme/'||n,'acme','repo','skills/'||n,'A useful skill' FROM seq;`);
+    sqlite.exec("UPDATE skills SET quality_status = 'eligible'");
     const pages = [];
     for (let page = 1; page <= 3; page++) pages.push(await getTrendingSkillsPaginated({ DB: db }, page, 24));
     expect(pages.map((page) => page.skills.length)).toEqual([2, 24, 24]);
@@ -189,8 +190,10 @@ describe('growth integration regressions', () => {
     const { db, sqlite } = createMigratedDb();
     sqlite.exec(`INSERT INTO skills(id,name,slug,created_at,indexed_at,last_commit_at,description)
       VALUES('old','Old','acme/old',1,1000,9999,'Older skill'), ('new','New','acme/new',2,2,1,'Newly indexed skill');`);
+    sqlite.exec("UPDATE skills SET quality_status = 'eligible'");
     expect((await getRecentSkills({ DB: db }, 2)).map((skill) => skill.id)).toEqual(['new', 'old']);
     sqlite.exec("UPDATE skills SET indexed_at=99999,updated_at=99999 WHERE id='old'");
+    sqlite.exec("UPDATE skills SET quality_status = 'eligible'");
     expect((await getRecentSkills({ DB: db }, 2)).map((skill) => skill.id)).toEqual(['new', 'old']);
     sqlite.close();
   });

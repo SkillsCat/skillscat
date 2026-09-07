@@ -1,4 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { filterQualityEligibleSkills } from '$lib/server/skill/quality-discovery';
+
+vi.mock('$lib/server/skill/quality-discovery', () => ({
+  filterQualityEligibleSkills: vi.fn(async (_db: unknown, rows: unknown[]) => rows),
+}));
 
 const setPublicPageCache = vi.fn();
 const resolveOrgPagePayload = vi.fn();
@@ -323,7 +328,10 @@ describe('public detail status overrides', () => {
     expect(headers.has('Cache-Control')).toBe(false);
   });
 
-  it('inlines cached related skills on the first detail render', async () => {
+  it.each([false, true])('renders detail when related quality lookup fails: %s', async (qualityLookupFails) => {
+    if (qualityLookupFails) {
+      vi.mocked(filterQualityEligibleSkills).mockRejectedValueOnce(new Error('D1 unavailable'));
+    }
     getSkillBySlug.mockResolvedValue({
       id: 'skill_1',
       name: 'Demo Skill',
@@ -393,7 +401,9 @@ describe('public detail status overrides', () => {
       isDataRequest: false,
     } as never);
 
-    expect(result.recommendSkills).toHaveLength(1);
+    expect(result.recommendSkills).toHaveLength(qualityLookupFails ? 0 : 1);
+    expect(result.skill?.id).toBe('skill_1');
+    expect(headers.has('X-Skillscat-Status-Override')).toBe(false);
     expect(fetch).not.toHaveBeenCalled();
     expect(getRecommendedSkills).not.toHaveBeenCalled();
     expect(getLightweightRecommendedSkills).not.toHaveBeenCalled();

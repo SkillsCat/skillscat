@@ -64,6 +64,7 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
   if (env.DB) {
     schedulePublicSkillVisibilityRecheck({
       db: env.DB,
+      requireQuality: true,
       waitUntil,
       entries: [
         ...(criticalCached.hit

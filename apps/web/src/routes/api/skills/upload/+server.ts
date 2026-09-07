@@ -1,4 +1,5 @@
 import { json, error } from '@sveltejs/kit';
+import { assessSkillQuality } from '$lib/server/skill/quality';
 import type { RequestHandler } from './$types';
 import { getAuthContext, requireSubmitPublishScope } from '$lib/server/auth/middleware';
 import { invalidateCache } from '$lib/server/cache';
@@ -450,6 +451,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
   const bundleMetadata = await computeUploadBundleMetadata(bundleFiles);
   const { hashes } = bundleMetadata;
   const contentHash = hashes.fullHash;
+  const quality = assessSkillQuality(skillMdContent, bundleFiles.map((file) => file.path));
   const categorySlugs = validation.categories || [];
   const r2Files = bundleFiles.map((file) => ({
     ...file,
@@ -483,8 +485,9 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
     const insertSkillStatement = db.prepare(`
       INSERT INTO skills (
         id, name, slug, description, visibility, owner_id, org_id,
-        source_type, readme, file_structure, content_hash, created_at, updated_at, indexed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'upload', ?, ?, ?, ?, ?, ?)
+        source_type, readme, file_structure, content_hash, created_at, updated_at, indexed_at,
+        quality_status, quality_reason, quality_version, quality_next_review_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'upload', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
       .bind(
         skillId,
@@ -499,7 +502,11 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
         contentHash,
         now,
         now,
-        now
+        now,
+        quality.status,
+        quality.reason,
+        quality.version,
+        quality.status === 'pending' ? now + 86_400_000 : 0
       );
     if (orgId) {
       await db.batch([

@@ -13,6 +13,7 @@ function createR2(entries: Record<string, string> = {}): R2Bucket {
 
       return {
         text: async () => value,
+        json: async () => JSON.parse(value),
       } as R2ObjectBody;
     }),
     put: vi.fn(async (key: string, value: string | ReadableStream | ArrayBuffer) => {
@@ -76,12 +77,12 @@ describe('public stats cache', () => {
     const now = Date.now();
     const cachedSkills = Array.from({ length: 24 }, (_, index) => createSkill(index + 1));
     const r2 = createR2({
-      'cache/lists/test/top.json': JSON.stringify({
+      'cache/lists/test/top-quality-v1.json': JSON.stringify({
         data: cachedSkills,
         generatedAt: now,
       }),
-      'cache/lists/test/stats/public.json': JSON.stringify({
-        data: { totalSkills: 42 },
+      'cache/lists/discovery-count-v1.json': JSON.stringify({
+        total: 42,
         generatedAt: now,
       }),
     });
@@ -136,12 +137,12 @@ describe('public stats cache', () => {
     const cachedSkills = Array.from({ length: 24 }, (_, index) => createSkill(index + 1));
     const liveRows = Array.from({ length: 25 }, (_, index) => createSkill(index + 2));
     const r2 = createR2({
-      'cache/lists/test/top.json': JSON.stringify({
+      'cache/lists/test/top-quality-v1.json': JSON.stringify({
         data: cachedSkills,
         generatedAt: now,
       }),
-      'cache/lists/test/stats/public.json': JSON.stringify({
-        data: { totalSkills: 42 },
+      'cache/lists/discovery-count-v1.json': JSON.stringify({
+        total: 42,
         generatedAt: now,
       }),
     });
@@ -163,7 +164,7 @@ describe('public stats cache', () => {
           };
         }
 
-        if (sql.includes('FROM skills INDEXED BY skills_top_public_rank_expr_idx')) {
+        if (sql.includes('FROM skills INDEXED BY skills_discovery_top_idx')) {
           return {
             bind: () => ({
               all: async () => ({ results: liveRows }),
@@ -198,18 +199,18 @@ describe('public stats cache', () => {
     const now = Date.now();
     const liveRows = Array.from({ length: 25 }, (_, index) => createSkill(index + 1));
     const r2 = createR2({
-      'cache/lists/test/top.json': JSON.stringify({
+      'cache/lists/test/top-quality-v1.json': JSON.stringify({
         data: [createSkill(1)],
         generatedAt: now,
       }),
-      'cache/lists/test/stats/public.json': JSON.stringify({
-        data: { totalSkills: 42 },
+      'cache/lists/discovery-count-v1.json': JSON.stringify({
+        total: 42,
         generatedAt: now,
       }),
     });
     const db = {
       prepare: vi.fn((sql: string) => {
-        if (sql.includes('FROM skills INDEXED BY skills_top_public_rank_expr_idx')) {
+        if (sql.includes('FROM skills INDEXED BY skills_discovery_top_idx')) {
           return {
             bind: () => ({
               all: async () => ({ results: liveRows }),

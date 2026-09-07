@@ -37,7 +37,8 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
   }
   const { data } = await resolvePublicSkillDataCache({
     db: env.DB,
-    cacheKey: `page:top:v1:${page}`,
+    requireQuality: true,
+    cacheKey: `page:top:v2:${page}`,
     load: () => getTopSkillsPaginated(env, page, ITEMS_PER_PAGE),
     ttlSeconds: TOP_PAGE_CACHE_TTL_SECONDS,
     getSkills: (value) => value.skills,

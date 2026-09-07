@@ -1,3 +1,4 @@
+import { filterQualityEligibleSkills } from '$lib/server/skill/quality-discovery';
 import type { D1Database } from '@cloudflare/workers-types';
 import type { FileNode, SkillCardData, SkillDetail, SkillInstallData } from '$lib/types';
 import { getCached } from '$lib/server/cache';
@@ -150,6 +151,7 @@ async function resolveRecommendSkills(
   if (skill.visibility === 'public') {
     try {
       const cachedRecommendSkills = await readCachedRecommendSkills({
+        db,
         skillId: skill.id,
         r2: options?.r2,
         algoVersion: options?.recommendAlgoVersion,
@@ -170,7 +172,7 @@ async function resolveRecommendSkills(
       RECOMMEND_ONLINE_CACHE_TTL_SECONDS,
       { waitUntil: options?.waitUntil }
     );
-    return data;
+    return filterQualityEligibleSkills(db, data);
   }
 
   return fetchRecommendedSkills(db, skill, getRealtimeRecommendMode(skill.visibility, options?.tier, false));
@@ -438,7 +440,7 @@ export async function resolveSkillDetail(
   }
 
   return {
-    data,
+    data: includeRecommendSkills ? { ...data, recommendSkills: await filterQualityEligibleSkills(db, data.recommendSkills) } : data,
     cacheControl: `public, max-age=${PUBLIC_CACHE_TTL_SECONDS}, stale-while-revalidate=600`,
     cacheStatus,
     status: 200,

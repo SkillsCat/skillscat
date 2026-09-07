@@ -63,6 +63,7 @@ type WaitUntilFn = (promise: Promise<unknown>) => void;
  */
 export function schedulePublicSkillVisibilityRecheck(input: {
   db: D1Database;
+  requireQuality?: boolean;
   entries: Array<{
     ids: string[];
     invalidate: () => Promise<unknown>;
@@ -77,7 +78,7 @@ export function schedulePublicSkillVisibilityRecheck(input: {
   const allIds = Array.from(new Set(entries.flatMap((entry) => entry.ids)));
   const task = (async () => {
     try {
-      const currentPublicIds = await getCurrentPublicSkillIds(input.db, allIds);
+      const currentPublicIds = await getCurrentPublicSkillIds(input.db, allIds, input.requireQuality);
       await Promise.all(
         entries.map(async (entry) => {
           if (entry.ids.some((id) => !currentPublicIds.has(id))) {
@@ -100,7 +101,8 @@ export function schedulePublicSkillVisibilityRecheck(input: {
 
 export async function getCurrentPublicSkillIds(
   db: D1Database,
-  ids: string[]
+  ids: string[],
+  requireQuality = false
 ): Promise<Set<string>> {
   const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
   if (uniqueIds.length === 0) {
@@ -113,6 +115,7 @@ export async function getCurrentPublicSkillIds(
     FROM skills INDEXED BY skills_visibility_id_idx
     WHERE visibility = 'public'
       AND id IN (${placeholders})
+      ${requireQuality ? "AND quality_status = 'eligible'" : ''}
   `)
     .bind(...uniqueIds)
     .all<{ id: string }>();

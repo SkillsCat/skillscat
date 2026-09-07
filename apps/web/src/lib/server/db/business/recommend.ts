@@ -77,8 +77,8 @@ async function loadFreshRelatedCandidates(db: D1Database, skillId: string, categ
   if (!categories.length) return [];
   const result = await db.prepare(`
     WITH recent AS MATERIALIZED (
-      SELECT id FROM skills INDEXED BY skills_public_first_published_idx
-      WHERE visibility = 'public' AND (${firstPublishedSql()}) >= ?
+      SELECT id FROM skills INDEXED BY skills_discovery_recent_idx
+      WHERE visibility = 'public' AND quality_status = 'eligible' AND (${firstPublishedSql()}) >= ?
       ORDER BY (${firstPublishedSql()}) DESC, id LIMIT 48
     )
     SELECT ${RECOMMEND_SKILL_COLUMNS_BASE}, NULL AS authorAvatar
@@ -327,8 +327,8 @@ async function loadRecommendPairSkillIds(
     ? await db.prepare(`
         WITH trending_pool AS MATERIALIZED (
           SELECT id, trending_score as trendingScore
-          FROM skills INDEXED BY skills_public_trending_id_idx
-          WHERE visibility = 'public'
+          FROM skills INDEXED BY skills_discovery_trending_idx
+          WHERE visibility = 'public' AND quality_status = 'eligible'
           ORDER BY trending_score DESC
           LIMIT ?
         )
@@ -363,7 +363,7 @@ async function loadRecommendPairSkillIds(
         CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
         WHERE sc1.category_slug = ?
           AND s.id = sc1.skill_id
-          AND s.visibility = 'public'
+          AND s.visibility = 'public' AND s.quality_status = 'eligible'
         ORDER BY s.trending_score DESC
         LIMIT ?
       `).bind(pair.secondCategory, pair.firstCategory, RECOMMEND_PAIR_CACHE_FETCH_LIMIT).all<{ id: string }>();
@@ -421,7 +421,7 @@ async function loadRecommendMultiCategoryCandidates(
           SELECT
             ${skillColumnsBase}
           FROM skills s INDEXED BY skills_visibility_id_idx
-          WHERE s.visibility = 'public'
+          WHERE s.visibility = 'public' AND s.quality_status = 'eligible'
             AND s.id IN (${idPh})
         `).bind(...neededIds).all<RecommendSkillCandidateRow>();
         return hydrated.results;
@@ -520,7 +520,7 @@ export async function getLightweightRecommendedSkills(
           SELECT
             ${RECOMMEND_SKILL_COLUMNS_BASE}
           FROM skills s INDEXED BY skills_visibility_id_idx
-          WHERE s.visibility = 'public'
+          WHERE s.visibility = 'public' AND s.quality_status = 'eligible'
             AND s.id IN (${seedPh})
         `).bind(...seedSkillIds).all<RecommendSkillCandidateRow>(),
         'lightweight category seeds'
@@ -687,7 +687,7 @@ export async function getRecommendedSkills(
         FROM matched_ids matched
         CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
         WHERE s.id = matched.skillId
-          AND s.visibility = 'public'
+          AND s.visibility = 'public' AND s.quality_status = 'eligible'
         ORDER BY matched.sharedCategoryCount DESC, s.trending_score DESC
         LIMIT ?
       `).bind(...discovery.orderedCategories, ...excludeIds, tier1Limit).all<RecommendSkillCandidateRow>(),
@@ -709,7 +709,7 @@ export async function getRecommendedSkills(
           ${SKILL_COLUMNS_BASE}
         , NULL as authorAvatar
         FROM skills s INDEXED BY skills_visibility_id_idx
-        WHERE s.visibility = 'public'
+        WHERE s.visibility = 'public' AND s.quality_status = 'eligible'
           AND s.id IN (${seedPh})
           AND s.id NOT IN (${exPh})
         ORDER BY s.trending_score DESC
@@ -772,7 +772,7 @@ export async function getRecommendedSkills(
         FROM matched_ids matched
         CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
         WHERE s.id = matched.skillId
-          AND s.visibility = 'public'
+          AND s.visibility = 'public' AND s.quality_status = 'eligible'
         ORDER BY matched.sharedCategoryCount DESC, s.trending_score DESC
         LIMIT ?
       `).bind(...discovery.fallbackCategories, ...excludeIds, tier1SupplementLimit).all<RecommendSkillCandidateRow>(),
@@ -791,8 +791,8 @@ export async function getRecommendedSkills(
         SELECT
           ${SKILL_COLUMNS_BASE}
         , NULL as authorAvatar
-        FROM skills s INDEXED BY skills_public_trending_id_idx
-        WHERE s.visibility = 'public'
+        FROM skills s INDEXED BY skills_discovery_trending_idx
+        WHERE s.visibility = 'public' AND s.quality_status = 'eligible'
           AND s.id NOT IN (${exPh})
           AND EXISTS (
             SELECT 1
@@ -836,7 +836,7 @@ export async function getRecommendedSkills(
       FROM matched_ids matched
       CROSS JOIN skills s INDEXED BY skills_visibility_id_idx
       WHERE s.id = matched.skillId
-        AND s.visibility = 'public'
+        AND s.visibility = 'public' AND s.quality_status = 'eligible'
       ORDER BY matched.sharedTagCount DESC, s.trending_score DESC
       LIMIT ?
     `).bind(...skillTags, ...excludeIds, tier2Limit).all<RecommendSkillCandidateRow>(),
