@@ -232,6 +232,20 @@
       "when": 1787840250901,
       "tag": "0032_magical_franklin_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1788773185303,
+      "tag": "0033_melted_norman_osborn",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1788774509917,
+      "tag": "0034_cynical_crystal",
+      "breakpoints": true
     }
   ]
 }
