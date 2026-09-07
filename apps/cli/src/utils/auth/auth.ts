@@ -45,7 +45,8 @@ export function loadConfig(): AuthConfig {
   try {
     if (existsSync(CONFIG_FILE)) {
       const content = readFileSync(CONFIG_FILE, 'utf-8');
-      return JSON.parse(content) as AuthConfig;
+      const parsed: unknown = JSON.parse(content);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as AuthConfig;
     }
   } catch {
     // Ignore errors, return empty config
@@ -303,7 +304,7 @@ export function setTokens(tokens: {
 
 export function isAuthenticated(): boolean {
   const config = loadConfig();
-  return !!config.accessToken;
+  return !!config.accessToken && isAuthConfigForCurrentRegistry(config);
 }
 
 export function getUser(): AuthConfig['user'] | undefined {

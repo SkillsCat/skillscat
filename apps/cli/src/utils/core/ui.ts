@@ -47,10 +47,11 @@ export function prompt(question: string): Promise<string> {
     output: process.stdout,
   });
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    rl.once('close', () => reject(new Error('Input closed before confirmation. Use --yes for non-interactive commands that support it.')));
     rl.question(question, (answer) => {
-      rl.close();
       resolve(answer);
+      rl.close();
     });
   });
 }

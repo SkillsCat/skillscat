@@ -10,7 +10,7 @@ describe('installed db identity', () => {
     resetTestConfigDir();
   });
 
-  it('keeps project and global records separate, while replacing exact identity', async () => {
+  it('keeps project and global records separate and preserves previously installed agents', async () => {
     const { recordInstallation, getInstalledSkills } = await import('../src/utils/storage/db');
     const globalClaude = getAgentById('claude-code');
     const projectClaude = join(process.cwd(), '.claude', 'skills', 'Shared Skill');
@@ -65,8 +65,29 @@ describe('installed db identity', () => {
     expect(skills).toHaveLength(2);
 
     const projectSkill = skills.find((skill) => !skill.global);
-    expect(projectSkill?.agents).toEqual(['cursor']);
+    expect(projectSkill?.agents).toEqual(['claude-code', 'cursor']);
     expect(projectSkill?.installedAt).toBe(3);
+  });
+
+  it('preserves versions on untouched agents and replaces sources owning the same directory', async () => {
+    const { recordInstallation, getInstalledSkills } = await import('../src/utils/storage/db');
+    for (const path of ['.claude/skills', '.cursor/skills']) {
+      mkdirSync(join(process.cwd(), path, 'Demo'), { recursive: true });
+      writeFileSync(join(process.cwd(), path, 'Demo', 'SKILL.md'), '# Demo');
+    }
+    const base = {
+      name: 'Demo', description: '', global: false, installedAt: 1,
+      installRoot: process.cwd(), path: 'SKILL.md', registrySlug: 'owner/first',
+    };
+    recordInstallation({ ...base, agents: ['claude-code'], contentHash: 'v1' });
+    recordInstallation({ ...base, agents: ['cursor'], contentHash: 'v2' });
+    expect(getInstalledSkills()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agents: ['claude-code'], contentHash: 'v1' }),
+      expect.objectContaining({ agents: ['cursor'], contentHash: 'v2' }),
+    ]));
+    recordInstallation({ ...base, registrySlug: 'owner/second', agents: ['cursor'], contentHash: 'v3' });
+    expect(getInstalledSkills()).toHaveLength(2);
+    expect(getInstalledSkills().find((skill) => skill.agents.includes('cursor'))?.registrySlug).toBe('owner/second');
   });
 
   it('can copy tracked installs from .agents to a specific agent target', async () => {

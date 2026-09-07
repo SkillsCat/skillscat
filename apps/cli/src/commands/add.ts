@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import pc from 'picocolors';
 import { parseSource } from '../utils/source/source';
 import {
@@ -73,7 +73,7 @@ function isRegistryAccessError(error: unknown): error is RegistryRequestError {
 }
 
 export async function add(source: string, options: AddOptions): Promise<void> {
-  const explicitRepoInstall = options.repo === true;
+  const explicitRepoInstall = options.repo === true || options.list === true;
   const repoSource = parseSource(source);
   if (!repoSource) {
     error('Invalid source. Supported formats:');
@@ -234,6 +234,15 @@ export async function add(source: string, options: AddOptions): Promise<void> {
   }
 
   const locationLabel = isGlobal ? 'global' : 'project';
+  const destinationNames = new Set<string>();
+  for (const entry of selectedEntries) {
+    const destination = getSkillPath(targetAgents[0], entry.skill.name, isGlobal).toLowerCase();
+    if (destinationNames.has(destination)) {
+      error(`Multiple skills resolve to the same installation directory: ${entry.skill.name}. Install a specific slug or path.`);
+      process.exit(1);
+    }
+    destinationNames.add(destination);
+  }
 
   console.log();
   console.log(pc.bold(`Installing ${selectedEntries.length} skill(s) to ${targetAgents.length} agent(s):`));
@@ -283,6 +292,13 @@ export async function add(source: string, options: AddOptions): Promise<void> {
     for (const agent of targetAgents) {
       const skillDir = getSkillPath(agent, skill.name, isGlobal);
       const skillFile = join(skillDir, 'SKILL.md');
+      try {
+        assertSkillFilesSafe(skillDir, skill);
+      } catch (err) {
+        error(`Failed to install ${skill.name} to ${agent.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        installFailures += 1;
+        continue;
+      }
       const existedBefore = existsSync(skillFile);
 
       if (existedBefore && !options.force) {
@@ -731,7 +747,7 @@ async function hydrateCompanionFilesForInstall(
     }
 
     const installSource = entry.installSource;
-    if (!installSource || installSource.platform !== 'github') {
+    if (!installSource) {
       continue;
     }
 
@@ -767,6 +783,7 @@ async function hydrateCompanionFilesFromRegistryBundle(entry: ResolvedInstallSki
 
       if (normalizedPath.toLowerCase() === 'skill.md') {
         entry.skill.content = file.content;
+        entry.skill.contentHash = calculateContentHash(file.content);
         continue;
       }
 
@@ -815,7 +832,7 @@ export function companionFilesAreUpToDate(
     return false;
   }
 
-  for (const file of skill.companionFiles ?? []) {
+  for (const file of getExpectedCompanionFiles(skill)) {
     const destination = join(skillDir, file.path);
     if (!existsSync(destination)) {
       return false;
@@ -836,6 +853,7 @@ export function companionFilesAreUpToDate(
 }
 
 export function syncCompanionFiles(skillDir: string, skill: SkillInfo): void {
+  assertSkillFilesSafe(skillDir, skill);
   const expectedFiles = getExpectedCompanionFiles(skill);
   const expectedPaths = expectedFiles.map((file) => file.path);
   const previousPaths = readCompanionManifest(skillDir) ?? [];
@@ -868,7 +886,7 @@ function getExpectedCompanionFiles(skill: SkillInfo): Array<{ path: string; cont
 
   for (const file of files) {
     const normalized = normalizeCompanionRelativePath(file.path);
-    if (!normalized) continue;
+    if (!normalized || normalized.toLowerCase() === 'skill.md') continue;
     deduped.set(normalized, file.content);
   }
 
@@ -899,7 +917,7 @@ function readCompanionManifest(skillDir: string): string[] | null {
 
     const validFiles = parsed.files
       .map((value) => (typeof value === 'string' ? normalizeCompanionRelativePath(value) : ''))
-      .filter((value): value is string => Boolean(value));
+      .filter((value): value is string => Boolean(value) && value.toLowerCase() !== 'skill.md');
 
     validFiles.sort((a, b) => a.localeCompare(b));
     return Array.from(new Set(validFiles));
@@ -933,10 +951,10 @@ function normalizeCompanionRelativePath(path: string): string {
   const normalized = path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   if (!normalized) return '';
   const segments = normalized.split('/');
-  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) {
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..' || /[:\x00]/.test(segment))) {
     return '';
   }
-  if (segments.includes(COMPANION_MANIFEST_FILE)) {
+  if (segments.some((segment) => segment.toLowerCase() === COMPANION_MANIFEST_FILE)) {
     return '';
   }
   return segments.join('/');
@@ -950,11 +968,29 @@ function pruneEmptyParentDirs(skillDir: string, filePath: string): void {
       if (entries.length > 0) {
         break;
       }
-      rmSync(current, { recursive: false, force: true });
+      rmdirSync(current);
     } catch {
       break;
     }
     current = dirname(current);
+  }
+}
+
+/** Refuse to follow local symlinks when replacing managed installation files. */
+export function assertSkillFilesSafe(skillDir: string, skill: SkillInfo): void {
+  const checkPath = (path: string) => {
+    let current = skillDir;
+    for (const segment of ['', ...relative(skillDir, path).split(/[\\/]/).filter(Boolean)]) {
+      current = join(current, segment);
+      if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) {
+        throw new Error(`Refusing to write through a symbolic link: ${current}`);
+      }
+    }
+  };
+  checkPath(join(skillDir, 'SKILL.md'));
+  checkPath(join(skillDir, COMPANION_MANIFEST_FILE));
+  for (const path of [...getExpectedCompanionPaths(skill), ...(readCompanionManifest(skillDir) ?? [])]) {
+    checkPath(join(skillDir, path));
   }
 }
 

@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 
@@ -29,8 +29,9 @@ export function resetTestCacheDir(): void {
 
 export function createWorkspace(label: string): string {
   const base = process.env.SKILLSCAT_TEST_HOME || homedir();
-  const workspace = join(base, 'workspaces', `${label}-${Date.now()}`);
-  mkdirSync(workspace, { recursive: true });
+  const workspaces = join(base, 'workspaces');
+  mkdirSync(workspaces, { recursive: true });
+  const workspace = mkdtempSync(join(workspaces, `${label}-`));
   process.chdir(workspace);
   return workspace;
 }

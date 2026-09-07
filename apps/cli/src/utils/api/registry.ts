@@ -3,7 +3,7 @@ import { getBaseUrl, getValidToken } from '../auth/auth';
 import { verboseRequest, verboseResponse, verboseLog } from '../core/verbose';
 import { parseNetworkError, parseHttpError } from '../core/errors';
 import { cacheSkill } from '../storage/cache';
-import { parseSlug } from '../core/slug';
+import { encodeSlugForSkillPath } from '../core/slug';
 import { fetchWithTimeout } from '../core/fetch';
 
 export interface SkillRegistryItem {
@@ -78,9 +78,8 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 }
 
 export async function fetchSkill(skillIdentifier: string): Promise<SkillRegistryItem | null> {
-  const { owner, name } = parseSlug(skillIdentifier);
   const registryUrl = getRegistryUrl();
-  const url = `${registryUrl}/skill/${owner}/${name}`;
+  const url = `${registryUrl}/skill/${encodeSlugForSkillPath(skillIdentifier)}`;
 
   const headers = await getAuthHeaders();
   const startTime = Date.now();

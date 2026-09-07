@@ -201,4 +201,7 @@ program.exitOverride((err) => {
   process.exit(err.code === 'commander.help' ? 0 : err.exitCode);
 });
 
-program.parse();
+program.parseAsync().catch((err: unknown) => {
+  console.error(err instanceof Error ? err.message : 'Command failed');
+  process.exitCode = 1;
+});

@@ -65,7 +65,10 @@ export async function fetchWithTimeout(
   input: FetchInput,
   options: FetchWithTimeoutOptions = {}
 ): Promise<Response> {
-  const { timeoutMs = getRequestTimeoutMs(), signal, ...requestInit } = options;
+  const { timeoutMs = getRequestTimeoutMs(), signal: optionSignal, ...requestInit } = options;
+  const signal = optionSignal !== undefined
+    ? optionSignal
+    : (typeof Request !== 'undefined' && input instanceof Request ? input.signal : undefined);
   const controller = new AbortController();
   const cleanupCallbacks: Array<() => void> = [];
 
@@ -83,21 +86,43 @@ export async function fetchWithTimeout(
     controller.abort(new RequestTimeoutError(timeoutMs, getInputUrl(input)));
   }, timeoutMs);
   unrefTimer(timeout);
+  const cleanup = () => {
+    clearTimeout(timeout);
+    for (const callback of cleanupCallbacks) callback();
+  };
+  controller.signal.addEventListener('abort', cleanup, { once: true });
 
   try {
-    return await fetch(input, {
+    const response = await fetch(input, {
       ...requestInit,
       signal: controller.signal,
     });
+    if (response.body === null) cleanup();
+    // fetch resolves at headers. Keep the timeout active while the caller reads
+    // the body, otherwise a stalled JSON/file download can hang indefinitely.
+    const readers = new Set(['json', 'text', 'arrayBuffer', 'blob', 'formData', 'bytes']);
+    return new Proxy(response, {
+      get(target, property) {
+        const value: unknown = Reflect.get(target, property, target);
+        if (typeof value !== 'function') return value;
+        if (!readers.has(String(property))) return value.bind(target);
+        return async (...args: unknown[]) => {
+          try {
+            return await value.apply(target, args);
+          } catch (err) {
+            if (controller.signal.reason instanceof RequestTimeoutError) throw controller.signal.reason;
+            throw err;
+          } finally {
+            cleanup();
+          }
+        };
+      },
+    });
   } catch (err) {
+    cleanup();
     if (controller.signal.reason instanceof RequestTimeoutError) {
       throw controller.signal.reason;
     }
     throw err;
-  } finally {
-    clearTimeout(timeout);
-    for (const cleanup of cleanupCallbacks) {
-      cleanup();
-    }
   }
 }

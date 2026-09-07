@@ -3,6 +3,7 @@
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 const PORT_RANGE_START = 9876;
 const PORT_RANGE_END = 9886;
@@ -51,12 +52,15 @@ function tryStartServer(
 /**
  * Start a local callback server on an available port
  */
-export async function startCallbackServer(expectedState: string): Promise<CallbackServer> {
+export async function startCallbackServer(
+  expectedState: string,
+  portRange = { start: PORT_RANGE_START, end: PORT_RANGE_END }
+): Promise<CallbackServer> {
   let server: Server | null = null;
-  let port = PORT_RANGE_START;
+  let port = portRange.start;
 
   // Try ports in range until one is available
-  while (port <= PORT_RANGE_END && !server) {
+  while (port <= portRange.end && !server) {
     let resolveCallback: (result: CallbackResult) => void;
     let rejectCallback: (error: Error) => void;
 
@@ -64,18 +68,29 @@ export async function startCallbackServer(expectedState: string): Promise<Callba
       resolveCallback = resolve;
       rejectCallback = reject;
     });
+    // The browser may respond before login reaches waitForCallback().
+    void callbackPromise.catch(() => {});
 
     const handler = (req: IncomingMessage, res: ServerResponse) => {
-      if (req.method !== 'GET' || !req.url?.startsWith('/callback')) {
+      if (req.method !== 'GET' || !req.url) {
         res.writeHead(404);
         res.end('Not Found');
         return;
       }
 
       const url = new URL(req.url, `http://localhost:${port}`);
+      if (url.pathname !== '/callback') {
+        res.writeHead(404).end('Not Found');
+        return;
+      }
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
       const error = url.searchParams.get('error');
+      // Unrelated requests must not terminate the legitimate login attempt.
+      if (state !== expectedState || (!code && !error)) {
+        res.writeHead(400).end('Invalid callback');
+        return;
+      }
 
       // Return simple OK response (this is called via fetch, not browser navigation)
       res.writeHead(200, {
@@ -105,7 +120,7 @@ export async function startCallbackServer(expectedState: string): Promise<Callba
     server = await tryStartServer(port, handler);
 
     if (server) {
-      const currentPort = port;
+      const currentPort = (server.address() as AddressInfo).port;
       let timeoutId: NodeJS.Timeout;
 
       const waitForCallback = (): Promise<CallbackResult> => {
@@ -145,5 +160,5 @@ export async function startCallbackServer(expectedState: string): Promise<Callba
     port++;
   }
 
-  throw new Error(`Could not find available port in range ${PORT_RANGE_START}-${PORT_RANGE_END}`);
+  throw new Error(`Could not find available port in range ${portRange.start}-${portRange.end}`);
 }

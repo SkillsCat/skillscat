@@ -242,11 +242,27 @@ export function recordInstallation(skill: InstalledSkill): void {
     return;
   }
 
-  // Replace only exact same installation identity.
-  db.skills = db.skills.filter((existing) =>
-    !sameInstallationIdentity(existing, normalized) &&
-    !sameLegacyProjectIdentity(existing, normalized)
-  );
+  const targetPaths = new Set(normalized.agents.flatMap((id) => {
+    const agent = getAgentById(id);
+    return agent ? [getSkillPath(agent, normalized.name, normalized.global, normalized.installRoot)] : [];
+  }));
+  db.skills = db.skills.flatMap((existing) => {
+    const sameIdentity = sameInstallationIdentity(existing, normalized)
+      || sameLegacyProjectIdentity(existing, normalized);
+    // A target directory can belong to only one source/version. Preserve other
+    // agents, including their old hashes so a later update can still find them.
+    const remainingAgents = existing.agents.filter((id) => {
+      const agent = getAgentById(id);
+      if (sameIdentity && normalized.agents.includes(id)) return false;
+      if (!existing.global && !existing.installRoot && !sameIdentity) return true;
+      return !agent || !targetPaths.has(getSkillPath(agent, existing.name, existing.global, existing.installRoot));
+    });
+    if (sameIdentity && existing.contentHash === normalized.contentHash && existing.sha === normalized.sha) {
+      normalized.agents = Array.from(new Set([...remainingAgents, ...normalized.agents]));
+      return [];
+    }
+    return remainingAgents.length ? [{ ...existing, agents: remainingAgents }] : [];
+  });
 
   db.skills.push(normalized);
   saveDb(db);
@@ -318,20 +334,21 @@ export function copyInstallationAgent(
   const sourceSkillDirs = options?.sourceSkillDirs ? new Set(options.sourceSkillDirs) : null;
   const sourceAgent = getAgentById(sourceAgentId);
 
-  db.skills = db.skills.map((skill) => {
+  const copies: InstalledSkill[] = [];
+  db.skills.forEach((skill) => {
     if (options?.global !== undefined && skill.global !== options.global) {
-      return skill;
+      return;
     }
 
     if (!skill.agents.includes(sourceAgentId) || skill.agents.includes(targetAgentId)) {
-      return skill;
+      return;
     }
 
     let installRoot = skill.installRoot;
     if (options?.installRoot !== undefined) {
       if (installRoot) {
         if (installRoot !== options.installRoot) {
-          return skill;
+          return;
         }
       } else if (
         !skill.global &&
@@ -340,28 +357,27 @@ export function copyInstallationAgent(
       ) {
         installRoot = options.installRoot;
       } else {
-        return skill;
+        return;
       }
     }
 
     if (sourceSkillDirs && sourceAgent) {
       const sourceSkillDir = getSkillPath(sourceAgent, skill.name, skill.global, installRoot);
       if (!sourceSkillDirs.has(sourceSkillDir)) {
-        return skill;
+        return;
       }
     }
 
     updated += 1;
-    return {
+    copies.push({
       ...skill,
       installRoot,
-      agents: [...skill.agents, targetAgentId],
-    };
+      agents: [targetAgentId],
+    });
+    return;
   });
 
-  if (updated > 0) {
-    saveDb(db);
-  }
+  for (const copy of copies) recordInstallation(copy);
 
   return updated;
 }

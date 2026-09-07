@@ -1,3 +1,5 @@
+import { parse as parseYaml } from 'yaml';
+
 export type Platform = 'github' | 'gitlab';
 
 export interface RepoSource {
@@ -46,11 +48,20 @@ export interface SkillMetadata {
  * Parse repository source from various formats
  */
 export function parseSource(source: string): RepoSource | null {
+  source = source.trim();
+  const sshMatch = source.match(/^git@(github|gitlab)\.com:(.+?)(?:\.git)?$/);
+  if (sshMatch) {
+    const parts = sshMatch[2].split('/');
+    if (parts.length < 2 || (sshMatch[1] === 'github' && parts.length !== 2)
+      || parts.some((part) => !/^[\w.-]+$/.test(part) || part === '.' || part === '..')) return null;
+    return { platform: sshMatch[1] as Platform, owner: parts.slice(0, -1).join('/'), repo: parts.at(-1)! };
+  }
   // GitHub shorthand or a nested published slug: owner/repo[/path]
-  const shorthandMatch = source.match(/^([^\/\s]+)\/([^\/\s]+)(?:\/(.+))?$/);
+  const shorthandMatch = source.match(/^([\w.-]+)\/([\w.-]+)(?:\/(.+))?$/);
   if (shorthandMatch) {
     const path = shorthandMatch[3];
-    if (path?.split('/').some((segment) => !segment || segment === '.' || segment === '..')) {
+    if ([shorthandMatch[1], shorthandMatch[2], ...(path?.split('/') ?? [])]
+      .some((segment) => !segment || segment === '.' || segment === '..' || /[\\\s?#]/.test(segment))) {
       return null;
     }
     return {
@@ -65,6 +76,21 @@ export function parseSource(source: string): RepoSource | null {
   try {
     const url = new URL(source);
     const host = url.hostname.toLowerCase();
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+    if (host === 'gitlab.com' || host === 'www.gitlab.com') {
+      const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+      const routeIndex = parts.indexOf('-');
+      const repoParts = routeIndex === -1 ? parts : parts.slice(0, routeIndex);
+      if (repoParts.length < 2 || repoParts.some((part) => !/^[\w.-]+$/.test(part) || part === '.' || part === '..')) return null;
+      const route = routeIndex === -1 ? undefined : parts[routeIndex + 1];
+      const branch = routeIndex === -1 ? undefined : parts[routeIndex + 2];
+      if (routeIndex !== -1 && (!['tree', 'blob'].includes(route ?? '') || !branch)) return null;
+      return {
+        platform: 'gitlab', owner: repoParts.slice(0, -1).join('/'),
+        repo: repoParts.at(-1)!.replace(/\.git$/, ''), branch,
+        path: routeIndex === -1 ? undefined : parts.slice(routeIndex + 3).join('/') || undefined,
+      };
+    }
     // skills.sh URL: https://skills.sh/owner/repo or https://skills.sh/owner/repo/skill-name
     if (host === 'skills.sh' || host === 'www.skills.sh') {
       const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
@@ -92,6 +118,7 @@ export function parseSource(source: string): RepoSource | null {
 
         if (route === 'tree' || route === 'blob') {
           const branch = parts[3];
+          if (!branch) return null;
           const path = parts.slice(4).join('/');
           return {
             platform: 'github',
@@ -116,36 +143,6 @@ export function parseSource(source: string): RepoSource | null {
     }
   } catch {
     // Not a valid URL, continue to other formats.
-  }
-
-  // GitLab URL: https://gitlab.com/owner/repo or with -/tree/branch/path
-  const gitlabMatch = source.match(
-    /gitlab\.com\/(.+?)(?:\/-\/tree\/([^\/]+))?(?:\/(.+))?$/
-  );
-  if (gitlabMatch) {
-    const fullPath = gitlabMatch[1];
-    const parts = fullPath.split('/').filter(p => p && !p.startsWith('-'));
-    if (parts.length >= 2) {
-      const repo = parts.pop()!.replace(/\.git$/, '');
-      const owner = parts.join('/');
-      return {
-        platform: 'gitlab',
-        owner,
-        repo,
-        branch: gitlabMatch[2],
-        path: gitlabMatch[3]
-      };
-    }
-  }
-
-  // Git SSH URL: git@github.com:owner/repo.git
-  const sshMatch = source.match(/git@(github|gitlab)\.com:([^\/]+)\/(.+?)(?:\.git)?$/);
-  if (sshMatch) {
-    return {
-      platform: sshMatch[1] as Platform,
-      owner: sshMatch[2],
-      repo: sshMatch[3]
-    };
   }
 
   return null;
@@ -181,35 +178,16 @@ export const SKILL_DISCOVERY_PATHS = [
  * Parse SKILL.md frontmatter
  */
 export function parseSkillFrontmatter(content: string): SkillMetadata | null {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  const frontmatterMatch = content.replace(/^\uFEFF/, '').match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
   if (!frontmatterMatch) return null;
-
-  const frontmatter = frontmatterMatch[1];
-  const metadata: Partial<SkillMetadata> = {};
-
-  // Parse name
-  const nameMatch = frontmatter.match(/^name:\s*["']?(.+?)["']?\s*$/m);
-  if (nameMatch) metadata.name = nameMatch[1].trim();
-
-  // Parse description
-  const descMatch = frontmatter.match(/^description:\s*["']?(.+?)["']?\s*$/m);
-  if (descMatch) metadata.description = descMatch[1].trim();
-
-  // Parse allowed-tools
-  const toolsMatch = frontmatter.match(/^allowed-tools:\s*\[([^\]]+)\]/m);
-  if (toolsMatch) {
-    metadata['allowed-tools'] = toolsMatch[1].split(',').map(t => t.trim().replace(/["']/g, ''));
+  try {
+    const metadata: unknown = parseYaml(frontmatterMatch[1], { maxAliasCount: 50 });
+    if (!metadata || typeof metadata !== 'object') return null;
+    const fields = metadata as Record<string, unknown>;
+    if (typeof fields.name !== 'string' || !fields.name.trim()
+      || typeof fields.description !== 'string' || !fields.description.trim()) return null;
+    return { ...fields, name: fields.name.trim(), description: fields.description.trim() } as SkillMetadata;
+  } catch {
+    return null;
   }
-
-  // Parse model
-  const modelMatch = frontmatter.match(/^model:\s*["']?(.+?)["']?\s*$/m);
-  if (modelMatch) metadata.model = modelMatch[1].trim();
-
-  // Parse context
-  const contextMatch = frontmatter.match(/^context:\s*["']?(.+?)["']?\s*$/m);
-  if (contextMatch && contextMatch[1].trim() === 'fork') metadata.context = 'fork';
-
-  if (!metadata.name || !metadata.description) return null;
-
-  return metadata as SkillMetadata;
 }
