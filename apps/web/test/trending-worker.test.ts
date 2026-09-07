@@ -105,6 +105,7 @@ function createRepoMetricsDb() {
   const db = new DatabaseSync(':memory:');
   db.exec(`
     CREATE TABLE skills (
+      first_published_at INTEGER, created_at INTEGER,
       id TEXT PRIMARY KEY NOT NULL,
       repo_owner TEXT,
       repo_name TEXT,

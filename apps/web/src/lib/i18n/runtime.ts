@@ -1,3 +1,4 @@
+import { localizeHref, isLocalizedPublicPath } from '$lib/seo/locale-path';
 import { browser } from '$app/environment';
 import { invalidateAll } from '$app/navigation';
 import { getContext, setContext } from 'svelte';
@@ -22,6 +23,7 @@ export interface I18nRuntime {
   formatNumber: (value: number) => string;
   formatCompactNumber: (value: number) => string;
   formatDate: (value: Date | number, options?: Intl.DateTimeFormatOptions) => string;
+  href: (href: string) => string;
   switchLocale: (nextLocale: SupportedLocale) => Promise<void>;
 }
 
@@ -38,6 +40,7 @@ export function createI18nRuntime(input: {
 }): I18nRuntime {
   return {
     locale: () => input.getLocale(),
+    href: (href) => localizeHref(href, input.getLocale()),
     htmlLang: () => getHtmlLang(input.getLocale()),
     messages: () => getMessages(input.getLocale()),
     availableLocales: () => AVAILABLE_LOCALES,
@@ -55,6 +58,10 @@ export function createI18nRuntime(input: {
     switchLocale: async (nextLocale) => {
       if (nextLocale === input.getLocale()) return;
 
+      if (browser && (nextLocale === 'en' || nextLocale === 'zh-CN') && isLocalizedPublicPath(window.location.pathname)) {
+        window.location.assign(localizeHref(window.location.pathname + window.location.search + window.location.hash, nextLocale, true));
+        return;
+      }
       input.setLocale(nextLocale);
       setLocaleCookie(nextLocale);
 

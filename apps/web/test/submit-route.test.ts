@@ -1488,6 +1488,10 @@ describe('submit route', () => {
         });
       }
 
+      if (url === 'https://api.github.com/repos/forker/toolbox/git/trees/HEAD?recursive=1') {
+        return jsonResponse({ sha: 'current', truncated: false, tree: [{ path: 'SKILL.md', type: 'blob', sha: 'blob' }] });
+      }
+
       if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
         return jsonResponse({
           name: 'SKILL.md',
@@ -1591,6 +1595,10 @@ describe('submit route', () => {
           ahead_by: 2,
           behind_by: 0,
         });
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/git/trees/HEAD?recursive=1') {
+        return jsonResponse({ sha: 'current', truncated: false, tree: [{ path: 'SKILL.md', type: 'blob', sha: 'blob' }] });
       }
 
       if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
@@ -1930,6 +1938,10 @@ describe('submit route', () => {
         });
       }
 
+      if (url === 'https://api.github.com/repos/forker/toolbox/git/trees/HEAD?recursive=1') {
+        return jsonResponse({ sha: 'current', truncated: false, tree: [{ path: 'SKILL.md', type: 'blob', sha: 'blob' }] });
+      }
+
       if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
         return jsonResponse({
           name: 'SKILL.md',
@@ -2163,6 +2175,10 @@ describe('submit route', () => {
           ahead_by: 2,
           behind_by: 0,
         });
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/git/trees/HEAD?recursive=1') {
+        return jsonResponse({ sha: 'current', truncated: false, tree: [{ path: 'SKILL.md', type: 'blob', sha: 'blob' }] });
       }
 
       if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {
@@ -2487,6 +2503,10 @@ describe('submit route', () => {
           ahead_by: 2,
           behind_by: 0,
         });
+      }
+
+      if (url === 'https://api.github.com/repos/forker/toolbox/git/trees/HEAD?recursive=1') {
+        return jsonResponse({ sha: 'current', truncated: false, tree: [{ path: 'SKILL.md', type: 'blob', sha: 'blob' }] });
       }
 
       if (url === 'https://api.github.com/repos/forker/toolbox/contents/SKILL.md') {

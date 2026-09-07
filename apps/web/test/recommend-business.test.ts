@@ -1,3 +1,4 @@
+import { firstPublishedSql } from '../src/lib/server/seo/freshness';
 import { DatabaseSync } from 'node:sqlite';
 
 import { describe, expect, it } from 'vitest';
@@ -65,6 +66,7 @@ function createRecommendDb(): DatabaseSync {
       trending_score REAL NOT NULL DEFAULT 0,
       last_commit_at INTEGER,
       updated_at INTEGER NOT NULL,
+      first_published_at INTEGER, created_at INTEGER, origin_relation_type TEXT,
       indexed_at INTEGER NOT NULL
     );
 
@@ -93,6 +95,7 @@ function createRecommendDb(): DatabaseSync {
       updated_at INTEGER NOT NULL DEFAULT 0
     );
 
+    CREATE INDEX skills_public_first_published_idx ON skills (${firstPublishedSql()} DESC, id) WHERE visibility = 'public';
     CREATE INDEX skills_visibility_id_idx
       ON skills (visibility, id);
     CREATE INDEX skills_visibility_trending_desc_idx
@@ -415,7 +418,7 @@ describe('orderRecommendDiscoveryCategories', () => {
     expect(db.queries.some((sql) => sql.includes('JOIN skill_categories sc2'))).toBe(false);
   });
 
-  it('uses low-cost category seeds before same-author and trending fallbacks', async () => {
+  it('uses related category seeds without unrelated author or trending padding', async () => {
     const sqlite = createRecommendDb();
 
     sqlite.exec(`
@@ -456,12 +459,10 @@ describe('orderRecommendDiscoveryCategories', () => {
 
     expect(results.map((skill) => skill.id)).toEqual([
       'skill-seeded',
-      'skill-same-author',
-      'skill-trending',
     ]);
   });
 
-  it('still returns low-cost fallback results when category seeds are missing', async () => {
+  it('returns no unrelated results when category seeds are missing', async () => {
     const sqlite = createRecommendDb();
 
     sqlite.exec(`
@@ -489,8 +490,7 @@ describe('orderRecommendDiscoveryCategories', () => {
     );
 
     expect(results.map((skill) => skill.id)).toEqual([
-      'skill-same-author',
-      'skill-trending',
+
     ]);
   });
 

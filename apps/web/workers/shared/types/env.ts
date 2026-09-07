@@ -21,6 +21,9 @@ export interface BaseEnv {
 }
 
 export interface GithubEventsEnv extends BaseEnv {
+  DISCOVERY_MAX_QUEUED_PER_RUN?: string;
+  DISCOVERY_MAX_QUEUED_PER_DAY?: string;
+  DISCOVERY_MAX_PENDING?: string;
   INDEXING_QUEUE: Queue<IndexingMessage>;
   GITHUB_EVENTS_PER_PAGE?: string;
   GITHUB_EVENTS_PAGES?: string;
@@ -77,6 +80,7 @@ export interface GithubEventsEnv extends BaseEnv {
 }
 
 export interface IndexingEnv extends BaseEnv {
+  DISCOVERY_MAX_QUEUED_PER_DAY?: string;
   INDEXING_QUEUE: Queue<IndexingMessage>;
   CLASSIFICATION_QUEUE: Queue<ClassificationMessage>;
   SECURITY_ANALYSIS_QUEUE?: Queue<SecurityAnalysisMessage>;

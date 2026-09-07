@@ -315,7 +315,8 @@ export async function markSearchDirty(
     VALUES (?, 1, ?, NULL, NULL, NULL, 0, NULL, ?, ?)
     ON CONFLICT(skill_id) DO UPDATE SET
       dirty = 1,
-      next_update_at = excluded.next_update_at,
+      next_update_at = CASE WHEN skill_search_state.fail_count > 0 AND skill_search_state.next_update_at > excluded.next_update_at
+        THEN skill_search_state.next_update_at ELSE excluded.next_update_at END,
       updated_at = excluded.updated_at
   `)
     .bind(skillId, now, now, now)
@@ -340,7 +341,8 @@ export async function markSearchDirtyBatch(
     VALUES (?, 1, ?, NULL, NULL, NULL, 0, NULL, ?, ?)
     ON CONFLICT(skill_id) DO UPDATE SET
       dirty = 1,
-      next_update_at = excluded.next_update_at,
+      next_update_at = CASE WHEN skill_search_state.fail_count > 0 AND skill_search_state.next_update_at > excluded.next_update_at
+        THEN skill_search_state.next_update_at ELSE excluded.next_update_at END,
       updated_at = excluded.updated_at
   `);
 

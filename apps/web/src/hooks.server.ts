@@ -1,3 +1,4 @@
+import { stripSeoLocale, isLocalizedPublicPath, localizeHref } from '$lib/seo/locale-path';
 import { createAuth, linkAuthorToUser, type AuthEnv } from '$lib/server/auth';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { building } from '$app/environment';
@@ -646,7 +647,7 @@ function safeDecodeURIComponent(value: string): string {
 }
 
 function getSkillOwnerFromPathname(pathname: string): string | null {
-  const pathOnly = pathname.replace(/\/+$/, '') || '/';
+  const pathOnly = stripSeoLocale(pathname).replace(/\/+$/, '') || '/';
   const segments = pathOnly.split('/').filter(Boolean);
   if (segments[0] !== 'skills' || segments.length !== 2) {
     return null;
@@ -757,7 +758,7 @@ function buildApiRedirectResponse(location: string): Response {
 }
 
 function getSkillSlugFromPathname(pathname: string): string | null {
-  const pathOnly = pathname.replace(/\/+$/, '') || '/';
+  const pathOnly = stripSeoLocale(pathname).replace(/\/+$/, '') || '/';
   const segments = pathOnly.split('/').filter(Boolean);
   if (segments[0] !== 'skills' || segments.length < 3) {
     return null;
@@ -880,13 +881,16 @@ const baseHandle: Handle = async ({ event, resolve }) => {
     event.request.method
   );
   const resolvedLocale = resolveRequestLocale({
-    cookieLocale: shouldForceDefaultLocale ? null : event.cookies.get(LOCALE_COOKIE_NAME),
+    cookieLocale: isLocalizedPublicPath(event.url.pathname) || shouldForceDefaultLocale ? null : event.cookies.get(LOCALE_COOKIE_NAME),
     acceptLanguage: shouldForceDefaultLocale ? null : event.request.headers.get('accept-language'),
     preferDefaultLocale: shouldForceDefaultLocale || shouldUseDefaultLocaleForIndexablePage(
       event.url.pathname,
       event.request.method
     ),
   });
+  if (isLocalizedPublicPath(event.url.pathname)) {
+    resolvedLocale.locale = event.url.pathname.startsWith('/zh-CN') ? 'zh-CN' : 'en';
+  }
   event.locals.locale = resolvedLocale.locale;
   event.locals.localeSource = resolvedLocale.source;
   event.locals.htmlLang = getHtmlLang(resolvedLocale.locale);
@@ -899,9 +903,9 @@ const baseHandle: Handle = async ({ event, resolve }) => {
     return buildPermanentRedirectResponse(canonicalHostLocation);
   }
 
-  const canonicalSkillPath = getCanonicalSkillPathFromPathname(event.url.pathname);
-  if (canonicalSkillPath && canonicalSkillPath !== event.url.pathname) {
-    const location = `${canonicalSkillPath}${event.url.search}`;
+  const canonicalSkillPath = getCanonicalSkillPathFromPathname(stripSeoLocale(event.url.pathname));
+  if (canonicalSkillPath && canonicalSkillPath !== stripSeoLocale(event.url.pathname)) {
+    const location = `${localizeHref(canonicalSkillPath, event.locals.locale, true)}${event.url.search}`;
     return buildPermanentRedirectResponse(location);
   }
 

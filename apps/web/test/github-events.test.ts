@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import githubEventsWorker from '../workers/github-events';
 import {
   buildRepoQueuedDedupIdentity,
+  processCodeSearchBackfill,
   computeAllowedSearchPages,
   extractGitHubReposFromBskyPost,
   extractGitHubReposFromText,
@@ -22,6 +23,17 @@ import {
   reserveXSearchRequest,
   shouldRunSearchDiscoveryThisTick,
 } from '../workers/github-events';
+
+// Isolate legacy channel/cursor tests from the new scheduler's cooldown and
+// accounting. Budget and adaptive scheduling have separate integration tests.
+async function runDiscoveryTick(controller: ScheduledController, env: Parameters<typeof githubEventsWorker.scheduled>[1], ctx: ExecutionContext) {
+  await env.KV.delete('discovery:channels:v2');
+  const metricsStatement = { bind() { return this; }, async first() { return { allowance: 40 }; }, async all() { return { results: [] }; }, async run() { return { meta: { changes: 1 } }; } };
+  return githubEventsWorker.scheduled(controller, {
+    GITHUB_TOPICS_ENABLED: '0', AWESOME_LISTS_ENABLED: '0', ...env,
+    DB: { prepare(sql: string) { return sql.includes('discovery_daily_stats') ? metricsStatement : env.DB.prepare(sql); } } as D1Database,
+  }, ctx);
+}
 
 function jsonResponse(body: unknown, status: number = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -205,7 +217,7 @@ describe('github-events helpers', () => {
     );
     const send = vi.fn(async () => undefined);
 
-    await githubEventsWorker.scheduled(
+    await runDiscoveryTick(
       {} as ScheduledController,
       {
         DB: {} as D1Database,
@@ -278,7 +290,7 @@ describe('github-events helpers', () => {
       throw new Error(`Unexpected GitHub request: ${url}`);
     });
 
-    await githubEventsWorker.scheduled(
+    await runDiscoveryTick(
       {} as ScheduledController,
       {
         KV: kv as never,
@@ -349,10 +361,10 @@ describe('github-events helpers', () => {
         GITHUB_HTML_SEARCH_DISCOVERY_ENABLED: '0',
       } as never;
 
-      await githubEventsWorker.scheduled({} as ScheduledController, env, {} as ExecutionContext);
+      await runDiscoveryTick({} as ScheduledController, env, {} as ExecutionContext);
       run = 1;
       vi.setSystemTime(new Date('2026-04-18T00:06:00Z'));
-      await githubEventsWorker.scheduled({} as ScheduledController, env, {} as ExecutionContext);
+      await runDiscoveryTick({} as ScheduledController, env, {} as ExecutionContext);
 
       expect(sent).toHaveLength(2);
       expect(kv.store.get('github-events:last-event-id')).toBe('evt-push-2');
@@ -429,7 +441,7 @@ describe('github-events helpers', () => {
       },
     } as unknown as D1Database;
 
-    await githubEventsWorker.scheduled(
+    await runDiscoveryTick(
       {} as ScheduledController,
       {
         DB: db,
@@ -521,7 +533,7 @@ describe('github-events helpers', () => {
       throw new Error(`Unexpected GitHub request: ${rawUrl}`);
     });
 
-    await githubEventsWorker.scheduled(
+    await runDiscoveryTick(
       {} as ScheduledController,
       {
         KV: kv as never,
@@ -618,7 +630,7 @@ describe('github-events helpers', () => {
       GITHUB_HTML_SEARCH_DISCOVERY_ENABLED: '0',
     } as never;
 
-    await githubEventsWorker.scheduled(
+    await runDiscoveryTick(
       {} as ScheduledController,
       env,
       {} as ExecutionContext
@@ -630,7 +642,7 @@ describe('github-events helpers', () => {
     expect(kv.store.get('github-events:last-event-id')).toBeUndefined();
     expect(kv.store.has('github-events:event-replay-state')).toBe(true);
 
-    await githubEventsWorker.scheduled(
+    await runDiscoveryTick(
       {} as ScheduledController,
       env,
       {} as ExecutionContext
@@ -723,11 +735,11 @@ describe('github-events helpers', () => {
       GITHUB_HTML_SEARCH_DISCOVERY_ENABLED: '0',
     } as never;
 
-    await expect(githubEventsWorker.scheduled(
+    await expect(runDiscoveryTick(
       {} as ScheduledController,
       env,
       {} as ExecutionContext
-    )).rejects.toThrow('queue unavailable');
+    )).resolves.toBeUndefined();
 
     const repoQueuedWindow = readRepoQueuedWindow(kv);
     delete repoQueuedWindow['acme/toolbox:'];
@@ -735,7 +747,7 @@ describe('github-events helpers', () => {
     runIndex = 1;
     runSendAttempts = 0;
 
-    await githubEventsWorker.scheduled(
+    await runDiscoveryTick(
       {} as ScheduledController,
       env,
       {} as ExecutionContext
@@ -787,216 +799,77 @@ function requestUrl(input: unknown): string {
       : (input as Request).url;
 }
 
-describe('github-events code search backfill', () => {
-  it('shares the current tick page budget between head discovery and backfill', async () => {
-    const kv = new MemoryKv();
-    const searchUrls: string[] = [];
-    const resetAt = Math.floor(Date.now() / 1000) + 600;
-    const fullPage = Array.from({ length: 100 }, (_, index) => ({
-      sha: `${String(index).padStart(2, '0')}${'a'.repeat(38)}`,
-      path: 'SKILL.md',
-      repository: { full_name: `Acme/Head${index}` },
-    }));
-
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      const url = requestUrl(input);
-      if (url === 'https://api.github.com/rate_limit') return rateLimitResponse(10, resetAt);
-      if (url.startsWith('https://api.github.com/events?')) return jsonResponse([]);
-      if (url.startsWith('https://api.github.com/search/code?')) {
-        searchUrls.push(url);
-        return jsonResponse({ items: new URL(url).searchParams.get('q')?.includes('created:') ? [] : fullPage });
-      }
-      throw new Error(`Unexpected GitHub request: ${url}`);
-    });
-
-    await githubEventsWorker.scheduled(
-      {} as ScheduledController,
-      {
-        KV: kv as never,
-        INDEXING_QUEUE: { send: async () => undefined },
-        GITHUB_TOKEN: 'token-a',
-        GITHUB_EVENTS_MIN_REST_REMAINING: '1',
-        GITHUB_EVENTS_REST_RESERVE: '0',
-        GITHUB_SEARCH_DISCOVERY_ENABLED: '1',
-        GITHUB_SEARCH_DISCOVERY_INTERVAL_SECONDS: '1',
-        GITHUB_SEARCH_DISCOVERY_PAGES: '3',
-        GITHUB_SEARCH_DISCOVERY_PER_PAGE: '100',
-        GITHUB_SEARCH_BACKFILL_ENABLED: '1',
-        GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS: '1',
-        GITHUB_SEARCH_BACKFILL_MAX_PAGES: '10',
-        GITHUB_SEARCH_BACKFILL_RESERVE: '0',
-        GITHUB_SEARCH_BACKFILL_MIN_REMAINING: '1',
-        GITHUB_HTML_SEARCH_DISCOVERY_ENABLED: '0',
-      } as never,
-      {} as ExecutionContext
-    );
-
-    expect(searchUrls).toHaveLength(3);
-    expect(searchUrls.some((url) => new URL(url).searchParams.get('q')?.includes('created:'))).toBe(false);
-  });
-
-  it('backfills one created-date slice per tick and advances the cursor', async () => {
+describe('repository search backfill', () => {
+  it('resumes a full page on the next tick instead of skipping the remaining results', async () => {
     const kv = new MemoryKv();
     const sent: unknown[] = [];
-    const searchUrls: string[] = [];
-    const resetAt = Math.floor(Date.now() / 1000) + 600;
-
+    const queries: URL[] = [];
+    const now = Date.parse('2026-04-18T00:00:00Z');
+    vi.spyOn(Date, 'now').mockReturnValue(now);
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      const url = requestUrl(input);
-
-      if (url === 'https://api.github.com/rate_limit') {
-        return rateLimitResponse(10, resetAt);
-      }
-      if (url.startsWith('https://api.github.com/events?')) {
-        return jsonResponse([]);
-      }
-      if (url.startsWith('https://api.github.com/search/code?')) {
-        searchUrls.push(url);
-        return jsonResponse({
-          items: [
-            {
-              sha: 'b'.repeat(40),
-              path: 'SKILL.md',
-              repository: { full_name: 'Acme/Backfilled' },
-            },
-          ],
-        });
-      }
-
-      throw new Error(`Unexpected GitHub request: ${url}`);
+      const url = new URL(requestUrl(input)); queries.push(url);
+      return jsonResponse({ total_count: 3, items: url.searchParams.get('page') === '1'
+        ? [{ full_name: 'acme/first' }, { full_name: 'acme/second' }] : [{ full_name: 'acme/third' }] });
     });
-
-    await githubEventsWorker.scheduled(
-      {} as ScheduledController,
-      {
-        KV: kv as never,
-        INDEXING_QUEUE: {
-          send: async (message: unknown) => sent.push(message),
-        },
-        GITHUB_TOKEN: 'token-a',
-        GITHUB_EVENTS_MIN_REST_REMAINING: '1',
-        GITHUB_EVENTS_REST_RESERVE: '0',
-        GITHUB_SEARCH_DISCOVERY_ENABLED: '0',
-        GITHUB_HTML_SEARCH_DISCOVERY_ENABLED: '0',
-        GITHUB_SEARCH_BACKFILL_ENABLED: '1',
-        GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS: '1',
-        GITHUB_SEARCH_BACKFILL_START_DATE: '2025-03-05',
-      } as never,
-      {} as ExecutionContext
-    );
-
-    expect(searchUrls).toHaveLength(1);
-    expect(new URL(searchUrls[0]).searchParams.get('q')).toBe(
-      'filename:SKILL.md created:2025-03-05..2025-03-05'
-    );
-    expect(sent).toEqual([
-      expect.objectContaining({
-        type: 'check_skill',
-        repoOwner: 'Acme',
-        repoName: 'Backfilled',
-        discoverySource: 'github-code-search',
-      }),
-    ]);
-    expect(kv.store.get('github-events:code-search:backfill-cursor')).toBe(
-      JSON.stringify({ date: '2025-03-06' })
-    );
+    const env = { KV: kv, INDEXING_QUEUE: { send: async (message: unknown) => { sent.push(message); } },
+      GITHUB_TOKEN: 'test', GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS: '1', GITHUB_DISCOVERY_CRON_INTERVAL_SECONDS: '1',
+      GITHUB_SEARCH_DISCOVERY_PER_PAGE: '2', GITHUB_SEARCH_BACKFILL_MAX_PAGES: '1' } as never;
+    const state = { recentUntilByIdentity: new Map<string, number>(), queuedInRun: new Set<string>(), dirty: false };
+    const snapshot = { remaining: 100, limit: 100, used: 0, resetAtEpochSec: now / 1000 + 60, updatedAtEpochMs: now } as never;
+    await processCodeSearchBackfill(env, state, snapshot, now, 1);
+    await processCodeSearchBackfill(env, state, snapshot, now, 1);
+    expect(sent).toHaveLength(3);
+    expect(queries.map((url) => url.pathname)).toEqual(['/search/repositories', '/search/repositories']);
+    expect(queries.map((url) => url.searchParams.get('page'))).toEqual(['1', '2']);
+    expect(queries[0].searchParams.get('q')).toContain('created:');
   });
-
-  it('wraps the backfill cursor back to the start date after reaching today', async () => {
+  it('splits capped windows without skipping either half', async () => {
     const kv = new MemoryKv();
-    const searchUrls: string[] = [];
-    const resetAt = Math.floor(Date.now() / 1000) + 600;
-    const today = new Date().toISOString().slice(0, 10);
-    kv.store.set('github-events:code-search:backfill-cursor', JSON.stringify({ date: today }));
-
+    const now = Date.now();
+    const queries: URL[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      const url = requestUrl(input);
-
-      if (url === 'https://api.github.com/rate_limit') {
-        return rateLimitResponse(10, resetAt);
-      }
-      if (url.startsWith('https://api.github.com/events?')) {
-        return jsonResponse([]);
-      }
-      if (url.startsWith('https://api.github.com/search/code?')) {
-        searchUrls.push(url);
-        return jsonResponse({ items: [] });
-      }
-
-      throw new Error(`Unexpected GitHub request: ${url}`);
+      queries.push(new URL(requestUrl(input)));
+      return jsonResponse({ total_count: queries.length === 1 ? 1001 : 0, items: [] });
     });
-
-    await githubEventsWorker.scheduled(
-      {} as ScheduledController,
-      {
-        KV: kv as never,
-        INDEXING_QUEUE: { send: async () => undefined },
-        GITHUB_TOKEN: 'token-a',
-        GITHUB_EVENTS_MIN_REST_REMAINING: '1',
-        GITHUB_EVENTS_REST_RESERVE: '0',
-        GITHUB_SEARCH_DISCOVERY_ENABLED: '0',
-        GITHUB_HTML_SEARCH_DISCOVERY_ENABLED: '0',
-        GITHUB_SEARCH_BACKFILL_ENABLED: '1',
-        GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS: '1',
-        GITHUB_SEARCH_BACKFILL_START_DATE: '2025-01-02',
-      } as never,
-      {} as ExecutionContext
-    );
-
-    expect(searchUrls).toHaveLength(1);
-    expect(new URL(searchUrls[0]).searchParams.get('q')).toBe(
-      'filename:SKILL.md created:2025-01-02..2025-01-02'
-    );
-    expect(kv.store.get('github-events:code-search:backfill-cursor')).toBe(
-      JSON.stringify({ date: '2025-01-03' })
-    );
+    const env = { KV: kv, INDEXING_QUEUE: { send: vi.fn() }, GITHUB_TOKEN: 'test', GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS: '1' } as never;
+    const state = { recentUntilByIdentity: new Map<string, number>(), queuedInRun: new Set<string>(), dirty: false };
+    const snapshot = { remaining: 100, resetAtEpochSec: now / 1000 + 60, updatedAtEpochMs: now } as never;
+    await processCodeSearchBackfill(env, state, snapshot, now, 1);
+    const key = [...kv.store.keys()].find((key) => key.includes('repositories:v2'))!;
+    const split = JSON.parse(kv.store.get(key)!);
+    expect(split.pending).toHaveLength(1);
+    expect(split.pending[0].start).toBe(split.end + 1000);
+    for (let i = 0; i < 3; i++) await processCodeSearchBackfill(env, state, snapshot, now, 1);
+    expect(JSON.parse(kv.store.get(key)!).start).toBe(split.pending[0].start);
+    expect(queries[1].searchParams.get('q')).toContain(new Date(split.end).toISOString());
   });
-
-  it('skips the backfill when the search budget is below the configured minimum', async () => {
+  it('retries an interrupted page while keeping successfully queued repositories deduplicated', async () => {
     const kv = new MemoryKv();
-    const sent: unknown[] = [];
-    const searchUrls: string[] = [];
-    const resetAt = Math.floor(Date.now() / 1000) + 600;
-
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      const url = requestUrl(input);
-
-      if (url === 'https://api.github.com/rate_limit') {
-        return rateLimitResponse(1, resetAt);
-      }
-      if (url.startsWith('https://api.github.com/events?')) {
-        return jsonResponse([]);
-      }
-      if (url.startsWith('https://api.github.com/search/code?')) {
-        searchUrls.push(url);
-        return jsonResponse({ items: [] });
-      }
-
-      throw new Error(`Unexpected GitHub request: ${url}`);
-    });
-
-    await githubEventsWorker.scheduled(
-      {} as ScheduledController,
-      {
-        KV: kv as never,
-        INDEXING_QUEUE: {
-          send: async (message: unknown) => sent.push(message),
-        },
-        GITHUB_TOKEN: 'token-a',
-        GITHUB_EVENTS_MIN_REST_REMAINING: '1',
-        GITHUB_EVENTS_REST_RESERVE: '0',
-        GITHUB_SEARCH_DISCOVERY_ENABLED: '0',
-        GITHUB_HTML_SEARCH_DISCOVERY_ENABLED: '0',
-        GITHUB_SEARCH_BACKFILL_ENABLED: '1',
-        GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS: '1',
-        GITHUB_SEARCH_BACKFILL_MIN_REMAINING: '5',
-      } as never,
-      {} as ExecutionContext
-    );
-
-    expect(searchUrls).toHaveLength(0);
-    expect(sent).toEqual([]);
-    expect(kv.store.has('github-events:code-search:backfill-cursor')).toBe(false);
+    const now = Date.now();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({total_count:2, items:[{full_name:'acme/one'},{full_name:'acme/two'}]}));
+    const send = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('queue unavailable')).mockResolvedValue(undefined);
+    const env = { KV: kv, INDEXING_QUEUE: { send }, GITHUB_TOKEN: 'test', GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS: '1' } as never;
+    const state = { recentUntilByIdentity: new Map<string, number>(), queuedInRun: new Set<string>(), dirty: false };
+    const snapshot = { remaining: 100, resetAtEpochSec: now / 1000 + 60, updatedAtEpochMs: now } as never;
+    await expect(processCodeSearchBackfill(env, state, snapshot, now, 1)).rejects.toThrow('queue unavailable');
+    expect([...kv.store.keys()].some((key) => key.includes('repositories:v2'))).toBe(false);
+    // Each GitHub response body can only be consumed once.
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({total_count:2, items:[{full_name:'acme/one'},{full_name:'acme/two'}]}));
+    await processCodeSearchBackfill(env, state, snapshot, now, 1);
+    expect(send.mock.calls.map((call) => call[0].repoName)).toEqual(['one','two','two']);
+  });
+  it('does not advance a cursor on rate limits or partial results', async () => {
+    const kv = new MemoryKv();
+    const now = Date.now();
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ incomplete_results: true, items: [] }));
+    const env = { KV: kv, INDEXING_QUEUE: { send: vi.fn() }, GITHUB_TOKEN: 'test', GITHUB_SEARCH_BACKFILL_INTERVAL_SECONDS: '1' } as never;
+    const state = { recentUntilByIdentity: new Map<string, number>(), queuedInRun: new Set<string>(), dirty: false };
+    const snapshot = { remaining: 100, resetAtEpochSec: now / 1000 + 60, updatedAtEpochMs: now } as never;
+    expect((await processCodeSearchBackfill(env, state, snapshot, now, 1)).skippedReason).toBe('incomplete_results');
+    expect([...kv.store.keys()].some((key) => key.includes('repositories:v2'))).toBe(false);
+    fetch.mockResolvedValue(jsonResponse({}, 429));
+    expect((await processCodeSearchBackfill(env, state, snapshot, now, 1)).skippedReason).toBe('search_rate_limited');
+    expect([...kv.store.keys()].some((key) => key.includes('repositories:v2'))).toBe(false);
   });
 });
 
@@ -1027,7 +900,7 @@ describe('github-events repo queue dedup TTL', () => {
     });
 
     const beforeMs = Date.now();
-    await githubEventsWorker.scheduled(
+    await runDiscoveryTick(
       {} as ScheduledController,
       {
         KV: kv as never,
@@ -1056,7 +929,7 @@ describe('github-events repo queue dedup TTL', () => {
 });
 
 describe('github-events HTML repo search discovery', () => {
-  it('enqueues HTML search candidates only when SKILL.md exists at the default branch HEAD', async () => {
+  it('enqueues repositories for tree discovery without requiring a root SKILL.md', async () => {
     const kv = new MemoryKv();
     const sent: unknown[] = [];
     const skillMdChecks: string[] = [];
@@ -1086,7 +959,7 @@ describe('github-events HTML repo search discovery', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    await githubEventsWorker.scheduled(
+    await runDiscoveryTick(
       {} as ScheduledController,
       {
         KV: kv as never,
@@ -1103,17 +976,14 @@ describe('github-events HTML repo search discovery', () => {
       {} as ExecutionContext
     );
 
-    expect(skillMdChecks.length).toBe(10);
+    expect(skillMdChecks).toHaveLength(0);
     expect(searchRequests).toHaveLength(3);
-    expect(sent).toEqual([
-      expect.objectContaining({
-        type: 'check_skill',
-        repoOwner: 'Punky971210',
-        repoName: 'dsh-punky-swarm',
-        discoverySource: 'github-repo-search-html',
-      }),
-    ]);
-    expect((sent[0] as { skillPath?: string }).skillPath).toBeUndefined();
+    expect(sent).toHaveLength(10);
+    expect(sent).toContainEqual(expect.objectContaining({
+      type: 'check_skill', repoOwner: 'Punky971210', repoName: 'dsh-punky-swarm',
+      discoverySource: 'github-repo-search-html',
+    }));
+    expect(sent.every((message) => !(message as { skillPath?: string }).skillPath)).toBe(true);
     expect(readRepoQueuedWindow(kv)).toHaveProperty('punky971210/dsh-punky-swarm:');
   });
 
@@ -1138,7 +1008,7 @@ describe('github-events HTML repo search discovery', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    await githubEventsWorker.scheduled(
+    await runDiscoveryTick(
       {} as ScheduledController,
       {
         KV: kv as never,

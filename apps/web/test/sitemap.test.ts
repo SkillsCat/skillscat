@@ -88,11 +88,11 @@ function createDbMock(rows: {
 describe('dynamic sitemap snapshot keys', () => {
   it('parses the versioned R2 object shape used by snapshot persistence', () => {
     expect(parseDynamicSitemapSnapshotPage(
-      'cache/sitemaps/v2/sitemap:v2:skills:6:xml.xml',
+      'cache/sitemaps/v3/sitemap:v3:skills:6:xml.xml',
       'skills'
     )).toBe(6);
     expect(parseDynamicSitemapSnapshotPage(
-      'cache/sitemaps/v2/sitemap:v2:profiles:2:xml.xml',
+      'cache/sitemaps/v3/sitemap:v3:profiles:2:xml.xml',
       'skills'
     )).toBeNull();
     expect(parseDynamicSitemapSnapshotPage(
@@ -124,7 +124,7 @@ describe('getExpandedCoreSitemapPages', () => {
     expect(pages.some((page) => page.url === '/recent?page=2')).toBe(true);
     expect(pages.some((page) => page.url === '/top?page=2')).toBe(true);
     expect(pages.some((page) => page.url === '/category/seo')).toBe(false);
-    expect(db.queries[0]).toContain('INDEXED BY skills_public_openclaw_updated_slug_idx');
+    expect(db.queries[0]).toContain('INDEXED BY skills_public_seo_freshness_idx');
     expect(db.queries[0]).toContain('LIMIT ?');
   });
 
@@ -268,13 +268,13 @@ describe('loadRecentSkillsSitemapPages', () => {
         const normalized = query.replace(/\s+/g, ' ').trim();
         expect(normalized).toContain("s.visibility = 'public'");
         expect(normalized).toContain("TRIM(COALESCE(s.description, '')) <> ''");
-        expect(normalized).toContain('INDEXED BY skills_public_openclaw_updated_slug_idx');
-        expect(normalized).toContain('ORDER BY sort_ts DESC, slug ASC');
+        expect(normalized).toContain('INDEXED BY skills_public_seo_freshness_idx');
+        expect(normalized).toContain('ORDER BY freshness DESC, s.slug');
 
         return {
           bind(cutoff: number, limit: number) {
             expect(cutoff).toBe(Date.parse('2026-03-05T00:00:00.000Z'));
-            expect(limit).toBe(1000);
+            expect(limit).toBe(500);
 
             return {
               all: async () => ({
@@ -284,14 +284,14 @@ describe('loadRecentSkillsSitemapPages', () => {
                     updated_at: null,
                     indexed_at: null,
                     last_commit_at: Date.parse('2026-03-18T00:00:00.000Z'),
-                    sort_ts: Date.parse('2026-03-18T00:00:00.000Z'),
+                    freshness: Date.parse('2026-03-18T00:00:00.000Z'),
                   },
                   {
                     slug: 'backrunner/beta',
                     updated_at: Date.parse('2026-03-17T00:00:00.000Z'),
                     indexed_at: Date.parse('2026-03-16T00:00:00.000Z'),
                     last_commit_at: null,
-                    sort_ts: Date.parse('2026-03-17T00:00:00.000Z'),
+                    freshness: Date.parse('2026-03-17T00:00:00.000Z'),
                   },
                 ],
               }),

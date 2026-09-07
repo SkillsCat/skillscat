@@ -58,6 +58,7 @@ function createHashDb() {
   const db = new DatabaseSync(':memory:');
   db.exec(`
     CREATE TABLE skills (
+      first_published_at INTEGER,
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT,
       slug TEXT NOT NULL,

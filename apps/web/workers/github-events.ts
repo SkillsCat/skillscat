@@ -1,3 +1,5 @@
+import { reserveDiscoveryAllowance, releaseDiscoveryAllowance } from './shared/discovery-budget';
+import { DiscoveryBudgetExhausted, withDiscoveryQueueBudget, recordDiscoveryStats, nextDiscoveryChannelState, type DiscoveryChannelState } from './shared/discovery-budget';
 /**
  * GitHub Events Worker
  *
@@ -14,11 +16,10 @@ import {
   withGitHubRateLimitKVOverride,
 } from '../src/lib/server/github-client/env';
 import {
-  checkPublicSkillMdAtHead,
   fetchPublicSkillRepoSearchPage,
   PublicRepoSearchError,
 } from '../src/lib/server/github-client/public-search';
-import { getRateLimit, listPublicEvents, searchCode } from '../src/lib/server/github-client/rest';
+import { getRateLimit, listPublicEvents, searchCode, searchRepositories } from '../src/lib/server/github-client/rest';
 import {
   isRateLimitSnapshotStale,
   readAggregatedRateLimitSnapshot,
@@ -459,9 +460,7 @@ function formatDateOnly(epochMs: number): string {
   return new Date(epochMs).toISOString().slice(0, 10);
 }
 
-function addDaysToDateOnly(date: string, days: number): string {
-  return formatDateOnly(Date.parse(`${date}T00:00:00Z`) + days * 86400_000);
-}
+
 
 function getHtmlSearchDiscoveryConfig(env: GithubEventsEnv): {
   enabled: boolean;
@@ -1509,145 +1508,88 @@ async function processCodeSearchDiscovery(
   });
 }
 
-async function getCodeSearchBackfillCursor(env: GithubEventsEnv): Promise<string | null> {
-  const raw = await getGithubEventsStateStore(env).get(CODE_SEARCH_BACKFILL_CURSOR_KEY);
-  if (!raw) return null;
+interface RepoBackfillCursor { start: number; end: number; page: number; query: number; pending: Array<{ start: number; end: number }> }
+const BACKFILL_QUERIES = ['SKILL.md in:readme', 'agent-skills in:readme', '.claude/skills in:readme'];
 
-  try {
-    const parsed = JSON.parse(raw) as { date?: unknown };
-    return typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date)
-      ? parsed.date
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-async function setCodeSearchBackfillCursor(env: GithubEventsEnv, date: string): Promise<void> {
-  await getGithubEventsStateStore(env).put(CODE_SEARCH_BACKFILL_CURSOR_KEY, JSON.stringify({ date }), {
-    expirationTtl: 86400 * 30,
-  });
-}
-
-/**
- * Code Search 日期切片回填:每 tick 处理一个 `created:<date>..<date>` 切片,
- * 游标前进一天;到达今天后回卷到起始日期重扫,捕获漏网仓库。
- * 严格受 search 预算约束,快照不可用或余量不足时整体跳过。
- */
-async function processCodeSearchBackfill(
-  env: GithubEventsEnv,
-  repoDedupeState: RepoQueueDedupeState,
-  initialSearchSnapshot?: GitHubRateLimitSnapshot | null,
-  nowMs: number = Date.now(),
-  pageBudgetOverride?: number
+export async function processCodeSearchBackfill(
+  env: GithubEventsEnv, repoDedupeState: RepoQueueDedupeState,
+  initialSearchSnapshot: GitHubRateLimitSnapshot | null, nowMs = Date.now(), pageBudgetOverride?: number
 ): Promise<CodeSearchBackfillResult> {
   const config = getSearchBackfillConfig(env);
-  const baseResult: CodeSearchBackfillResult = {
-    scanned: 0,
-    queued: 0,
-    pagesFetched: 0,
-    allowedPages: 0,
-  };
-
-  if (!config.enabled) {
-    return { ...baseResult, skippedReason: 'disabled' };
+  const base = { scanned: 0, queued: 0, pagesFetched: 0, allowedPages: 0 };
+  if (!config.enabled) return { ...base, skippedReason: 'disabled' };
+  if (!shouldRunSearchDiscoveryThisTick(nowMs, config.cronIntervalSeconds, config.intervalSeconds)) return { ...base, skippedReason: 'interval_throttled' };
+  const snapshot = initialSearchSnapshot && !isRateLimitSnapshotStale(initialSearchSnapshot, RATE_LIMIT_SNAPSHOT_MAX_AGE_MS)
+    ? initialSearchSnapshot : await readOrRefreshRateLimitSnapshot(env, 'search');
+  if (!snapshot || snapshot.remaining < config.minRemaining) return { ...base, skippedReason: 'insufficient_remaining' };
+  const pages = Math.min(pageBudgetOverride ?? config.maxPages,
+    computeAllowedSearchPages(config.maxPages, snapshot.remaining, snapshot.resetAtEpochSec, config.cronIntervalSeconds, config.reserve, nowMs));
+  if (pages <= 0) return { ...base, skippedReason: 'budget_exhausted' };
+  const store = getGithubEventsStateStore(env);
+  const key = `${CODE_SEARCH_BACKFILL_CURSOR_KEY}:repositories:v2`;
+  const raw = await store.get(key);
+  let cursor: RepoBackfillCursor;
+  try { cursor = raw ? JSON.parse(raw) : null; } catch { cursor = null as unknown as RepoBackfillCursor; }
+  if (!cursor || !Number.isFinite(cursor.start) || !Number.isFinite(cursor.end) || cursor.start < 0 || cursor.end < cursor.start || !Number.isInteger(cursor.page) || cursor.page < 1 || cursor.page > Math.ceil(1000 / config.perPage)
+    || !Number.isInteger(cursor.query) || cursor.query < 0 || cursor.query >= BACKFILL_QUERIES.length
+    || !Array.isArray(cursor.pending) || cursor.pending.some((window) => !Number.isFinite(window.start) || !Number.isFinite(window.end) || window.end < window.start)) {
+    const start = Date.parse(config.startDate);
+    cursor = { start, end: start + 86400000 - 1000, page: 1, query: 0, pending: [] };
   }
-
-  if (!shouldRunSearchDiscoveryThisTick(nowMs, config.cronIntervalSeconds, config.intervalSeconds)) {
-    return { ...baseResult, skippedReason: 'interval_throttled' };
-  }
-
-  const searchSnapshot = (!initialSearchSnapshot || isRateLimitSnapshotStale(initialSearchSnapshot, RATE_LIMIT_SNAPSHOT_MAX_AGE_MS))
-    ? await readOrRefreshRateLimitSnapshot(env, 'search')
-    : initialSearchSnapshot;
-  if (!searchSnapshot) {
-    return { ...baseResult, skippedReason: 'missing_rate_limit' };
-  }
-
-  if (searchSnapshot.remaining < config.minRemaining) {
-    return { ...baseResult, skippedReason: 'insufficient_remaining' };
-  }
-
-  const computedAllowedPages = computeAllowedSearchPages(
-    config.maxPages,
-    searchSnapshot.remaining,
-    searchSnapshot.resetAtEpochSec,
-    config.cronIntervalSeconds,
-    config.reserve,
-    nowMs
-  );
-  const allowedPages = pageBudgetOverride === undefined
-    ? computedAllowedPages
-    : Math.min(computedAllowedPages, Math.max(0, Math.floor(pageBudgetOverride)));
-
-  if (allowedPages <= 0) {
-    return { ...baseResult, allowedPages, skippedReason: 'budget_exhausted' };
-  }
-
-  const today = formatDateOnly(nowMs);
-  const cursor = await getCodeSearchBackfillCursor(env);
-  const date = (!cursor || cursor >= today) ? config.startDate : cursor;
-  const query = `filename:SKILL.md created:${date}..${date}`;
-
-  const seenFingerprints = new Set<string>();
-  let scanned = 0;
-  let queued = 0;
-  let pagesFetched = 0;
-
-  for (let page = 1; page <= allowedPages; page++) {
-    const response = await searchCode(query, {
-      page,
-      perPage: config.perPage,
-      sort: 'indexed',
-      order: 'desc',
-      // Budget snapshots are refreshed explicitly via /rate_limit.
-      // Keep discovery requests themselves write-free for KV cost control.
+  const result = { ...base, allowedPages: pages, date: new Date(cursor.start).toISOString().slice(0, 10) };
+  const save = () => store.put(key, JSON.stringify(cursor));
+  for (let attempted = 0; attempted < pages; attempted++) {
+    const range = `${new Date(cursor.start).toISOString()}..${new Date(cursor.end).toISOString()}`;
+    const response = await searchRepositories(`${BACKFILL_QUERIES[cursor.query]} created:${range}`, {
+      page: cursor.page, perPage: config.perPage,
       ...getGitHubRequestAuthFromEnv(env, { rateLimitMode: 'read_only' }),
       userAgent: 'SkillsCat-Worker/1.0',
     });
-
-    if (!response.ok) {
-      if (isGitHubRateLimited(response)) {
-        return { scanned, queued, pagesFetched, allowedPages, date, skippedReason: 'search_rate_limited' };
+    result.pagesFetched++;
+    if (!response.ok) return { ...result, skippedReason: isGitHubRateLimited(response) ? 'search_rate_limited' : 'search_failed' };
+    const payload = await response.json() as { total_count?: number; incomplete_results?: boolean; items?: Array<{ full_name?: string }> };
+    if (payload.incomplete_results) return { ...result, skippedReason: 'incomplete_results' };
+    if ((payload.total_count ?? 0) > 1000) {
+      if (cursor.end - cursor.start < 1000) return { ...result, skippedReason: 'unsplittable_window' };
+      const midpoint = Math.floor((cursor.start + cursor.end) / 2000) * 1000;
+      cursor.pending.push({ start: midpoint + 1000, end: cursor.end });
+      cursor.end = midpoint; cursor.page = 1;
+      await save(); continue;
+    }
+    const items = payload.items ?? [];
+    for (const item of items) {
+      result.scanned++;
+      const repo = parseRepoFullName(item.full_name);
+      if (!repo || wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, undefined, nowMs)) continue;
+      // A send failure leaves this page pending; the persisted cross-source
+      // dedupe window prevents repeats on the next run.
+      await env.INDEXING_QUEUE.send({ type: 'check_skill', repoOwner: repo.owner, repoName: repo.name, discoverySource: 'github-repo-search' });
+      markRepoQueued(repoDedupeState, repo.owner, repo.name, undefined, nowMs, getRepoQueueDedupTtlSeconds(env));
+      result.queued++;
+    }
+    if (items.length === config.perPage && cursor.page * config.perPage < (payload.total_count ?? 1000)) {
+      cursor.page++;
+    } else {
+      if (++cursor.query >= BACKFILL_QUERIES.length) {
+        cursor.query = 0;
+        const next = cursor.pending.pop();
+        if (next) { cursor.start = next.start; cursor.end = next.end; }
+        else {
+          cursor.start = Math.floor((cursor.end + 1000) / 86400000) * 86400000;
+          if (cursor.start >= nowMs) cursor.start = Date.parse(config.startDate);
+          cursor.end = cursor.start + 86400000 - 1000;
+        }
       }
-      console.warn(`Code search backfill failed for ${date}: ${response.status}`);
-      return { scanned, queued, pagesFetched, allowedPages, date, skippedReason: 'search_failed' };
+      cursor.page = 1;
     }
-
-    const payload = await response.json() as GitHubCodeSearchResponse;
-    const items = Array.isArray(payload.items) ? payload.items : [];
-    pagesFetched++;
-
-    const outcome = await queueCodeSearchItems(
-      env,
-      items,
-      repoDedupeState,
-      seenFingerprints,
-      null,
-      nowMs
-    );
-    scanned += outcome.scanned;
-    queued += outcome.queued;
-
-    if (items.length < config.perPage) {
-      break;
-    }
-
-    if (page === allowedPages) {
-      // GitHub search 单查询上限 1000 条/10 页,单日 SKILL.md 新增量远达不到;
-      // 截断只记日志,游标照常前进。
-      console.log(`Code search backfill page budget exhausted on a full page for ${date}; remaining results are not fetched`);
-    }
+    await save();
   }
-
-  await setCodeSearchBackfillCursor(env, addDaysToDateOnly(date, 1));
-
-  return { scanned, queued, pagesFetched, allowedPages, date };
+  return result;
 }
 
 /**
  * HTML 仓库搜索发现:抓 github.com/search 仓库结果页(零 API 配额),
- * 入队前用 github.com/<owner>/<repo>/raw/HEAD/SKILL.md 校验候选(200 才算通过),
+ * 候选进入统一仓库 tree 扫描，支持没有根目录 SKILL.md 的嵌套 skills,
  * 过滤 awesome-list 类仓库。任何抓取/解析失败只记日志跳过,绝不影响其他路径。
  */
 async function processHtmlRepoSearchDiscovery(
@@ -1711,15 +1653,8 @@ async function processHtmlRepoSearchDiscovery(
           continue;
         }
 
-        let hasSkillMd = false;
-        try {
-          hasSkillMd = await checkPublicSkillMdAtHead(repo.owner, repo.name, { waitUntil });
-        } catch (error) {
-          console.warn(`HTML repo search candidate check failed for ${repo.owner}/${repo.name}:`, error);
-          continue;
-        }
-        if (!hasSkillMd) continue;
-
+        // The indexing worker scans the repository tree once and discovers
+        // nested skills; absence of a root SKILL.md is not a rejection.
         if (!await renewDiscoveryRunLock(env, lockToken)) {
           return { scanned, queued, pagesFetched, skippedReason: 'lock_lost' };
         }
@@ -1745,7 +1680,7 @@ async function processHtmlRepoSearchDiscovery(
   return { scanned, queued, pagesFetched };
 }
 
-async function processXSearchDiscovery(
+export async function processXSearchDiscovery(
   env: GithubEventsEnv,
   repoDedupeState: RepoQueueDedupeState,
   lockToken: string,
@@ -1948,7 +1883,7 @@ export async function processGithubTopicsDiscovery(
   for (const repo of candidates.values()) {
     if (queued >= config.maxQueuedRepos) break;
     const identity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
-    if (known.has(identity)) continue;
+    if (known.has(identity) && new Date(nowMs).getUTCHours() !== 0) continue;
     if (wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, undefined, nowMs)) continue;
     const message: IndexingMessage = {
       type: 'check_skill',
@@ -2040,7 +1975,7 @@ export async function processAwesomeListsDiscovery(
   for (const repo of candidates.values()) {
     if (queued >= config.maxQueuedRepos) break;
     const identity = `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`;
-    if (known.has(identity)) continue;
+    if (known.has(identity) && new Date(nowMs).getUTCHours() !== 0) continue;
     if (wasRepoQueuedRecently(repoDedupeState, repo.owner, repo.name, undefined, nowMs)) continue;
     const message: IndexingMessage = {
       type: 'check_skill',
@@ -2260,108 +2195,90 @@ async function releaseDiscoveryRunLock(env: GithubEventsEnv, token: string): Pro
 }
 
 export default {
-  async scheduled(
-    _controller: ScheduledController,
-    env: GithubEventsEnv,
-    _ctx: ExecutionContext
-  ): Promise<void> {
+  async scheduled(_controller: ScheduledController, env: GithubEventsEnv, ctx: ExecutionContext): Promise<void> {
     const sharedRateLimitKV = getGitHubRateLimitKVFromEnv(env);
-    const runtimeEnv = withGitHubRateLimitKVOverride(
-      env,
-      isDurableObjectKvStore(sharedRateLimitKV)
-        ? createMemoizedDurableObjectKvStore(sharedRateLimitKV)
-        : sharedRateLimitKV
-    );
-    const lockToken = await acquireDiscoveryRunLock(runtimeEnv);
-    if (!lockToken) {
-      console.log('GitHub Events Worker skipped due to active discovery lock');
-      return;
-    }
-
-    console.log('GitHub Events Worker triggered at:', new Date().toISOString());
-
-    let repoDedupeState: RepoQueueDedupeState | null = null;
-    let nowMs = Date.now();
-
+    const baseEnv = withGitHubRateLimitKVOverride(env, isDurableObjectKvStore(sharedRateLimitKV)
+      ? createMemoizedDurableObjectKvStore(sharedRateLimitKV) : sharedRateLimitKV);
+    const lockToken = await acquireDiscoveryRunLock(baseEnv);
+    if (!lockToken) return;
+    const counts = new Map<string, number>();
+    let dedupe: RepoQueueDedupeState | null = null;
+    let channelStates: Record<string, DiscoveryChannelState> = {};
+    let statesChanged = false;
+    const startedAt = Date.now();
+    let reserved = 0;
     try {
-      repoDedupeState = await readRepoQueueDedupeState(runtimeEnv, nowMs);
-
-      if (!await hasDiscoveryRunLockOwnership(runtimeEnv, lockToken)) {
-        console.log('GitHub Events Worker lock ownership lost before discovery start');
-        return;
-      }
-
-      const restBeforeEvents = await readOrRefreshRateLimitSnapshot(runtimeEnv, 'rest');
-
-      if (!await hasDiscoveryRunLockOwnership(runtimeEnv, lockToken)) {
-        console.log('GitHub Events Worker lock ownership lost before events processing');
-        return;
-      }
-
-      const eventsResult = await processEvents(runtimeEnv, restBeforeEvents, repoDedupeState, nowMs);
-      const searchBeforeDiscovery = await readGitHubRateLimitBudget(runtimeEnv, 'search', {
-        includeStale: true,
-      });
-
-      if (!await hasDiscoveryRunLockOwnership(runtimeEnv, lockToken)) {
-        console.log('GitHub Events Worker lock ownership lost before code search processing');
-        return;
-      }
-
-      nowMs = Date.now();
-      const searchResult = await processCodeSearchDiscovery(runtimeEnv, repoDedupeState, searchBeforeDiscovery, nowMs);
-
-      nowMs = Date.now();
-      const backfillSnapshot = searchBeforeDiscovery && searchResult.remainingAfter !== undefined
-        ? {
-            ...searchBeforeDiscovery,
-            remaining: searchResult.remainingAfter,
-            // This is a local per-tick budget after subtracting requests made
-            // above, so do not refresh it back to the original snapshot.
-            updatedAtEpochMs: Date.now(),
-            ...(searchResult.resetAtEpochSecAfter === undefined
-              ? {}
-              : { resetAtEpochSec: searchResult.resetAtEpochSecAfter }),
-          }
-        : searchBeforeDiscovery;
-      const backfillPageBudget = searchResult.skippedReason === 'search_rate_limited'
-        ? 0
-        : searchResult.skippedReason === 'disabled'
-          || searchResult.skippedReason === 'interval_throttled'
-          || searchResult.skippedReason === 'missing_rate_limit'
-          ? undefined
-          : Math.max(0, searchResult.allowedPages - searchResult.pagesFetched);
-      const backfillResult = await processCodeSearchBackfill(
-        runtimeEnv,
-        repoDedupeState,
-        backfillSnapshot,
-        nowMs,
-        backfillPageBudget
-      );
-
-      if (!await hasDiscoveryRunLockOwnership(runtimeEnv, lockToken)) {
-        console.log('GitHub Events Worker lock ownership lost before HTML repo search processing');
-        return;
-      }
-
-      nowMs = Date.now();
-      const htmlResult = await processHtmlRepoSearchDiscovery(runtimeEnv, repoDedupeState, _ctx, lockToken, nowMs);
-      nowMs = Date.now();
-      const xResult = await processXSearchDiscovery(runtimeEnv, repoDedupeState, lockToken, nowMs);
-      nowMs = Date.now();
-      const topicsResult = await processGithubTopicsDiscovery(runtimeEnv, repoDedupeState, lockToken, nowMs);
-      nowMs = Date.now();
-      const awesomeResult = await processAwesomeListsDiscovery(runtimeEnv, repoDedupeState, lockToken, nowMs);
-      nowMs = Date.now();
-      const bskyResult = await processBskySearchDiscovery(runtimeEnv, repoDedupeState, lockToken, nowMs);
-      console.log(
-        `Discovery summary: events_processed=${eventsResult.processed}, events_queued=${eventsResult.queued}, events_unknown_skipped=${eventsResult.unknownSkipped}, events_pages=${eventsResult.pagesFetched}/${eventsResult.allowedPages}, events_skipped=${eventsResult.skippedReason || 'none'}, search_scanned=${searchResult.scanned}, search_queued=${searchResult.queued}, search_pages=${searchResult.pagesFetched}/${searchResult.allowedPages}, search_cursor_stop=${searchResult.stoppedByCursor}, search_skipped=${searchResult.skippedReason || 'none'}, backfill_scanned=${backfillResult.scanned}, backfill_queued=${backfillResult.queued}, backfill_pages=${backfillResult.pagesFetched}/${backfillResult.allowedPages}, backfill_date=${backfillResult.date || 'none'}, backfill_skipped=${backfillResult.skippedReason || 'none'}, html_scanned=${htmlResult.scanned}, html_queued=${htmlResult.queued}, html_pages=${htmlResult.pagesFetched}, html_skipped=${htmlResult.skippedReason || 'none'}, x_scanned=${xResult.scanned}, x_queued=${xResult.queued}, x_tweets=${xResult.tweets}, x_skipped=${xResult.skippedReason || 'none'}, topics_scanned=${topicsResult.scanned}, topics_queued=${topicsResult.queued}, topics_skipped=${topicsResult.skippedReason || 'none'}, awesome_scanned=${awesomeResult.scanned}, awesome_queued=${awesomeResult.queued}, awesome_skipped=${awesomeResult.skippedReason || 'none'}, bsky_scanned=${bskyResult.scanned}, bsky_queued=${bskyResult.queued}, bsky_posts=${bskyResult.posts}, bsky_skipped=${bskyResult.skippedReason || 'none'}, rest_snapshot_remaining=${restBeforeEvents?.remaining ?? 'unknown'}, search_snapshot_remaining=${searchBeforeDiscovery?.remaining ?? 'unknown'}`
-      );
+      const today = new Date(startedAt).toISOString().slice(0, 10);
+      const since = new Date(startedAt - 86400000).toISOString().slice(0, 10);
+      const stats = await env.DB.prepare(`SELECT source, SUM(queued) AS queued, SUM(completed) AS completed,
+        SUM(indexed) AS indexed, SUM(CASE WHEN day = ? THEN queued ELSE 0 END) AS queuedToday
+        FROM discovery_daily_stats WHERE day >= ? AND source <> '__budget__' GROUP BY source`).bind(today, since)
+        .all<{ source: string; queued: number; completed: number; indexed: number; queuedToday: number }>();
+      const pending = stats.results.reduce((sum, row) => sum + row.queued - row.completed, 0);
+      const todayQueued = stats.results.reduce((sum, row) => sum + row.queuedToday, 0);
+      const dailyMax = parseClampedPositiveInt(env.DISCOVERY_MAX_QUEUED_PER_DAY, 500, 5000);
+      const runMax = parseClampedPositiveInt(env.DISCOVERY_MAX_QUEUED_PER_RUN, 40, 100);
+      const pendingMax = parseClampedPositiveInt(env.DISCOVERY_MAX_PENDING, 100, 1000);
+      const allowance = Math.max(0, Math.min(runMax, dailyMax - todayQueued, pendingMax - Math.max(0, pending)));
+      if (!allowance) { console.log('Discovery skipped: daily or downstream queue budget exhausted'); return; }
+      reserved = await reserveDiscoveryAllowance(env.DB, allowance, dailyMax, startedAt);
+      if (!reserved) return;
+      const runtimeEnv = withDiscoveryQueueBudget(baseEnv, reserved, counts);
+      dedupe = await readRepoQueueDedupeState(runtimeEnv, startedAt);
+      try { channelStates = JSON.parse(await env.KV.get('discovery:channels:v2') ?? '{}'); } catch { channelStates = {}; }
+      const runChannel = async (source: string, interval: number, action: (channelEnv: GithubEventsEnv) => Promise<{ queued: number; scanned?: number; skippedReason?: string }>) => {
+        const previous = channelStates[source];
+        if (previous?.nextRunAt > Date.now() || Date.now() - startedAt > 180000
+          || [...counts.values()].reduce((a, b) => a + b, 0) >= reserved) return;
+        if (!await renewDiscoveryRunLock(runtimeEnv, lockToken)) return;
+        // A single channel cannot consume every slot on each tick.
+        const channelEnv = withDiscoveryQueueBudget(runtimeEnv, Math.min(20, reserved), new Map());
+        let failed = false;
+        let lastRun: DiscoveryChannelState['lastRun'];
+        const before = counts.get(source) ?? 0;
+        try {
+          const result = await action(channelEnv);
+          lastRun = { scanned: result.scanned, queued: result.queued, skippedReason: result.skippedReason };
+          if (result.skippedReason === 'interval_throttled' || result.skippedReason === 'disabled') return;
+          failed = Boolean(result.skippedReason && result.skippedReason !== 'budget_exhausted');
+        } catch (error) {
+          if (!(error instanceof DiscoveryBudgetExhausted)) { failed = true; console.warn(`Discovery channel ${source} failed`, error); }
+        }
+        const row = stats.results.find((item) => item.source === source);
+        channelStates[source] = nextDiscoveryChannelState(previous,
+          { completed: row?.completed ?? 0, indexed: row?.indexed ?? 0, queued: (counts.get(source) ?? 0) - before, failed }, interval, Date.now());
+        channelStates[source].lastRun = lastRun ?? { queued: (counts.get(source) ?? 0) - before, skippedReason: failed ? 'error' : 'budget_exhausted' };
+        console.log(JSON.stringify({ event: 'discovery_channel', source, ...channelStates[source].lastRun }));
+        statesChanged = true;
+      };
+      // Rotate independent free discovery sources; keep expensive historical work last.
+      let searchBudget: GitHubRateLimitSnapshot | null = null;
+      const newSources = [
+        () => runChannel('github-code-search', 900000, async (e) => {
+          searchBudget = await readGitHubRateLimitBudget(e, 'search', { includeStale: true });
+          const result = await processCodeSearchDiscovery(e, dedupe!, searchBudget);
+          if (searchBudget && result.remainingAfter !== undefined) searchBudget = { ...searchBudget, remaining: result.remainingAfter, updatedAtEpochMs: Date.now() };
+          return result;
+        }),
+        () => runChannel('github-repo-search-html', 900000, (e) => processHtmlRepoSearchDiscovery(e, dedupe!, ctx, lockToken)),
+        () => runChannel('github-topics', 3600000, (e) => processGithubTopicsDiscovery(e, dedupe!, lockToken)),
+        () => runChannel('awesome-lists', 86400000, (e) => processAwesomeListsDiscovery(e, dedupe!, lockToken)),
+      ];
+      const rotation = Math.floor(startedAt / 300000) % newSources.length;
+      for (const source of [...newSources.slice(rotation), ...newSources.slice(0, rotation)]) await source();
+      await runChannel('github-events', 900000, async (e) => processEvents(e, await readOrRefreshRateLimitSnapshot(e, 'rest'), dedupe!, Date.now()));
+      await runChannel('github-repo-search', 3600000, async (e) => processCodeSearchBackfill(e, dedupe!, searchBudget ?? await readGitHubRateLimitBudget(e, 'search', { includeStale: true })));
+      // Paid X and unauthenticated Bluesky discovery intentionally remain disabled.
+      console.log(JSON.stringify({ event: 'discovery_run', allowance, pending, queued: Object.fromEntries(counts), elapsedMs: Date.now() - startedAt }));
     } finally {
-      if (repoDedupeState) {
-        await persistRepoQueueDedupeState(runtimeEnv, repoDedupeState, Date.now());
+      try {
+        await releaseDiscoveryAllowance(env.DB, reserved - [...counts.values()].reduce((sum, count) => sum + count, 0), startedAt);
+        if (dedupe) await persistRepoQueueDedupeState(baseEnv, dedupe, Date.now());
+        for (const [source, queued] of counts) await recordDiscoveryStats(env.DB, source, { queued });
+        if (statesChanged) await env.KV.put('discovery:channels:v2', JSON.stringify(channelStates));
+      } finally {
+        await releaseDiscoveryRunLock(baseEnv, lockToken);
       }
-      await releaseDiscoveryRunLock(runtimeEnv, lockToken);
     }
   },
 };

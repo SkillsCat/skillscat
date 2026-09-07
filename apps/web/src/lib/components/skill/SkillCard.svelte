@@ -101,7 +101,7 @@
 </script>
 
 <a
-  href={buildSkillPath(skill.slug)}
+  href={i18n.href(buildSkillPath(skill.slug))}
   class="skill-card group block"
 >
   <div class="card-layout">

@@ -41,7 +41,7 @@ export async function hydrateCachedSkills(
 
   const result = await db.prepare(`
     SELECT
-      s.id,
+      s.id, s.name, s.slug, s.description, s.stars, s.forks, s.trending_score AS trendingScore,
       s.repo_owner as repoOwner,
       s.repo_name as repoName,
       COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
@@ -53,7 +53,7 @@ export async function hydrateCachedSkills(
   `)
     .bind(...skillIds)
     .all<{
-      id: string;
+      id: string; name: string; slug: string; description: string | null; stars: number; forks: number; trendingScore: number;
       repoOwner: string;
       repoName: string;
       updatedAt: number;
@@ -61,6 +61,7 @@ export async function hydrateCachedSkills(
     }>();
 
   const skillMap = new Map<string, {
+    name: string; slug: string; description: string | null; stars: number; forks: number; trendingScore: number;
     repoOwner: string;
     repoName: string;
     updatedAt: number;
@@ -69,6 +70,7 @@ export async function hydrateCachedSkills(
 
   for (const row of result.results || []) {
     skillMap.set(row.id, {
+      name: row.name, slug: row.slug, description: row.description, stars: row.stars, forks: row.forks, trendingScore: row.trendingScore,
       repoOwner: row.repoOwner,
       repoName: row.repoName,
       updatedAt: row.updatedAt,
@@ -82,6 +84,7 @@ export async function hydrateCachedSkills(
 
     return [{
       ...skill,
+      name: latest.name ?? skill.name, slug: latest.slug ?? skill.slug, description: latest.description === undefined ? skill.description : latest.description, stars: latest.stars ?? skill.stars, forks: latest.forks ?? skill.forks, trendingScore: latest.trendingScore ?? skill.trendingScore,
       repoOwner: latest.repoOwner || skill.repoOwner,
       repoName: latest.repoName || skill.repoName,
       updatedAt: latest.updatedAt ?? skill.updatedAt,

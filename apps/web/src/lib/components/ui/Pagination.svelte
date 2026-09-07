@@ -103,7 +103,7 @@
       {#if currentPage > 1}
         <a
           class="pagination-btn pagination-arrow"
-          href={getPageUrl(currentPage - 1)}
+          href={i18n.href(getPageUrl(currentPage - 1))}
           rel={getPageRel(currentPage - 1)}
           aria-label={messages.pagination.previousPage}
         >
@@ -137,7 +137,7 @@
           {:else}
             <a
               class="pagination-btn pagination-page"
-              href={getPageUrl(page)}
+              href={i18n.href(getPageUrl(page))}
               rel={getPageRel(page)}
               aria-label={i18n.t(messages.pagination.page, { page })}
             >
@@ -151,7 +151,7 @@
       {#if currentPage < totalPages}
         <a
           class="pagination-btn pagination-arrow"
-          href={getPageUrl(currentPage + 1)}
+          href={i18n.href(getPageUrl(currentPage + 1))}
           rel={getPageRel(currentPage + 1)}
           aria-label={messages.pagination.nextPage}
         >

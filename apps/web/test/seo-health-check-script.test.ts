@@ -6,6 +6,7 @@ import {
   extractUrlEntries,
   isFreshSitemapDate,
   selectEvenlySpaced,
+  validateBilingualHtml,
   validateIndexablePageHtml,
   validateIndexableSkillHtml,
   validateSitemapLocations,
@@ -69,6 +70,13 @@ describe('SEO health check parsing', () => {
     ], options)).toThrow(/max is 2/);
   });
 
+  it('checks URL language and symmetric hreflang, with English-only details allowed', () => {
+    const html = `<html lang="zh-CN"><link rel="alternate" hreflang="en" href="https://skills.cat/recent"><link rel="alternate" hreflang="zh-CN" href="https://skills.cat/zh-CN/recent"><link rel="alternate" hreflang="x-default" href="https://skills.cat/recent">`;
+    expect(() => validateBilingualHtml(html, 'https://skills.cat/zh-CN/recent')).not.toThrow();
+    expect(() => validateBilingualHtml(html.replace('lang="zh-CN"', 'lang="en"'), 'https://skills.cat/zh-CN/recent')).toThrow(/lang/);
+    expect(() => validateBilingualHtml(html.replace('hreflang="en"', 'hreflang="ja"'), 'https://skills.cat/zh-CN/recent')).toThrow(/English/);
+    expect(() => validateBilingualHtml('<html lang="en">', 'https://skills.cat/skills/acme/unready')).not.toThrow();
+  });
   it('validates canonical, robots, description, and structured data for skill HTML', () => {
     const url = 'https://skills.cat/skills/acme/demo';
     const html = `

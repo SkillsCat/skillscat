@@ -1,3 +1,5 @@
+import { firstPublishedSql } from '$lib/server/seo/freshness';
+import { loadTrendingSnapshot } from '$lib/server/ranking/trending-snapshot';
 import type { SkillCardData } from '$lib/types';
 import { buildRecentActivitySortSql, buildTopRatedSortScoreSql } from '$lib/server/ranking';
 import { LIST_CACHE_MAX_AGE_MS } from '$lib/server/db/shared/constants';
@@ -306,110 +308,39 @@ export async function getCachedList(
 /**
  * 获取 trending skills
  */
-export async function getTrendingSkills(
-  env: DbEnv,
-  limit: number = 12
-): Promise<SkillCardData[]> {
-  // 先尝试从 R2 缓存读取
-  const cached = await getCachedList(env.R2, 'trending', env.CACHE_VERSION, {
-    maxAgeMs: LIST_CACHE_MAX_AGE_MS,
-  });
-  if (cached?.data) {
-    const top = cached.data.slice(0, limit);
-    if (!env.DB) return top;
-    return hydrateCachedSkills(env.DB, top);
-  }
-
-  // 从 D1 读取
-  if (!env.DB) return [];
-
-  const result = await env.DB.prepare(`
-    SELECT
-      s.id,
-      s.name,
-      s.slug,
-      s.description,
-      s.repo_owner as repoOwner,
-      s.repo_name as repoName,
-      s.stars,
-      s.forks,
-      s.trending_score as trendingScore,
-      COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-      a.avatar_url as authorAvatar
-    FROM skills s
-    LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE s.visibility = 'public'
-    ORDER BY s.trending_score DESC
-    LIMIT ?
-  `)
-    .bind(limit)
-    .all<SkillListRow>();
-
-  return addCategoriesToSkills(env.DB, result.results);
+export async function getTrendingSkills(env: DbEnv, limit = 12): Promise<SkillCardData[]> {
+  return (await getTrendingSkillsPaginated(env, 1, limit)).skills;
 }
 
-/**
- * 获取 trending skills (分页版本)
- */
 export async function getTrendingSkillsPaginated(
-  env: DbEnv,
-  page: number = 1,
-  limit: number = 24
-): Promise<{ skills: SkillCardData[]; total: number }> {
+  env: DbEnv, page = 1, limit = 24
+): Promise<{ skills: SkillCardData[]; total: number; totalPages?: number }> {
+  if (!env.DB || page < 1 || limit < 1) return { skills: [], total: 0, totalPages: 0 };
+  const total = await getPublicSkillTotal(env);
+  // Even a completely empty first page can add at most one page of padding.
+  if ((page - 1) * limit >= total + limit) return { skills: [], total };
+  const snapshot = await loadTrendingSnapshot(env);
   const offset = (page - 1) * limit;
-  const queryLimit = offset === 0 ? limit + 1 : limit;
-  const cachedPage = await getCachedPage(env, 'trending', page, limit);
-  if (cachedPage) return cachedPage;
-
-  if (!env.DB) return { skills: [], total: 0 };
-
-  const knownTotal = offset > 0 ? await getPublicSkillTotal(env) : null;
-  if (knownTotal !== null && offset >= knownTotal) {
-    return { skills: [], total: knownTotal };
-  }
-
-  const result = await env.DB.prepare(`
-    WITH ranked AS (
-      SELECT
-        id,
-        name,
-        slug,
-        description,
-        repo_owner as repoOwner,
-        repo_name as repoName,
-        stars,
-        forks,
-        trending_score as trendingScore,
-        COALESCE(last_commit_at, updated_at) as updatedAt
+  const head = snapshot.data;
+  // A deliberately short first page still consumes one pagination slot. Keep
+  // the actual item count separate so the final tail items remain reachable.
+  const reservedGap = head.length < 24 ? Math.max(0, limit - head.length) : 0;
+  const totalPages = total > 0 ? Math.ceil((total + reservedGap) / limit) : 0;
+  if (page > totalPages) return { skills: [], total, totalPages };
+  const rows: SkillListRow[] = head.slice(offset, offset + limit);
+  if (rows.length < limit && offset + rows.length < total + reservedGap && !(page === 1 && head.length < 24)) {
+    const remaining = await env.DB.prepare(`
+      SELECT id, name, slug, description, repo_owner AS repoOwner, repo_name AS repoName,
+        stars, forks, trending_score AS trendingScore,
+        COALESCE(last_commit_at, updated_at) AS updatedAt, NULL AS authorAvatar
       FROM skills INDEXED BY skills_public_trending_id_idx
-      WHERE visibility = 'public'
-      ORDER BY trending_score DESC
-      LIMIT ? OFFSET ?
-    )
-    SELECT ranked.*, a.avatar_url as authorAvatar
-    FROM ranked
-    LEFT JOIN authors a INDEXED BY authors_username_idx
-      ON ranked.repoOwner = a.username
-  `)
-    .bind(queryLimit, offset)
-    .all<SkillListRow>();
-
-  const hasMoreOnFirstPage = offset === 0 && result.results.length > limit;
-  const pageRows = hasMoreOnFirstPage ? result.results.slice(0, limit) : result.results;
-
-  let total: number;
-  if (offset === 0 && !hasMoreOnFirstPage) {
-    total = pageRows.length;
-  } else {
-    total = knownTotal ?? await getPublicSkillTotal(env);
+      WHERE visibility = 'public' AND id NOT IN (SELECT value FROM json_each(?))
+      ORDER BY trending_score DESC, id ASC LIMIT ? OFFSET ?
+    `).bind(JSON.stringify(head.map((row) => row.id)), limit - rows.length,
+      Math.max(0, offset - Math.max(head.length, limit))).all<SkillListRow>();
+    rows.push(...remaining.results);
   }
-
-  const skills = await addCategoriesToSkills(env.DB, pageRows);
-
-  return {
-    skills,
-    total,
-  };
+  return { skills: await hydrateCachedSkills(env.DB, await addCategoriesToSkills(env.DB, rows)), total, totalPages };
 }
 
 /**
@@ -448,10 +379,7 @@ export async function getRecentSkills(
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.visibility = 'public'
-    ORDER BY CASE
-      WHEN s.last_commit_at IS NULL THEN s.indexed_at
-      ELSE s.last_commit_at
-    END DESC
+    ORDER BY (${firstPublishedSql('s')}) DESC, s.id ASC
     LIMIT ?
   `)
     .bind(limit)
@@ -493,12 +421,9 @@ export async function getRecentSkillsPaginated(
         forks,
         trending_score as trendingScore,
         COALESCE(last_commit_at, updated_at) as updatedAt
-      FROM skills INDEXED BY skills_visibility_recent_expr_idx
+      FROM skills INDEXED BY skills_public_first_published_idx
       WHERE visibility = 'public'
-      ORDER BY CASE
-        WHEN last_commit_at IS NULL THEN indexed_at
-        ELSE last_commit_at
-      END DESC
+      ORDER BY (${firstPublishedSql()}) DESC, id ASC
       LIMIT ? OFFSET ?
     )
     SELECT ranked.*, a.avatar_url as authorAvatar

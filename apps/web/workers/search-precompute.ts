@@ -12,6 +12,7 @@
 import type { ExecutionContext, ScheduledController, SearchPrecomputeEnv } from './shared/types';
 import {
   normalizeRecommendAlgoVersion,
+  upsertRecommendStateFailure,
   RECOMMEND_PRECOMPUTE_COOL_RECENT_ACCESS_WINDOW_MS,
 } from '../src/lib/server/ranking/recommend-precompute';
 import {
@@ -45,6 +46,7 @@ const DEFAULT_MISSING_STATE_SCAN_LIMIT = 500;
 
 interface RecommendPrecomputeCandidate {
   id: string;
+  visibility: string;
   slug: string;
   tier: string;
   trending_score: number;
@@ -57,6 +59,7 @@ interface RecommendPrecomputeCandidate {
 
 interface SearchPrecomputeCandidate {
   id: string;
+  visibility: string;
   name: string;
   slug: string;
   repo_owner: string | null;
@@ -132,6 +135,35 @@ function buildRecommendRefreshUrl(appOrigin: string, slug: string): string | nul
   return `${appOrigin}/api/skills/${encodedOwner}/${encodedName}/recommend?refresh=1`;
 }
 
+
+/** Walk missing state with a bounded cursor; successful rows advance, failures do not. */
+export async function seedMissingPrecomputeState(env: SearchPrecomputeEnv, kind: 'search' | 'recommend', scanLimit: number, writeLimit: number, now: number): Promise<void> {
+  const key = `maintenance/precompute-missing-v2-${kind}.json`;
+  const object = await env.R2.get(key);
+  const state = object ? await object.json<{ cursor: number; nextRunAt: number }>() : null;
+  if (state && state.nextRunAt > now) return;
+  const cursor = state?.cursor && Number.isSafeInteger(state.cursor) ? state.cursor : Number.MAX_SAFE_INTEGER;
+  const table = kind === 'search' ? 'skill_search_state' : 'skill_recommend_state';
+  const rows = await env.DB.prepare(`WITH candidates AS MATERIALIZED (
+    SELECT rowid, id, visibility, tier, last_accessed_at FROM skills WHERE rowid < ? ORDER BY rowid DESC LIMIT ?
+  ) SELECT c.rowid, c.id, c.visibility, c.tier, c.last_accessed_at, state.skill_id AS existing
+    FROM candidates c LEFT JOIN ${table} state ON state.skill_id = c.id ORDER BY c.rowid DESC`)
+    .bind(cursor, Math.max(1, Math.min(2000, scanLimit))).all<{ rowid: number; id: string; visibility: string; tier: string; last_accessed_at: number; existing: string | null }>();
+  const statements: D1PreparedStatement[] = [];
+  let nextCursor = rows.results.length ? cursor : 0;
+  for (const row of rows.results) {
+    nextCursor = row.rowid;
+    const eligible = row.visibility === 'public' && row.tier !== 'archived'
+      && (kind === 'search' || row.tier === 'hot' || row.tier === 'warm'
+        || (row.tier === 'cool' && row.last_accessed_at >= now - RECOMMEND_PRECOMPUTE_COOL_RECENT_ACCESS_WINDOW_MS));
+    if (eligible && !row.existing) statements.push(env.DB.prepare(`INSERT INTO ${table} (skill_id, dirty, next_update_at)
+      VALUES (?, 1, ?) ON CONFLICT(skill_id) DO NOTHING`).bind(row.id, now));
+    if (statements.length >= writeLimit) break;
+  }
+  for (let i = 0; i < statements.length; i += 50) await env.DB.batch(statements.slice(i, i + 50));
+  await env.R2.put(key, JSON.stringify({ cursor: nextCursor, nextRunAt: now + 86400000 }), { httpMetadata: { contentType: 'application/json' } });
+}
+
 async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{ attempted: number; succeeded: number; failed: number; skipped: number }> {
   if (!isRecommendPrecomputeEnabled(env)) {
     return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
@@ -150,45 +182,35 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
   const requestTimeoutMs = getRecommendPrecomputeRequestTimeoutMs(env);
   const recommendMissingScanHour = parseMissingStateScanHour(env.RECOMMEND_MISSING_STATE_SCAN_HOUR_UTC);
   const recommendMissingScanLimit = parseMissingStateScanLimit(env.RECOMMEND_MISSING_STATE_SCAN_LIMIT);
-  const includeRecommendMissingStateScan = shouldRunMissingStateScan(now, recommendMissingScanHour);
   const recommendRecentCoolAccessAfter = now - RECOMMEND_PRECOMPUTE_COOL_RECENT_ACCESS_WINDOW_MS;
+  const includeRecommendMissingStateScan = shouldRunMissingStateScan(now, recommendMissingScanHour);
 
   let candidatesResult;
   try {
     // Avoid version-mismatch inequality scans here: `algo_version != ?` forces a
     // full scan of the state table in SQLite/D1. Dirty/null/due state still
     // drives background refresh, and recommend requests can backfill on access.
-    if (includeRecommendMissingStateScan) {
+    if (includeRecommendMissingStateScan) await seedMissingPrecomputeState(env, 'recommend', recommendMissingScanLimit, limit, now);
+
       candidatesResult = await env.DB.prepare(`
-        WITH state_candidates AS (
-          SELECT skill_id FROM skill_recommend_state WHERE dirty = 1
+        WITH state_candidates AS MATERIALIZED (
+          SELECT skill_id FROM (
+            SELECT skill_id FROM skill_recommend_state INDEXED BY skill_recommend_state_due_idx
+            WHERE next_update_at <= ? ORDER BY next_update_at, skill_id LIMIT ${limit}
+          )
           UNION
-          SELECT skill_id FROM skill_recommend_state WHERE precomputed_at IS NULL
-          UNION
-          SELECT skill_id FROM skill_recommend_state WHERE next_update_at <= ?
-          UNION
-          SELECT skill_id FROM skill_recommend_state WHERE algo_version IS NULL
-        ),
-        missing_state AS (
-          SELECT s.id as skill_id
-          FROM skills s INDEXED BY skills_public_non_archived_indexed_idx
-          LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
-          WHERE rs.skill_id IS NULL
-            AND s.visibility = 'public'
-            AND (
-              s.tier IN ('hot', 'warm')
-              OR (s.tier = 'cool' AND s.last_accessed_at IS NOT NULL AND s.last_accessed_at >= ?)
-            )
-          ORDER BY s.indexed_at DESC
-          LIMIT ?
+          SELECT skill_id FROM (
+            SELECT skill_id FROM skill_recommend_state INDEXED BY skill_recommend_state_dirty_due_idx
+            WHERE next_update_at IS NULL AND dirty = 1
+            ORDER BY skill_id LIMIT ${limit}
+          )
         ),
         candidate_ids AS (
           SELECT skill_id FROM state_candidates
-          UNION
-          SELECT skill_id FROM missing_state
         )
         SELECT
           s.id,
+          s.visibility,
           s.slug,
           s.tier,
           s.trending_score,
@@ -200,11 +222,6 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
         FROM candidate_ids c
         JOIN skills s ON s.id = c.skill_id
         LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
-        WHERE s.visibility = 'public'
-          AND (
-            s.tier IN ('hot', 'warm')
-            OR (s.tier = 'cool' AND s.last_accessed_at IS NOT NULL AND s.last_accessed_at >= ?)
-          )
         ORDER BY
           COALESCE(rs.dirty, 1) DESC,
           CASE s.tier
@@ -220,58 +237,8 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
           COALESCE(rs.next_update_at, 0) ASC
         LIMIT ?
       `)
-        .bind(now, recommendRecentCoolAccessAfter, recommendMissingScanLimit, recommendRecentCoolAccessAfter, limit)
+        .bind(now, limit)
         .all<RecommendPrecomputeCandidate>();
-    } else {
-      candidatesResult = await env.DB.prepare(`
-        WITH state_candidates AS (
-          SELECT skill_id FROM skill_recommend_state WHERE dirty = 1
-          UNION
-          SELECT skill_id FROM skill_recommend_state WHERE precomputed_at IS NULL
-          UNION
-          SELECT skill_id FROM skill_recommend_state WHERE next_update_at <= ?
-          UNION
-          SELECT skill_id FROM skill_recommend_state WHERE algo_version IS NULL
-        ),
-        candidate_ids AS (
-          SELECT skill_id FROM state_candidates
-        )
-        SELECT
-          s.id,
-          s.slug,
-          s.tier,
-          s.trending_score,
-          s.last_accessed_at,
-          rs.dirty,
-          rs.next_update_at,
-          rs.precomputed_at,
-          rs.algo_version
-        FROM candidate_ids c
-        JOIN skills s ON s.id = c.skill_id
-        LEFT JOIN skill_recommend_state rs ON rs.skill_id = s.id
-        WHERE s.visibility = 'public'
-          AND (
-            s.tier IN ('hot', 'warm')
-            OR (s.tier = 'cool' AND s.last_accessed_at IS NOT NULL AND s.last_accessed_at >= ?)
-          )
-        ORDER BY
-          COALESCE(rs.dirty, 1) DESC,
-          CASE s.tier
-            WHEN 'hot' THEN 0
-            WHEN 'warm' THEN 1
-            WHEN 'cool' THEN 2
-            WHEN 'cold' THEN 3
-            ELSE 4
-          END ASC,
-          s.trending_score DESC,
-          CASE WHEN s.last_accessed_at IS NULL THEN 1 ELSE 0 END ASC,
-          s.last_accessed_at DESC,
-          COALESCE(rs.next_update_at, 0) ASC
-        LIMIT ?
-      `)
-        .bind(now, recommendRecentCoolAccessAfter, limit)
-        .all<RecommendPrecomputeCandidate>();
-    }
   } catch (err) {
     console.warn('Recommend precompute query failed (migration may not be applied yet):', err);
     return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
@@ -293,6 +260,12 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
       break;
     }
 
+    if (candidate.visibility !== 'public' || !(candidate.tier === 'hot' || candidate.tier === 'warm'
+      || (candidate.tier === 'cool' && (candidate.last_accessed_at ?? 0) >= recommendRecentCoolAccessAfter))) {
+      await env.DB.prepare('UPDATE skill_recommend_state SET dirty = 0, next_update_at = ? WHERE skill_id = ?')
+        .bind(now + 7 * 86400000, candidate.id).run();
+      skipped++; continue;
+    }
     const refreshUrl = buildRecommendRefreshUrl(appOrigin, candidate.slug);
     if (!refreshUrl) {
       skipped++;
@@ -317,6 +290,7 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
       }
       if (!response.ok) {
         failed++;
+        await upsertRecommendStateFailure(env.DB, { skillId: candidate.id });
         const body = await response.text();
         console.warn(`Recommend precompute refresh failed for ${candidate.slug}: ${response.status} ${body.slice(0, 200)}`);
         continue;
@@ -325,6 +299,7 @@ async function processRecommendPrecomputeBatch(env: SearchPrecomputeEnv): Promis
       succeeded++;
     } catch (err) {
       failed++;
+      await upsertRecommendStateFailure(env.DB, { skillId: candidate.id });
       console.warn(`Recommend precompute request error for ${candidate.slug}:`, err);
     }
   }
@@ -521,36 +496,27 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
 
   let candidatesResult;
   try {
-    if (includeSearchMissingStateScan) {
+    if (includeSearchMissingStateScan) await seedMissingPrecomputeState(env, 'search', searchMissingScanLimit, limit, now);
+
       candidatesResult = await env.DB.prepare(`
-        WITH state_candidates AS (
-          SELECT skill_id FROM skill_search_state WHERE dirty = 1
+        WITH state_candidates AS MATERIALIZED (
+          SELECT skill_id FROM (
+            SELECT skill_id FROM skill_search_state INDEXED BY skill_search_state_due_idx
+            WHERE next_update_at <= ? ORDER BY next_update_at, skill_id LIMIT ${limit}
+          )
           UNION
-          SELECT skill_id FROM skill_search_state WHERE precomputed_at IS NULL
-          UNION
-          SELECT skill_id FROM skill_search_state WHERE next_update_at IS NULL
-          UNION
-          SELECT skill_id FROM skill_search_state WHERE next_update_at <= ?
-          UNION
-          SELECT skill_id FROM skill_search_state WHERE algo_version IS NULL
-        ),
-        missing_state AS (
-          SELECT s.id as skill_id
-          FROM skills s INDEXED BY skills_public_non_archived_indexed_idx
-          LEFT JOIN skill_search_state ss ON ss.skill_id = s.id
-          WHERE ss.skill_id IS NULL
-            AND s.visibility = 'public'
-            AND s.tier != 'archived'
-          ORDER BY s.indexed_at DESC
-          LIMIT ?
+          SELECT skill_id FROM (
+            SELECT skill_id FROM skill_search_state INDEXED BY skill_search_state_dirty_due_idx
+            WHERE next_update_at IS NULL AND dirty = 1
+            ORDER BY skill_id LIMIT ${limit}
+          )
         ),
         candidate_ids AS (
           SELECT skill_id FROM state_candidates
-          UNION
-          SELECT skill_id FROM missing_state
         )
         SELECT
           s.id,
+          s.visibility,
           s.name,
           s.slug,
           s.repo_owner,
@@ -581,73 +547,6 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
         FROM candidate_ids c
         JOIN skills s ON s.id = c.skill_id
         LEFT JOIN skill_search_state ss ON ss.skill_id = s.id
-        WHERE s.visibility = 'public'
-          AND s.tier != 'archived'
-        ORDER BY
-          COALESCE(ss.dirty, 1) DESC,
-          CASE s.tier
-            WHEN 'hot' THEN 0
-            WHEN 'warm' THEN 1
-            WHEN 'cool' THEN 2
-            WHEN 'cold' THEN 3
-            ELSE 4
-          END ASC,
-          s.trending_score DESC,
-          COALESCE(ss.next_update_at, 0) ASC
-        LIMIT ?
-      `)
-        .bind(now, searchMissingScanLimit, limit)
-        .all<SearchPrecomputeCandidate>();
-    } else {
-      candidatesResult = await env.DB.prepare(`
-        WITH state_candidates AS (
-          SELECT skill_id FROM skill_search_state WHERE dirty = 1
-          UNION
-          SELECT skill_id FROM skill_search_state WHERE precomputed_at IS NULL
-          UNION
-          SELECT skill_id FROM skill_search_state WHERE next_update_at IS NULL
-          UNION
-          SELECT skill_id FROM skill_search_state WHERE next_update_at <= ?
-          UNION
-          SELECT skill_id FROM skill_search_state WHERE algo_version IS NULL
-        ),
-        candidate_ids AS (
-          SELECT skill_id FROM state_candidates
-        )
-        SELECT
-          s.id,
-          s.name,
-          s.slug,
-          s.repo_owner,
-          s.repo_name,
-          s.description,
-          (
-            SELECT json_group_array(sc.category_slug)
-            FROM skill_categories sc
-            WHERE sc.skill_id = s.id
-          ) as categories_json,
-          (
-            SELECT json_group_array(st.tag)
-            FROM skill_tags st
-            WHERE st.skill_id = s.id
-          ) as tags_json,
-          s.tier,
-          s.stars,
-          s.trending_score,
-          s.download_count_30d,
-          s.download_count_90d,
-          s.access_count_30d,
-          s.last_commit_at,
-          s.updated_at,
-          ss.dirty,
-          ss.next_update_at,
-          ss.precomputed_at,
-          ss.algo_version
-        FROM candidate_ids c
-        JOIN skills s ON s.id = c.skill_id
-        LEFT JOIN skill_search_state ss ON ss.skill_id = s.id
-        WHERE s.visibility = 'public'
-          AND s.tier != 'archived'
         ORDER BY
           COALESCE(ss.dirty, 1) DESC,
           CASE s.tier
@@ -663,7 +562,6 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
       `)
         .bind(now, limit)
         .all<SearchPrecomputeCandidate>();
-    }
   } catch (err) {
     console.warn('Search precompute query failed (migration may not be applied yet):', err);
     return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
@@ -692,6 +590,11 @@ async function processSearchPrecomputeBatch(env: SearchPrecomputeEnv): Promise<{
       continue;
     }
 
+    if (candidate.visibility !== 'public' || candidate.tier === 'archived') {
+      await env.DB.prepare('UPDATE skill_search_state SET dirty = 0, next_update_at = ? WHERE skill_id = ?')
+        .bind(now + 7 * 86400000, candidate.id).run();
+      skipped++; continue;
+    }
     attempted++;
 
     try {

@@ -62,7 +62,7 @@
       class="skill-card"
       class:skill-card-grid={layout === 'grid'}
     >
-      <a href={buildSkillPath(skill.slug)} class="skill-link">
+      <a href={i18n.href(buildSkillPath(skill.slug))} class="skill-link">
         <div class="skill-info">
           <div class="skill-header">
             <h3 class="skill-name" title={layout === 'grid' ? skill.name : undefined}>{skill.name}</h3>

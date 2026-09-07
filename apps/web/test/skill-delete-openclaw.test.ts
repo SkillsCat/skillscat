@@ -106,7 +106,7 @@ describe('hard deleting an OpenClaw-published skill', () => {
       'derived/readme-html/v1/skill-1/SKILL.md',
     ]));
     expect(events.indexOf('db-delete')).toBeGreaterThan(
-      Math.max(...events.map((event, index) => event.startsWith('r2-delete:') ? index : -1))
+      Math.max(...events.map((event, index) => event.startsWith('r2-delete:') && !event.includes('cache/lists/trending-v2.json') ? index : -1))
     );
     expect(mocks.invalidateOpenClawSkillCaches).toHaveBeenCalledWith(
       'skill-1',

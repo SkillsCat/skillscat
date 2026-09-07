@@ -25,7 +25,7 @@ export const GET: RequestHandler = async ({ platform }) => {
   const snapshotMaxAgeSeconds = SITEMAP_FULL_SNAPSHOT_MAX_AGE_SECONDS;
 
   return createCachedSitemapResponse({
-    cacheKey: 'sitemap:v2:index:xml',
+    cacheKey: 'sitemap:v3:index:xml',
     ttl: getSitemapHotCacheTtlSeconds(SITEMAP_INDEX_CACHE_TTL, refreshMinIntervalSeconds),
     cacheControl: buildSitemapCacheControl({
       browserMaxAgeSeconds: SITEMAP_INDEX_BROWSER_MAX_AGE_SECONDS,

@@ -361,7 +361,7 @@
                     <div class="error-message">
                       <p>{error}</p>
                       {#if existingSkillSlug}
-                        <a href={buildSkillPath(existingSkillSlug)} class="error-link">
+                        <a href={i18n.href(buildSkillPath(existingSkillSlug))} class="error-link">
                           {messages.submitDialog.viewExistingSkill}
                         </a>
                       {/if}

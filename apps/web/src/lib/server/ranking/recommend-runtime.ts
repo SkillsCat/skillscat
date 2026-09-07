@@ -1,7 +1,7 @@
 export type RealtimeRecommendMode = 'full' | 'lightweight';
 
 export const RECOMMEND_LIGHTWEIGHT_FALLBACK_COOLDOWN_MS = 60 * 60 * 1000;
-const RECOMMEND_ONLINE_CACHE_KEY_VERSION = 'v2';
+const RECOMMEND_ONLINE_CACHE_KEY_VERSION = 'v3';
 
 function buildLegacyOnlineRecommendCacheKey(skillId: string, mode: RealtimeRecommendMode): string {
   return `recommend:${skillId}:${mode}`;
@@ -25,7 +25,8 @@ export function getRealtimeRecommendMode(
     return 'lightweight';
   }
 
-  return tier === 'hot' ? 'full' : 'lightweight';
+  void tier;
+  return 'lightweight';
 }
 
 export function shouldLoadRecommendSignals(mode: RealtimeRecommendMode): boolean {

@@ -36,7 +36,7 @@ export interface RecommendStateRow {
   updated_at: number;
 }
 
-export const DEFAULT_RECOMMEND_ALGO_VERSION = 'v1';
+export const DEFAULT_RECOMMEND_ALGO_VERSION = 'v2';
 const RECOMMEND_PRECOMPUTE_R2_PREFIX = 'cache/recommend';
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -49,7 +49,7 @@ const CACHE_VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 
 export function normalizeRecommendAlgoVersion(value: string | undefined | null): string {
   const normalized = (value || '').trim();
-  if (!normalized) return DEFAULT_RECOMMEND_ALGO_VERSION;
+  if (!normalized || normalized === 'v1') return DEFAULT_RECOMMEND_ALGO_VERSION;
   return CACHE_VERSION_PATTERN.test(normalized) ? normalized : DEFAULT_RECOMMEND_ALGO_VERSION;
 }
 
@@ -156,7 +156,8 @@ export async function markRecommendDirty(
     VALUES (?, 1, ?, NULL, NULL, 0, NULL, NULL, ?, ?)
     ON CONFLICT(skill_id) DO UPDATE SET
       dirty = 1,
-      next_update_at = excluded.next_update_at,
+      next_update_at = CASE WHEN skill_recommend_state.fail_count > 0 AND skill_recommend_state.next_update_at > excluded.next_update_at
+        THEN skill_recommend_state.next_update_at ELSE excluded.next_update_at END,
       updated_at = excluded.updated_at
   `)
     .bind(skillId, now, now, now)
@@ -240,7 +241,8 @@ export async function updateRecommendStateNextUpdateAt(
     )
     VALUES (?, 0, ?, NULL, NULL, 0, NULL, NULL, ?, ?)
     ON CONFLICT(skill_id) DO UPDATE SET
-      next_update_at = excluded.next_update_at,
+      next_update_at = CASE WHEN skill_recommend_state.fail_count > 0 AND skill_recommend_state.next_update_at > excluded.next_update_at
+        THEN skill_recommend_state.next_update_at ELSE excluded.next_update_at END,
       updated_at = excluded.updated_at
   `)
     .bind(params.skillId, nextUpdateAt, now, now)

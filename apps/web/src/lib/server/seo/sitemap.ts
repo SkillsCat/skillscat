@@ -1,3 +1,6 @@
+import { seoFreshnessSql } from './freshness';
+import { localizeHref, isLocalizedPublicPath } from '$lib/seo/locale-path';
+import { sanitizeSummary, SUMMARY_GENERATION_VERSION } from '$lib/seo/summary';
 import { CATEGORIES } from '$lib/constants/categories';
 import { invalidateCache, peekCachedText, putCachedText } from '$lib/server/cache';
 import { buildSeoIndexableSkillWhere } from '$lib/server/seo/indexability';
@@ -7,6 +10,7 @@ import { encodeSkillSlugForPath } from '$lib/skill-path';
 export const SITE_URL = 'https://skills.cat';
 // Keep each sitemap comfortably small so bots can fetch them quickly even on cold builds.
 export const SITEMAP_URL_LIMIT = 10_000;
+export const SKILL_SITEMAP_PAGE_SIZE = 5_000;
 
 export const SITEMAP_INDEX_BROWSER_MAX_AGE_SECONDS = 300;
 export const SITEMAP_INDEX_SHARED_MAX_AGE_SECONDS = 600;
@@ -32,7 +36,7 @@ export const RECENT_SITEMAP_WINDOW_DAYS = 14;
 export const RECENT_SITEMAP_URL_LIMIT = 1000;
 
 const inflightSitemapBuilds = new Map<string, Promise<string>>();
-const SITEMAP_SNAPSHOT_PREFIX = 'cache/sitemaps/v2';
+const SITEMAP_SNAPSHOT_PREFIX = 'cache/sitemaps/v3';
 const SITEMAP_FULL_REFRESH_MARKER_KEY = `${SITEMAP_SNAPSHOT_PREFIX}/full-refresh-complete`;
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 
@@ -193,7 +197,7 @@ export function buildSitemapCacheControl(options: {
 }
 
 function buildSkillFreshnessExpr(alias = 's'): string {
-  return `CASE WHEN ${alias}.last_commit_at IS NULL THEN ${alias}.updated_at ELSE ${alias}.last_commit_at END`;
+  return `(${seoFreshnessSql(alias)})`;
 }
 
 function buildSkillFreshnessCase(updatedExpr: string, skillFreshnessExpr: string): string {
@@ -261,6 +265,9 @@ export function dedupePages(pages: SitemapPage[]): SitemapPage[] {
 }
 
 export function buildUrlSetXml(pages: SitemapPage[]): string {
+  pages = dedupePages(pages.flatMap((page) => isLocalizedPublicPath(page.url.split('?')[0])
+    && !page.url.startsWith('/skills/') && !page.url.startsWith('/zh-CN')
+    ? [page, { ...page, url: localizeHref(page.url, 'zh-CN') }] : [page]));
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${pages
@@ -340,7 +347,7 @@ export async function getExpandedCoreSitemapPages(
   const publicSkillsRow = await db.prepare(`
     WITH bounded_skills AS (
       SELECT ${buildSkillFreshnessExpr()} AS freshness_ts
-      FROM skills s INDEXED BY skills_public_openclaw_updated_slug_idx
+      FROM skills s INDEXED BY skills_public_seo_freshness_idx
       WHERE ${buildSeoIndexableSkillWhere('s')}
       ORDER BY freshness_ts DESC
       LIMIT ?
@@ -664,7 +671,7 @@ export async function getSitemapIndexStats(
     const count = Math.max(0, toNumber(row?.count));
     return {
       count,
-      pages: Math.ceil(count / SITEMAP_URL_LIMIT),
+      pages: Math.ceil(count / SKILL_SITEMAP_PAGE_SIZE),
       lastmod: toIsoDate(row?.max_ts),
     };
   };
@@ -722,34 +729,29 @@ export function buildSitemapPublicPaths(stats: SitemapIndexStats): string[] {
   return ['/sitemap.xml', ...buildSitemapIndexEntries(stats).map((entry) => entry.url)];
 }
 
-export async function loadSkillsSitemapPage(
-  db: SitemapDb | undefined,
-  page: number
-): Promise<SitemapPage[]> {
+interface SkillSitemapRow {
+  slug: string; freshness: number; zh_summary: string | null; zh_updated_at: number | null;
+}
+function skillRowsToSitemapPages(rows: SkillSitemapRow[]): SitemapPage[] {
+  return rows.flatMap((row): SitemapPage[] => {
+    const page: SitemapPage = { url: `/skills/${encodeSkillSlugForPath(row.slug)}`, priority: '0.6', changefreq: 'weekly', lastmod: toIsoDate(row.freshness) };
+    if (!sanitizeSummary(row.zh_summary, 'zh-CN')) return [page];
+    return [page, { ...page, url: localizeHref(page.url, 'zh-CN', true), lastmod: toIsoDate(Math.max(row.freshness, row.zh_updated_at ?? 0)) }];
+  });
+}
+
+export async function loadSkillsSitemapPage(db: SitemapDb | undefined, page: number, afterSlug?: string): Promise<SitemapPage[]> {
   if (!db) return [];
-
-  const offset = (page - 1) * SITEMAP_URL_LIMIT;
-  const skills = await db.prepare(`
-    SELECT slug, updated_at, indexed_at, last_commit_at
-    FROM skills s
-    WHERE ${buildSeoIndexableSkillWhere('s')}
-    ORDER BY slug ASC
-    LIMIT ? OFFSET ?
-  `)
-    .bind(SITEMAP_URL_LIMIT, offset)
-    .all<{
-      slug: string;
-      updated_at: number | null;
-      indexed_at: number | null;
-      last_commit_at: number | null;
-    }>();
-
-  return (skills.results || []).map((skill) => ({
-    url: `/skills/${encodeSkillSlugForPath(skill.slug)}`,
-    priority: '0.6',
-    changefreq: 'weekly',
-    lastmod: toIsoDate(skill.last_commit_at ?? skill.updated_at ?? skill.indexed_at),
-  }));
+  const rows = await db.prepare(`
+    SELECT s.slug, ${buildSkillFreshnessExpr()} AS freshness, l.summary AS zh_summary, l.updated_at AS zh_updated_at
+    FROM skills s LEFT JOIN skill_localizations l ON l.skill_id = s.id AND l.locale = 'zh-CN'
+      AND l.source_hash = COALESCE(s.content_hash, s.commit_sha, CAST(s.indexed_at AS TEXT))
+      AND l.generation_version = ?
+    WHERE ${buildSeoIndexableSkillWhere('s')} ${afterSlug === undefined ? '' : 'AND s.slug > ?'}
+    ORDER BY s.slug ASC LIMIT ? ${afterSlug === undefined ? 'OFFSET ?' : ''}
+  `).bind(SUMMARY_GENERATION_VERSION, ...(afterSlug === undefined
+    ? [SKILL_SITEMAP_PAGE_SIZE, (page - 1) * SKILL_SITEMAP_PAGE_SIZE] : [afterSlug, SKILL_SITEMAP_PAGE_SIZE])).all<SkillSitemapRow>();
+  return skillRowsToSitemapPages(rows.results || []);
 }
 
 export async function loadProfilesSitemapPage(
@@ -770,41 +772,23 @@ export async function loadOrgsSitemapPage(
   return loadEntitySitemapPage(db, ORG_SITEMAP_QUERY_CONFIG, page);
 }
 
-export async function loadRecentSkillsSitemapPages(
-  db: SitemapDb | undefined,
-  now = Date.now()
-): Promise<SitemapPage[]> {
+export async function loadRecentSkillsSitemapPages(db: SitemapDb | undefined, now = Date.now()): Promise<SitemapPage[]> {
   if (!db) return [];
-
-  const recentCutoffTimestamp = getRecentCutoffTimestamp(now);
-  const skills = await db.prepare(`
-    SELECT
-      slug,
-      updated_at,
-      indexed_at,
-      last_commit_at,
-      ${buildSkillFreshnessExpr()} AS sort_ts
-    FROM skills s INDEXED BY skills_public_openclaw_updated_slug_idx
+  const rows = await db.prepare(`
+    WITH candidates AS MATERIALIZED (
+      SELECT id FROM skills s INDEXED BY skills_public_seo_freshness_idx
+      WHERE s.visibility = 'public' AND ${buildSkillFreshnessExpr()} >= ?
+      ORDER BY ${buildSkillFreshnessExpr()} DESC, s.slug LIMIT ?
+    )
+    SELECT s.slug, ${buildSkillFreshnessExpr()} AS freshness, l.summary AS zh_summary, l.updated_at AS zh_updated_at
+    FROM candidates c JOIN skills s ON s.id = c.id
+    LEFT JOIN skill_localizations l ON l.skill_id = s.id AND l.locale = 'zh-CN'
+      AND l.source_hash = COALESCE(s.content_hash, s.commit_sha, CAST(s.indexed_at AS TEXT))
+      AND l.generation_version = ?
     WHERE ${buildSeoIndexableSkillWhere('s')}
-      AND ${buildSkillFreshnessExpr('s')} >= ?
-    ORDER BY sort_ts DESC, slug ASC
-    LIMIT ?
-  `)
-    .bind(recentCutoffTimestamp, RECENT_SITEMAP_URL_LIMIT)
-    .all<{
-      slug: string;
-      updated_at: number | null;
-      indexed_at: number | null;
-      last_commit_at: number | null;
-      sort_ts: number | null;
-    }>();
-
-  return (skills.results || []).map((skill) => ({
-    url: `/skills/${encodeSkillSlugForPath(skill.slug)}`,
-    priority: '0.7',
-    changefreq: 'daily',
-    lastmod: toIsoDate(skill.last_commit_at ?? skill.updated_at ?? skill.indexed_at),
-  }));
+    ORDER BY freshness DESC, s.slug
+  `).bind(getRecentCutoffTimestamp(now), Math.floor(RECENT_SITEMAP_URL_LIMIT / 2), SUMMARY_GENERATION_VERSION).all<SkillSitemapRow>();
+  return skillRowsToSitemapPages(rows.results || []).map((page) => ({ ...page, priority: '0.7', changefreq: 'daily' }));
 }
 
 export async function loadRecentProfilesSitemapPages(
@@ -906,12 +890,18 @@ async function persistSitemapSnapshot(
   if (!r2) return false;
 
   try {
-    await r2.put(buildSitemapSnapshotKey(cacheKey), xml, {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(xml));
+    const contentHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    const key = buildSitemapSnapshotKey(cacheKey);
+    const previous = typeof r2.head === 'function' ? await r2.head(key) : null;
+    if (previous?.customMetadata?.contentHash === contentHash) return true;
+    await r2.put(key, xml, {
       httpMetadata: {
         contentType: 'application/xml; charset=utf-8',
       },
       customMetadata: {
         generatedAt: String(Date.now()),
+        contentHash,
       },
     });
     return true;
@@ -930,7 +920,7 @@ async function deleteSitemapSnapshot(
 }
 
 function buildDynamicSitemapSnapshotPrefix(kind: DynamicSitemapKind): string {
-  return `${SITEMAP_SNAPSHOT_PREFIX}/sitemap:v2:${kind}:`;
+  return `${SITEMAP_SNAPSHOT_PREFIX}/sitemap:v3:${kind}:`;
 }
 
 export function parseDynamicSitemapSnapshotPage(
@@ -974,7 +964,7 @@ async function cleanupStaleDynamicSitemapSnapshots(
         continue;
       }
 
-      const cacheKey = `sitemap:v2:${kind}:${page}:xml`;
+      const cacheKey = `sitemap:v3:${kind}:${page}:xml`;
       await Promise.all([
         r2.delete(object.key),
         invalidateCache(cacheKey),
@@ -1095,7 +1085,7 @@ export async function refreshPrioritySitemapSnapshots(options: {
   const recentTtl = getSitemapHotCacheTtlSeconds(SITEMAP_RECENT_CACHE_TTL, refreshMinIntervalSeconds);
   const inputs: SitemapRefreshInput[] = [
     {
-      cacheKey: 'sitemap:v2:core:xml',
+      cacheKey: 'sitemap:v3:core:xml',
       ttl: getSitemapHotCacheTtlSeconds(SITEMAP_CORE_CACHE_TTL, refreshMinIntervalSeconds),
       debugTag: 'core',
       fetcher: async () => buildUrlSetXml(await getExpandedCoreSitemapPages(db)),
@@ -1103,7 +1093,7 @@ export async function refreshPrioritySitemapSnapshots(options: {
   ];
 
   inputs.push({
-    cacheKey: 'sitemap:v2:recent:skills:xml',
+    cacheKey: 'sitemap:v3:recent:skills:xml',
     ttl: recentTtl,
     debugTag: 'recent-skills',
     fetcher: async () => buildUrlSetXml(await loadRecentSkillsSitemapPages(db)),
@@ -1136,14 +1126,14 @@ export async function refreshAllSitemapSnapshots(options: {
   };
 
   await refresh({
-    cacheKey: 'sitemap:v2:core:xml',
+    cacheKey: 'sitemap:v3:core:xml',
     ttl: getSitemapHotCacheTtlSeconds(SITEMAP_CORE_CACHE_TTL, refreshMinIntervalSeconds),
     debugTag: 'core',
     fetcher: async () => buildUrlSetXml(await getExpandedCoreSitemapPages(db)),
   });
 
   await refresh({
-    cacheKey: 'sitemap:v2:recent:skills:xml',
+    cacheKey: 'sitemap:v3:recent:skills:xml',
     ttl: getSitemapHotCacheTtlSeconds(SITEMAP_RECENT_CACHE_TTL, refreshMinIntervalSeconds),
     debugTag: 'recent-skills',
     fetcher: async () => buildUrlSetXml(await loadRecentSkillsSitemapPages(db)),
@@ -1151,8 +1141,9 @@ export async function refreshAllSitemapSnapshots(options: {
 
   for (const kind of ['skills', 'profiles', 'orgs'] as const) {
     const shardInputs: SitemapRefreshInput[] = [];
+    let afterSlug = '';
     for (let page = 1; page <= stats.dynamic[kind].pages; page += 1) {
-      const cacheKey = `sitemap:v2:${kind}:${page}:xml`;
+      const cacheKey = `sitemap:v3:${kind}:${page}:xml`;
       shardInputs.push({
         cacheKey,
         ttl: getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, refreshMinIntervalSeconds),
@@ -1162,7 +1153,9 @@ export async function refreshAllSitemapSnapshots(options: {
 
           switch (kind) {
             case 'skills':
-              pages = await loadSkillsSitemapPage(db, page);
+              pages = await loadSkillsSitemapPage(db, page, afterSlug);
+              const lastEnglish = pages.filter((entry) => entry.url.startsWith('/skills/')).at(-1);
+              if (lastEnglish) afterSlug = decodeURIComponent(lastEnglish.url.slice('/skills/'.length));
               break;
             case 'profiles':
               pages = await loadProfilesSitemapPage(db, page);
@@ -1179,6 +1172,9 @@ export async function refreshAllSitemapSnapshots(options: {
           return buildUrlSetXml(pages);
         },
       });
+      if (kind === 'skills') {
+        refreshed.push(...await refreshSitemapInputs(shardInputs.splice(0), { r2, waitUntil, concurrency: 1 }));
+      }
     }
 
     refreshed.push(...await refreshSitemapInputs(shardInputs, { r2, waitUntil, concurrency: 4 }));
@@ -1188,7 +1184,7 @@ export async function refreshAllSitemapSnapshots(options: {
   // Publish the index only after every referenced shard exists. The independent
   // R2 marker below is written last so interrupted builds are retried.
   await refresh({
-    cacheKey: 'sitemap:v2:index:xml',
+    cacheKey: 'sitemap:v3:index:xml',
     ttl: getSitemapHotCacheTtlSeconds(SITEMAP_INDEX_CACHE_TTL, refreshMinIntervalSeconds),
     debugTag: 'index',
     fetcher: async () => buildSitemapIndexXml(buildSitemapIndexEntries(stats)),

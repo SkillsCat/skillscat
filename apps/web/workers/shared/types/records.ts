@@ -37,6 +37,7 @@ export interface SkillRecord {
   created_at: number;
   updated_at: number;
   indexed_at: number;
+  first_published_at?: number | null;
 }
 
 export interface AuthorRecord {

@@ -1,3 +1,4 @@
+import { TRENDING_SNAPSHOT_KEY } from '$lib/server/ranking/trending-snapshot';
 import {
   buildGithubSkillR2Key,
   buildGithubSkillR2Prefix,
@@ -303,6 +304,8 @@ export async function deleteSkillArtifactsAndInvalidateCaches(
     }
 
     await Promise.all([
+      r2?.delete(TRENDING_SNAPSHOT_KEY),
+      invalidateCache('lists:trending:snapshot:v2'),
       ...Array.from(categoryCacheKeys, (cacheKey) => invalidateCache(cacheKey)),
       invalidateOpenClawSkillCaches(skill.id, skill.slug, skillRow?.org_slug, {
         owner: skill.repoOwner,

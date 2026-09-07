@@ -1,3 +1,4 @@
+import { sanitizeSummary } from '$lib/seo/summary';
 import type { SkillDetail } from '$lib/types';
 import { buildSkillSecuritySummary } from '$lib/server/skill/security-summary';
 import { loadSkillReadmeFromR2 } from '$lib/server/db/business/readme';
@@ -15,6 +16,7 @@ interface SkillDetailRow {
   github_url: string | null;
   skill_path: string | null;
   summary: string | null;
+  content_hash: string | null;
   stars: number | null;
   forks: number | null;
   trending_score: number | null;
@@ -104,6 +106,7 @@ export async function getSkillBySlug(
         s.github_url,
         s.skill_path,
         s.summary,
+        COALESCE(s.content_hash, s.commit_sha, CAST(s.indexed_at AS TEXT)) AS content_hash,
         s.stars,
         s.forks,
         s.trending_score,
@@ -307,7 +310,8 @@ export async function getSkillBySlug(
     repoName: skillData.repo_name,
     githubUrl: skillData.github_url || (skillData.repo_owner ? `https://github.com/${skillData.repo_owner}/${skillData.repo_name}` : null),
     skillPath: skillData.skill_path || '',
-    summary: skillData.summary,
+    summary: sanitizeSummary(skillData.summary),
+    contentHash: skillData.content_hash,
     stars: skillData.stars || 0,
     forks: skillData.forks || 0,
     trendingScore: skillData.trending_score || 0,

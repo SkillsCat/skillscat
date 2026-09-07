@@ -3,6 +3,8 @@
   import LocaleSwitcher from '$lib/components/ui/LocaleSwitcher.svelte';
   import { useI18n } from '$lib/i18n/runtime';
 
+  // Reserved for a future integration. Enabling this only reveals the layout.
+  const showDesktopAdSlot = false;
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
 </script>
@@ -23,16 +25,16 @@
         <h4 class="font-semibold text-fg mb-3">{messages.footer.discover}</h4>
         <ul class="space-y-2 text-sm">
           <li>
-            <a href="/trending" class="text-fg-muted hover:text-fg transition-colors">{messages.footer.trending}</a>
+            <a href={i18n.href('/trending')} class="text-fg-muted hover:text-fg transition-colors">{messages.footer.trending}</a>
           </li>
           <li>
-            <a href="/recent" class="text-fg-muted hover:text-fg transition-colors">{messages.footer.recentlyAdded}</a>
+            <a href={i18n.href('/recent')} class="text-fg-muted hover:text-fg transition-colors">{messages.footer.recentlyAdded}</a>
           </li>
           <li>
-            <a href="/top" class="text-fg-muted hover:text-fg transition-colors">{messages.footer.topRated}</a>
+            <a href={i18n.href('/top')} class="text-fg-muted hover:text-fg transition-colors">{messages.footer.topRated}</a>
           </li>
           <li>
-            <a href="/categories" class="text-fg-muted hover:text-fg transition-colors">{messages.footer.categories}</a>
+            <a href={i18n.href('/categories')} class="text-fg-muted hover:text-fg transition-colors">{messages.footer.categories}</a>
           </li>
         </ul>
       </div>
@@ -42,7 +44,7 @@
         <h4 class="font-semibold text-fg mb-3">{messages.footer.resources}</h4>
         <ul class="space-y-2 text-sm">
           <li>
-            <a href="/docs" class="text-fg-muted hover:text-fg transition-colors">{messages.footer.docs}</a>
+            <a href={i18n.href('/docs')} class="text-fg-muted hover:text-fg transition-colors">{messages.footer.docs}</a>
           </li>
           <li>
             <a
@@ -82,14 +84,18 @@
         <h4 class="font-semibold text-fg mb-3">{messages.footer.legal}</h4>
         <ul class="space-y-2 text-sm">
           <li>
-            <a href="/privacy" class="text-fg-muted hover:text-fg transition-colors">{messages.footer.privacyPolicy}</a>
+            <a href={i18n.href('/privacy')} class="text-fg-muted hover:text-fg transition-colors">{messages.footer.privacyPolicy}</a>
           </li>
           <li>
-            <a href="/terms" class="text-fg-muted hover:text-fg transition-colors">{messages.footer.termsOfService}</a>
+            <a href={i18n.href('/terms')} class="text-fg-muted hover:text-fg transition-colors">{messages.footer.termsOfService}</a>
           </li>
         </ul>
       </div>
     </div>
+
+    {#if showDesktopAdSlot}
+      <div class="desktop-ad-slot" aria-hidden="true" data-ad-slot="footer"></div>
+    {/if}
 
     <!-- Bottom -->
     <div class="mt-8 pt-8 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -98,11 +104,11 @@
           © {new Date().getFullYear()} SkillsCat. {messages.footer.openSourceNotice}
         </p>
         <div class="flex items-center gap-3 md:hidden text-sm">
-          <a href="/docs" class="text-fg-subtle hover:text-fg transition-colors">{messages.footer.docs}</a>
+          <a href={i18n.href('/docs')} class="text-fg-subtle hover:text-fg transition-colors">{messages.footer.docs}</a>
           <span class="text-fg-subtle">·</span>
-          <a href="/privacy" class="text-fg-subtle hover:text-fg transition-colors">{messages.footer.privacy}</a>
+          <a href={i18n.href('/privacy')} class="text-fg-subtle hover:text-fg transition-colors">{messages.footer.privacy}</a>
           <span class="text-fg-subtle">·</span>
-          <a href="/terms" class="text-fg-subtle hover:text-fg transition-colors">{messages.footer.terms}</a>
+          <a href={i18n.href('/terms')} class="text-fg-subtle hover:text-fg transition-colors">{messages.footer.terms}</a>
         </div>
       </div>
       <div class="flex items-center gap-4">
@@ -122,3 +128,10 @@
     </div>
   </div>
 </footer>
+
+<style>
+  .desktop-ad-slot { display: none; }
+  @media (min-width: 1024px) {
+    .desktop-ad-slot { display: block; width: 728px; height: 90px; margin: 32px auto 0; }
+  }
+</style>

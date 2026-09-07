@@ -139,7 +139,7 @@
       <nav class="sidebar-nav" bind:this={navEl}>
         {#each navItems as item}
           <a
-            href={item.href}
+            href={i18n.href(item.href)}
             class="nav-item"
             class:nav-item-active={isActive(item.href, item.exact)}
           >

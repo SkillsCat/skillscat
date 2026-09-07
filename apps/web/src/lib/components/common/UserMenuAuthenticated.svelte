@@ -75,12 +75,12 @@
               <DropdownMenu.Separator class="dropdown-separator" />
 
               <DropdownMenu.Group>
-                <a href="/user/skills" class="dropdown-item">
+                <a href={i18n.href('/user/skills')} class="dropdown-item">
                   <HugeiconsIcon icon={SparklesIcon} size={16} />
                   {messages.userMenu.mySkills}
                 </a>
 
-                <a href="/user/messages" class="dropdown-item">
+                <a href={i18n.href('/user/messages')} class="dropdown-item">
                   <HugeiconsIcon icon={Mail01Icon} size={16} />
                   {messages.userMenu.messages}
                   {#if unreadCount > 0}
@@ -88,12 +88,12 @@
                   {/if}
                 </a>
 
-                <a href="/bookmarks" class="dropdown-item">
+                <a href={i18n.href('/bookmarks')} class="dropdown-item">
                   <HugeiconsIcon icon={Bookmark02Icon} size={16} />
                   {messages.userMenu.bookmarks}
                 </a>
 
-                <a href="/user/account" class="dropdown-item">
+                <a href={i18n.href('/user/account')} class="dropdown-item">
                   <HugeiconsIcon icon={Settings01Icon} size={16} />
                   {messages.userMenu.settings}
                 </a>

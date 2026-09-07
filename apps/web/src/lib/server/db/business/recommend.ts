@@ -1,3 +1,5 @@
+import { firstPublishedSql } from '$lib/server/seo/freshness';
+import { diversify } from '$lib/server/ranking/diversity';
 import type { D1Database } from '@cloudflare/workers-types';
 import type { SkillCardData } from '$lib/types';
 import { getCached } from '$lib/server/cache';
@@ -70,6 +72,25 @@ const RECOMMEND_SKILL_COLUMNS_BASE = `
   s.stars, s.forks, s.trending_score as trendingScore,
   COALESCE(s.last_commit_at, s.updated_at) as updatedAt, s.last_commit_at as lastCommitAt`;
 const SKILL_COLUMNS_BASE = RECOMMEND_SKILL_COLUMNS_BASE;
+
+async function loadFreshRelatedCandidates(db: D1Database, skillId: string, categories: string[]): Promise<RecommendSkillCandidateRow[]> {
+  if (!categories.length) return [];
+  const result = await db.prepare(`
+    WITH recent AS MATERIALIZED (
+      SELECT id FROM skills INDEXED BY skills_public_first_published_idx
+      WHERE visibility = 'public' AND (${firstPublishedSql()}) >= ?
+      ORDER BY (${firstPublishedSql()}) DESC, id LIMIT 48
+    )
+    SELECT ${RECOMMEND_SKILL_COLUMNS_BASE}, NULL AS authorAvatar
+    FROM recent r JOIN skills s ON s.id = r.id
+    WHERE s.id <> ? AND EXISTS (
+      SELECT 1 FROM skill_categories sc WHERE sc.skill_id = s.id
+        AND sc.category_slug IN (SELECT value FROM json_each(?))
+    ) AND COALESCE(s.origin_relation_type, '') <> 'historical_copy_of'
+    ORDER BY s.trending_score DESC, s.id LIMIT 12
+  `).bind(Date.now() - 14 * 86400000, skillId, JSON.stringify(categories.slice(0, 3))).all<RecommendSkillCandidateRow>();
+  return result.results || [];
+}
 
 function normalizeRecommendSignalList(values: string[], limit: number): string[] {
   const seen = new Set<string>();
@@ -455,7 +476,7 @@ export async function getLightweightRecommendedSkills(
   skillId: string,
   categories: string[],
   repoOwner: string = '',
-  limit: number = 10,
+  limit: number = 8,
   timingCollector?: TimingCollector,
   includeCategories: boolean = true
 ): Promise<SkillCardData[]> {
@@ -470,15 +491,14 @@ export async function getLightweightRecommendedSkills(
 
   const collected: RecommendSkillCandidateRow[] = [];
   const excludedIds = new Set<string>([skillId]);
-  const buildExcludePlaceholders = () => Array.from(excludedIds).map(() => '?').join(',');
-  const getExcludeParams = () => Array.from(excludedIds);
+  void repoOwner;
 
   const pushCandidates = (rows: RecommendSkillCandidateRow[]) => {
     for (const row of rows) {
       if (excludedIds.has(row.id)) continue;
       excludedIds.add(row.id);
       collected.push(row);
-      if (collected.length >= limit) {
+      if (collected.length >= Math.min(limit * 4, 80)) {
         return;
       }
     }
@@ -522,49 +542,16 @@ export async function getLightweightRecommendedSkills(
     }
   }
 
-  if (repoOwner && collected.length < limit) {
-    const exPh = buildExcludePlaceholders();
-    const sameAuthorLimit = Math.max(3, Math.min(6, limit - collected.length + 2));
-    const sameAuthorRows = await timedTask(
-      timingCollector,
-      'rel_lw_author',
-      () => db.prepare(`
-        SELECT ${RECOMMEND_SKILL_COLUMNS_BASE}
-        FROM skills s INDEXED BY skills_repo_visibility_trending_idx
-        WHERE s.repo_owner = ?
-          AND s.visibility = 'public'
-          AND s.id NOT IN (${exPh})
-        ORDER BY s.trending_score DESC
-        LIMIT ?
-      `).bind(repoOwner, ...getExcludeParams(), sameAuthorLimit).all<RecommendSkillCandidateRow>(),
-      'lightweight same author'
-    );
-    pushCandidates(sameAuthorRows.results);
-  }
-
-  if (collected.length < limit) {
-    const exPh = buildExcludePlaceholders();
-    const trendingLimit = Math.max(4, Math.min(8, limit - collected.length + 2));
-    const trendingRows = await timedTask(
-      timingCollector,
-      'rel_lw_trending',
-      () => db.prepare(`
-        SELECT ${RECOMMEND_SKILL_COLUMNS_BASE}
-        FROM skills s INDEXED BY skills_public_trending_id_idx
-        WHERE s.visibility = 'public'
-          AND s.id NOT IN (${exPh})
-        ORDER BY s.trending_score DESC
-        LIMIT ?
-      `).bind(...getExcludeParams(), trendingLimit).all<RecommendSkillCandidateRow>(),
-      'lightweight trending fallback'
-    );
-    pushCandidates(trendingRows.results);
-  }
-
+  const fresh = await loadFreshRelatedCandidates(db, skillId, normalizedCategories);
+  pushCandidates(fresh);
   if (collected.length === 0) return [];
 
-  const top = collected
-    .slice(0, limit)
+  const freshIds = new Set(fresh.map((row) => row.id));
+  const related = [...collected, ...fresh.filter((row) => !excludedIds.has(row.id))]
+    .sort((a, b) => (b.sharedCategoryCount ?? 1) - (a.sharedCategoryCount ?? 1)
+      || Number(freshIds.has(b.id)) - Number(freshIds.has(a.id))
+      || b.trendingScore - a.trendingScore || a.id.localeCompare(b.id));
+  const top = diversify(related, limit)
     .map((row) => toSkillCardRow(row));
 
   if (!includeCategories) {
@@ -605,7 +592,7 @@ export async function getRecommendedSkills(
   skillId: string,
   categories: string[],
   repoOwner: string = '',
-  limit: number = 10,
+  limit: number = 8,
   timingCollector?: TimingCollector,
   includeCategories: boolean = true,
   preloadedTags?: string[] | null
@@ -858,49 +845,7 @@ export async function getRecommendedSkills(
     addCandidates(result.results, 2);
   }
 
-  // Tier 3: Same author
-  if (repoOwner && candidateMap.size < MIN_CANDIDATES) {
-    const exPh = excludePlaceholders();
-    const tier3Limit = getTierFetchLimit(3, 1, 6);
-    const result = await timedTask(
-      timingCollector,
-      'rel_t3',
-      () => db.prepare(`
-      SELECT ${SKILL_COLUMNS_BASE}
-      , NULL as authorAvatar
-      FROM skills s INDEXED BY skills_repo_visibility_trending_idx
-      WHERE s.repo_owner = ?
-        AND s.id NOT IN (${exPh})
-        AND s.visibility = 'public'
-      ORDER BY s.trending_score DESC
-      LIMIT ?
-    `).bind(repoOwner, ...excludeIds, tier3Limit).all<RecommendSkillCandidateRow>(),
-      'tier3 same author'
-    );
-    addCandidates(result.results, 3);
-  }
-
-  // Tier 4: Trending fallback
-  if (candidateMap.size < MIN_CANDIDATES) {
-    const exPh = excludePlaceholders();
-    const tier4Limit = getTierFetchLimit(4, 2, 8);
-    const result = await timedTask(
-      timingCollector,
-      'rel_t4',
-      () => db.prepare(`
-      SELECT ${SKILL_COLUMNS_BASE}
-      , NULL as authorAvatar
-      FROM skills s INDEXED BY skills_public_trending_id_idx
-      WHERE s.id NOT IN (${exPh})
-        AND s.visibility = 'public'
-      ORDER BY s.trending_score DESC
-      LIMIT ?
-    `).bind(...excludeIds, tier4Limit).all<RecommendSkillCandidateRow>(),
-      'tier4 trending fallback'
-    );
-    addCandidates(result.results, 4);
-  }
-
+  addCandidates(await loadFreshRelatedCandidates(db, skillId, recommendCategories), 1);
   if (candidateMap.size === 0) return [];
 
   const allCandidates = Array.from(candidateMap.values())
@@ -1019,9 +964,10 @@ export async function getRecommendedSkills(
     b.relevanceScore - a.relevanceScore
     || b.trendingScore - a.trendingScore
     || b.stars - a.stars
+    || a.id.localeCompare(b.id)
   );
 
-  const top = scored.slice(0, limit).map(({
+  const top = diversify(scored, limit).map(({
     relevanceScore, sharedCategoryCount, sharedTagCount, lastCommitAt, ...rest
   }) => rest);
   timingCollector?.('rel_sort', Math.max(0, performance.now() - sortSliceStart), 'sort and slice');

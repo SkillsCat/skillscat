@@ -43,7 +43,7 @@
   {#each items as item (item.href ?? item.label)}
     {#if item.href}
       <a
-        href={item.href}
+        href={i18n.href(item.href)}
         class={item.active ? 'tab active' : 'tab'}
         aria-current={item.active ? 'page' : undefined}
         aria-label={item.ariaLabel}

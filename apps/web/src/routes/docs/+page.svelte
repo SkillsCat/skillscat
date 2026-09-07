@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { useI18n } from '$lib/i18n/runtime';
+  import ChineseDocs from '$lib/components/docs/ChineseDocs.svelte';
+  const i18n = useI18n();
   import SEO from '$lib/components/common/SEO.svelte';
   import DocsProseCard from '$lib/components/docs/DocsProseCard.svelte';
   import { buildOgImageUrl } from '$lib/seo/og';
@@ -30,6 +33,9 @@
     },
   ] as const;
 </script>
+{#if i18n.locale() === 'zh-CN'}
+  <ChineseDocs kind="index" />
+{:else}
 
 <SEO
   {title}
@@ -132,6 +138,8 @@
   </div>
 </div>
 
+
+{/if}
 <style>
   .docs-page {
     padding: 1.5rem 1rem 4rem;

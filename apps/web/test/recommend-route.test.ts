@@ -338,7 +338,7 @@ describe('recommend route crawler fallback policy', () => {
     expect(getRecommendedSkills).not.toHaveBeenCalled();
   });
 
-  it('keeps hot skills eligible for online fallback even for verified bots', async () => {
+  it('serves bounded lightweight fallback for hot skills and verified bots', async () => {
     const db = createDb([
       {
         id: 'skill_1',
@@ -357,7 +357,7 @@ describe('recommend route crawler fallback policy', () => {
       },
     ]);
     const waitUntil = vi.fn();
-    getRecommendedSkills.mockResolvedValue([
+    getLightweightRecommendedSkills.mockResolvedValue([
       {
         id: 'rec_1',
         name: 'Hot Related',
@@ -392,7 +392,7 @@ describe('recommend route crawler fallback policy', () => {
 
     const payload = await response.json();
     expect(payload.data.recommendSkills).toHaveLength(1);
-    expect(getRecommendedSkills).toHaveBeenCalledTimes(1);
+    expect(getLightweightRecommendedSkills).toHaveBeenCalledTimes(1);
     expect(waitUntil).toHaveBeenCalledTimes(1);
   });
 

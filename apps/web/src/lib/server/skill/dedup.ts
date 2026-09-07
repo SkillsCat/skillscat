@@ -217,6 +217,7 @@ export async function convertPrivateSkillToPublicGithub(
     SET
       name = ?,
       description = ?,
+      first_published_at = COALESCE(first_published_at, ?),
       visibility = 'public',
       source_type = 'github',
       repo_owner = ?,
@@ -239,6 +240,7 @@ export async function convertPrivateSkillToPublicGithub(
     .bind(
       input.name,
       normalizedDescription,
+      input.indexedAt,
       input.repoOwner,
       input.repoName,
       normalizedSkillPath,

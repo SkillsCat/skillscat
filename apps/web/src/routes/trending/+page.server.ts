@@ -34,14 +34,14 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
   }
   const { data } = await resolvePublicSkillDataCache({
     db: env.DB,
-    cacheKey: `page:trending:v1:${page}`,
+    cacheKey: `page:trending:v2:${page}`,
     load: () => getTrendingSkillsPaginated(env, page, ITEMS_PER_PAGE),
     ttlSeconds: 60,
     getSkills: (value) => value.skills,
     waitUntil: platform?.context?.waitUntil?.bind(platform.context),
   });
   const { skills, total } = data;
-  const totalPages = Math.min(PUBLIC_LIST_MAX_PAGE, Math.ceil(total / ITEMS_PER_PAGE));
+  const totalPages = Math.min(PUBLIC_LIST_MAX_PAGE, data.totalPages ?? Math.ceil(total / ITEMS_PER_PAGE));
   const lastPage = Math.max(1, totalPages);
 
   if (page > lastPage) {

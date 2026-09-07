@@ -6,7 +6,7 @@ import type { DbEnv } from '$lib/server/db/shared/types';
  * highlighted HTML in R2 so the (CPU-heavy) shiki transform runs at most once
  * per skill version globally, instead of once per edge colo.
  *
- * Keys embed the readme version (skill.updatedAt ?? indexedAt), so a skill
+ * Keys embed the source content hash (or immutable upload version), so a skill
  * content update produces a new key and old objects become unreachable —
  * the same immutability model as the previous `readme:html:` Cache API
  * entries. The R2 prefix is deleted when the skill itself is deleted

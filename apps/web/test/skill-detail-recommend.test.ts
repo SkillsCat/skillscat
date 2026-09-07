@@ -215,7 +215,7 @@ describe('resolveSkillDetail recommend fallback', () => {
     expect(getRecommendedSkills).not.toHaveBeenCalled();
     expect(getLightweightRecommendedSkills).toHaveBeenCalledTimes(1);
     expect(getLightweightRecommendedSkills.mock.calls[0]?.[2]).toEqual(['automation']);
-    expect(getCached.mock.calls.map((call) => call[0])).toContain('recommend:online:v2:skill_1:lightweight');
+    expect(getCached.mock.calls.map((call) => call[0])).toContain('recommend:online:v3:skill_1:lightweight');
   });
 
   it('ignores empty precomputed payloads and recomputes lightweight results', async () => {

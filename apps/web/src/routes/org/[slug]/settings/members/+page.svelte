@@ -309,7 +309,7 @@
             />
             <div class="member-info">
               <div class="member-header">
-                <a href={getMemberProfileHref(member)} class="member-name">{member.name}</a>
+                <a href={i18n.href(getMemberProfileHref(member))} class="member-name">{member.name}</a>
                 <span class="role-badge {getRoleBadgeClass(member.role)}"
                   >{getRoleLabel(member.role)}</span
                 >
