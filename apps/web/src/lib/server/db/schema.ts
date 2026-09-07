@@ -1,3 +1,4 @@
+import { firstPublishedSql, seoFreshnessSql } from '../seo/freshness';
 import { sqliteTable, text, integer, real, primaryKey, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { sql, relations } from 'drizzle-orm';
 import { buildRecentActivitySortSql, buildTopRatedSortScoreSql } from '../ranking';
@@ -115,6 +116,8 @@ export const skills = sqliteTable('skills', {
   name: text('name').notNull(),
   slug: text('slug').notNull(),
   description: text('description'),
+  firstPublishedAt: integer('first_published_at'),
+  contentUpdatedAt: integer('content_updated_at'),
   summary: text('summary'), // AI-generated functional summary shown above README on the detail page
   githubUrl: text('github_url'), // Not unique - multi-skill repos share the same URL
   repoOwner: text('repo_owner'),
@@ -165,6 +168,9 @@ export const skills = sqliteTable('skills', {
   index('skills_trending_idx').on(table.trendingScore),
   index('skills_stars_idx').on(table.stars),
   index('skills_indexed_idx').on(table.indexedAt),
+  index('skills_public_first_published_idx').on(sql.raw(`${firstPublishedSql()} DESC`), table.id).where(sql`${table.visibility} = 'public'`),
+  index('skills_public_seo_freshness_idx').on(sql.raw(`${seoFreshnessSql()} DESC`), table.slug).where(sql`${table.visibility} = 'public'`),
+  index('skills_public_content_updated_idx').on(table.contentUpdatedAt, table.slug).where(sql`${table.visibility} = 'public'`),
   index('skills_visibility_idx').on(table.visibility),
   index('skills_visibility_id_idx').on(table.visibility, table.id),
   index('skills_visibility_name_idx').on(table.visibility, table.name),
@@ -315,6 +321,28 @@ export const skills = sqliteTable('skills', {
   )
 ]);
 
+// Shared daily discovery allowance and per-channel yield accounting.
+export const discoveryDailyStats = sqliteTable('discovery_daily_stats', {
+  day: text('day').notNull(), source: text('source').notNull(),
+  queued: integer('queued').notNull().default(0), completed: integer('completed').notNull().default(0),
+  indexed: integer('indexed').notNull().default(0), failed: integer('failed').notNull().default(0),
+}, (table) => [primaryKey({ columns: [table.day, table.source] })]);
+
+// Validated, content-versioned introductions and retry state.
+export const skillLocalizations = sqliteTable('skill_localizations', {
+  skillId: text('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+  locale: text('locale').notNull(),
+  summary: text('summary'),
+  sourceHash: text('source_hash').notNull(),
+  generationVersion: text('generation_version').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  nextAttemptAt: integer('next_attempt_at').notNull().default(0),
+  failCount: integer('fail_count').notNull().default(0),
+}, (table) => [
+  primaryKey({ columns: [table.skillId, table.locale] }),
+  index('skill_localizations_locale_updated_idx').on(table.locale, table.updatedAt, table.skillId),
+]);
+
 // Skills that a user submitted and that were subsequently persisted in the
 // public registry. The composite key keeps the submitted list duplicate-free.
 // Note: indexed_at stores skills.created_at (when the skill was first
@@ -412,8 +440,8 @@ export const skillRecommendState = sqliteTable('skill_recommend_state', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
   primaryKey({ columns: [table.skillId] }),
-  index('skill_recommend_state_dirty_due_idx').on(table.dirty, table.nextUpdateAt),
-  index('skill_recommend_state_due_idx').on(table.nextUpdateAt),
+  index('skill_recommend_state_dirty_due_idx').on(table.dirty, table.nextUpdateAt, table.skillId),
+  index('skill_recommend_state_due_idx').on(table.nextUpdateAt, table.skillId),
   index('skill_recommend_state_algo_dirty_idx').on(table.algoVersion, table.dirty),
   index('skill_recommend_state_precomputed_null_idx')
     .on(table.skillId)
@@ -440,8 +468,8 @@ export const skillSearchState = sqliteTable('skill_search_state', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(sql`(unixepoch() * 1000)`)
 }, (table) => [
   primaryKey({ columns: [table.skillId] }),
-  index('skill_search_state_dirty_due_idx').on(table.dirty, table.nextUpdateAt),
-  index('skill_search_state_due_idx').on(table.nextUpdateAt),
+  index('skill_search_state_dirty_due_idx').on(table.dirty, table.nextUpdateAt, table.skillId),
+  index('skill_search_state_due_idx').on(table.nextUpdateAt, table.skillId),
   index('skill_search_state_algo_dirty_idx').on(table.algoVersion, table.dirty),
   index('skill_search_state_score_idx').on(table.score),
   index('skill_search_state_precomputed_null_idx')
