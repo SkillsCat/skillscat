@@ -37,10 +37,10 @@ function createRefreshDbMock() {
               if (normalized.includes('FROM category_public_stats')) {
                 return { results: [] };
               }
-              if (normalized.includes('ORDER BY slug ASC') && !normalized.includes('sort_ts')) {
+              if (normalized.includes('ORDER BY s.slug') && !normalized.includes('sort_ts')) {
                 return {
                   results: [{
-                    slug: 'acme/demo-skill',
+                    slug: 'acme/demo-skill', freshness: 1000,
                     updated_at: 1000,
                     indexed_at: 1000,
                     last_commit_at: null,
@@ -77,7 +77,7 @@ describe('sitemap snapshot policy', () => {
     const head = vi.fn(async () => ({ key: 'index' }));
 
     await expect(hasCompletedSitemapFullRefresh({ head } as unknown as R2Bucket)).resolves.toBe(true);
-    expect(head).toHaveBeenCalledWith('cache/sitemaps/v2/full-refresh-complete');
+    expect(head).toHaveBeenCalledWith('cache/sitemaps/v3/full-refresh-complete');
     await expect(hasCompletedSitemapFullRefresh(undefined)).resolves.toBe(false);
   });
 
@@ -131,7 +131,7 @@ describe('sitemap snapshot policy', () => {
     } as unknown as R2Bucket;
 
     const response = await createCachedSitemapResponse({
-      cacheKey: 'sitemap:v2:index:xml',
+      cacheKey: 'sitemap:v3:index:xml',
       ttl: 86400,
       cacheControl: 'public, max-age=300, s-maxage=3600',
       fetcher,
@@ -147,7 +147,7 @@ describe('sitemap snapshot policy', () => {
     expect(fetcher).not.toHaveBeenCalled();
     expect(putCachedText).toHaveBeenCalledOnce();
     expect(peekCachedText).toHaveBeenCalledWith(
-      'sitemap:v2:index:xml',
+      'sitemap:v3:index:xml',
       expect.objectContaining({ allowLegacyFallback: false })
     );
   });
@@ -160,14 +160,14 @@ describe('sitemap snapshot policy', () => {
       r2: createRefreshR2Mock(putKeys),
     });
 
-    const shardIndex = putKeys.indexOf('cache/sitemaps/v2/sitemap:v2:skills:1:xml.xml');
-    const indexIndex = putKeys.indexOf('cache/sitemaps/v2/sitemap:v2:index:xml.xml');
+    const shardIndex = putKeys.indexOf('cache/sitemaps/v3/sitemap:v3:skills:1:xml.xml');
+    const indexIndex = putKeys.indexOf('cache/sitemaps/v3/sitemap:v3:index:xml.xml');
     expect(shardIndex).toBeGreaterThanOrEqual(0);
     expect(indexIndex).toBeGreaterThan(shardIndex);
-    expect(putKeys).toContain('cache/sitemaps/v2/sitemap:v2:recent:skills:xml.xml');
-    expect(putKeys).not.toContain('cache/sitemaps/v2/sitemap:v2:recent:profiles:xml.xml');
-    expect(putKeys).not.toContain('cache/sitemaps/v2/sitemap:v2:recent:orgs:xml.xml');
-    expect(putKeys.at(-1)).toBe('cache/sitemaps/v2/full-refresh-complete');
+    expect(putKeys).toContain('cache/sitemaps/v3/sitemap:v3:recent:skills:xml.xml');
+    expect(putKeys).not.toContain('cache/sitemaps/v3/sitemap:v3:recent:profiles:xml.xml');
+    expect(putKeys).not.toContain('cache/sitemaps/v3/sitemap:v3:recent:orgs:xml.xml');
+    expect(putKeys.at(-1)).toBe('cache/sitemaps/v3/full-refresh-complete');
   });
 
   it('does not rewrite the full index during an hourly priority refresh', async () => {
@@ -178,12 +178,12 @@ describe('sitemap snapshot policy', () => {
       r2: createRefreshR2Mock(putKeys),
     });
 
-    expect(putKeys).not.toContain('cache/sitemaps/v2/sitemap:v2:index:xml.xml');
-    expect(putKeys).toContain('cache/sitemaps/v2/sitemap:v2:recent:skills:xml.xml');
-    expect(putKeys).not.toContain('cache/sitemaps/v2/sitemap:v2:recent:profiles:xml.xml');
-    expect(putKeys).not.toContain('cache/sitemaps/v2/sitemap:v2:recent:orgs:xml.xml');
+    expect(putKeys).not.toContain('cache/sitemaps/v3/sitemap:v3:index:xml.xml');
+    expect(putKeys).toContain('cache/sitemaps/v3/sitemap:v3:recent:skills:xml.xml');
+    expect(putKeys).not.toContain('cache/sitemaps/v3/sitemap:v3:recent:profiles:xml.xml');
+    expect(putKeys).not.toContain('cache/sitemaps/v3/sitemap:v3:recent:orgs:xml.xml');
     expect(putCachedText).toHaveBeenCalledWith(
-      'sitemap:v2:recent:skills:xml',
+      'sitemap:v3:recent:skills:xml',
       expect.any(String),
       expect.any(Number),
       expect.objectContaining({ awaitWrite: true })

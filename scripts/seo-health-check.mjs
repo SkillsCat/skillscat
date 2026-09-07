@@ -75,7 +75,7 @@ export function validateSitemapLocations(entries, options) {
 
     assert(parsed.origin === origin, `${label} contains cross-origin URL: ${entry.loc}`);
     assert(!parsed.hash, `${label} contains a fragment URL: ${entry.loc}`);
-    assert(!pathPrefix || parsed.pathname.startsWith(pathPrefix), `${label} contains unexpected path: ${entry.loc}`);
+    assert(!pathPrefix || parsed.pathname.replace(/^\/zh-CN(?=\/|$)/, '').startsWith(pathPrefix), `${label} contains unexpected path: ${entry.loc}`);
     assert(!seen.has(parsed.href), `${label} contains duplicate URL: ${entry.loc}`);
     seen.add(parsed.href);
 
@@ -103,6 +103,25 @@ export function validateIndexablePageHtml(body, expectedUrl) {
 export function validateIndexableSkillHtml(body, expectedUrl) {
   validateIndexablePageHtml(body, expectedUrl);
   assert(body.includes('"@type":"SoftwareSourceCode"'), 'SoftwareSourceCode structured data missing');
+  const introduction = /<p[^>]*class="[^"]*skill-summary-text[^"]*"[^>]*>([\s\S]*?)<\/p>/i.exec(body)?.[1] ?? '';
+  const description = /<meta name="description" content="([^"]+)"/i.exec(body)?.[1] ?? '';
+  assert(!/(?:the user (?:wants|asks)|let me (?:analy[sz]e|think)|<think>|用户要求|让我分析)/i.test(introduction + description), 'polluted AI introduction');
+}
+
+export function validateBilingualHtml(body, expectedUrl) {
+  const url = new URL(expectedUrl);
+  const chinese = /^\/zh-CN(?:\/|$)/.test(url.pathname);
+  const path = url.pathname.replace(/^\/zh-CN(?=\/|$)/, '') || '/';
+  const supported = /^(?:\/|\/(?:trending|recent|top|categories)|\/category\/[^/]+|\/docs(?:\/(?:cli|openclaw))?|\/skills\/[^/]+\/.+)$/.test(path);
+  if (!supported) return;
+  assert(new RegExp(`<html[^>]*lang="${chinese ? 'zh-CN' : 'en'}"`, 'i').test(body), 'html lang does not match URL');
+  const alternates = new Map([...body.matchAll(/<link rel="alternate" hreflang="([^"]+)" href="([^"]+)"/gi)].map((match) => [match[1], decodeXml(match[2])]));
+  if (!chinese && path.startsWith('/skills/') && alternates.size === 0) return;
+  const en = `${url.origin}${path}${url.search}`;
+  const zh = `${url.origin}/zh-CN${path === '/' ? '' : path}${url.search}`;
+  assert(alternates.get('en') === en, 'English hreflang missing or incorrect');
+  assert(alternates.get('zh-CN') === zh, 'Chinese hreflang missing or incorrect');
+  assert(alternates.get('x-default') === en, 'x-default must point to English');
 }
 
 function parseArgs(argv) {
@@ -236,6 +255,14 @@ async function auditIndexableHtmlUrl(pageUrl, origin, validateHtml) {
     `${parsed.pathname} has an unexpected X-Robots-Tag noindex`
   );
   validateHtml(body, parsed.toString());
+  validateBilingualHtml(body, parsed.toString());
+  if (parsed.pathname.startsWith('/zh-CN')) {
+    const enUrl = new URL(parsed.pathname.replace(/^\/zh-CN/, '') || '/', parsed.origin);
+    enUrl.search = parsed.search;
+    const english = await fetchText(enUrl.toString(), { redirect: 'manual' });
+    assert(english.response.status === 200, 'English alternate is not ready');
+    validateBilingualHtml(english.body, enUrl.toString());
+  }
   return elapsedMs;
 }
 

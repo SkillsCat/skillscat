@@ -1,3 +1,5 @@
+import { TRENDING_SNAPSHOT_KEY } from '../src/lib/server/ranking/trending-snapshot';
+import { recordDiscoveryStats, reserveDiscoveryAllowance, releaseDiscoveryAllowance, DiscoveryBudgetExhausted } from './shared/discovery-budget';
 /**
  * Indexing Worker
  *
@@ -314,6 +316,7 @@ interface IndexingBatchContext {
   skillCommitDatesByPath: Map<string, Promise<{ lastCommitAt: number | null; firstCommitAt: number | null }>>;
   publicRepositoryReaders: Map<string, PublicGitHubRepositoryReader>;
   indexNowUrls: Set<string>;
+  newSkillsBySource: Map<string, number>;
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
@@ -524,6 +527,7 @@ function createIndexingBatchContext(): IndexingBatchContext {
     skillCommitDatesByPath: new Map(),
     publicRepositoryReaders: new Map(),
     indexNowUrls: new Set(),
+    newSkillsBySource: new Map(),
   };
 }
 
@@ -2733,13 +2737,15 @@ async function updateSkill(
       description = ?,
       stars = ?,
       forks = ?,
+      summary = CASE WHEN content_hash IS NOT ? THEN NULL ELSE summary END,
+      content_updated_at = CASE WHEN content_hash IS NOT ? THEN ? ELSE content_updated_at END,
       content_hash = ?,
       commit_sha = ?,
       file_structure = ?,
       last_commit_at = COALESCE(?, last_commit_at),
       skill_md_first_commit_at = ?,
       repo_created_at = ?,
-      indexed_at = ?,
+      indexed_at = COALESCE(indexed_at, ?),
       updated_at = COALESCE(?, updated_at)
     WHERE id = ?
     RETURNING id
@@ -2749,6 +2755,9 @@ async function updateSkill(
       skillMetadata.description,
       repo.stargazers_count,
       repo.forks_count,
+      persistenceMetadata.contentHash,
+      persistenceMetadata.contentHash,
+      now,
       persistenceMetadata.contentHash,
       commitSha,
       serializedFileStructure,
@@ -2775,7 +2784,7 @@ async function updateSkillMetricsOnly(
     UPDATE skills SET
       stars = ?,
       forks = ?,
-      indexed_at = ?
+      indexed_at = COALESCE(indexed_at, ?)
     WHERE id = ?
     RETURNING id
   `)
@@ -2885,7 +2894,12 @@ export function getMessageDedupKey(message: IndexingMessage): string {
   const repo = message.repoName.toLowerCase();
   const path = (message.skillPath || '').toLowerCase();
   const submissionUserId = getUserSubmissionContext(message)?.userId;
-  return `${owner}/${repo}:${path}${submissionUserId ? `:user:${submissionUserId}` : ''}`;
+  // Continuations enumerate a pinned tree. Different pages (or revisions) must
+  // survive batch deduplication even when they share the root candidate path.
+  const continuation = message.discoveryPathOffset
+    ? `:page:${message.discoveryPathOffset}:${message.headSha || message.gitRef || ''}`
+    : '';
+  return `${owner}/${repo}:${path}${submissionUserId ? `:user:${submissionUserId}` : ''}${continuation}`;
 }
 
 function shouldProcessDuplicateBatchMessage(
@@ -2984,7 +2998,21 @@ export async function queueDiscoveredSkillPaths(
   let queued = 0;
   const shouldUsePendingMarker = !message.forceReindex;
 
-  for (const discoveredSkillPath of skillPaths) {
+  const offset = Math.max(0, message.discoveryPathOffset ?? 0);
+  const budgeted = Boolean(message.discoverySource && !message.submittedBy && !message.forceReindex);
+  const budgetDay = Date.now();
+  const needed = Math.min(25, skillPaths.length - offset) + (skillPaths.length > offset + 25 ? 1 : 0);
+  if (needed <= 0) return 0;
+  const dailyMax = Math.max(1, Math.min(5000, Number.parseInt(env.DISCOVERY_MAX_QUEUED_PER_DAY ?? '500', 10) || 500));
+  const reserved = budgeted ? await reserveDiscoveryAllowance(env.DB, needed, dailyMax, budgetDay) : needed;
+  if (reserved < Math.min(2, needed)) {
+    if (budgeted) await releaseDiscoveryAllowance(env.DB, reserved, budgetDay);
+    throw new DiscoveryBudgetExhausted('Daily discovery queue budget exhausted');
+  }
+  const pathLimit = Math.min(25, skillPaths.length - offset > reserved ? reserved - 1 : reserved);
+  const batchPaths = skillPaths.slice(offset, offset + pathLimit);
+  try {
+  for (const discoveredSkillPath of batchPaths) {
     if (!discoveredSkillPath) continue;
 
     const processedKey = buildProcessedCandidateKey(owner, repo, discoveredSkillPath, headSha);
@@ -3016,6 +3044,7 @@ export async function queueDiscoveredSkillPaths(
         repoOwner: owner,
         repoName: repo,
         skillPath: discoveredSkillPath,
+        headSha, gitRef: headSha,
         ...(skillFilePath ? { skillFilePath } : {}),
         submittedBy: message.submittedBy,
         submittedAt: message.submittedAt,
@@ -3034,7 +3063,17 @@ export async function queueDiscoveredSkillPaths(
     }
   }
 
+  if (offset + batchPaths.length < skillPaths.length) {
+    await env.INDEXING_QUEUE.send({ ...message, repoOwner: owner, repoName: repo,
+      skillPath: undefined, skillFilePath: undefined, gitRef: headSha, headSha,
+      discoveryPathOffset: offset + batchPaths.length });
+    queued++;
+  }
   return queued;
+  } finally {
+    if (budgeted) await releaseDiscoveryAllowance(env.DB, reserved - queued, budgetDay);
+    if (queued && message.discoverySource) await recordDiscoveryStats(env.DB, message.discoverySource, { queued });
+  }
 }
 
 async function processMessage(
@@ -3091,7 +3130,9 @@ async function processMessage(
   const defaultBranch = repo.default_branch || 'main';
   // Queue delivery is best-effort ordered. Always resolve the current branch
   // head so an older PushEvent cannot overwrite a newer indexed revision.
-  const latestCommit = await getOrCreateBatchPromise(
+  const latestCommit = message.discoveryPathOffset && message.headSha
+    ? { sha: message.headSha, branch: message.headSha }
+    : await getOrCreateBatchPromise(
     batchContext.latestCommitByRepoRef,
     getRepoRefCacheKey(canonicalRepoOwner, canonicalRepoName, defaultBranch),
     () => getLatestCommitSha(
@@ -3129,7 +3170,7 @@ async function processMessage(
     latestCommit.sha,
     message
   );
-  if (!forceReindex && await wasCandidateProcessed(env, processedCandidateKey)) {
+  if (!forceReindex && !message.discoveryPathOffset && await wasCandidateProcessed(env, processedCandidateKey)) {
     await recordPersistedUserSubmissionForSource(
       env.DB,
       message,
@@ -3176,6 +3217,7 @@ async function processMessage(
           log.log(`Queued ${queuedDiscoveredPaths} discovered nested skill paths for ${canonicalRepoOwner}/${canonicalRepoName}`);
         }
 
+        if (message.discoveryPathOffset) { shouldMarkProcessed = true; return; }
         if (!discoveredRepositorySkillPaths.includes('')) {
           if (discoveredRepositorySkillPaths.length === 0) {
             log.log(`No SKILL.md found anywhere in repository: ${canonicalRepoOwner}/${canonicalRepoName}`);
@@ -3187,6 +3229,7 @@ async function processMessage(
         }
       } catch (scanError) {
         log.warn(`Failed to scan repository skill paths for ${canonicalRepoOwner}/${canonicalRepoName}`, scanError);
+        throw scanError;
       }
     }
 
@@ -3647,6 +3690,8 @@ async function processMessage(
           skillId = updatedId;
           skillSlug = createResult.existingSnapshot.slug;
         } else {
+          const source = message.discoverySource ?? 'user-submit';
+          batchContext.newSkillsBySource.set(source, (batchContext.newSkillsBySource.get(source) ?? 0) + 1);
           await invalidatePublicDiscoveryCaches(`github publish ${canonicalRepoOwner}/${canonicalRepoName}${skillPath ? `/${skillPath}` : ''}`);
         }
 
@@ -3871,6 +3916,7 @@ export default {
     );
     const seenInBatch = new Map<string, { queuedAsPending: boolean }>();
     const messagesToProcess: Message<IndexingMessage>[] = [];
+    const duplicateCompletions = new Map<string, number>();
 
     for (const message of batch.messages) {
       const dedupKey = getMessageDedupKey(message.body);
@@ -3878,6 +3924,7 @@ export default {
 
       if (!shouldProcessDuplicateBatchMessage(message.body, seenState)) {
         log.log(`Skipping duplicate message in batch: ${dedupKey}`);
+        if (message.body.discoverySource) duplicateCompletions.set(message.body.discoverySource, (duplicateCompletions.get(message.body.discoverySource) ?? 0) + 1);
         message.ack();
         continue;
       }
@@ -3888,6 +3935,7 @@ export default {
       messagesToProcess.push(message);
     }
 
+    for (const [source, completed] of duplicateCompletions) await recordDiscoveryStats(env.DB, source, { completed });
     if (messagesToProcess.length === 0) {
       return;
     }
@@ -3924,6 +3972,8 @@ export default {
     const batchContext = createIndexingBatchContext();
     batchContext.waitUntil = ctx?.waitUntil?.bind(ctx);
 
+    const completedBySource = new Map<string, number>();
+    const failedBySource = new Map<string, number>();
     for (const message of messagesToProcess) {
       const dedupKey = getMessageDedupKey(message.body);
 
@@ -3934,15 +3984,24 @@ export default {
         log.log(`Processing message ID: ${message.id}`);
         await processMessage(message.body, runtimeEnv, batchContext);
         message.ack();
+        if (message.body.discoverySource) completedBySource.set(message.body.discoverySource, (completedBySource.get(message.body.discoverySource) ?? 0) + 1);
         log.log(`Message acknowledged: ${message.id}`);
       } catch (error) {
+        if (message.body.discoverySource) failedBySource.set(message.body.discoverySource, (failedBySource.get(message.body.discoverySource) ?? 0) + 1);
         log.error(`Error processing message ${message.id}:`, error);
-        const delaySeconds = getQueueRetryDelaySeconds(null);
+        const delaySeconds = error instanceof DiscoveryBudgetExhausted
+          ? Math.min(43200, Math.max(60, Math.ceil((86400000 - Date.now() % 86400000) / 1000)))
+          : getQueueRetryDelaySeconds(null);
         message.retry({ delaySeconds });
         log.log(`Message scheduled for retry in ${delaySeconds}s: ${message.id}`);
       }
     }
 
+    if (batchContext.newSkillsBySource.size && env.R2) await env.R2.delete(TRENDING_SNAPSHOT_KEY);
+    for (const source of new Set([...completedBySource.keys(), ...failedBySource.keys(), ...batchContext.newSkillsBySource.keys()])) {
+      await recordDiscoveryStats(env.DB, source, { completed: completedBySource.get(source), failed: failedBySource.get(source), indexed: batchContext.newSkillsBySource.get(source) });
+    }
+    log.log(JSON.stringify({ event: 'indexing_yield', indexed: Object.fromEntries(batchContext.newSkillsBySource), completed: Object.fromEntries(completedBySource), failed: Object.fromEntries(failedBySource) }));
     if (isIndexNowEnabled(env) && batchContext.indexNowUrls.size > 0) {
       scheduleIndexNowSubmission({
         env: runtimeEnv,

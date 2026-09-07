@@ -1,7 +1,7 @@
 import type { GitHubGraphQLRepoData, SkillRecord } from '../types';
 
 const SKILL_REFRESH_SELECT_COLUMNS = `
-  id, repo_owner, repo_name, stars, forks, star_snapshots, indexed_at, last_commit_at,
+  id, repo_owner, repo_name, stars, forks, star_snapshots, indexed_at, first_published_at, created_at, last_commit_at,
   tier, last_accessed_at, access_count_7d, download_count_7d, next_update_at`;
 
 export function getSkillRefreshSelectColumns(): string {

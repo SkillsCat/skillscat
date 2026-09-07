@@ -43,7 +43,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 
   if (slug === 'core') {
     return createCachedSitemapResponse({
-      cacheKey: 'sitemap:v2:core:xml',
+      cacheKey: 'sitemap:v3:core:xml',
       ttl: getSitemapHotCacheTtlSeconds(SITEMAP_CORE_CACHE_TTL, refreshMinIntervalSeconds),
       cacheControl: buildSitemapCacheControl({
         browserMaxAgeSeconds: SITEMAP_CORE_BROWSER_MAX_AGE_SECONDS,
@@ -55,6 +55,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
       }),
       debugTag: 'core',
       r2,
+      refreshStaleSnapshot: false,
       snapshotMaxAgeSeconds,
       waitUntil,
       fetcher: async () => buildUrlSetXml(await getExpandedCoreSitemapPages(db)),
@@ -69,7 +70,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
     const isHourlyRecent = kind === 'skills';
 
     return createCachedSitemapResponse({
-      cacheKey: `sitemap:v2:recent:${kind}:xml`,
+      cacheKey: `sitemap:v3:recent:${kind}:xml`,
       ttl: getSitemapHotCacheTtlSeconds(
         isHourlyRecent ? SITEMAP_RECENT_CACHE_TTL : SITEMAP_DYNAMIC_CACHE_TTL,
         refreshMinIntervalSeconds
@@ -84,6 +85,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
       }),
       debugTag: `recent-${kind}`,
       r2,
+      refreshStaleSnapshot: false,
       snapshotMaxAgeSeconds: isHourlyRecent
         ? snapshotMaxAgeSeconds
         : SITEMAP_FULL_SNAPSHOT_MAX_AGE_SECONDS,
@@ -118,7 +120,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
   const page = Number(pagePart);
 
   return createCachedSitemapResponse({
-    cacheKey: `sitemap:v2:${kind}:${page}:xml`,
+    cacheKey: `sitemap:v3:${kind}:${page}:xml`,
     ttl: getSitemapHotCacheTtlSeconds(SITEMAP_DYNAMIC_CACHE_TTL, refreshMinIntervalSeconds),
     cacheControl: buildSitemapCacheControl({
       browserMaxAgeSeconds: SITEMAP_DYNAMIC_BROWSER_MAX_AGE_SECONDS,
@@ -130,6 +132,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
     }),
     debugTag: `${kind}-${page}`,
     r2,
+    refreshStaleSnapshot: false,
     snapshotMaxAgeSeconds: SITEMAP_FULL_SNAPSHOT_MAX_AGE_SECONDS,
     waitUntil,
     fetcher: async () => {

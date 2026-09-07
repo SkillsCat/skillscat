@@ -4,9 +4,9 @@ export const HOME_CRITICAL_CACHE_KEY = 'page:home:critical:v1';
 export const HOME_RECENT_CACHE_KEY = 'page:home:recent:v1';
 export const HOME_TOP_CACHE_KEY = 'page:home:top:v1';
 export const LEGACY_HOME_CACHE_KEY = 'page:home:v1';
-export const HOME_HTML_CACHE_KEY_PREFIX = 'page:home:html:v1';
-export const DISCOVERY_HTML_CACHE_KEY_PREFIX = 'page:discovery:html:v1';
-export const SKILL_HTML_CACHE_KEY_PREFIX = 'page:skill:html:v1';
+export const HOME_HTML_CACHE_KEY_PREFIX = 'page:home:html:v2';
+export const DISCOVERY_HTML_CACHE_KEY_PREFIX = 'page:discovery:html:v2';
+export const SKILL_HTML_CACHE_KEY_PREFIX = 'page:skill:html:v2';
 export const SKILL_PUBLIC_HINT_CACHE_KEY_PREFIX = 'page:skill:public:v1';
 export const PUBLIC_SKILLS_STATS_CACHE_KEY = 'stats:public-skills:v1';
 export const AGENT_SKILLS_DISCOVERY_INDEX_CACHE_KEY = 'agent-skills:discovery-index:v1';
@@ -132,12 +132,14 @@ export const PUBLIC_DISCOVERY_PAGE_CACHE_KEYS = [
   AGENT_SKILLS_DISCOVERY_INDEX_CACHE_KEY,
   CATEGORIES_API_CACHE_KEY,
   'page:trending:v1:1',
+  'page:trending:v2:1',
   'page:recent:v1:1',
   'page:top:v1:1',
   CATEGORIES_PAGE_CACHE_KEY,
 ] as const;
 
 export const PUBLIC_DISCOVERY_PAGE_INVALIDATION_KEYS = [
+  'lists:trending:snapshot:v2',
   LEGACY_HOME_CACHE_KEY,
   ...PUBLIC_DISCOVERY_PAGE_CACHE_KEYS,
 ] as const;

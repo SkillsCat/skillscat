@@ -167,3 +167,14 @@ export async function getViewerOrgMembership(org: string, options?: GitHubClient
     graphqlFallback: 'off',
   }));
 }
+
+export async function searchRepositories(query: string, options: GitHubClientRequestOptions & { page?: number; perPage?: number } = {}): Promise<Response> {
+  const { page = 1, perPage = 100, ...rest } = options;
+  const url = new URL('https://api.github.com/search/repositories');
+  url.searchParams.set('q', query);
+  url.searchParams.set('page', String(page));
+  url.searchParams.set('per_page', String(perPage));
+  url.searchParams.set('sort', 'updated');
+  url.searchParams.set('order', 'desc');
+  return githubRequest(url.toString(), withOptions(rest, { endpointId: 'search_repositories' }));
+}

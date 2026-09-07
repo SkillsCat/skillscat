@@ -1,5 +1,8 @@
+import { readSkillLocalizations } from '$lib/server/seo/localizations';
+import { sanitizeSummary } from '$lib/seo/summary';
+import { localizeHref } from '$lib/seo/locale-path';
 import type { PageServerLoad } from './$types';
-import { redirect } from '@sveltejs/kit';
+import { redirect, isRedirect } from '@sveltejs/kit';
 import { getSkillBySlug } from '$lib/server/db/business/detail';
 import { getLightweightRecommendedSkills, getRecommendedSkills } from '$lib/server/db/business/recommend';
 import { loadSkillReadmeFromR2 } from '$lib/server/db/business/readme';
@@ -140,7 +143,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
   }
 
   if (normalizedOwner !== params.owner || normalizedName !== params.name) {
-    throw redirect(308, buildSkillPathFromOwnerAndName(normalizedOwner, normalizedName));
+    throw redirect(308, localizeHref(buildSkillPathFromOwnerAndName(normalizedOwner, normalizedName), locals.locale, true));
   }
 
   const slug = buildSkillSlug(normalizedOwner, normalizedName);
@@ -167,6 +170,16 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       return finish(createNotFoundResult());
     }
 
+    const introductions = env.DB && skill.visibility === 'public'
+      ? await readSkillLocalizations(env.DB, skill.id, skill.contentHash ?? String(skill.indexedAt)) : {};
+    const hasChineseIntroduction = Boolean(introductions['zh-CN']) && isSeoIndexableSkill(skill);
+    if (locals.locale === 'zh-CN' && !hasChineseIntroduction) {
+      throw redirect(307, buildSkillPathFromOwnerAndName(normalizedOwner, normalizedName));
+    }
+    const localizedSkill: SkillDetail = { ...skill,
+      summary: locals.locale === 'zh-CN' ? introductions['zh-CN'] : introductions.en ?? sanitizeSummary(skill.summary),
+      description: locals.locale === 'zh-CN' ? introductions['zh-CN'] ?? skill.description : introductions.en ?? skill.description,
+    };
     const shouldDeferUserState = skill.visibility === 'public';
     const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
 
@@ -186,7 +199,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
 
         // Version-keyed (updatedAt/indexedAt) so entries are immutable after a
         // skill update: colo-local Cache API in front of the R2 derived object.
-        const readmeVersion = skill.updatedAt ?? skill.indexedAt ?? 0;
+        const readmeVersion = skill.contentHash ?? skill.currentVersionId ?? skill.updatedAt ?? skill.indexedAt ?? 0;
         const { data } = await getCached(
           `readme:html:hl:${skill.id}:${readmeVersion}`,
           () => getOrRenderHighlightedReadme({
@@ -365,9 +378,9 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     const isDotFolderSkill = skill.skillPath ? /^\.[\w-]+/.test(skill.skillPath) : false;
     const hasReadme = Boolean(skill.readme) || Boolean(renderedReadme);
     // Avoid sending both raw markdown and rendered HTML in the same data payload.
-    const skillForClient: SkillDetail = hasReadme ? { ...skill, readme: null } : skill;
+    const skillForClient: SkillDetail = hasReadme ? { ...localizedSkill, readme: null } : localizedSkill;
     const install = buildSkillInstallData(skillForClient);
-    const seo = buildSkillSeoPayload(skill);
+    const seo = buildSkillSeoPayload(localizedSkill, locals.locale === 'zh-CN' ? 'zh-CN' : 'en');
 
     return finish({
       skill: skillForClient,
@@ -382,8 +395,10 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       hasReadme,
       seo,
       seoIndexable: isSeoIndexableSkill(skill),
+      hasChineseIntroduction,
     });
   } catch (error) {
+    if (isRedirect(error)) throw error;
     console.error('Error loading skill:', error);
     setHeaders({
       'X-Skillscat-Status-Override': '500',

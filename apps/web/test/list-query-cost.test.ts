@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { firstPublishedSql } from '../src/lib/server/seo/freshness';
 
 import { describe, expect, it } from 'vitest';
 
@@ -52,6 +53,8 @@ function createListDb(): DatabaseSync {
       trending_score REAL NOT NULL DEFAULT 0,
       last_commit_at INTEGER,
       updated_at INTEGER NOT NULL,
+      first_published_at INTEGER, created_at INTEGER, indexed_at INTEGER,
+      tier TEXT, origin_relation_type TEXT, readme TEXT DEFAULT 'Useful skill instructions',
       visibility TEXT NOT NULL
     );
     CREATE INDEX skills_visibility_id_idx ON skills (visibility, id);
@@ -61,6 +64,7 @@ function createListDb(): DatabaseSync {
       ON skills (trending_score DESC, id)
       WHERE visibility = 'public';
 
+    CREATE INDEX skills_public_first_published_idx ON skills ((${firstPublishedSql()}) DESC, id) WHERE visibility = 'public';
     CREATE TABLE authors (
       username TEXT PRIMARY KEY NOT NULL,
       avatar_url TEXT
@@ -86,7 +90,7 @@ function createListDb(): DatabaseSync {
       printf('skill-%02d', n),
       printf('Skill %02d', n),
       printf('skill-%02d', n),
-      'owner',
+      printf('owner-%02d', n),
       'repo',
       n,
       0,
@@ -119,9 +123,10 @@ describe('public list query cost guards', () => {
       };
     });
     const r2 = {
-      get: async (key: string) => key === 'cache/trending.json'
+      get: async (key: string) => key === 'cache/lists/trending-v2.json'
         ? {
-            text: async () => JSON.stringify({
+            json: async () => ({
+              version: 'v2',
               data: cachedSkills,
               generatedAt: Date.now(),
             }),
@@ -164,7 +169,7 @@ describe('public list query cost guards', () => {
     ]);
     const listQuery = db.queries.find((sql) => sql.includes('WITH ranked AS'));
     expect(listQuery).toContain('INDEXED BY skills_public_trending_id_idx');
-    expect(listQuery?.indexOf('LIMIT ? OFFSET ?')).toBeLessThan(listQuery?.indexOf('LEFT JOIN authors') ?? 0);
+    expect(listQuery?.indexOf('LIMIT 240')).toBeLessThan(listQuery?.indexOf('FROM candidates') ?? 0);
 
     const plan = sqlite.prepare(`
       EXPLAIN QUERY PLAN

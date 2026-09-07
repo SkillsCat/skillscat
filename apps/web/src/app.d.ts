@@ -30,6 +30,9 @@ declare global {
         GITHUB_HTML_SUBMIT_FALLBACK_ENABLED?: string;
         WORKER_SECRET?: string;
         CACHE_VERSION?: string;
+      DISCOVERY_MAX_QUEUED_PER_RUN?: string;
+      DISCOVERY_MAX_QUEUED_PER_DAY?: string;
+      DISCOVERY_MAX_PENDING?: string;
         SITEMAP_REFRESH_MIN_INTERVAL_SECONDS?: string;
         INDEXNOW_ENABLED?: string;
         INDEXNOW_KEY?: string;

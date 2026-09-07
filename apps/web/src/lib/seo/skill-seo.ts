@@ -1,3 +1,4 @@
+import { sanitizeSummary } from './summary';
 import { CATEGORIES } from '$lib/constants/categories';
 import type { Category } from '$lib/constants/categories';
 import type { SkillDetail } from '$lib/types';
@@ -69,7 +70,7 @@ function buildGroundedSeoDescription(skill: SkillDetail): string {
   // Thin or missing descriptions are padded with the AI-generated functional
   // summary so the meta description (and JSON-LD) carry more unique text —
   // thin snippets are a common "crawled, not indexed" driver on detail pages.
-  const summary = cleanSummaryText(skill.summary);
+  const summary = cleanSummaryText(sanitizeSummary(skill.summary));
   if (summary) {
     const combined = fromSkillDescription ? `${fromSkillDescription} ${summary}` : summary;
     return trimToLength(combined, MAX_SEO_DESCRIPTION_LENGTH);
@@ -130,7 +131,12 @@ export function buildSkillSeoKeywords(skill: SkillDetail): string[] {
   return keywords.slice(0, MAX_SEO_KEYWORDS);
 }
 
-export function buildSkillSeoPayload(skill: SkillDetail): SkillSeoPayload {
+export function buildSkillSeoPayload(skill: SkillDetail, locale: 'en' | 'zh-CN' = 'en'): SkillSeoPayload {
+  if (locale === 'zh-CN') return {
+    title: trimToLength(`${skill.name} | AI 智能体技能 | SkillsCat`, MAX_SEO_TITLE_LENGTH),
+    description: trimToLength(sanitizeSummary(skill.summary, 'zh-CN') ?? skill.description ?? skill.name, MAX_SEO_DESCRIPTION_LENGTH),
+    keywords: [skill.name], articleTags: [],
+  };
   const categories = getSeoRelevantCategories(skill);
   const primaryCategoryName = categories[0]?.name;
   const keywords = buildSkillSeoKeywords(skill);

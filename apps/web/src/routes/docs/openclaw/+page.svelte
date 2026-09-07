@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { useI18n } from '$lib/i18n/runtime';
+  import ChineseDocs from '$lib/components/docs/ChineseDocs.svelte';
+  const i18n = useI18n();
   import SEO from '$lib/components/common/SEO.svelte';
   import DocsProseCard from '$lib/components/docs/DocsProseCard.svelte';
   import DocsTableOfContents from '$lib/components/docs/DocsTableOfContents.svelte';
@@ -80,6 +83,9 @@
     },
   ]);
 </script>
+{#if i18n.locale() === 'zh-CN'}
+  <ChineseDocs kind="openclaw" />
+{:else}
 
 <SEO
   {title}
@@ -261,6 +267,8 @@ npx skillscat add &lt;slug&gt; --agent openclaw</code></pre>
   </div>
 </div>
 
+
+{/if}
 <style>
   .docs-page {
     padding: 1.5rem 1rem 4rem;

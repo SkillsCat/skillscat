@@ -525,7 +525,7 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
           <div class="skills-grid">
             {#each skills as skill (skill.id)}
               {@const displayDescription = cleanSkillCardDescription(skill.description)}
-              <a href={buildSkillPath(skill.slug)} class="skill-card">
+              <a href={i18n.href(buildSkillPath(skill.slug))} class="skill-card">
                 <h3>{skill.name}</h3>
                 {#if displayDescription}
                   <p>{displayDescription}</p>
@@ -571,7 +571,7 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
         {#if members.length > 0}
           <div class="members-grid">
             {#each members as member}
-              <a href={getMemberProfileHref(member)} class="member-card">
+              <a href={i18n.href(getMemberProfileHref(member))} class="member-card">
                 <Avatar
                   src={member.image}
                   alt={member.name}

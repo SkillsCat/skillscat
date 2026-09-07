@@ -134,7 +134,7 @@
       <!-- Nav Links (Desktop) -->
       <div class="nav-links">
         <a
-          href="/trending"
+          href={i18n.href('/trending')}
           class="nav-link"
           data-active={matchesPath('/trending') ? '' : undefined}
         >
@@ -148,7 +148,7 @@
         />
 
         <a
-          href="/docs"
+          href={i18n.href('/docs')}
           class="nav-link"
           data-active={matchesPath('/docs') ? '' : undefined}
         >
@@ -237,7 +237,7 @@
             </button>
           {/if}
           <a
-            href="/trending"
+            href={i18n.href('/trending')}
             class="mobile-link"
             data-active={matchesPath('/trending') ? '' : undefined}
             onclick={() => mobileMenuOpen = false}
@@ -246,7 +246,7 @@
             {messages.nav.trending}
           </a>
           <a
-            href="/categories"
+            href={i18n.href('/categories')}
             class="mobile-link"
             data-active={matchesCategoryPath() ? '' : undefined}
             onclick={() => mobileMenuOpen = false}
@@ -255,7 +255,7 @@
             {messages.nav.categories}
           </a>
           <a
-            href="/docs"
+            href={i18n.href('/docs')}
             class="mobile-link"
             data-active={matchesPath('/docs') ? '' : undefined}
             onclick={() => mobileMenuOpen = false}
@@ -269,22 +269,22 @@
         {#if currentUser}
           <div class="mobile-separator"></div>
           <div class="mobile-links">
-            <a href="/user/skills" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+            <a href={i18n.href('/user/skills')} class="mobile-link" onclick={() => mobileMenuOpen = false}>
               <HugeiconsIcon icon={CodeIcon} size={16} strokeWidth={2} />
               {messages.userMenu.mySkills}
             </a>
-            <a href="/user/messages" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+            <a href={i18n.href('/user/messages')} class="mobile-link" onclick={() => mobileMenuOpen = false}>
               <HugeiconsIcon icon={Mail01Icon} size={16} strokeWidth={2} />
               {messages.userMenu.messages}
               {#if unreadCount > 0}
                 <span class="mobile-badge">{unreadCount}</span>
               {/if}
             </a>
-            <a href="/bookmarks" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+            <a href={i18n.href('/bookmarks')} class="mobile-link" onclick={() => mobileMenuOpen = false}>
               <HugeiconsIcon icon={Bookmark02Icon} size={16} strokeWidth={2} />
               {messages.userMenu.bookmarks}
             </a>
-            <a href="/user/account" class="mobile-link" onclick={() => mobileMenuOpen = false}>
+            <a href={i18n.href('/user/account')} class="mobile-link" onclick={() => mobileMenuOpen = false}>
               <HugeiconsIcon icon={Settings01Icon} size={16} strokeWidth={2} />
               {messages.userMenu.settings}
             </a>

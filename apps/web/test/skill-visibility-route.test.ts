@@ -267,7 +267,7 @@ describe('uploaded skill visibility transitions', () => {
     expect(response.status).toBe(200);
     expect(updates).toHaveLength(1);
     expect(updates[0][0]).toBe('public');
-    expect(updates[0][1]).toBe('https://github.com/alice/demo');
+    expect(updates[0][3]).toBe('https://github.com/alice/demo');
   });
 
   it('lets an organization token publish a verified organization skill', async () => {

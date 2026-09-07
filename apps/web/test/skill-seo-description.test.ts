@@ -63,7 +63,7 @@ describe('buildSkillSeoPayload description', () => {
   });
 
   it('truncates overlong combined text to 160 chars', () => {
-    const longSummary = 'word '.repeat(80).trim();
+    const longSummary = 'word '.repeat(80).trim() + '.';
     const payload = buildSkillSeoPayload(createSkill({
       description: 'Docker compose helper.',
       summary: longSummary,

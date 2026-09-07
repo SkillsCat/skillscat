@@ -18,6 +18,7 @@
   let { children, data }: Props = $props();
   let selectedLocale = $state<LayoutData['locale'] | null>(null);
   const locale = $derived(selectedLocale ?? data.locale);
+  $effect(() => { data.locale; selectedLocale = null; });
   const { session, start: startAuthSession } = createLazyAuthSession();
   const currentUser = $derived.by(() => {
     if ($session.isPending) {

@@ -30,9 +30,10 @@
   const messages = $derived(i18n.messages());
   let displayCount = $derived(i18n.formatNumber(data.stats.totalSkills));
   const ogImageUrl = HOME_OG_IMAGE_URL;
-  const homeTitle = 'SkillsCat | AI Agent Skill Registry and CLI';
-  const homeDescription =
-    'SkillsCat is an AI agent skill registry and CLI for discovering, installing, and publishing reusable skills for OpenClaw, ClawBot, Claude Code, and local agent workflows.';
+  const homeTitle = $derived(i18n.locale() === 'zh-CN' ? 'SkillsCat | AI 智能体技能发现与安装平台' : 'SkillsCat | AI Agent Skill Registry and CLI');
+  const homeDescription = $derived(i18n.locale() === 'zh-CN'
+    ? '在 SkillsCat 发现、安装和发布 AI 智能体技能，浏览最新收录与趋势推荐，阅读技能介绍和源文件，并通过 CLI 将技能用于 OpenClaw、Claude Code 等工作流。'
+    : 'SkillsCat is an AI agent skill registry and CLI for discovering, installing, and publishing reusable skills for OpenClaw, ClawBot, Claude Code, and local agent workflows.');
   const homeStructuredData = $derived({
     '@context': 'https://schema.org',
     '@graph': [
@@ -106,7 +107,7 @@
           </span>
           {messages.home.trendingTitle}
         </h2>
-        <a href="/trending" class="home-view-all-link">
+        <a href={i18n.href('/trending')} class="home-view-all-link">
           {messages.common.viewAll}
           <span aria-hidden="true">-></span>
         </a>
@@ -138,7 +139,7 @@
             </span>
             {messages.home.recentTitle}
           </h2>
-          <a href="/recent" class="home-view-all-link">
+          <a href={i18n.href('/recent')} class="home-view-all-link">
             {messages.common.viewAll}
             <span aria-hidden="true">-></span>
           </a>
@@ -171,7 +172,7 @@
             </span>
             {messages.home.topTitle}
           </h2>
-          <a href="/top" class="home-view-all-link">
+          <a href={i18n.href('/top')} class="home-view-all-link">
             {messages.common.viewAll}
             <span aria-hidden="true">-></span>
           </a>

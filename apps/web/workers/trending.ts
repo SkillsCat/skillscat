@@ -1,3 +1,6 @@
+import { firstPublishedSql } from '../src/lib/server/seo/freshness';
+import { buildTrendingSnapshot, TRENDING_SNAPSHOT_KEY } from '../src/lib/server/ranking/trending-snapshot';
+import { invalidateCache } from '../src/lib/server/cache';
 /**
  * Trending Worker
  *
@@ -70,6 +73,7 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
 }
 
 function getListCachePaths(listName: string, cacheVersion?: string): string[] {
+  if (listName === 'recent') listName = 'recent-v2';
   const normalizedVersion = (cacheVersion || '').trim();
   const paths: string[] = [];
 
@@ -139,7 +143,12 @@ export function calculateTrendingScore(skill: {
   const downloads7d = skill.downloadCount7d ?? 0;
   const downloadBoost = Math.min(2.0, 1.0 + Math.log2(downloads7d + 1) * 0.15);
 
-  const score = baseScore * velocityMultiplier * recencyBoost * activityPenalty * downloadBoost;
+  const ageSinceDiscovery = Math.max(0, (now - skill.indexedAt) / 86400000);
+  const discoveryBoost = ageSinceDiscovery <= 14 ? 4 * (1 - ageSinceDiscovery / 14) : 0;
+  const installScore = Math.log2(Math.max(0, downloads7d) + 1) * 6;
+  const growthScore = Math.log2(dailyGrowth7d + 1) * 12;
+  const score = (baseScore * 0.2 + growthScore * velocityMultiplier + installScore)
+    * recencyBoost * activityPenalty * downloadBoost + discoveryBoost;
   return Math.round(score * 100) / 100;
 }
 
@@ -301,7 +310,7 @@ function buildSkillRefreshUpdate(
   const score = calculateTrendingScore({
     stars: repoMetrics.stars,
     starSnapshots: compressed,
-    indexedAt: skill.indexed_at,
+    indexedAt: skill.first_published_at ?? skill.created_at ?? skill.indexed_at,
     lastCommitAt: repoMetrics.lastCommitAt,
     downloadCount7d: skill.download_count_7d,
   });
@@ -828,6 +837,8 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
     const lastFlush = await stateStore.get('dl:last_flush_actions');
     const today = new Date().toISOString().slice(0, 10);
     if (lastFlush === today) return 0;
+    await env.DB.prepare('DELETE FROM discovery_daily_stats WHERE day < ?')
+      .bind(new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10)).run();
 
     const now = Date.now();
     const sevenDaysAgo = now - 7 * 86400000;
@@ -1018,27 +1029,13 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d', 'trending_score');
   const recentActivitySortSql = buildRecentActivitySortSql('last_commit_at', 'updated_at');
 
-  const trending = await env.DB.prepare(`
-    SELECT s.id, s.name, s.slug, s.description,
-           s.repo_owner as repoOwner,
-           s.repo_name as repoName,
-           s.stars, s.forks,
-           s.trending_score as trendingScore,
-           COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
-           a.avatar_url as authorAvatar
-    FROM skills s
-    LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE s.visibility = 'public'
-    ORDER BY s.trending_score DESC
-    LIMIT 100
-  `).all<SkillListItem>();
-
-  const trendingPayload = JSON.stringify({ data: trending.results, generatedAt: now });
-  await Promise.all(
-    getListCachePaths('trending', env.CACHE_VERSION).map((path) =>
-      env.R2.put(path, trendingPayload, { httpMetadata: { contentType: 'application/json' } })
-    )
-  );
+  const snapshot = await buildTrendingSnapshot(env.DB, now);
+  const previous = await env.R2.get(TRENDING_SNAPSHOT_KEY);
+  const old = previous ? await previous.json<{ data: unknown }>() : null;
+  if (JSON.stringify(old?.data) !== JSON.stringify(snapshot.data)) {
+    await env.R2.put(TRENDING_SNAPSHOT_KEY, JSON.stringify(snapshot), { httpMetadata: { contentType: 'application/json' } });
+    await invalidateCache('lists:trending:snapshot:v2');
+  }
 
   const publicStats = await loadPublicStatsLive(env.DB);
   await writeCachedPublicStats(env.R2, publicStats, env.CACHE_VERSION, now);
@@ -1081,10 +1078,7 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
     FROM skills s
     LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.visibility = 'public'
-    ORDER BY CASE
-      WHEN s.last_commit_at IS NULL THEN s.indexed_at
-      ELSE s.last_commit_at
-    END DESC
+    ORDER BY (${firstPublishedSql('s')}) DESC, s.id ASC
     LIMIT 100
   `).all<SkillListItem>();
 
@@ -1241,7 +1235,9 @@ export default {
     allUpdatedIds.push(...warmResult.updatedIds);
 
     // 4. Update cool tier skills (every 7 days, but process some each hour)
-    const coolResult = await updateSkillsByTier(env, ['cool'], Math.floor(MAX_SKILLS_PER_RUN / 4));
+    const coolResult = new Date().getUTCHours() % 6 === 0
+      ? await updateSkillsByTier(env, ['cool'], Math.floor(MAX_SKILLS_PER_RUN / 4))
+      : { count: 0, updatedIds: [], githubApiCalls: 0 };
     console.log(`Updated ${coolResult.count} cool tier skills`);
     allUpdatedIds.push(...coolResult.updatedIds);
 

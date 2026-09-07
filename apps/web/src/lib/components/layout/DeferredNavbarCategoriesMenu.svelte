@@ -118,7 +118,7 @@
           <NavbarCategoriesContentComponent />
         {:else if loadFailed}
           <div class="nav-content-fallback">
-            <NavigationMenu.Link href="/categories" class="view-all-link">
+            <NavigationMenu.Link href={i18n.href('/categories')} class="view-all-link">
               {messages.categories.viewAll}
             </NavigationMenu.Link>
           </div>

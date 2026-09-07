@@ -61,6 +61,7 @@ AI_MODEL = "deepseek/deepseek-v4-flash-0731"
 FREE_MODELS = "openrouter/free"
 CLASSIFICATION_PAID_MODEL = "deepseek/deepseek-v4-flash-0731"
 INDEXNOW_ENABLED = "0"
+# Introduction repair uses free models only; no independent paid fallback.
 SUMMARY_BACKFILL_BATCH_SIZE = "40"
 
 [env.production]
@@ -97,4 +98,5 @@ AI_MODEL = "deepseek/deepseek-v4-flash-0731"
 FREE_MODELS = "openrouter/free"
 CLASSIFICATION_PAID_MODEL = "deepseek/deepseek-v4-flash-0731"
 INDEXNOW_ENABLED = "1"
+# Introduction repair uses free models only; no independent paid fallback.
 SUMMARY_BACKFILL_BATCH_SIZE = "40"

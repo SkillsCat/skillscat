@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { categoryGuide } from '$lib/seo/category-guide';
   import SearchBox from '$lib/components/common/SearchBox.svelte';
   import SEO from '$lib/components/common/SEO.svelte';
   import Grid from '$lib/components/layout/Grid.svelte';
@@ -91,6 +92,7 @@
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
 
+  const guide = $derived(categoryGuide(data.category?.slug ?? '', i18n.locale() === 'zh-CN'));
   let searchQuery = $state('');
   const displayCategory = $derived(
     data.category ? (data.isDynamic ? data.category : localizeCategory(data.category, i18n.locale())) : null
@@ -259,9 +261,9 @@
     <!-- Breadcrumb -->
     <nav class="mb-6 text-sm">
       <ol class="flex items-center gap-2 text-fg-muted">
-        <li><a href="/" class="hover:text-primary transition-colors">{messages.categories.breadcrumbHome}</a></li>
+        <li><a href={i18n.href('/')} class="hover:text-primary transition-colors">{messages.categories.breadcrumbHome}</a></li>
         <li>/</li>
-        <li><a href="/categories" class="hover:text-primary transition-colors">{messages.categories.breadcrumbCategories}</a></li>
+        <li><a href={i18n.href('/categories')} class="hover:text-primary transition-colors">{messages.categories.breadcrumbCategories}</a></li>
         <li>/</li>
         <li class="text-fg font-medium">{displayCategory.name}</li>
       </ol>
@@ -288,6 +290,18 @@
       </div>
       <p class="category-header-description">{displayCategory.description}</p>
     </div>
+
+    {#if guide.text && (data.pagination?.currentPage ?? 1) === 1}
+      <section class="mb-8 text-sm text-fg-muted leading-relaxed">
+        <h2 class="text-base font-semibold text-fg mb-2">{i18n.locale() === 'zh-CN' ? '用途与选择建议' : 'Uses and selection guide'}</h2>
+        <p>{guide.text}</p>
+        <nav class="flex flex-wrap gap-3 mt-3" aria-label={i18n.locale() === 'zh-CN' ? '相关分类' : 'Related categories'}>
+          {#each guide.related as category}
+            <a class="text-primary hover:underline" href={i18n.href(`/category/${category.slug}`)}>{localizeCategory(category, i18n.locale()).name}</a>
+          {/each}
+        </nav>
+      </section>
+    {/if}
 
     {#if data.skills.length > 0}
       <!-- Search -->

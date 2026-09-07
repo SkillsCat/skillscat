@@ -1175,6 +1175,7 @@ describe('indexing worker negative repository path', () => {
       ackAll: vi.fn(),
       retryAll: vi.fn(),
     }, {
+      DB: { prepare: () => ({ bind: () => ({ run: async () => ({ success: true }) }) }) },
       KV: new MemoryKv(),
       GITHUB_TOKEN: 'token-a',
       STATE_DO: namespace,

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { page } from '$app/state';
+  import { isLocalizedPublicPath, localizeSeoUrl, localizeStructuredData, stripSeoLocale } from '$lib/seo/locale-path';
   import { buildOgImageUrl, HOME_OG_IMAGE_URL, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
   import { SITE_NAME, SITE_URL } from '$lib/seo/constants';
   import { getSeoLocaleMetadata } from '$lib/i18n/seo';
@@ -57,11 +59,14 @@
   const siteUrl = SITE_URL;
   const localeMeta = $derived(getSeoLocaleMetadata(i18n.locale()));
 
-  const fullUrl = $derived(
+  const rawUrl = $derived(
     url
       ? (url.startsWith('http://') || url.startsWith('https://') ? url : `${siteUrl}${url}`)
       : siteUrl
   );
+  const fullUrl = $derived(localizeSeoUrl(rawUrl, page.url.pathname.startsWith('/zh-CN') ? 'zh-CN' : 'en'));
+  const hasChinese = $derived(isLocalizedPublicPath(page.url.pathname)
+    && (!stripSeoLocale(page.url.pathname).startsWith('/skills/') || page.data.hasChineseIntroduction === true));
   const fullImage = $derived(
     image.startsWith('http://') || image.startsWith('https://') ? image : `${siteUrl}${image}`
   );
@@ -103,7 +108,7 @@
     structuredData === undefined ? (noindex ? null : defaultStructuredData) : structuredData
   );
   const safeJsonLd = $derived(
-    jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') : ''
+    jsonLd ? JSON.stringify(localizeStructuredData(jsonLd, page.url.pathname.startsWith('/zh-CN') ? 'zh-CN' : 'en', page.data.hasChineseIntroduction === true ? `https://skills.cat${stripSeoLocale(page.url.pathname)}` : undefined)).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') : ''
   );
 </script>
 
@@ -158,13 +163,18 @@
 
   <!-- Canonical URL -->
   {#if hasCanonical}
-    <link rel="canonical" href={fullUrl} />
+    <link rel="canonical" href={i18n.href(fullUrl)} />
+  {/if}
+  {#if hasCanonical && !noindex && hasChinese}
+    <link rel="alternate" hreflang="en" href={i18n.href(localizeSeoUrl(rawUrl, 'en'))} />
+    <link rel="alternate" hreflang="zh-CN" href={i18n.href(localizeSeoUrl(rawUrl, 'zh-CN'))} />
+    <link rel="alternate" hreflang="x-default" href={i18n.href(localizeSeoUrl(rawUrl, 'en'))} />
   {/if}
   {#if fullPrevUrl}
-    <link rel="prev" href={fullPrevUrl} />
+    <link rel="prev" href={i18n.href(localizeSeoUrl(fullPrevUrl, i18n.locale()))} />
   {/if}
   {#if fullNextUrl}
-    <link rel="next" href={fullNextUrl} />
+    <link rel="next" href={i18n.href(localizeSeoUrl(fullNextUrl, i18n.locale()))} />
   {/if}
 
   <!-- Structured Data -->

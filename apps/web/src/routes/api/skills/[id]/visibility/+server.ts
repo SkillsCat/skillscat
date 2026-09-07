@@ -1,3 +1,4 @@
+import { TRENDING_SNAPSHOT_KEY } from '$lib/server/ranking/trending-snapshot';
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getGitHubRateLimitKVFromEnv, getGitHubRequestAuthFromEnv } from '$lib/server/github-client/env';
@@ -268,9 +269,9 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
       }
 
       await runVisibilityUpdate(db, db.prepare(`
-        UPDATE skills SET visibility = ?, updated_at = ?, indexed_at = ? WHERE id = ?
+        UPDATE skills SET first_published_at = COALESCE(first_published_at, CASE WHEN visibility = 'public' THEN COALESCE(created_at, indexed_at) WHEN ? = 'public' THEN ? ELSE NULL END), visibility = ?, updated_at = ?, indexed_at = ? WHERE id = ?
       `)
-        .bind(visibility, now, now, skillId), skill.org_id, now, vtExtraStatements);
+        .bind(visibility, now, visibility, now, now, skillId), skill.org_id, now, vtExtraStatements);
     } else {
       if (!auth.userId) {
         throw error(400, 'A user account is required to verify this uploaded skill');
@@ -306,18 +307,18 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
       // Update with the canonical verified repository URL.
       await runVisibilityUpdate(db, db.prepare(`
         UPDATE skills
-        SET visibility = ?, verified_repo_url = ?, updated_at = ?, indexed_at = ?
+        SET first_published_at = COALESCE(first_published_at, CASE WHEN visibility = 'public' THEN COALESCE(created_at, indexed_at) WHEN ? = 'public' THEN ? ELSE NULL END), visibility = ?, verified_repo_url = ?, updated_at = ?, indexed_at = ?
         WHERE id = ?
       `)
-        .bind(visibility, verification.normalizedUrl, now, now, skillId), skill.org_id, now, vtExtraStatements);
+        .bind(visibility, now, visibility, verification.normalizedUrl, now, now, skillId), skill.org_id, now, vtExtraStatements);
     }
   } else {
     // GitHub-sourced skills and transitions away from public do not need
     // upload ownership verification.
     await runVisibilityUpdate(db, db.prepare(`
-      UPDATE skills SET visibility = ?, updated_at = ?, indexed_at = ? WHERE id = ?
+      UPDATE skills SET first_published_at = COALESCE(first_published_at, CASE WHEN visibility = 'public' THEN COALESCE(created_at, indexed_at) WHEN ? = 'public' THEN ? ELSE NULL END), visibility = ?, updated_at = ?, indexed_at = ? WHERE id = ?
     `)
-      .bind(visibility, now, becamePublic ? now : skill.indexed_at, skillId), skill.org_id, now, vtExtraStatements);
+      .bind(visibility, now, visibility, now, becamePublic ? now : skill.indexed_at, skillId), skill.org_id, now, vtExtraStatements);
   }
 
   const categoryRows = await db.prepare(`
@@ -348,6 +349,8 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
 
   try {
     await Promise.all([
+      platform?.env?.R2?.delete(TRENDING_SNAPSHOT_KEY),
+      invalidateCache('lists:trending:snapshot:v2'),
       ...Array.from(categoryCacheKeys, (cacheKey) => invalidateCache(cacheKey)),
       invalidateOpenClawSkillCaches(skillId, skill.slug, skill.org_slug, {
         owner: skill.repo_owner,
