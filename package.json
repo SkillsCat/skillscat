@@ -6,7 +6,7 @@
   "repository": "https://github.com/skillscat/skillscat",
   "license": "AGPL-3.0",
   "type": "module",
-  "packageManager": "pnpm@11.11.0",
+  "packageManager": "pnpm@12.3.4",
   "scripts": {
     "init:project": "node scripts/init.mjs",
     "init:local": "node scripts/init.mjs --local",
