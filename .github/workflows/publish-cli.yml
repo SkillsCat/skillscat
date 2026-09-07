@@ -1,0 +1,106 @@
+name: Publish CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact version already committed in apps/cli/package.json
+        required: true
+        type: string
+  push:
+    tags:
+      - 'cli/v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-cli
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'SkillsCat/skillscat' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/cli/v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out release
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Validate release version
+        id: release
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const pkg = JSON.parse(readFileSync('apps/cli/package.json', 'utf8'));
+          const requested = process.env.GITHUB_REF_TYPE === 'tag'
+            ? process.env.GITHUB_REF_NAME.replace(/^cli\/v/, '')
+            : process.env.REQUESTED_VERSION;
+          if (!/^\d+\.\d+\.\d+$/.test(requested || '') || pkg.version !== requested) {
+            throw new Error(`Requested version ${requested} does not match package version ${pkg.version}`);
+          }
+          if (pkg.repository.url !== `git+https://github.com/${process.env.GITHUB_REPOSITORY}.git`) {
+            throw new Error('Package repository must match the publishing repository');
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${pkg.version}\n`);
+          JS
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check CLI types
+        run: pnpm --filter ./apps/cli typecheck
+
+      - name: Lint CLI
+        run: pnpm exec eslint apps/cli/src apps/cli/test apps/cli/rollup.config.js
+
+      - name: Test CLI
+        run: pnpm --filter ./apps/cli exec vitest run --config vitest.unit.config.ts --maxWorkers=4
+
+      - name: Build CLI
+        run: pnpm --filter ./apps/cli build
+
+      - name: Verify package entry point
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          test "$(node apps/cli/dist/index.js --version)" = "$RELEASE_VERSION"
+          node apps/cli/dist/index.js --help
+          npm pack ./apps/cli --dry-run --json
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11.18.0
+
+      - name: Publish to npm using OIDC
+        working-directory: apps/cli
+        run: npm publish --access public --provenance
+
+      - name: Verify published version
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            echo "Checking npm version (attempt $attempt)"
+            if test "$(npm view "skillscat@$RELEASE_VERSION" version)" = "$RELEASE_VERSION"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1

@@ -4,7 +4,7 @@
   "description": "CLI for installing AI agent skills from SkillsCat registry",
   "type": "module",
   "bin": {
-    "skillscat": "./dist/index.js"
+    "skillscat": "dist/index.js"
   },
   "files": [
     "dist"
@@ -45,7 +45,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/skillscat/skillscat"
+    "url": "git+https://github.com/SkillsCat/skillscat.git"
   },
   "homepage": "https://skills.cat"
 }
