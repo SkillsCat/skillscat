@@ -94,6 +94,7 @@ import {
   buildGithubSkillR2Prefix,
 } from '../src/lib/skill-path';
 import { canonicalizeCategorySlug } from './shared/classification/categories';
+import { assessSkillQuality, type SkillQualityAssessment } from '../src/lib/server/skill/quality';
 import {
   isGitHubPublicFallbackEnabled,
   PublicGitHubRepositoryReader,
@@ -2110,6 +2111,7 @@ async function updateVisibleSkillLineageMetadata(
     currentSnapshotId: string;
     currentVersionId: string;
     origin: SkillOriginMetadata;
+    quality: SkillQualityAssessment;
   }
 ): Promise<void> {
   await db.prepare(`
@@ -2124,7 +2126,8 @@ async function updateVisibleSkillLineageMetadata(
       origin_repo_name = ?,
       origin_skill_path = ?,
       origin_commit_sha = ?,
-      origin_relation_type = ?
+      origin_relation_type = ?,
+      quality_status = ?, quality_reason = ?, quality_version = ?, quality_next_review_at = ?
     WHERE id = ?
   `)
     .bind(
@@ -2138,6 +2141,10 @@ async function updateVisibleSkillLineageMetadata(
       input.origin.originSkillPath,
       input.origin.originCommitSha,
       input.origin.originRelationType,
+      input.quality.status,
+      input.quality.reason,
+      input.quality.version,
+      input.quality.status === 'pending' ? Date.now() + 86_400_000 : 0,
       input.skillId
     )
     .run();
@@ -2735,6 +2742,7 @@ async function updateSkill(
     UPDATE skills SET
       name = ?,
       description = ?,
+      quality_status = 'pending',
       stars = ?,
       forks = ?,
       summary = CASE WHEN content_hash IS NOT ? THEN NULL ELSE summary END,
@@ -3727,6 +3735,7 @@ async function processMessage(
       currentSnapshotId: snapshot.id,
       currentVersionId: versionRecord.id,
       origin: originMetadata,
+      quality: assessSkillQuality(skillMdContent, directoryFiles.map((file) => file.path)),
     });
     await updateSkillSourceState(env.DB, {
       sourceId: source.id,

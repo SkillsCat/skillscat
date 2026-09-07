@@ -1,3 +1,4 @@
+import { filterQualityEligibleSkills } from '$lib/server/skill/quality-discovery';
 import { readSkillLocalizations } from '$lib/server/seo/localizations';
 import { sanitizeSummary } from '$lib/seo/summary';
 import { localizeHref } from '$lib/seo/locale-path';
@@ -240,6 +241,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
         async () => {
           try {
             return await readCachedRecommendSkills({
+              db: env.DB,
               skillId: skill.id,
               r2: env.R2,
               algoVersion: recommendAlgoVersion,
@@ -287,20 +289,6 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
             console.warn('Failed background refresh trigger for recommend skills:', recommendRefreshError);
           })
       );
-    }
-
-    setPublicPageCache({
-      setHeaders,
-      request,
-      isAuthenticated: shouldDeferUserState ? false : Boolean(readPrincipal),
-      sMaxAge: 300,
-      staleWhileRevalidate: 1800,
-      varyByLanguageHeader: false,
-      varyByCookie: !shouldDeferUserState,
-    });
-
-    if (shouldDeferUserState) {
-      setHeaders({ [PUBLIC_SKILL_HTML_CACHE_HEADER]: '1' });
     }
 
     // Recommendations always resolve server-side so they are part of the SSR
@@ -354,7 +342,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
         return data;
       },
       'secondary'
-    );
+    ).then((rows) => filterQualityEligibleSkills(env.DB, rows));
 
     const [recommendSkillsResult, renderedReadmeResult, isBookmarkedResult] = await Promise.allSettled([
       recommendSkillsPromise,
@@ -381,6 +369,20 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     const skillForClient: SkillDetail = hasReadme ? { ...localizedSkill, readme: null } : localizedSkill;
     const install = buildSkillInstallData(skillForClient);
     const seo = buildSkillSeoPayload(localizedSkill, locals.locale === 'zh-CN' ? 'zh-CN' : 'en');
+
+    setPublicPageCache({
+      setHeaders,
+      request,
+      isAuthenticated: shouldDeferUserState ? false : Boolean(readPrincipal),
+      sMaxAge: 300,
+      staleWhileRevalidate: 1800,
+      varyByLanguageHeader: false,
+      varyByCookie: !shouldDeferUserState,
+    });
+
+    if (shouldDeferUserState) {
+      setHeaders({ [PUBLIC_SKILL_HTML_CACHE_HEADER]: '1' });
+    }
 
     return finish({
       skill: skillForClient,

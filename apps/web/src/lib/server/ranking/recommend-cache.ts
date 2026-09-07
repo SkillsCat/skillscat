@@ -1,3 +1,4 @@
+import { filterQualityEligibleSkills } from '$lib/server/skill/quality-discovery';
 import type { D1Database } from '@cloudflare/workers-types';
 import { getCached } from '$lib/server/cache';
 import type { SkillCardData } from '$lib/types';
@@ -76,6 +77,7 @@ export async function readCachedRecommendPrecomputedPayload(input: {
 }
 
 export async function readCachedRecommendSkills(input: {
+  db: D1Database | undefined;
   skillId: string;
   r2?: R2Bucket;
   algoVersion?: string | null;
@@ -89,7 +91,7 @@ export async function readCachedRecommendSkills(input: {
   const { payload, hit, algoVersion } = await readCachedRecommendPrecomputedPayload(input);
 
   return {
-    recommendSkills: payload ? mapRecommendPayloadItems(payload.recommendSkills, input.limit) : null,
+    recommendSkills: payload ? await filterQualityEligibleSkills(input.db, mapRecommendPayloadItems(payload.recommendSkills, input.limit)) : null,
     hit,
     algoVersion,
   };

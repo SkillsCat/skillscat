@@ -350,7 +350,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request, params })
   try {
     await Promise.all([
       platform?.env?.R2?.delete(TRENDING_SNAPSHOT_KEY),
-      invalidateCache('lists:trending:snapshot:v2'),
+      invalidateCache('lists:trending:snapshot:v3'),
       ...Array.from(categoryCacheKeys, (cacheKey) => invalidateCache(cacheKey)),
       invalidateOpenClawSkillCaches(skillId, skill.slug, skill.org_slug, {
         owner: skill.repo_owner,

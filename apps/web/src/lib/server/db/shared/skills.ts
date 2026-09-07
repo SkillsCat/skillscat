@@ -32,7 +32,8 @@ export function normalizeCachedSkill(item: CachedSkillCardRaw): SkillCardData {
 
 export async function hydrateCachedSkills(
   db: D1Database,
-  skills: SkillCardData[]
+  skills: SkillCardData[],
+  requireQuality = false
 ): Promise<SkillCardData[]> {
   if (skills.length === 0) return [];
 
@@ -49,6 +50,7 @@ export async function hydrateCachedSkills(
     FROM skills s INDEXED BY skills_visibility_id_idx
     LEFT JOIN authors a ON s.repo_owner = a.username
     WHERE s.visibility = 'public'
+      ${requireQuality ? "AND s.quality_status = 'eligible'" : ''}
       AND s.id IN (${placeholders})
   `)
     .bind(...skillIds)

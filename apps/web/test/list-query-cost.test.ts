@@ -55,16 +55,17 @@ function createListDb(): DatabaseSync {
       updated_at INTEGER NOT NULL,
       first_published_at INTEGER, created_at INTEGER, indexed_at INTEGER,
       tier TEXT, origin_relation_type TEXT, readme TEXT DEFAULT 'Useful skill instructions',
+      quality_status TEXT NOT NULL DEFAULT 'eligible',
       visibility TEXT NOT NULL
     );
     CREATE INDEX skills_visibility_id_idx ON skills (visibility, id);
     CREATE INDEX skills_visibility_trending_desc_idx
       ON skills (visibility, trending_score DESC);
-    CREATE INDEX skills_public_trending_id_idx
+    CREATE INDEX skills_discovery_trending_idx
       ON skills (trending_score DESC, id)
       WHERE visibility = 'public';
 
-    CREATE INDEX skills_public_first_published_idx ON skills ((${firstPublishedSql()}) DESC, id) WHERE visibility = 'public';
+    CREATE INDEX skills_discovery_recent_idx ON skills ((${firstPublishedSql()}) DESC, id) WHERE visibility = 'public';
     CREATE TABLE authors (
       username TEXT PRIMARY KEY NOT NULL,
       avatar_url TEXT
@@ -123,10 +124,10 @@ describe('public list query cost guards', () => {
       };
     });
     const r2 = {
-      get: async (key: string) => key === 'cache/lists/trending-v2.json'
+      get: async (key: string) => key === 'cache/lists/trending-v3.json'
         ? {
             json: async () => ({
-              version: 'v2',
+              version: 'v3',
               data: cachedSkills,
               generatedAt: Date.now(),
             }),
@@ -168,7 +169,7 @@ describe('public list query cost guards', () => {
       'skill-26',
     ]);
     const listQuery = db.queries.find((sql) => sql.includes('WITH ranked AS'));
-    expect(listQuery).toContain('INDEXED BY skills_public_trending_id_idx');
+    expect(listQuery).toContain('INDEXED BY skills_discovery_trending_idx');
     expect(listQuery?.indexOf('LIMIT 240')).toBeLessThan(listQuery?.indexOf('FROM candidates') ?? 0);
 
     const plan = sqlite.prepare(`
@@ -185,7 +186,7 @@ describe('public list query cost guards', () => {
           forks,
           trending_score as trendingScore,
           COALESCE(last_commit_at, updated_at) as updatedAt
-        FROM skills INDEXED BY skills_public_trending_id_idx
+        FROM skills INDEXED BY skills_discovery_trending_idx
         WHERE visibility = 'public'
         ORDER BY trending_score DESC
         LIMIT 6 OFFSET 0
@@ -196,7 +197,7 @@ describe('public list query cost guards', () => {
         ON ranked.repoOwner = a.username
     `).all() as { detail: string }[];
 
-    expect(plan.some((row) => row.detail.includes('skills_public_trending_id_idx'))).toBe(true);
+    expect(plan.some((row) => row.detail.includes('skills_discovery_trending_idx'))).toBe(true);
     expect(plan.some((row) => row.detail.includes('authors_username_idx'))).toBe(true);
     expect(plan.some((row) => /^SCAN skills$/u.test(row.detail))).toBe(false);
     expect(plan.some((row) => row.detail.includes('TEMP B-TREE'))).toBe(false);
@@ -212,7 +213,7 @@ describe('public list query cost guards', () => {
       24
     )).resolves.toEqual({ skills: [], total: 30 });
 
-    expect(db.queries.some((sql) => sql.includes('COUNT(*) as total'))).toBe(true);
+    expect(db.queries.some((sql) => sql.includes('COUNT(*) AS total'))).toBe(true);
     expect(db.queries.some((sql) => sql.includes('WITH ranked AS'))).toBe(false);
   });
 });

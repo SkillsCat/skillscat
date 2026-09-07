@@ -1,3 +1,5 @@
+import { backfillSkillQuality } from './shared/quality-backfill';
+import { countQualityEligibleSkills, QUALITY_DISCOVERY_COUNT_KEY } from '../src/lib/server/skill/quality-discovery';
 import { firstPublishedSql } from '../src/lib/server/seo/freshness';
 import { buildTrendingSnapshot, TRENDING_SNAPSHOT_KEY } from '../src/lib/server/ranking/trending-snapshot';
 import { invalidateCache } from '../src/lib/server/cache';
@@ -73,7 +75,8 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
 }
 
 function getListCachePaths(listName: string, cacheVersion?: string): string[] {
-  if (listName === 'recent') listName = 'recent-v2';
+  if (listName === 'top') listName = 'top-quality-v1';
+  if (listName === 'recent') listName = 'recent-quality-v1';
   const normalizedVersion = (cacheVersion || '').trim();
   const paths: string[] = [];
 
@@ -1025,6 +1028,10 @@ async function flushDownloadCounts(env: TrendingEnv): Promise<number> {
 }
 
 async function regenerateListCaches(env: TrendingEnv): Promise<void> {
+  const total = await countQualityEligibleSkills(env.DB);
+  await env.R2.put(QUALITY_DISCOVERY_COUNT_KEY, JSON.stringify({ total, generatedAt: Date.now() }), {
+    httpMetadata: { contentType: 'application/json' },
+  });
   const now = Date.now();
   const topRatedSortScoreSql = buildTopRatedSortScoreSql('stars', 'download_count_90d', 'trending_score');
   const recentActivitySortSql = buildRecentActivitySortSql('last_commit_at', 'updated_at');
@@ -1034,7 +1041,7 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
   const old = previous ? await previous.json<{ data: unknown }>() : null;
   if (JSON.stringify(old?.data) !== JSON.stringify(snapshot.data)) {
     await env.R2.put(TRENDING_SNAPSHOT_KEY, JSON.stringify(snapshot), { httpMetadata: { contentType: 'application/json' } });
-    await invalidateCache('lists:trending:snapshot:v2');
+    await invalidateCache('lists:trending:snapshot:v3');
   }
 
   const publicStats = await loadPublicStatsLive(env.DB);
@@ -1048,8 +1055,8 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
              stars, forks,
              trending_score as trendingScore,
              COALESCE(last_commit_at, updated_at) as updatedAt
-      FROM skills INDEXED BY skills_top_public_rank_expr_idx
-      WHERE visibility = 'public'
+      FROM skills INDEXED BY skills_discovery_top_idx
+      WHERE visibility = 'public' AND quality_status = 'eligible'
       ORDER BY ${topRatedSortScoreSql} DESC, stars DESC,
                download_count_90d DESC, download_count_30d DESC, trending_score DESC,
                ${recentActivitySortSql} DESC
@@ -1075,9 +1082,9 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
            s.trending_score as trendingScore,
            COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
            a.avatar_url as authorAvatar
-    FROM skills s
+    FROM skills s INDEXED BY skills_discovery_recent_idx
     LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE s.visibility = 'public'
+    WHERE s.visibility = 'public' AND s.quality_status = 'eligible'
     ORDER BY (${firstPublishedSql('s')}) DESC, s.id ASC
     LIMIT 100
   `).all<SkillListItem>();
@@ -1265,8 +1272,11 @@ export default {
       console.log(`Flushed download counts for ${downloadsFlushed} skills`);
     }
 
+    // Reuse the existing hourly cron; the repair has fixed I/O limits.
+    const qualityUpdates = await backfillSkillQuality(env);
+
     // 7. Regenerate list caches
-    if (shouldRegenerateTrendingListCaches({
+    if (qualityUpdates > 0 || shouldRegenerateTrendingListCaches({
       markedUpdates: markedResult.count,
       hotUpdates: hotResult.count,
       warmUpdates: warmResult.count,

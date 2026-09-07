@@ -139,6 +139,10 @@ export const skills = sqliteTable('skills', {
   orgId: text('org_id').references(() => organizations.id, { onDelete: 'set null' }),
   sourceType: text('source_type').notNull().default('github'), // 'github', 'upload'
   contentHash: text('content_hash'), // SHA-256 hash for duplicate detection
+  qualityStatus: text('quality_status').notNull().default('pending'),
+  qualityReason: text('quality_reason'),
+  qualityVersion: integer('quality_version').notNull().default(0),
+  qualityNextReviewAt: integer('quality_next_review_at').notNull().default(0),
   sourceId: text('source_id'),
   currentSnapshotId: text('current_snapshot_id'),
   currentVersionId: text('current_version_id'),
@@ -168,6 +172,17 @@ export const skills = sqliteTable('skills', {
   index('skills_trending_idx').on(table.trendingScore),
   index('skills_stars_idx').on(table.stars),
   index('skills_indexed_idx').on(table.indexedAt),
+  index('skills_quality_review_idx').on(table.qualityStatus, table.qualityNextReviewAt, table.id)
+    .where(sql`${table.visibility} = 'public'`),
+  index('skills_discovery_recent_idx').on(sql.raw(`${firstPublishedSql()} DESC`), table.id)
+    .where(sql`${table.visibility} = 'public' AND ${table.qualityStatus} = 'eligible'`),
+  index('skills_discovery_trending_idx').on(sql.raw('trending_score DESC'), table.id)
+    .where(sql`${table.visibility} = 'public' AND ${table.qualityStatus} = 'eligible'`),
+  index('skills_discovery_top_idx').on(
+    sql.raw(`${TOP_RATED_SORT_SCORE_SQL} DESC`), sql.raw('stars DESC'),
+    sql.raw('download_count_90d DESC'), sql.raw('download_count_30d DESC'),
+    sql.raw('trending_score DESC'), sql.raw(`${TOP_RATED_RECENT_ACTIVITY_SQL} DESC`)
+  ).where(sql`${table.visibility} = 'public' AND ${table.qualityStatus} = 'eligible'`),
   index('skills_public_first_published_idx').on(sql.raw(`${firstPublishedSql()} DESC`), table.id).where(sql`${table.visibility} = 'public'`),
   index('skills_public_seo_freshness_idx').on(sql.raw(`${seoFreshnessSql()} DESC`), table.slug).where(sql`${table.visibility} = 'public'`),
   index('skills_public_content_updated_idx').on(table.contentUpdatedAt, table.slug).where(sql`${table.visibility} = 'public'`),

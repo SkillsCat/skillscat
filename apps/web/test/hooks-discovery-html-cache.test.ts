@@ -105,7 +105,7 @@ beforeEach(() => {
 describe('discovery HTML cache', () => {
   it('serves cached discovery HTML without running load or auth', async () => {
     mocks.peekCachedText.mockImplementation(async (key: string) =>
-      key === 'page:discovery:html:v2:trending:en' ? '<html>cached trending</html>' : null
+      key === 'page:discovery:html:v3:trending:en' ? '<html>cached trending</html>' : null
     );
     const { handle } = await import('../src/hooks.server');
     const { waitUntil } = createWaitUntil();
@@ -152,7 +152,7 @@ describe('discovery HTML cache', () => {
     expect(response.headers.get('set-cookie')).toBeNull();
     expect(waitUntil).toHaveBeenCalled();
     expect(mocks.putCachedText).toHaveBeenCalledWith(
-      'page:discovery:html:v2:trending:en',
+      'page:discovery:html:v3:trending:en',
       '<html>fresh discovery</html>',
       300,
       expect.objectContaining({ contentType: 'text/html; charset=utf-8' })
@@ -179,7 +179,7 @@ describe('discovery HTML cache', () => {
     expect(response.headers.get('Link')).toContain('rel="service-doc"');
     expect(response.headers.get('Link')).toContain('rel="describedby"');
     expect(mocks.putCachedText).toHaveBeenCalledWith(
-      'page:home:html:v2:en',
+      'page:home:html:v3:en',
       '<html>fresh home</html>',
       60,
       expect.objectContaining({ contentType: 'text/html; charset=utf-8' })
@@ -191,7 +191,7 @@ describe('discovery HTML cache', () => {
 
   it('isolates cached HTML per locale', async () => {
     mocks.peekCachedText.mockImplementation(async (key: string) =>
-      key === 'page:discovery:html:v2:trending:zh-CN' ? '<html>缓存的发现页</html>' : null
+      key === 'page:discovery:html:v3:trending:zh-CN' ? '<html>缓存的发现页</html>' : null
     );
     const { handle } = await import('../src/hooks.server');
     const { waitUntil } = createWaitUntil();
@@ -212,7 +212,7 @@ describe('discovery HTML cache', () => {
     expect(response.headers.get('Content-Language')).toBe('zh-CN');
     expect(response.headers.get('X-Cache')).toBe('HIT');
     expect(mocks.peekCachedText).toHaveBeenCalledWith(
-      'page:discovery:html:v2:trending:zh-CN',
+      'page:discovery:html:v3:trending:zh-CN',
       expect.anything()
     );
     expect(resolve).not.toHaveBeenCalled();

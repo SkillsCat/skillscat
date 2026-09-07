@@ -3,10 +3,10 @@ import { getCached } from '$lib/server/cache';
 import type { DbEnv, SkillListRow } from '$lib/server/db/shared/types';
 import { diversify } from './diversity';
 
-export const TRENDING_SNAPSHOT_KEY = 'cache/lists/trending-v2.json';
+export const TRENDING_SNAPSHOT_KEY = 'cache/lists/trending-v3.json';
 export const TRENDING_HEAD_SIZE = 240;
 interface TrendingCandidate extends SkillListRow { publishedAt: number }
-export interface TrendingSnapshot { version: 'v2'; generatedAt: number; data: TrendingCandidate[] }
+export interface TrendingSnapshot { version: 'v3'; generatedAt: number; data: TrendingCandidate[] }
 
 export function rankTrendingHead(rows: TrendingCandidate[], now: number): TrendingCandidate[] {
   const sorted = [...new Map(rows.map((row) => [row.id, row])).values()]
@@ -29,11 +29,11 @@ export function rankTrendingHead(rows: TrendingCandidate[], now: number): Trendi
 export async function buildTrendingSnapshot(db: D1Database, now = Date.now()): Promise<TrendingSnapshot> {
   const rows = await db.prepare(`
     WITH ranked AS MATERIALIZED (
-      SELECT id FROM skills INDEXED BY skills_public_trending_id_idx
-      WHERE visibility = 'public' ORDER BY trending_score DESC, id LIMIT 240
+      SELECT id FROM skills INDEXED BY skills_discovery_trending_idx
+      WHERE visibility = 'public' AND quality_status = 'eligible' ORDER BY trending_score DESC, id LIMIT 240
     ), recent AS MATERIALIZED (
-      SELECT id FROM skills INDEXED BY skills_public_first_published_idx
-      WHERE visibility = 'public' AND (${firstPublishedSql()}) >= ?
+      SELECT id FROM skills INDEXED BY skills_discovery_recent_idx
+      WHERE visibility = 'public' AND quality_status = 'eligible' AND (${firstPublishedSql()}) >= ?
       ORDER BY (${firstPublishedSql()}) DESC, id LIMIT 48
     ), candidates AS (SELECT id FROM ranked UNION SELECT id FROM recent)
     SELECT s.id, s.name, s.slug, s.description, s.repo_owner AS repoOwner, s.repo_name AS repoName,
@@ -46,18 +46,18 @@ export async function buildTrendingSnapshot(db: D1Database, now = Date.now()): P
       AND COALESCE(s.origin_relation_type, '') <> 'historical_copy_of'
       AND (TRIM(COALESCE(s.description, '')) <> '' OR s.readme IS NOT NULL)
   `).bind(now - 14 * 86400000).all<TrendingCandidate>();
-  return { version: 'v2', generatedAt: now, data: rankTrendingHead(rows.results || [], now) };
+  return { version: 'v3', generatedAt: now, data: rankTrendingHead(rows.results || [], now) };
 }
 
 export async function loadTrendingSnapshot(env: DbEnv): Promise<TrendingSnapshot> {
-  return (await getCached('lists:trending:snapshot:v2', async () => {
+  return (await getCached('lists:trending:snapshot:v3', async () => {
     if (env.R2) {
       const object = await env.R2.get(TRENDING_SNAPSHOT_KEY);
       if (object) {
         const snapshot = await object.json<TrendingSnapshot>();
-        if (snapshot.version === 'v2' && Array.isArray(snapshot.data)) return snapshot;
+        if (snapshot.version === 'v3' && Array.isArray(snapshot.data)) return snapshot;
       }
     }
-    return env.DB ? buildTrendingSnapshot(env.DB) : { version: 'v2' as const, generatedAt: Date.now(), data: [] };
+    return env.DB ? buildTrendingSnapshot(env.DB) : { version: 'v3' as const, generatedAt: Date.now(), data: [] };
   }, 300)).data;
 }

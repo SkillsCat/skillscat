@@ -6,7 +6,8 @@ import { LIST_CACHE_MAX_AGE_MS } from '$lib/server/db/shared/constants';
 import { buildListCacheKeys } from '$lib/server/db/shared/cache';
 import { addCategoriesToSkills, hydrateCachedSkills, normalizeCachedSkill } from '$lib/server/db/shared/skills';
 import type { CachedSkillCardRaw, DbEnv, SkillListRow } from '$lib/server/db/shared/types';
-import { getStats } from '$lib/server/db/business/stats';
+import { getCached } from '$lib/server/cache';
+import { countQualityEligibleSkills, QUALITY_DISCOVERY_COUNT_KEY } from '$lib/server/skill/quality-discovery';
 
 interface CategoryListSnapshotRow {
   publicSkillCount: number;
@@ -145,8 +146,19 @@ function skillCardsToRows(skills: SkillCardData[]): SkillListRow[] {
 }
 
 async function getPublicSkillTotal(env: DbEnv): Promise<number> {
-  const stats = await getStats(env);
-  return stats.totalSkills;
+  if (!env.DB) return 0;
+  const db = env.DB;
+  return (await getCached('quality:discovery-total:v1', async () => {
+    try {
+      const object = await env.R2?.get(QUALITY_DISCOVERY_COUNT_KEY);
+      if (object) {
+        const cached = await object.json<{ total: number; generatedAt: number }>();
+        const age = Date.now() - cached.generatedAt;
+        if (Number.isInteger(cached.total) && cached.total >= 0 && cached.total <= 2400 && age >= 0 && age < 7_200_000) return cached.total;
+      }
+    } catch { /* A missing/broken snapshot uses a bounded covering-index count. */ }
+    return countQualityEligibleSkills(db);
+  }, 300)).data;
 }
 
 async function getCachedPage(
@@ -182,7 +194,7 @@ async function getCachedPage(
   if (!canServeFullPage) return null;
 
   const pageSkills = cached.data.slice(offset, requestedEnd);
-  const currentPublicSkills = await hydrateCachedSkills(env.DB, pageSkills);
+  const currentPublicSkills = await hydrateCachedSkills(env.DB, pageSkills, true);
   if (currentPublicSkills.length !== pageSkills.length) {
     return null;
   }
@@ -333,14 +345,14 @@ export async function getTrendingSkillsPaginated(
       SELECT id, name, slug, description, repo_owner AS repoOwner, repo_name AS repoName,
         stars, forks, trending_score AS trendingScore,
         COALESCE(last_commit_at, updated_at) AS updatedAt, NULL AS authorAvatar
-      FROM skills INDEXED BY skills_public_trending_id_idx
-      WHERE visibility = 'public' AND id NOT IN (SELECT value FROM json_each(?))
+      FROM skills INDEXED BY skills_discovery_trending_idx
+      WHERE visibility = 'public' AND quality_status = 'eligible' AND id NOT IN (SELECT value FROM json_each(?))
       ORDER BY trending_score DESC, id ASC LIMIT ? OFFSET ?
     `).bind(JSON.stringify(head.map((row) => row.id)), limit - rows.length,
       Math.max(0, offset - Math.max(head.length, limit))).all<SkillListRow>();
     rows.push(...remaining.results);
   }
-  return { skills: await hydrateCachedSkills(env.DB, await addCategoriesToSkills(env.DB, rows)), total, totalPages };
+  return { skills: await hydrateCachedSkills(env.DB, await addCategoriesToSkills(env.DB, rows), true), total, totalPages };
 }
 
 /**
@@ -357,7 +369,8 @@ export async function getRecentSkills(
   if (cached?.data) {
     const top = cached.data.slice(0, limit);
     if (!env.DB) return top;
-    return hydrateCachedSkills(env.DB, top);
+    const hydrated = await hydrateCachedSkills(env.DB, top, true);
+    if (hydrated.length === limit) return hydrated;
   }
 
   // 从 D1 读取
@@ -376,9 +389,9 @@ export async function getRecentSkills(
       s.trending_score as trendingScore,
       COALESCE(s.last_commit_at, s.updated_at) as updatedAt,
       a.avatar_url as authorAvatar
-    FROM skills s
+    FROM skills s INDEXED BY skills_discovery_recent_idx
     LEFT JOIN authors a ON s.repo_owner = a.username
-    WHERE s.visibility = 'public'
+    WHERE s.visibility = 'public' AND s.quality_status = 'eligible'
     ORDER BY (${firstPublishedSql('s')}) DESC, s.id ASC
     LIMIT ?
   `)
@@ -421,8 +434,8 @@ export async function getRecentSkillsPaginated(
         forks,
         trending_score as trendingScore,
         COALESCE(last_commit_at, updated_at) as updatedAt
-      FROM skills INDEXED BY skills_public_first_published_idx
-      WHERE visibility = 'public'
+      FROM skills INDEXED BY skills_discovery_recent_idx
+      WHERE visibility = 'public' AND quality_status = 'eligible'
       ORDER BY (${firstPublishedSql()}) DESC, id ASC
       LIMIT ? OFFSET ?
     )
@@ -468,7 +481,8 @@ export async function getTopSkills(
   if (cached?.data) {
     const top = cached.data.slice(0, limit);
     if (!env.DB) return top;
-    return hydrateCachedSkills(env.DB, top);
+    const hydrated = await hydrateCachedSkills(env.DB, top, true);
+    if (hydrated.length === limit) return hydrated;
   }
 
   // 从 D1 读取
@@ -487,8 +501,8 @@ export async function getTopSkills(
         forks,
         trending_score as trendingScore,
         COALESCE(last_commit_at, updated_at) as updatedAt
-      FROM skills INDEXED BY skills_top_public_rank_expr_idx
-      WHERE visibility = 'public'
+      FROM skills INDEXED BY skills_discovery_top_idx
+      WHERE visibility = 'public' AND quality_status = 'eligible'
       ORDER BY ${topRatedSortScoreSql} DESC, stars DESC,
                download_count_90d DESC, download_count_30d DESC, trending_score DESC,
                ${recentActivitySortSql} DESC
@@ -540,8 +554,8 @@ export async function getTopSkillsPaginated(
         forks,
         trending_score as trendingScore,
         COALESCE(last_commit_at, updated_at) as updatedAt
-      FROM skills INDEXED BY skills_top_public_rank_expr_idx
-      WHERE visibility = 'public'
+      FROM skills INDEXED BY skills_discovery_top_idx
+      WHERE visibility = 'public' AND quality_status = 'eligible'
       ORDER BY ${topRatedSortScoreSql} DESC, stars DESC,
                download_count_90d DESC, download_count_30d DESC, trending_score DESC,
                ${recentActivitySortSql} DESC

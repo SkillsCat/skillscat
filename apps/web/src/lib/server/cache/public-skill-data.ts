@@ -6,6 +6,7 @@ type WaitUntilFn = (promise: Promise<unknown>) => void;
 
 export async function resolvePublicSkillDataCache<T>(input: {
   db: D1Database | undefined;
+  requireQuality?: boolean;
   cacheKey: string;
   load: () => Promise<T>;
   ttlSeconds: number;
@@ -28,6 +29,7 @@ export async function resolvePublicSkillDataCache<T>(input: {
   // critical path. A stale entry is invalidated so the next request reloads.
   schedulePublicSkillVisibilityRecheck({
     db: input.db,
+    requireQuality: input.requireQuality,
     waitUntil: input.waitUntil,
     entries: [{
       ids: skills.map((skill) => skill.id),

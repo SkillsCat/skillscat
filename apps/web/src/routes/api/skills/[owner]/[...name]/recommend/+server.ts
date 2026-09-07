@@ -1,3 +1,4 @@
+import { filterQualityEligibleSkills } from '$lib/server/skill/quality-discovery';
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { ApiResponse, SkillCardData } from '$lib/types';
@@ -378,6 +379,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
         async () => {
           try {
             return await readCachedRecommendSkills({
+              db,
               skillId: skill.id,
               r2: env?.R2,
               algoVersion,
@@ -539,7 +541,7 @@ export const GET: RequestHandler = async ({ params, platform, request, locals, u
     return json({
       success: true,
       data: {
-        recommendSkills: recommendSkills.slice(0, RECOMMEND_RESPONSE_LIMIT),
+        recommendSkills: await filterQualityEligibleSkills(db, recommendSkills.slice(0, RECOMMEND_RESPONSE_LIMIT)),
       },
     } satisfies ApiResponse<{ recommendSkills: SkillCardData[] }>, {
       headers: responseHeaders,

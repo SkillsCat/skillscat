@@ -60,6 +60,7 @@ function createRecommendDb(): DatabaseSync {
       description TEXT,
       repo_owner TEXT NOT NULL,
       repo_name TEXT NOT NULL,
+      quality_status TEXT NOT NULL DEFAULT 'eligible',
       visibility TEXT NOT NULL,
       stars INTEGER NOT NULL DEFAULT 0,
       forks INTEGER NOT NULL DEFAULT 0,
@@ -95,12 +96,12 @@ function createRecommendDb(): DatabaseSync {
       updated_at INTEGER NOT NULL DEFAULT 0
     );
 
-    CREATE INDEX skills_public_first_published_idx ON skills (${firstPublishedSql()} DESC, id) WHERE visibility = 'public';
+    CREATE INDEX skills_discovery_recent_idx ON skills (${firstPublishedSql()} DESC, id) WHERE visibility = 'public';
     CREATE INDEX skills_visibility_id_idx
       ON skills (visibility, id);
     CREATE INDEX skills_visibility_trending_desc_idx
       ON skills (visibility, trending_score DESC);
-    CREATE INDEX skills_public_trending_id_idx
+    CREATE INDEX skills_discovery_trending_idx
       ON skills (trending_score DESC, id)
       WHERE visibility = 'public';
     CREATE INDEX skills_repo_visibility_trending_idx
@@ -361,7 +362,7 @@ describe('orderRecommendDiscoveryCategories', () => {
       // hydration queries remain.
       expect(secondDb.queries.some((sql) => sql.includes('WITH trending_pool AS MATERIALIZED'))).toBe(false);
       expect(secondDb.queries.some((sql) => sql.includes('JOIN skill_categories sc2'))).toBe(false);
-      expect(secondDb.queries.some((sql) => sql.includes('FROM skills s INDEXED BY skills_visibility_id_idx WHERE s.visibility = \'public\' AND s.id IN'))).toBe(true);
+      expect(secondDb.queries.some((sql) => sql.includes('FROM skills s INDEXED BY skills_visibility_id_idx WHERE s.visibility = \'public\' AND s.quality_status = \'eligible\' AND s.id IN'))).toBe(true);
     } finally {
       if (originalCaches === undefined) {
         delete globalRef.caches;
