@@ -8,14 +8,15 @@
   import Section from '$lib/components/layout/Section.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import Avatar from '$lib/components/common/Avatar.svelte';
+  import Pagination from '$lib/components/ui/Pagination.svelte';
   import { useI18n } from '$lib/i18n/runtime';
   import { getProfilesCopy } from '$lib/i18n/profiles';
   import { getUiCopy } from '$lib/i18n/ui';
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
   import { buildSkillPath } from '$lib/skill-path';
   import { buildOgImageUrl } from '$lib/seo/og';
-import { SITE_URL } from '$lib/seo/constants';
-import { isSeoIndexableSkill } from '$lib/seo/indexability';
+  import { MAX_INDEXABLE_COLLECTION_PAGE, SITE_URL } from '$lib/seo/constants';
+  import { isSeoIndexableSkill } from '$lib/seo/indexability';
 
   interface UserProfile {
     id: string;
@@ -50,6 +51,13 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
       profile: UserProfile | null;
       skills: Skill[];
       error?: string;
+      pagination?: {
+        currentPage: number;
+        totalPages: number;
+        totalItems: number;
+        itemsPerPage: number;
+        baseUrl: string;
+      };
     };
   }
 
@@ -107,8 +115,9 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
   const profile = $derived(data.profile);
   const skills = $derived(data.skills);
   const error = $derived(data.error);
+  const currentPage = $derived(data.pagination?.currentPage ?? 1);
   const profileDisplayName = $derived(profile?.name?.trim() || username);
-  const profileCanonicalUrl = $derived(`${SITE_URL}/u/${encodeURIComponent(username)}`);
+  const profileCanonicalUrl = $derived(`${SITE_URL}/u/${encodeURIComponent(username)}${currentPage > 1 ? `?page=${currentPage}` : ''}`);
   const topCategoryNames = $derived((() => {
     const counts = new Map<string, number>();
     for (const skill of skills) {
@@ -129,7 +138,7 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
     const bio = cleanSeoText(profile?.bio);
     const prefix = bio
       ? bio
-      : i18n.t(copy.user.seoFallbackDescription, { count: skills.length, name: profileDisplayName });
+      : i18n.t(copy.user.seoFallbackDescription, { count: profile?.skillCount ?? 0, name: profileDisplayName });
     return trimSeoText(prefix, MAX_SEO_DESCRIPTION_LENGTH);
   })());
   const ogImageUrl = $derived(
@@ -144,10 +153,10 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
       ? trimSeoText(
           i18n.t(copy.user.seoTitle, {
             name: profileDisplayName,
-            countPart: skills.length ? ` (${skills.length})` : '',
+            countPart: profile.skillCount ? ` (${profile.skillCount})` : '',
           }),
           MAX_SEO_TITLE_LENGTH
-        )
+        ) + (currentPage > 1 ? i18n.t(messages.common.pageSuffix, { page: currentPage }) : '')
       : copy.user.seoNotFoundTitle
   );
   const profileSeoKeywords = $derived((() => {
@@ -190,7 +199,7 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
       .slice(0, PROFILE_ITEMLIST_LIMIT)
       .map((skill, index) => ({
         '@type': 'ListItem',
-                position: index + 1,
+                position: (currentPage - 1) * (data.pagination?.itemsPerPage ?? 24) + index + 1,
                 url: `${SITE_URL}${buildSkillPath(skill.slug)}`,
                 name: skill.name,
       }))
@@ -229,7 +238,7 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
                 '@type': 'ItemList',
                 name: i18n.t(copy.user.itemListName, { name: profileDisplayName }),
                 url: profileCanonicalUrl,
-                numberOfItems: skills.length,
+                numberOfItems: profile.skillCount,
                 itemListElement: profileSkillItemList,
               }]
             : [])
@@ -237,7 +246,7 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
       : null
   );
   const profileShouldNoindex = $derived(
-    skills.length === 0 || !skills.some((skill) => isSeoIndexableSkill(skill))
+    currentPage > MAX_INDEXABLE_COLLECTION_PAGE || skills.length === 0 || !skills.some((skill) => isSeoIndexableSkill(skill))
   );
 
   function formatDate(timestamp: number): string {
@@ -370,6 +379,9 @@ import { isSeoIndexableSkill } from '$lib/seo/indexability';
             />
           {/each}
         </Grid>
+        {#if data.pagination}
+          <Pagination {...data.pagination} maxCrawlablePage={MAX_INDEXABLE_COLLECTION_PAGE} />
+        {/if}
       {/if}
     </Section>
   {/if}

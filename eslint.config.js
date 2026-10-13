@@ -11,6 +11,8 @@ export default [
       '**/.svelte-kit/**',
       '**/build/**',
       '**/.wrangler/**',
+      // Temporary Worker bundles and verification artifacts are generated code.
+      'tmp/**',
       // svelte-eslint-parser can't handle {@html} with <script> tags
       '**/components/common/SEO.svelte',
     ],

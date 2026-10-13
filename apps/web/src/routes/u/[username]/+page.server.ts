@@ -1,5 +1,17 @@
+import { error } from '@sveltejs/kit';
+import { PUBLIC_LIST_MAX_PAGE } from '$lib/server/db/shared/constants';
 import type { PageServerLoad } from './$types';
 import { setPublicPageCache } from '$lib/server/cache/page';
+
+const ITEMS_PER_PAGE = 24;
+
+interface ProfilePagination {
+  currentPage: number;
+  totalPages: number;
+  totalItems: number;
+  itemsPerPage: number;
+  baseUrl: string;
+}
 
 const CACHE_TTL = 30 * 60; // 30 minutes
 const CACHE_TTL_NOT_FOUND = 5 * 60; // 5 minutes for 404s
@@ -8,6 +20,7 @@ interface UserProfileLoadResult {
   profile: UserProfile | null;
   skills: Skill[];
   error?: string;
+  pagination?: ProfilePagination;
 }
 
 interface UserSkillRow {
@@ -58,7 +71,60 @@ async function hydrateCategories(
   }));
 }
 
-export const load: PageServerLoad = async ({ params, platform, setHeaders, locals, request }) => {
+async function loadProfileSkills(
+  db: D1Database,
+  identity: { ownerId: string } | { repoOwner: string },
+  page: number
+) {
+  const registered = 'ownerId' in identity;
+  // These fragments are selected by code, never supplied by the caller.
+  const index = registered ? 'skills_owner_visibility_stars_idx' : 'skills_visibility_repo_owner_idx';
+  const where = registered ? 's.owner_id = ? AND s.org_id IS NULL' : 's.repo_owner = ?';
+  const owner = registered ? identity.ownerId : identity.repoOwner;
+  const totals = await db.prepare(`
+    SELECT COUNT(*) AS skillCount, COALESCE(SUM(s.stars), 0) AS totalStars
+    FROM skills s INDEXED BY ${index}
+    WHERE ${where} AND s.visibility = 'public'
+    LIMIT 1
+  `).bind(owner).first<{ skillCount: number; totalStars: number }>();
+  const skillCount = Number(totals?.skillCount) || 0;
+  const totalPages = Math.min(PUBLIC_LIST_MAX_PAGE, Math.ceil(skillCount / ITEMS_PER_PAGE));
+  if (page > Math.max(1, totalPages)) throw error(404, 'Page not found');
+
+  // Limit IDs before loading descriptions and categories. In particular, the
+  // category bind count must not grow with the author's entire collection.
+  const idsResult = await db.prepare(`
+    SELECT s.id
+    FROM skills s INDEXED BY ${index}
+    WHERE ${where} AND s.visibility = 'public'
+    ORDER BY s.stars DESC, COALESCE(s.last_commit_at, s.updated_at) DESC, s.id ASC
+    LIMIT ? OFFSET ?
+  `).bind(owner, ITEMS_PER_PAGE, (page - 1) * ITEMS_PER_PAGE).all<{ id: string }>();
+  const ids = (idsResult.results || []).map((row) => row.id);
+  let rows: UserSkillRow[] = [];
+  if (ids.length) {
+    const placeholders = ids.map(() => '?').join(',');
+    const result = await db.prepare(`
+      SELECT s.id, s.name, s.slug, s.description, s.stars,
+        COALESCE(s.last_commit_at, s.updated_at) AS updatedAt,
+        s.tier, s.indexed_at AS indexedAt,
+        s.download_count_90d AS downloadCount90d, s.access_count_30d AS accessCount30d
+      FROM skills s
+      WHERE s.id IN (${placeholders}) AND ${where} AND s.visibility = 'public'
+      LIMIT ?
+    `).bind(...ids, owner, ITEMS_PER_PAGE).all<UserSkillRow>();
+    const byId = new Map((result.results || []).map((row) => [row.id, row]));
+    rows = ids.flatMap((id) => byId.has(id) ? [byId.get(id)!] : []);
+  }
+  return {
+    skills: await hydrateCategories(db, rows),
+    skillCount,
+    totalStars: Number(totals?.totalStars) || 0,
+    totalPages,
+  };
+}
+
+export const load: PageServerLoad = async ({ params, platform, setHeaders, locals, request, url }) => {
   setPublicPageCache({
     setHeaders,
     request,
@@ -71,6 +137,13 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
   const db = platform?.env?.DB;
   const cache = platform?.caches?.default;
   const { username } = params;
+  const rawPage = Number.parseInt(url.searchParams.get('page') || '1', 10);
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+  if (page > PUBLIC_LIST_MAX_PAGE) throw error(404, 'Page not found');
+  const pagination = (skillCount: number, totalPages: number): ProfilePagination => ({
+    currentPage: page, totalPages, totalItems: skillCount, itemsPerPage: ITEMS_PER_PAGE,
+    baseUrl: `/u/${encodeURIComponent(username)}`,
+  });
 
   if (!db || !username) {
     return {
@@ -81,7 +154,7 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
   }
 
   // Try to get from cache first
-  const cacheKey = `user-profile:v2:${username}`;
+  const cacheKey = `user-profile:v3:${encodeURIComponent(username)}:${page}`;
   if (cache) {
     try {
       const cached = await cache.match(new Request(`https://cache/${cacheKey}`));
@@ -101,7 +174,7 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
   // 1. GitHub account_id (username from GitHub OAuth)
   // 2. User name (display name)
   let user = await db.prepare(`
-    SELECT u.id, u.name, u.email, u.image, u.created_at as joinedAt,
+    SELECT u.id, u.name, u.image, u.created_at as joinedAt,
            a.account_id as githubUsername
     FROM account a
     CROSS JOIN user u
@@ -114,7 +187,6 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
     .first<{
       id: string;
       name: string;
-      email: string | null;
       image: string | null;
       joinedAt: number;
       githubUsername: string | null;
@@ -122,7 +194,7 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
 
   if (!user) {
     user = await db.prepare(`
-      SELECT u.id, u.name, u.email, u.image, u.created_at as joinedAt,
+      SELECT u.id, u.name, u.image, u.created_at as joinedAt,
              a.account_id as githubUsername
       FROM user u
       LEFT JOIN account a ON u.id = a.user_id AND a.provider_id = 'github'
@@ -133,36 +205,14 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
       .first<{
         id: string;
         name: string;
-        email: string | null;
-        image: string | null;
+          image: string | null;
         joinedAt: number;
         githubUsername: string | null;
       }>();
   }
 
   if (user) {
-    // Found registered user - get their skills by owner_id
-    const skillsResult = await db.prepare(`
-      SELECT
-        s.id,
-        s.name,
-        s.slug,
-        s.description,
-        s.stars,
-        COALESCE(s.last_commit_at, s.updated_at) as updatedAt
-        ,s.tier
-        ,s.indexed_at as indexedAt
-        ,s.download_count_90d as downloadCount90d
-        ,s.access_count_30d as accessCount30d
-      FROM skills s INDEXED BY skills_owner_visibility_stars_idx
-      WHERE s.owner_id = ? AND s.org_id IS NULL AND s.visibility = 'public'
-      ORDER BY s.stars DESC, COALESCE(s.last_commit_at, s.updated_at) DESC
-    `)
-      .bind(user.id)
-      .all<UserSkillRow>();
-
-    const skills = await hydrateCategories(db, skillsResult.results || []);
-    const totalStars = skills.reduce((sum, s) => sum + (s.stars || 0), 0);
+    const { skills, skillCount, totalStars, totalPages } = await loadProfileSkills(db, { ownerId: user.id }, page);
 
     const result = {
       profile: {
@@ -171,12 +221,13 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
         image: user.image,
         bio: null as string | null,
         githubUsername: user.githubUsername,
-        skillCount: skills.length,
+        skillCount,
         totalStars,
         joinedAt: user.joinedAt,
         isRegistered: true,
         type: 'User' as const,
       },
+      pagination: pagination(skillCount, totalPages),
       skills: skills.map(s => ({
         id: s.id,
         name: s.name,
@@ -250,28 +301,7 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
     return notFoundResult;
   }
 
-  // Get skills by repo_owner (GitHub username)
-  const skillsResult = await db.prepare(`
-    SELECT
-      s.id,
-      s.name,
-      s.slug,
-      s.description,
-      s.stars,
-      COALESCE(s.last_commit_at, s.updated_at) as updatedAt
-      ,s.tier
-      ,s.indexed_at as indexedAt
-      ,s.download_count_90d as downloadCount90d
-      ,s.access_count_30d as accessCount30d
-    FROM skills s INDEXED BY skills_visibility_repo_owner_idx
-    WHERE s.repo_owner = ? AND s.visibility = 'public'
-    ORDER BY s.stars DESC, COALESCE(s.last_commit_at, s.updated_at) DESC
-  `)
-    .bind(username)
-    .all<UserSkillRow>();
-
-  const skills = await hydrateCategories(db, skillsResult.results || []);
-  const totalStars = skills.reduce((sum, s) => sum + (s.stars || 0), 0);
+  const { skills, skillCount, totalStars, totalPages } = await loadProfileSkills(db, { repoOwner: username }, page);
 
   const result = {
     profile: {
@@ -280,12 +310,13 @@ export const load: PageServerLoad = async ({ params, platform, setHeaders, local
       image: author.avatarUrl,
       bio: author.bio,
       githubUsername: author.username,
-      skillCount: skills.length,
+      skillCount,
       totalStars,
       joinedAt: author.createdAt,
       isRegistered: false,
       type: (author.type || 'User') as 'User' | 'Organization',
     },
+    pagination: pagination(skillCount, totalPages),
     skills: skills.map(s => ({
       id: s.id,
       name: s.name,
