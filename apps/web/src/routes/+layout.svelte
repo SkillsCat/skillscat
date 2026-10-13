@@ -60,9 +60,10 @@
   let showLavaBackground = $state(false);
   let ToastComponent = $state<typeof import('$lib/components/ui/Toast.svelte').default | null>(null);
   let unreadCount = $state(0);
-  let unreadCountLastFetchedAt = $state(0);
-  let unreadCountFetchUserId = $state<string | null>(null);
-  let isLoadingUnreadCount = $state(false);
+  // Request bookkeeping is not UI state. Making it reactive causes the effect
+  // below to cancel its own fetch as soon as the loading/cache state changes.
+  let unreadCountLastFetchedAt = 0;
+  let unreadCountFetchUserId: string | null = null;
   const UNREAD_COUNT_REFRESH_INTERVAL_MS = 15_000;
 
   $effect(() => {
@@ -92,29 +93,19 @@
     void loadToastUi();
   });
 
-  async function loadUnreadCount(options?: { force?: boolean; signal?: AbortSignal }): Promise<void> {
-    const force = options?.force ?? false;
-    const userId = currentUserId;
-    if (!userId) {
-      unreadCount = 0;
-      unreadCountFetchUserId = null;
-      unreadCountLastFetchedAt = 0;
-      return;
-    }
-
+  async function loadUnreadCount(userId: string, signal: AbortSignal): Promise<void> {
     const now = Date.now();
     const sameUser = unreadCountFetchUserId === userId;
-    if (!force && sameUser && now - unreadCountLastFetchedAt < UNREAD_COUNT_REFRESH_INTERVAL_MS) {
+    if (sameUser && now - unreadCountLastFetchedAt < UNREAD_COUNT_REFRESH_INTERVAL_MS) {
       return;
     }
-    if (isLoadingUnreadCount) return;
 
-    isLoadingUnreadCount = true;
     try {
       const response = await fetch('/api/notifications/unread-count', {
-        signal: options?.signal,
+        signal,
         headers: { accept: 'application/json' }
       });
+      if (signal.aborted) return;
 
       if (response.status === 401) {
         unreadCount = 0;
@@ -128,6 +119,7 @@
       }
 
       const payload = await response.json() as { success?: boolean; count?: number };
+      if (signal.aborted) return;
       if (!payload.success) {
         throw new Error('Failed to fetch unread count');
       }
@@ -136,12 +128,8 @@
       unreadCountFetchUserId = userId;
       unreadCountLastFetchedAt = Date.now();
     } catch (err) {
-      if (options?.signal?.aborted) return;
+      if (signal.aborted) return;
       console.error('Failed to load unread notification count:', err);
-    } finally {
-      if (!options?.signal?.aborted) {
-        isLoadingUnreadCount = false;
-      }
     }
   }
 
@@ -157,7 +145,7 @@
     }
 
     const controller = new AbortController();
-    void loadUnreadCount({ signal: controller.signal });
+    void loadUnreadCount(userId, controller.signal);
     return () => controller.abort();
   });
 
