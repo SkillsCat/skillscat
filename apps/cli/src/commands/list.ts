@@ -4,7 +4,7 @@ import pc from 'picocolors';
 import { AGENTS, getAgentsByIds, getInvalidAgentIds, type Agent } from '../utils/agents/agents';
 import { getInstalledSkills } from '../utils/storage/db';
 import { parseSkillFrontmatter } from '../utils/source/source';
-import { error, warn } from '../utils/core/ui';
+import { dataTable, error, hint, warn } from '../utils/core/ui';
 
 interface ListOptions {
   global?: boolean;
@@ -91,44 +91,19 @@ export async function list(options: ListOptions): Promise<void> {
   if (skills.length === 0) {
     warn('No skills installed.');
     console.log();
-    console.log(pc.dim('Install skills with:'));
-    console.log(`  ${pc.cyan('npx skillscat add <slug>')}`);
+    hint('Install skills with:', 'npx skillscat add <slug>');
     console.log();
-    console.log(pc.dim('Or search for skills:'));
-    console.log(`  ${pc.cyan('npx skillscat search <query>')}`);
+    hint('Or search for skills:', 'npx skillscat search <query>');
     return;
   }
 
-  console.log();
-  console.log(pc.bold(`Installed skills (${skills.length}):`));
-  console.log();
-
-  // Group by agent
-  const byAgent = new Map<string, FoundSkill[]>();
-  for (const skill of skills) {
-    const key = `${skill.agent} (${skill.location})`;
-    if (!byAgent.has(key)) {
-      byAgent.set(key, []);
-    }
-    byAgent.get(key)!.push(skill);
-  }
-
-  for (const [agentKey, agentSkills] of byAgent) {
-    console.log(pc.cyan(agentKey));
-    for (const skill of agentSkills) {
-      console.log(`  ${pc.green('•')} ${pc.bold(skill.name)}`);
-      if (skill.description) {
-        console.log(`    ${pc.dim(skill.description)}`);
-      }
-    }
-    console.log();
-  }
+  dataTable(`Installed skills (${skills.length}):`, ['#', 'Skill', 'Agent', 'Location', 'Description'],
+    skills.map((skill, i) => [String(i + 1), skill.name, skill.agent, skill.location, skill.description || '(none)']));
 
   // Show tracked skills from database
   const dbSkills = getInstalledSkills();
   if (dbSkills.length > 0) {
-    console.log(pc.dim('─'.repeat(50)));
     console.log(pc.dim(`Tracked installations: ${dbSkills.length}`));
-    console.log(pc.dim('Run `npx skillscat update --check` to check for updates.'));
+    hint('Check for updates:', 'npx skillscat update --check');
   }
 }

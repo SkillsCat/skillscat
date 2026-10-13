@@ -1,7 +1,7 @@
 import pc from 'picocolors';
 import { getRegistryUrl } from '../utils/config/config';
 import { getValidToken } from '../utils/auth/auth';
-import { error, spinner, warn, info } from '../utils/core/ui';
+import { dataTable, error, hint, spinner, warn, info } from '../utils/core/ui';
 import { verboseRequest, verboseResponse, verboseConfig, isVerbose } from '../utils/core/verbose';
 import { parseNetworkError, parseHttpError } from '../utils/core/errors';
 import { fetchWithTimeout } from '../utils/core/fetch';
@@ -111,8 +111,8 @@ export async function search(query?: string, options: SearchOptions = {}): Promi
       console.log();
       console.log(pc.dim('You can still install skills directly from GitHub/GitLab:'));
       console.log();
-      console.log(`  ${pc.cyan('npx skillscat add vercel-labs/agent-skills')}`);
-      console.log(`  ${pc.cyan('npx skillscat add owner/repo')}`);
+      console.log(`  ${pc.cyan('npx skillscat add https://github.com/vercel-labs/agent-skills')}`);
+      console.log(`  ${pc.cyan('npx skillscat add https://github.com/owner/repo')}`);
       console.log();
       console.log(pc.dim('Popular skill repositories:'));
       console.log(`  ${pc.dim('•')} vercel-labs/agent-skills - React, Next.js best practices`);
@@ -133,35 +133,14 @@ export async function search(query?: string, options: SearchOptions = {}): Promi
     }
     console.log();
     console.log(pc.dim('You can also install skills directly from GitHub/GitLab:'));
-    console.log(`  ${pc.cyan('npx skillscat add owner/repo')}`);
+    console.log(`  ${pc.cyan('npx skillscat add https://github.com/owner/repo')}`);
     return;
   }
 
-  console.log();
-  console.log(pc.bold(`Found ${result.total} skill(s):`));
-  console.log();
-
-  for (const skill of result.skills) {
-    const identifier = skill.slug || `${skill.owner}/${skill.repo}`;
-    const platformIcon = skill.platform === 'github' ? '' : ' (GitLab)';
-    const privateLabel = skill.visibility === 'private' ? pc.red(' [private]') : '';
-
-    console.log(`  ${pc.bold(pc.cyan(identifier))}${pc.dim(platformIcon)}${privateLabel}`);
-    if (skill.description) {
-      console.log(`  ${pc.dim(skill.description)}`);
-    }
-    console.log(
-      `  ${pc.yellow('★')} ${skill.stars}  ${pc.dim('|')}  ` +
-      pc.dim(skill.categories.length > 0 ? skill.categories.join(', ') : 'uncategorized')
-    );
-    console.log();
-  }
-
-  console.log(pc.dim('─'.repeat(50)));
-  console.log();
-  console.log(pc.dim('Install a skill:'));
-  console.log(`  ${pc.cyan('npx skillscat add <slug>')}`);
-  console.log();
-  console.log(pc.dim('Inspect a repository first:'));
-  console.log(`  ${pc.cyan('npx skillscat info <owner>/<repo>')}`);
+  dataTable(`Found ${result.total} skill(s):`, ['#', 'Slug', 'Stars', 'Categories', 'Visibility', 'Description'],
+    result.skills.map((skill, i) => [String(i + 1), skill.slug || `${skill.owner}/${skill.repo}`, String(skill.stars),
+      skill.categories.length ? skill.categories.join(', ') : 'uncategorized',
+      `${skill.visibility || 'public'}${skill.platform === 'gitlab' ? ' (GitLab)' : ''}`, skill.description || '(none)']));
+  hint('Install a skill:', 'npx skillscat add <slug>');
+  hint('Inspect a repository first:', 'npx skillscat info <owner>/<repo>');
 }

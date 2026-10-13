@@ -3,7 +3,8 @@ import pc from 'picocolors';
 import { getBaseUrl, getValidToken } from '../utils/auth/auth';
 import { parseHttpError, parseNetworkError } from '../utils/core/errors';
 import { fetchWithTimeout } from '../utils/core/fetch';
-import { error, prompt, success } from '../utils/core/ui';
+import { details, error, info, success } from '../utils/core/ui';
+import { selectOne } from '../utils/core/prompts';
 
 interface ReportOptions {
   reason?: 'security' | 'copyright';
@@ -40,7 +41,9 @@ export async function report(slug: string, options: ReportOptions = {}): Promise
 
   let reason = normalizeReason(options.reason);
   if (!reason) {
-    const answer = await prompt('Report reason [security/copyright]: ');
+    const answer = await selectOne({ name: 'reason', message: 'Choose a report reason', choices: [
+      { name: 'Security concern', value: 'security' }, { name: 'Copyright concern', value: 'copyright' },
+    ] });
     reason = normalizeReason(answer);
   }
 
@@ -89,10 +92,9 @@ export async function report(slug: string, options: ReportOptions = {}): Promise
   success(payload.message || 'Report submitted');
 
   if (reason === 'security' && payload.report) {
-    console.log(`  Open security reports: ${pc.cyan(String(payload.report.openSecurityReportCount))}`);
-    console.log(`  Risk level: ${pc.cyan(payload.report.riskLevel)}`);
+    details('Report status', [['Open security reports', String(payload.report.openSecurityReportCount)], ['Risk level', payload.report.riskLevel]]);
     if (payload.report.premiumEscalated) {
-      console.log(`  ${pc.yellow('Premium review queued')}`);
+      info('Premium review queued');
     }
   }
 }

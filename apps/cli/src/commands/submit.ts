@@ -1,3 +1,4 @@
+import { error as showError, info as showInfo, success as showSuccess, warn as showWarning, hint } from '../utils/core/ui';
 import pc from 'picocolors';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, dirname } from 'node:path';
@@ -194,7 +195,7 @@ function findGitRoot(cwd: string): string | null {
 export async function submit(urlArg?: string, _options?: SubmitOptions): Promise<void> {
   // Step 1: Check authentication
   if (!isAuthenticated()) {
-    console.error(pc.red('Authentication required.'));
+    showError('Authentication required.');
     console.log(pc.dim('Run `skillscat login` first.'));
     process.exit(1);
   }
@@ -228,7 +229,7 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
             console.log(pc.dim('Found SKILL.md at repository root'));
           }
         } else {
-          console.error(pc.red('Found SKILL.md but could not determine repository URL.'));
+          showError('Found SKILL.md but could not determine repository URL.');
           console.log(pc.dim('Add a "repository" field to package.json or provide the URL as argument.'));
           process.exit(1);
         }
@@ -237,7 +238,7 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
         const extractedUrl = getRepoUrlFromPackageJson(cwd);
 
         if (!extractedUrl) {
-          console.error(pc.red('No SKILL.md found and no repository URL provided.'));
+          showError('No SKILL.md found and no repository URL provided.');
           console.log();
           console.log('Usage:');
           console.log(pc.dim('  skillscat submit <github-url>'));
@@ -257,7 +258,7 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
       const extractedUrl = getRepoUrlFromPackageJson(cwd);
 
       if (!extractedUrl) {
-        console.error(pc.red('No repository URL provided.'));
+        showError('No repository URL provided.');
         console.log();
         console.log('Usage:');
         console.log(pc.dim('  skillscat submit <github-url>'));
@@ -276,7 +277,7 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
 
   // Step 3: Validate and normalize URL
   if (!isValidGitHubUrl(repoUrl)) {
-    console.error(pc.red('Invalid GitHub URL.'));
+    showError('Invalid GitHub URL.');
     console.log();
     console.log('Supported formats:');
     console.log(pc.dim('  https://github.com/owner/repo'));
@@ -290,14 +291,14 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
   // Step 4: Get valid token (with auto-refresh)
   const token = await getValidToken();
   if (!token) {
-    console.error(pc.red('Session expired. Please log in again.'));
+    showError('Session expired. Please log in again.');
     console.log(pc.dim('Run `skillscat login` to authenticate.'));
     process.exit(1);
   }
 
   // Step 5: Submit to API
   const displayUrl = skillPath ? `${normalizedUrl} (path: ${skillPath})` : normalizedUrl;
-  console.log(pc.cyan(`Submitting: ${displayUrl}`));
+  showInfo(`Submitting: ${displayUrl}`);
 
   try {
     const baseUrl = getBaseUrl();
@@ -318,28 +319,28 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
 
     // Handle different response statuses
     if (response.status === 401) {
-      console.error(pc.red('Authentication failed.'));
+      showError('Authentication failed.');
       console.log(pc.dim('Your session may have expired. Run `skillscat login` to re-authenticate.'));
       process.exit(1);
     }
 
     if (response.status === 409 && result.existingSlug) {
-      console.error(pc.yellow('This skill already exists in the registry.'));
+      showWarning('This skill already exists in the registry.');
       console.log();
-      console.log(`View it at: ${pc.cyan(`${baseUrl}/skills/${result.existingSlug}`)}`);
-      console.log(`Install with: ${pc.cyan(`skillscat add ${result.existingSlug}`)}`);
+      hint('View it at:', `${baseUrl}/skills/${result.existingSlug}`);
+      hint('Install with:', `npx skillscat add ${result.existingSlug}`);
       process.exit(1);
     }
 
     if (response.status === 404) {
-      console.error(pc.red('Repository not found.'));
+      showError('Repository not found.');
       console.log(pc.dim('Please check the URL and ensure the repository is public.'));
       process.exit(1);
     }
 
     if (response.status === 400) {
       const submitError = result.error || result.message || 'Invalid request';
-      console.error(pc.red(`Submission failed: ${submitError}`));
+      showError(`Submission failed: ${submitError}`);
       if (result.code === 'no_skill_md_found') {
         console.log();
         console.log(pc.dim('Make sure your repository has a SKILL.md file in the repository root or a supported subdirectory, including dot folders.'));
@@ -357,7 +358,7 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
     }
 
     if (!response.ok || !result.success) {
-      console.error(pc.red(`Submission failed: ${result.error || result.message || 'Unknown error'}`));
+      showError(`Submission failed: ${result.error || result.message || 'Unknown error'}`);
       if (result.code === 'github_rate_limited' && result.retryAfterSeconds) {
         console.log(pc.dim(`Try again in about ${result.retryAfterSeconds} seconds.`));
       }
@@ -370,19 +371,19 @@ export async function submit(urlArg?: string, _options?: SubmitOptions): Promise
 
     console.log();
     if (existingCount > 0 && submittedCount === 0) {
-      console.log(pc.green('No new submission needed.'));
+      showSuccess('No new submission needed.');
     } else {
-      console.log(pc.green('Skill submitted successfully!'));
+      showSuccess('Skill submitted successfully!');
     }
     printSubmitMessage(result.message || 'It will appear in the catalog once processed.');
 
     if (result.existingSlug) {
       console.log();
-      console.log(`View it at: ${pc.cyan(`${baseUrl}/skills/${result.existingSlug}`)}`);
-      console.log(`Install with: ${pc.cyan(`skillscat add ${result.existingSlug}`)}`);
+      hint('View it at:', `${baseUrl}/skills/${result.existingSlug}`);
+      hint('Install with:', `npx skillscat add ${result.existingSlug}`);
     }
   } catch (error) {
-    console.error(pc.red('Failed to connect to SkillsCat.'));
+    showError('Failed to connect to SkillsCat.');
     if (error instanceof Error) {
       console.error(pc.dim(error.message));
     }

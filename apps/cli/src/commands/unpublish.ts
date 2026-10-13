@@ -1,7 +1,8 @@
+import { error as showError, info as showInfo, success as showSuccess, cancelled, details, warn } from '../utils/core/ui';
 import pc from 'picocolors';
 import { getValidToken, getBaseUrl } from '../utils/auth/auth';
 import { fetchWithTimeout } from '../utils/core/fetch';
-import { prompt, warn } from '../utils/core/ui';
+import { confirmText } from '../utils/core/prompts';
 import { encodeSlugForSkillPath, parseSlug } from '../utils/core/slug';
 
 interface UnpublishOptions {
@@ -26,7 +27,7 @@ export async function unpublishSkill(slug: string, options: UnpublishOptions): P
   // Check authentication/session validity.
   const token = await getValidToken();
   if (!token) {
-    console.error(pc.red('Authentication required or session expired.'));
+    showError('Authentication required or session expired.');
     console.log(pc.dim('Run `skillscat login` to authenticate.'));
     process.exit(1);
   }
@@ -34,29 +35,27 @@ export async function unpublishSkill(slug: string, options: UnpublishOptions): P
   try {
     parseSlug(slug);
   } catch {
-    console.error(pc.red('Invalid slug format. Expected format: owner/skill-name'));
+    showError('Invalid slug format. Expected format: owner/skill-name');
     process.exit(1);
   }
 
   if (!options.yes) {
-    console.log(`Slug: ${pc.cyan(slug)}`);
-    console.log();
+    details('Unpublish skill', [['Slug', slug]]);
 
     warn('This action cannot be undone!');
     console.log();
-    const answer = await prompt(`Unpublish ${pc.red(slug)}? Type the slug to confirm: `);
-    if (answer !== slug) {
-      console.log(pc.dim('Cancelled.'));
+    if (!await confirmText(`Unpublish ${slug}?`, slug)) {
+      cancelled();
       process.exit(0);
     }
     console.log();
   }
 
-  console.log(pc.cyan('Unpublishing skill...'));
+  showInfo('Unpublishing skill...');
 
   const latestToken = await getValidToken();
   if (!latestToken) {
-    console.error(pc.red('Session expired. Please run `skillscat login` and try again.'));
+    showError('Session expired. Please run `skillscat login` and try again.');
     process.exit(1);
   }
   const baseUrl = getBaseUrl();
@@ -77,13 +76,13 @@ export async function unpublishSkill(slug: string, options: UnpublishOptions): P
     const result = await readResponsePayload<UnpublishResponse>(response);
 
     if (!response.ok || !result.success) {
-      console.error(pc.red(`Failed to unpublish: ${result.error || result.message || 'Unknown error'}`));
+      showError(`Failed to unpublish: ${result.error || result.message || 'Unknown error'}`);
       process.exit(1);
     }
 
-    console.log(pc.green('✔ Skill unpublished successfully!'));
+    showSuccess('Skill unpublished successfully!');
   } catch (requestError) {
-    console.error(pc.red('Failed to connect to registry.'));
+    showError('Failed to connect to registry.');
     if (requestError instanceof Error) {
       console.error(pc.dim(requestError.message));
     }

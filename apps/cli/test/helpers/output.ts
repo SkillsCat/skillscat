@@ -1,4 +1,15 @@
-import { vi } from 'vitest';
+import { onTestFinished, vi } from 'vitest';
+
+export function mockInteractiveTerminal(): void {
+  for (const stream of [process.stdin, process.stdout]) {
+    const descriptor = Object.getOwnPropertyDescriptor(stream, 'isTTY');
+    Object.defineProperty(stream, 'isTTY', { configurable: true, value: true });
+    onTestFinished(() => {
+      if (descriptor) Object.defineProperty(stream, 'isTTY', descriptor);
+      else Reflect.deleteProperty(stream, 'isTTY');
+    });
+  }
+}
 
 export class ExitError extends Error {
   code: number;

@@ -1,22 +1,26 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ eof: false }));
+const state = vi.hoisted(() => ({ eof: false, cancel: false }));
 vi.mock('node:readline', () => ({
   createInterface: () => {
     const rl = new EventEmitter();
     return Object.assign(rl, {
       question: (_question: string, answer: (value: string) => void) => {
-        queueMicrotask(() => state.eof ? rl.emit('close') : answer('y'));
+        queueMicrotask(() => state.cancel ? rl.emit('SIGINT') : state.eof ? rl.emit('close') : answer('y'));
       },
       close: () => rl.emit('close'),
     });
   },
 }));
-import { prompt } from '../src/utils/core/ui';
+import { prompt, PromptCancelledError } from '../src/utils/core/ui';
 
 describe('confirmation input', () => {
-  afterEach(() => { state.eof = false; });
+  afterEach(() => { state.eof = false; state.cancel = false; });
+  it('recognizes Ctrl+C as cancellation', async () => {
+    state.cancel = true;
+    await expect(prompt('Continue?')).rejects.toBeInstanceOf(PromptCancelledError);
+  });
   it('returns an answer before closing the interface', async () => {
     await expect(prompt('Continue?')).resolves.toBe('y');
   });

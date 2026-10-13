@@ -4,7 +4,7 @@ import { getInstalledDbPath, ensureConfigDir } from '../config/config';
 import type { RepoSource } from '../source/source';
 import { getAgentById, getSkillPath } from '../agents/agents';
 
-export type UpdateStrategy = 'git' | 'registry';
+export type UpdateStrategy = 'git' | 'registry' | 'local';
 
 export interface InstalledSkill {
   name: string;
@@ -12,6 +12,7 @@ export interface InstalledSkill {
   source?: RepoSource;
   registrySlug?: string;
   updateStrategy?: UpdateStrategy;
+  localPath?: string;
   agents: string[];
   global: boolean;
   installedAt: number;
@@ -54,6 +55,7 @@ function normalizeSource(raw: unknown): RepoSource | undefined {
 }
 
 function getUpdateStrategy(skill: Pick<InstalledSkill, 'updateStrategy' | 'registrySlug'>): UpdateStrategy {
+  if (skill.updateStrategy === 'local') return 'local';
   if (skill.updateStrategy === 'registry') return 'registry';
   if (skill.updateStrategy === 'git') return 'git';
   return skill.registrySlug ? 'registry' : 'git';
@@ -76,6 +78,7 @@ function normalizeSkill(raw: unknown): InstalledSkill | null {
     name: candidate.name,
     description: typeof candidate.description === 'string' ? candidate.description : '',
     source,
+    localPath: typeof candidate.localPath === 'string' ? candidate.localPath : undefined,
     registrySlug,
     updateStrategy: getUpdateStrategy({
       updateStrategy: candidate.updateStrategy,
@@ -146,6 +149,7 @@ function sameInstallationIdentity(a: InstalledSkill, b: InstalledSkill): boolean
     a.global === b.global &&
     (a.installRoot ?? '') === (b.installRoot ?? '') &&
     a.path === b.path &&
+    a.localPath === b.localPath &&
     (a.registrySlug ?? '') === (b.registrySlug ?? '') &&
     getUpdateStrategy(a) === getUpdateStrategy(b) &&
     sameSource(a.source, b.source)
@@ -160,6 +164,7 @@ function sameLegacyProjectIdentity(existing: InstalledSkill, next: InstalledSkil
     Boolean(next.installRoot) &&
     existing.name === next.name &&
     existing.path === next.path &&
+    existing.localPath === next.localPath &&
     (existing.registrySlug ?? '') === (next.registrySlug ?? '') &&
     getUpdateStrategy(existing) === getUpdateStrategy(next) &&
     sameSource(existing.source, next.source)
@@ -385,8 +390,8 @@ export function copyInstallationAgent(
 /**
  * Get all installed skills
  */
-export function getInstalledSkills(): InstalledSkill[] {
-  const db = reconcileInstallations(loadDb());
+export function getInstalledSkills(options: { reconcile?: boolean } = {}): InstalledSkill[] {
+  const db = options.reconcile === false ? loadDb() : reconcileInstallations(loadDb());
   return db.skills;
 }
 

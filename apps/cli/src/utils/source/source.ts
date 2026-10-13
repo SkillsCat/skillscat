@@ -31,6 +31,7 @@ export interface SkillInfo {
 export interface SkillCompanionFile {
   path: string; // relative to the skill directory
   content: Uint8Array;
+  mode?: number; // Local executable/read permissions, when copying a local bundle
 }
 
 export interface SkillMetadata {

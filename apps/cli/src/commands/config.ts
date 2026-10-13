@@ -1,3 +1,4 @@
+import { error as showError, success as showSuccess, details, hint } from '../utils/core/ui';
 import pc from 'picocolors';
 import { loadSettings, getSetting, setSetting, deleteSetting, getConfigDir, normalizeRegistryUrl, type Settings } from '../utils/config/config';
 import { verboseConfig, isVerbose } from '../utils/core/verbose';
@@ -16,7 +17,7 @@ export async function configSet(key: string, value: string, options: ConfigSetOp
   }
 
   if (!VALID_KEYS.includes(key as keyof Settings)) {
-    console.error(pc.red(`Unknown config key: ${key}`));
+    showError(`Unknown config key: ${key}`);
     console.log(pc.dim(`Valid keys: ${VALID_KEYS.join(', ')}`));
     process.exit(1);
   }
@@ -24,14 +25,14 @@ export async function configSet(key: string, value: string, options: ConfigSetOp
   if (key === 'registry') {
     const normalized = normalizeRegistryUrl(value);
     if (!normalized) {
-      console.error(pc.red('Invalid registry URL. Use HTTPS, or HTTP only for localhost/loopback, with a /registry or /openclaw path.'));
+      showError('Invalid registry URL. Use HTTPS, or HTTP only for localhost/loopback, with a /registry or /openclaw path.');
       process.exit(1);
     }
     value = normalized;
   }
 
   setSetting(key as keyof Settings, value);
-  console.log(pc.green(`Set ${key} = ${value}`));
+  showSuccess(`Set ${key} = ${value}`);
 }
 
 export async function configGet(key: string, options: ConfigSetOptions = {}): Promise<void> {
@@ -40,7 +41,7 @@ export async function configGet(key: string, options: ConfigSetOptions = {}): Pr
   }
 
   if (!VALID_KEYS.includes(key as keyof Settings)) {
-    console.error(pc.red(`Unknown config key: ${key}`));
+    showError(`Unknown config key: ${key}`);
     console.log(pc.dim(`Valid keys: ${VALID_KEYS.join(', ')}`));
     process.exit(1);
   }
@@ -65,22 +66,9 @@ export async function configList(options: ConfigSetOptions = {}): Promise<void> 
 
   const settings = loadSettings();
 
-  console.log(pc.bold('Configuration:'));
-  console.log();
-  console.log(`  ${pc.cyan('Config directory:')} ${getConfigDir()}`);
-  console.log();
-  console.log(pc.bold('Settings:'));
-
-  // Show registry
-  const registry = settings.registry;
-  if (registry) {
-    console.log(`  ${pc.cyan('registry:')} ${registry}`);
-  } else {
-    console.log(`  ${pc.cyan('registry:')} ${pc.dim(`(default) ${DEFAULT_REGISTRY_URL}`)}`);
-  }
-
-  console.log();
-  console.log(pc.dim('Use `skillscat config set <key> <value>` to change settings.'));
+  details('Configuration:', [['Config directory', getConfigDir()],
+    ['registry', settings.registry || `(default) ${DEFAULT_REGISTRY_URL}`]]);
+  hint('Change a setting:', 'skillscat config set <key> <value>');
 }
 
 export async function configDelete(key: string, options: ConfigSetOptions = {}): Promise<void> {
@@ -89,11 +77,11 @@ export async function configDelete(key: string, options: ConfigSetOptions = {}):
   }
 
   if (!VALID_KEYS.includes(key as keyof Settings)) {
-    console.error(pc.red(`Unknown config key: ${key}`));
+    showError(`Unknown config key: ${key}`);
     console.log(pc.dim(`Valid keys: ${VALID_KEYS.join(', ')}`));
     process.exit(1);
   }
 
   deleteSetting(key as keyof Settings);
-  console.log(pc.green(`Deleted ${key} (reset to default)`));
+  showSuccess(`Deleted ${key} (reset to default)`);
 }

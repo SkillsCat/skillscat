@@ -20,8 +20,10 @@ import { view } from './commands/view';
 import { configSet, configGet, configList, configDelete } from './commands/config';
 import { setVerbose } from './utils/core/verbose';
 import { CLI_VERSION } from './version';
+import { cancelled, error, PromptCancelledError } from './utils/core/ui';
 
 const program = new Command();
+program.configureOutput({ outputError: (message) => error(message.replace(/^error:\s*/, '').trim()) });
 
 program
   .name('skillscat')
@@ -41,14 +43,14 @@ program
   .alias('a')
   .alias('install')
   .alias('i')
-  .description('Add a skill from a repository')
+  .description('Add a published skill, repository, or local directory (e.g., install .)')
   .option('-g, --global', 'Install to user directory instead of project')
   .option('-a, --agent <agents...>', 'Target specific agents (e.g., claude-code, cursor, agents)')
   .option('--global-agent <agents...>', 'Shortcut for --global --agent <agents...> (e.g., codex, claude, opencode)')
   .option('-r, --repo', 'Treat <source> as a repository instead of an exact published skill slug')
-  .option('-s, --skill <skills...>', 'Install specific skills by name')
+  .option('-s, --skill <skills...>', 'Install specific skills by name (or relative path for local sources)')
   .option('-l, --list', 'List available skills without installing')
-  .option('-y, --yes', 'Skip confirmation prompts')
+  .option('-y, --yes', 'Skip installation prompts (local skills are never published automatically)')
   .option('-f, --force', 'Overwrite existing skills')
   .action(add);
 
@@ -202,6 +204,7 @@ program.exitOverride((err) => {
 });
 
 program.parseAsync().catch((err: unknown) => {
-  console.error(err instanceof Error ? err.message : 'Command failed');
+  if (err instanceof PromptCancelledError) { cancelled(); return; }
+  error(err instanceof Error ? err.message : 'Command failed');
   process.exitCode = 1;
 });

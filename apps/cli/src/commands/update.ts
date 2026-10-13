@@ -1,6 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import pc from 'picocolors';
 import { AGENTS, getAgentsByIds, getInvalidAgentIds, getSkillPath, type Agent } from '../utils/agents/agents';
 import { getInstalledSkills, recordInstallation, type InstalledSkill } from '../utils/storage/db';
 import { fetchSkill as fetchGitSkill, fetchSkillCompanionFilesWithOptions } from '../utils/source/git';
@@ -9,18 +8,20 @@ import {
   fetchSkillFiles,
   RegistryRequestError,
 } from '../utils/api/registry';
-import { assertSkillFilesSafe, companionFilesAreUpToDate, syncCompanionFiles } from './add';
-import { success, error, warn, info, spinner } from '../utils/core/ui';
+import { assertSkillFilesSafe, companionFilesAreUpToDate, syncCompanionFiles, writeLocalSkillBundle } from '../utils/storage/skill-files';
+import { success, error, warn, info, spinner, hint, dataTable } from '../utils/core/ui';
 import { cacheSkill, calculateContentHash } from '../utils/storage/cache';
 import { verboseLog } from '../utils/core/verbose';
 import type { SkillCompanionFile, SkillInfo } from '../utils/source/source';
+import { loadLocalSkill } from '../utils/source/local';
 
 interface UpdateOptions {
   agent?: string[];
   check?: boolean;
 }
 
-function getUpdateStrategy(skill: InstalledSkill): 'git' | 'registry' {
+function getUpdateStrategy(skill: InstalledSkill): 'git' | 'registry' | 'local' {
+  if (skill.updateStrategy === 'local') return 'local';
   if (skill.updateStrategy === 'registry') return 'registry';
   if (skill.updateStrategy === 'git') return 'git';
   return skill.registrySlug ? 'registry' : 'git';
@@ -132,7 +133,7 @@ export async function update(skillName: string | undefined, options: UpdateOptio
 
   if (installedSkills.length === 0) {
     warn('No tracked skill installations found.');
-    console.log(pc.dim('Install skills with `npx skillscat add <source>` to track them.'));
+    hint('Install skills to track them:', 'npx skillscat add <slug>');
     return;
   }
 
@@ -145,10 +146,7 @@ export async function update(skillName: string | undefined, options: UpdateOptio
 
     if (skillsToCheck.length === 0) {
       error(`Skill "${skillName}" not found in tracked installations.`);
-      console.log(pc.dim('Available tracked skills:'));
-      for (const skill of installedSkills) {
-        console.log(pc.dim(`  - ${skill.name}`));
-      }
+      dataTable('Available tracked skills', ['Skill'], installedSkills.map((skill) => [skill.name]));
       process.exit(1);
     }
   }
@@ -201,6 +199,23 @@ export async function update(skillName: string | undefined, options: UpdateOptio
     try {
       const strategy = getUpdateStrategy(skill);
 
+      if (strategy === 'local') {
+        if (!skill.localPath) throw new Error('Missing local source directory');
+        const latest = loadLocalSkill(skill.localPath);
+        if (latest.name !== skill.name) throw new Error('Local skill name changed; reinstall it with `skillscat install <path>`');
+        const hasUpdate = hasSelectedAgentContentChanges(skill, latest.content, agents)
+          || hasCompanionFileChanges(skill, latest.content, latest.companionFiles ?? [], false, agents);
+        checkSpinner.stop(true);
+        if (hasUpdate) {
+          updates.push({ skill, newContent: latest.content, newContentHash: calculateContentHash(latest.content),
+            companionFiles: latest.companionFiles, companionFilesHydrationFailed: false, cacheSource: 'github' });
+          info(`${skill.name}: Update available from local source`);
+        } else {
+          info(`${skill.name}: Up to date`);
+        }
+        continue;
+      }
+
       if (strategy === 'registry') {
         const slug = getRegistrySlug(skill);
         if (!slug) {
@@ -238,7 +253,7 @@ export async function update(skillName: string | undefined, options: UpdateOptio
 
         if (!hasUpdate) {
           checkSpinner.stop(!companionResult.failed);
-          if (!companionResult.failed) console.log(pc.dim(`  ${skill.name}: Up to date`));
+          if (!companionResult.failed) info(`${skill.name}: Up to date`);
           continue;
         }
 
@@ -253,7 +268,7 @@ export async function update(skillName: string | undefined, options: UpdateOptio
           cacheRepo: skill.source?.repo || latestSkill.repo,
           cacheSource: 'registry',
         });
-        console.log(`  ${pc.yellow('⬆')} ${skill.name}: Update available`);
+        info(`${skill.name}: Update available`);
         continue;
       }
 
@@ -295,7 +310,7 @@ export async function update(skillName: string | undefined, options: UpdateOptio
 
       if (!hasUpdate) {
         checkSpinner.stop(!companionResult.failed);
-        if (!companionResult.failed) console.log(pc.dim(`  ${skill.name}: Up to date`));
+        if (!companionResult.failed) info(`${skill.name}: Up to date`);
         continue;
       }
 
@@ -312,10 +327,10 @@ export async function update(skillName: string | undefined, options: UpdateOptio
         cacheSource: 'github',
       });
 
-      console.log(`  ${pc.yellow('⬆')} ${skill.name}: Update available`);
+      info(`${skill.name}: Update available`);
     } catch (err) {
       checkSpinner.stop(false);
-      console.log(pc.dim(`  ${skill.name}: Failed to check (${err instanceof Error ? err.message : 'Unknown error'})`));
+      error(`${skill.name}: Failed to check (${err instanceof Error ? err.message : 'Unknown error'})`);
       checkFailures += 1;
     }
   }
@@ -338,7 +353,7 @@ export async function update(skillName: string | undefined, options: UpdateOptio
     if (checkFailures > 0) {
       warn(`${checkFailures} additional skill(s) could not be checked.`);
     }
-    console.log(pc.dim('Run `npx skillscat update` to install updates.'));
+    hint('Install available updates:', 'npx skillscat update');
     if (checkFailures > 0) {
       process.exit(1);
     }
@@ -381,9 +396,14 @@ export async function update(skillName: string | undefined, options: UpdateOptio
           name: skill.name, description: skill.description, path: skill.path,
           content: newContent, companionFiles: companionFiles ?? undefined,
         });
-        mkdirSync(dirname(skillFile), { recursive: true });
-        writeFileSync(skillFile, newContent, 'utf-8');
-        if (!companionFilesHydrationFailed && companionFiles !== null && companionFiles !== undefined) {
+        if (skill.updateStrategy === 'local') {
+          writeLocalSkillBundle(skillDir, { name: skill.name, description: skill.description, path: skill.path,
+            content: newContent, companionFiles: companionFiles ?? undefined });
+        } else {
+          mkdirSync(dirname(skillFile), { recursive: true });
+          writeFileSync(skillFile, newContent, 'utf-8');
+        }
+        if (skill.updateStrategy !== 'local' && !companionFilesHydrationFailed && companionFiles !== null && companionFiles !== undefined) {
           const updatedSkill: SkillInfo = {
             name: skill.name,
             description: skill.description,

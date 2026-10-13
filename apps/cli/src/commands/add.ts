@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import pc from 'picocolors';
 import { parseSource } from '../utils/source/source';
 import {
@@ -28,14 +28,20 @@ import {
 } from '../utils/agents/agents';
 import { recordInstallation } from '../utils/storage/db';
 import { trackInstallation } from '../utils/api/tracking';
-import { success, error, warn, info, spinner, prompt } from '../utils/core/ui';
+import { cancelled, dataTable, hint, success, error, warn, info, spinner } from '../utils/core/ui';
+import { confirm, selectOne } from '../utils/core/prompts';
 import { cacheSkill, calculateContentHash, getCachedSkill } from '../utils/storage/cache';
 import { verboseLog } from '../utils/core/verbose';
 import { isDefaultRegistry } from '../utils/config/config';
 import type { SkillRegistryItem } from '../utils/api/registry';
 import type { SkillInfo, RepoSource } from '../utils/source/source';
+import { isLocalSource } from '../utils/source/local';
+import { installLocal } from './install-local';
+import { assertSkillFilesSafe, companionFilesAreUpToDate, normalizeCompanionRelativePath, syncCompanionFiles } from '../utils/storage/skill-files';
 
-interface AddOptions {
+export { assertSkillFilesSafe, companionFilesAreUpToDate, syncCompanionFiles } from '../utils/storage/skill-files';
+
+export interface AddOptions {
   global?: boolean;
   globalAgent?: string[];
   agent?: string[];
@@ -65,14 +71,15 @@ interface ResolveInstallSkillsResult {
   selectionMode: ResolveSelectionMode;
 }
 
-const COMPANION_MANIFEST_FILE = '.skillscat-companion-files.json';
-const COMPANION_MANIFEST_VERSION = 1;
-
 function isRegistryAccessError(error: unknown): error is RegistryRequestError {
   return error instanceof RegistryRequestError && (error.status === 401 || error.status === 403);
 }
 
 export async function add(source: string, options: AddOptions): Promise<void> {
+  if (isLocalSource(source)) {
+    await installLocal(source, options);
+    return;
+  }
   const explicitRepoInstall = options.repo === true || options.list === true;
   const repoSource = parseSource(source);
   if (!repoSource) {
@@ -151,30 +158,16 @@ export async function add(source: string, options: AddOptions): Promise<void> {
   if (missingRequestedNames.length > 0) {
     error(`No skills found matching: ${missingRequestedNames.join(', ')}`);
     if (resolvedSkills.length > 0) {
-      console.log(pc.dim('Available skills:'));
-      for (const entry of resolvedSkills) {
-        console.log(pc.dim(`  - ${entry.skill.name}`));
-      }
+      showAvailableSkills(resolvedSkills);
     }
     process.exit(1);
   }
 
   // List mode - just show skills and exit
   if (options.list) {
-    console.log();
-    console.log(pc.bold(`Found ${resolvedSkills.length} skill(s):`));
-    console.log();
-
-    for (const entry of resolvedSkills) {
-      console.log(`  ${pc.cyan(entry.skill.name)}`);
-      console.log(`  ${pc.dim(entry.skill.description)}`);
-      console.log(`  ${pc.dim(`Path: ${entry.skill.path}`)}`);
-      console.log();
-    }
-
-    console.log(pc.dim('─'.repeat(50)));
-    console.log(pc.dim('Install with:'));
-    console.log(`  ${pc.cyan(formatAddCommand(source, options))}`);
+    dataTable(`Found ${resolvedSkills.length} skill(s):`, ['#', 'Skill', 'Path', 'Description'],
+      resolvedSkills.map(({ skill }, i) => [String(i + 1), skill.name, skill.path || '.', skill.description]));
+    hint('Install with:', formatAddCommand(source, options));
     return;
   }
 
@@ -185,15 +178,11 @@ export async function add(source: string, options: AddOptions): Promise<void> {
     } else {
       info(`No published skill slug matched ${pc.cyan(sourceLabel)}.`);
     }
-    console.log(pc.dim(`Found ${resolvedSkills.length} published skill(s) in repository ${sourceLabel}:`));
-    for (const entry of resolvedSkills) {
-      console.log(pc.dim(`  - ${entry.skill.name}${formatSkillPathHint(entry.skill.path)}`));
-    }
+    showAvailableSkills(resolvedSkills, `Found ${resolvedSkills.length} published skill(s) in repository ${sourceLabel}:`);
     console.log();
 
-    const confirm = await prompt(`Install all ${resolvedSkills.length} skill(s) from ${sourceLabel}? [y/N] `);
-    if (confirm.trim().toLowerCase() !== 'y') {
-      info('Installation cancelled.');
+    if (!await confirm(`Install all ${resolvedSkills.length} skill(s) from ${sourceLabel}?`)) {
+      cancelled('Installation cancelled.');
       process.exit(0);
     }
   }
@@ -208,10 +197,7 @@ export async function add(source: string, options: AddOptions): Promise<void> {
 
     if (selectedEntries.length === 0) {
       error(`No skills found matching: ${requestedSkillNames.join(', ')}`);
-      console.log(pc.dim('Available skills:'));
-      for (const entry of resolvedSkills) {
-        console.log(pc.dim(`  - ${entry.skill.name}`));
-      }
+      showAvailableSkills(resolvedSkills);
       process.exit(1);
     }
   } else if (selectionMode !== 'install-all' && !options.yes && resolvedSkills.length > 1) {
@@ -244,28 +230,14 @@ export async function add(source: string, options: AddOptions): Promise<void> {
     destinationNames.add(destination);
   }
 
-  console.log();
-  console.log(pc.bold(`Installing ${selectedEntries.length} skill(s) to ${targetAgents.length} agent(s):`));
-  console.log();
-
-  for (const entry of selectedEntries) {
-    console.log(`  ${pc.green('•')} ${pc.bold(entry.skill.name)}`);
-    console.log(`    ${pc.dim(entry.skill.description)}`);
-    console.log(`    ${pc.dim(`Source: ${entry.updateStrategy === 'registry' ? 'registry' : 'github'}`)}`);
-  }
-  console.log();
-
-  console.log(pc.dim('Target agents:'));
-  for (const agent of targetAgents) {
-    const path = getAgentBasePath(agent, isGlobal);
-    console.log(`  ${pc.cyan('•')} ${agent.name} → ${pc.dim(path)}`);
-  }
-  console.log();
+  dataTable(`Installing ${selectedEntries.length} skill(s) to ${targetAgents.length} agent(s) (${locationLabel}):`,
+    ['#', 'Skill', 'Source'], selectedEntries.map((entry, i) => [String(i + 1), entry.skill.name,
+      entry.registrySlug || `${sourceLabel}${formatSkillPathHint(entry.skill.path)}`]));
+  dataTable('Target agents:', ['Agent', 'Destination'], targetAgents.map((agent) => [agent.name, getAgentBasePath(agent, isGlobal)]));
 
   if (!options.yes) {
-    const confirm = await prompt(`Install to ${locationLabel} directory? [Y/n] `);
-    if (confirm.toLowerCase() === 'n') {
-      info('Installation cancelled.');
+    if (!await confirm(`Install to ${locationLabel} directory?`, true)) {
+      cancelled('Installation cancelled.');
       process.exit(0);
     }
   }
@@ -289,87 +261,89 @@ export async function add(source: string, options: AddOptions): Promise<void> {
     const { skill } = entry;
     const activeAgentIds = new Set<string>();
 
-    for (const agent of targetAgents) {
-      const skillDir = getSkillPath(agent, skill.name, isGlobal);
-      const skillFile = join(skillDir, 'SKILL.md');
-      try {
-        assertSkillFilesSafe(skillDir, skill);
-      } catch (err) {
-        error(`Failed to install ${skill.name} to ${agent.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        installFailures += 1;
-        continue;
-      }
-      const existedBefore = existsSync(skillFile);
-
-      if (existedBefore && !options.force) {
-        const existingContent = readFileSync(skillFile, 'utf-8');
-        if (
-          existingContent === skill.content
-          && companionFilesAreUpToDate(skillDir, skill, { skipValidation: entry.companionFilesHydrationFailed === true })
-        ) {
-          skipped++;
-          activeAgentIds.add(agent.id);
+    try {
+      for (const agent of targetAgents) {
+        const skillDir = getSkillPath(agent, skill.name, isGlobal);
+        const skillFile = join(skillDir, 'SKILL.md');
+        try {
+          assertSkillFilesSafe(skillDir, skill);
+        } catch (err) {
+          error(`Failed to install ${skill.name} to ${agent.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          installFailures += 1;
           continue;
         }
+        const existedBefore = existsSync(skillFile);
 
-        if (!options.yes) {
-          warn(`${skill.name} already exists for ${agent.name}`);
-          const overwrite = await prompt('Overwrite? [y/N] ');
-          if (overwrite.toLowerCase() !== 'y') {
+        if (existedBefore && !options.force) {
+          const existingContent = readFileSync(skillFile, 'utf-8');
+          if (
+            existingContent === skill.content
+            && companionFilesAreUpToDate(skillDir, skill, { skipValidation: entry.companionFilesHydrationFailed === true })
+          ) {
             skipped++;
+            activeAgentIds.add(agent.id);
             continue;
           }
+
+          if (!options.yes) {
+            warn(`${skill.name} already exists for ${agent.name}`);
+            if (!await confirm('Overwrite?')) {
+              skipped++;
+              continue;
+            }
+          }
+        }
+
+        try {
+          mkdirSync(dirname(skillFile), { recursive: true });
+          writeFileSync(skillFile, skill.content, 'utf-8');
+          if (!entry.companionFilesHydrationFailed) {
+            syncCompanionFiles(skillDir, skill);
+          }
+          installed++;
+          activeAgentIds.add(agent.id);
+
+          if (entry.updateStrategy === 'git') {
+            wroteGitDiscoveredSkill = true;
+          }
+
+          if (entry.cacheOwner && entry.cacheRepo) {
+            const cacheSkillPath = normalizeSkillPath(entry.cachePath ?? skill.path);
+            cacheSkill(
+              entry.cacheOwner,
+              entry.cacheRepo,
+              skill.content,
+              entry.updateStrategy === 'registry' ? 'registry' : 'github',
+              cacheSkillPath,
+              skill.sha
+            );
+            verboseLog(`Cached skill: ${skill.name}`);
+          }
+        } catch (err) {
+          error(`Failed to install ${skill.name} to ${agent.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          installFailures += 1;
         }
       }
 
-      try {
-        mkdirSync(dirname(skillFile), { recursive: true });
-        writeFileSync(skillFile, skill.content, 'utf-8');
-        if (!entry.companionFilesHydrationFailed) {
-          syncCompanionFiles(skillDir, skill);
-        }
-        installed++;
-        activeAgentIds.add(agent.id);
+    } finally {
+      if (activeAgentIds.size > 0) {
+        recordInstallation({
+          name: skill.name,
+          description: skill.description,
+          source: entry.installSource,
+          registrySlug: entry.registrySlug,
+          updateStrategy: entry.updateStrategy,
+          agents: Array.from(activeAgentIds),
+          global: isGlobal,
+          installedAt: Date.now(),
+          sha: skill.sha,
+          path: skill.path,
+          contentHash: skill.contentHash,
+          installRoot: isGlobal ? undefined : process.cwd(),
+        });
 
-        if (entry.updateStrategy === 'git') {
-          wroteGitDiscoveredSkill = true;
-        }
-
-        if (entry.cacheOwner && entry.cacheRepo) {
-          const cacheSkillPath = normalizeSkillPath(entry.cachePath ?? skill.path);
-          cacheSkill(
-            entry.cacheOwner,
-            entry.cacheRepo,
-            skill.content,
-            entry.updateStrategy === 'registry' ? 'registry' : 'github',
-            cacheSkillPath,
-            skill.sha
-          );
-          verboseLog(`Cached skill: ${skill.name}`);
-        }
-      } catch (err) {
-        error(`Failed to install ${skill.name} to ${agent.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        installFailures += 1;
+        trackInstallation(entry.trackingSlug).catch(() => {});
       }
-    }
-
-    if (activeAgentIds.size > 0) {
-      recordInstallation({
-        name: skill.name,
-        description: skill.description,
-        source: entry.installSource,
-        registrySlug: entry.registrySlug,
-        updateStrategy: entry.updateStrategy,
-        agents: Array.from(activeAgentIds),
-        global: isGlobal,
-        installedAt: Date.now(),
-        sha: skill.sha,
-        path: skill.path,
-        contentHash: skill.contentHash,
-        installRoot: isGlobal ? undefined : process.cwd(),
-      });
-
-      trackInstallation(entry.trackingSlug).catch(() => {});
     }
   }
 
@@ -399,10 +373,9 @@ export async function add(source: string, options: AddOptions): Promise<void> {
 
   if (installed > 0 || skipped > 0) {
     console.log();
-    console.log(pc.dim('Skills are now available in your coding agents.'));
-    console.log(pc.dim('Restart your agent or start a new session to use them.'));
+    info('Restart your agent or start a new session to use these skills.');
     if (usedFallbackAgent) {
-      console.log(pc.dim('Need a tool-specific copy later? Run `npx skillscat convert <agent>` to copy from .agents.'));
+      hint('Copy skills from .agents to another agent:', 'npx skillscat convert <agent>');
     }
   }
 
@@ -714,25 +687,26 @@ async function selectSingleSkillInteractive(entries: ResolvedInstallSkill[]): Pr
     process.exit(1);
   }
 
-  const inquirer = await import('inquirer');
-  const answer = await inquirer.default.prompt<{ skillKey: string }>([
-    {
-      type: 'list',
-      name: 'skillKey',
-      message: 'Multiple skills found. Select one to install:',
-      choices: entries.map((entry, index) => ({
-        name: `${entry.skill.name}  ${pc.dim(`(${entry.skill.path})`)}${entry.skill.description ? ` - ${entry.skill.description}` : ''}`,
-        value: String(index),
-      })),
-    },
-  ]);
+  const answer = await selectOne({
+    name: 'skillKey',
+    message: 'Choose a skill to install',
+    choices: entries.map((entry, index) => ({
+      name: `${index + 1}. ${entry.skill.name} (${entry.skill.path || '.'})${entry.skill.description ? ` - ${entry.skill.description}` : ''}`,
+      value: String(index),
+    })),
+  });
 
-  const selected = entries[Number.parseInt(answer.skillKey, 10)];
+  const selected = answer === undefined ? undefined : entries[Number.parseInt(answer, 10)];
   if (!selected) {
     error('No skill selected.');
     process.exit(1);
   }
   return selected;
+}
+
+function showAvailableSkills(entries: ResolvedInstallSkill[], title = 'Available skills:'): void {
+  dataTable(title, ['#', 'Skill', 'Path', 'Description'],
+    entries.map(({ skill }, i) => [String(i + 1), skill.name, skill.path || '.', skill.description]));
 }
 
 async function hydrateCompanionFilesForInstall(
@@ -805,203 +779,6 @@ async function hydrateCompanionFilesFromRegistryBundle(entry: ResolvedInstallSki
   }
 }
 
-export function companionFilesAreUpToDate(
-  skillDir: string,
-  skill: SkillInfo,
-  options?: { skipValidation?: boolean }
-): boolean {
-  if (options?.skipValidation) {
-    return true;
-  }
-
-  const expectedPaths = getExpectedCompanionPaths(skill);
-  const manifestPaths = readCompanionManifest(skillDir);
-
-  if (expectedPaths.length === 0) {
-    if (manifestPaths && manifestPaths.length > 0) {
-      return false;
-    }
-    return true;
-  }
-
-  // Force one rewrite for legacy installs without manifest so we can record managed files.
-  if (!manifestPaths) {
-    return false;
-  }
-  if (!sameStringArrays(manifestPaths, expectedPaths)) {
-    return false;
-  }
-
-  for (const file of getExpectedCompanionFiles(skill)) {
-    const destination = join(skillDir, file.path);
-    if (!existsSync(destination)) {
-      return false;
-    }
-
-    try {
-      const existing = readFileSync(destination);
-      const expected = Buffer.from(file.content);
-      if (!existing.equals(expected)) {
-        return false;
-      }
-    } catch {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-export function syncCompanionFiles(skillDir: string, skill: SkillInfo): void {
-  assertSkillFilesSafe(skillDir, skill);
-  const expectedFiles = getExpectedCompanionFiles(skill);
-  const expectedPaths = expectedFiles.map((file) => file.path);
-  const previousPaths = readCompanionManifest(skillDir) ?? [];
-
-  for (const stalePath of previousPaths) {
-    if (expectedPaths.includes(stalePath)) {
-      continue;
-    }
-    const destination = join(skillDir, stalePath);
-    try {
-      rmSync(destination, { force: true });
-      pruneEmptyParentDirs(skillDir, destination);
-    } catch {
-      // Best-effort cleanup only; write phase below still proceeds.
-    }
-  }
-
-  for (const file of expectedFiles) {
-    const destination = join(skillDir, file.path);
-    mkdirSync(dirname(destination), { recursive: true });
-    writeFileSync(destination, Buffer.from(file.content));
-  }
-
-  writeCompanionManifest(skillDir, expectedPaths);
-}
-
-function getExpectedCompanionFiles(skill: SkillInfo): Array<{ path: string; content: Uint8Array }> {
-  const files = skill.companionFiles ?? [];
-  const deduped = new Map<string, Uint8Array>();
-
-  for (const file of files) {
-    const normalized = normalizeCompanionRelativePath(file.path);
-    if (!normalized || normalized.toLowerCase() === 'skill.md') continue;
-    deduped.set(normalized, file.content);
-  }
-
-  return Array.from(deduped.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([path, content]) => ({ path, content }));
-}
-
-function getExpectedCompanionPaths(skill: SkillInfo): string[] {
-  return getExpectedCompanionFiles(skill).map((file) => file.path);
-}
-
-function readCompanionManifest(skillDir: string): string[] | null {
-  const manifestPath = join(skillDir, COMPANION_MANIFEST_FILE);
-  if (!existsSync(manifestPath)) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
-      version?: number;
-      files?: unknown;
-    };
-
-    if (parsed.version !== COMPANION_MANIFEST_VERSION || !Array.isArray(parsed.files)) {
-      return null;
-    }
-
-    const validFiles = parsed.files
-      .map((value) => (typeof value === 'string' ? normalizeCompanionRelativePath(value) : ''))
-      .filter((value): value is string => Boolean(value) && value.toLowerCase() !== 'skill.md');
-
-    validFiles.sort((a, b) => a.localeCompare(b));
-    return Array.from(new Set(validFiles));
-  } catch {
-    return null;
-  }
-}
-
-function writeCompanionManifest(skillDir: string, files: string[]): void {
-  const manifestPath = join(skillDir, COMPANION_MANIFEST_FILE);
-  const normalizedFiles = Array.from(new Set(files.map(normalizeCompanionRelativePath).filter(Boolean) as string[]))
-    .sort((a, b) => a.localeCompare(b));
-
-  if (normalizedFiles.length === 0) {
-    try {
-      rmSync(manifestPath, { force: true });
-    } catch {
-      // Ignore cleanup failures.
-    }
-    return;
-  }
-
-  mkdirSync(skillDir, { recursive: true });
-  writeFileSync(manifestPath, JSON.stringify({
-    version: COMPANION_MANIFEST_VERSION,
-    files: normalizedFiles,
-  }, null, 2));
-}
-
-function normalizeCompanionRelativePath(path: string): string {
-  const normalized = path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-  if (!normalized) return '';
-  const segments = normalized.split('/');
-  if (segments.some((segment) => !segment || segment === '.' || segment === '..' || /[:\x00]/.test(segment))) {
-    return '';
-  }
-  if (segments.some((segment) => segment.toLowerCase() === COMPANION_MANIFEST_FILE)) {
-    return '';
-  }
-  return segments.join('/');
-}
-
-function pruneEmptyParentDirs(skillDir: string, filePath: string): void {
-  let current = dirname(filePath);
-  while (current && current !== skillDir && current.startsWith(`${skillDir}`)) {
-    try {
-      const entries = readdirSync(current);
-      if (entries.length > 0) {
-        break;
-      }
-      rmdirSync(current);
-    } catch {
-      break;
-    }
-    current = dirname(current);
-  }
-}
-
-/** Refuse to follow local symlinks when replacing managed installation files. */
-export function assertSkillFilesSafe(skillDir: string, skill: SkillInfo): void {
-  const checkPath = (path: string) => {
-    let current = skillDir;
-    for (const segment of ['', ...relative(skillDir, path).split(/[\\/]/).filter(Boolean)]) {
-      current = join(current, segment);
-      if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) {
-        throw new Error(`Refusing to write through a symbolic link: ${current}`);
-      }
-    }
-  };
-  checkPath(join(skillDir, 'SKILL.md'));
-  checkPath(join(skillDir, COMPANION_MANIFEST_FILE));
-  for (const path of [...getExpectedCompanionPaths(skill), ...(readCompanionManifest(skillDir) ?? [])]) {
-    checkPath(join(skillDir, path));
-  }
-}
-
-function sameStringArrays(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
-
 function normalizeSkillPath(path?: string): string {
   if (!path) return '';
   const normalized = path.replace(/^\/+|\/+$/g, '');
@@ -1034,13 +811,8 @@ function resolveAgentsOrExit(ids: string[]): Agent[] {
   const invalidIds = ids.filter((id) => !getAgentById(id));
   if (invalidIds.length > 0) {
     error(`Invalid agent(s): ${invalidIds.join(', ')}`);
-    console.log(pc.dim('Available agents:'));
-    for (const agent of AGENTS) {
-      const aliases = agent.aliases && agent.aliases.length > 0
-        ? `; aliases: ${agent.aliases.join(', ')}`
-        : '';
-      console.log(pc.dim(`  - ${agent.id} (${agent.name}${aliases})`));
-    }
+    dataTable('Available agents:', ['ID', 'Agent', 'Aliases'],
+      AGENTS.map((agent) => [agent.id, agent.name, agent.aliases?.join(', ') || '(none)']));
     process.exit(1);
   }
 

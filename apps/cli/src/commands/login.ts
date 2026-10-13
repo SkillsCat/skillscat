@@ -1,7 +1,7 @@
 import pc from 'picocolors';
 import { setToken, setTokens, isAuthenticated, getPrincipal, getValidToken, getRegistryAuthUrl, getClientInfo, generateRandomState, generateCodeVerifier, computeCodeChallenge, initAuthSession, exchangeCodeForTokens, validateAccessToken } from '../utils/auth/auth';
 import { startCallbackServer } from '../utils/auth/callback-server';
-import { spinner, success, error, info, warn, box } from '../utils/core/ui';
+import { cancelled as showCancelled, hint, spinner, success, error, info, warn } from '../utils/core/ui';
 
 interface LoginOptions {
   token?: string;
@@ -86,7 +86,7 @@ export async function login(options: LoginOptions): Promise<void> {
   const authUrl = `${registryUrl}/auth/login?session=${encodeURIComponent(session.session_id)}`;
 
   console.log();
-  box(authUrl, 'Authorize in Browser');
+  hint('Authorize in Browser:', authUrl);
   console.log();
 
   // Try to open browser without invoking a shell
@@ -105,15 +105,17 @@ export async function login(options: LoginOptions): Promise<void> {
   });
 
   const waitSpinner = spinner('Waiting for authorization... (Press Ctrl+C to cancel)');
+  let exchangeSpinner: ReturnType<typeof spinner> | undefined;
 
   // Handle Ctrl+C gracefully
   let cancelled = false;
   const cleanup = () => {
     cancelled = true;
-    waitSpinner.stop(false);
+    waitSpinner.stop('cancelled');
+    exchangeSpinner?.stop('cancelled');
     callbackServer.close();
     console.log();
-    warn('Authorization cancelled.');
+    showCancelled('Authorization cancelled.');
     process.exit(0);
   };
   process.on('SIGINT', cleanup);
@@ -124,7 +126,7 @@ export async function login(options: LoginOptions): Promise<void> {
     waitSpinner.stop(true);
 
     // Step 5: Exchange code for tokens (with PKCE verifier)
-    const exchangeSpinner = spinner('Exchanging authorization code...');
+    exchangeSpinner = spinner('Exchanging authorization code...');
 
     const tokens = await exchangeCodeForTokens(registryUrl, result.code, session.session_id, codeVerifier);
 
@@ -144,6 +146,7 @@ export async function login(options: LoginOptions): Promise<void> {
     process.removeListener('SIGINT', cleanup);
   } catch (err) {
     process.removeListener('SIGINT', cleanup);
+    exchangeSpinner?.stop(false);
 
     if (cancelled) return;
 

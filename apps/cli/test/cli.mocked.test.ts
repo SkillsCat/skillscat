@@ -283,7 +283,7 @@ describe('CLI commands with mocked network', () => {
 
     const loggedOutWhoami = await runCommand(() => whoami());
     expect(loggedOutWhoami.exitCode).toBe(1);
-    expect(loggedOutWhoami.stdout).toContain('Not logged in');
+    expect(loggedOutWhoami.stderr).toContain('Not logged in');
   });
 
   it('add/list/update/remove with GitHub mock', async () => {
@@ -609,6 +609,21 @@ describe('CLI commands with mocked network', () => {
 
     const result = await runCommand(() => update(undefined, {}));
     expect(result.stderr).toContain('No tracked skill installations found.');
+  });
+
+  it('keeps completed remote agent installations tracked when a later confirmation is cancelled', async () => {
+    mockGitHubFetch(SKILL_MD_V1, 'sha-cancel-track');
+    const { add } = await import('../src/commands/add');
+    const ui = await import('../src/utils/core/ui');
+    const { getInstalledSkills } = await import('../src/utils/storage/db');
+    const cursorFile = join(process.cwd(), '.cursor', 'skills', 'Test Skill', 'SKILL.md');
+    mkdirSync(join(cursorFile, '..'), { recursive: true });
+    writeFileSync(cursorFile, SKILL_MD_V2);
+    vi.spyOn(ui, 'prompt').mockResolvedValueOnce('y').mockRejectedValueOnce(new ui.PromptCancelledError());
+    await expect(add('testowner/testrepo', { agent: ['codex', 'cursor'] })).rejects.toBeInstanceOf(ui.PromptCancelledError);
+    expect(readFileSync(join(process.cwd(), '.codex', 'skills', 'Test Skill', 'SKILL.md'), 'utf-8')).toBe(SKILL_MD_V1);
+    expect(readFileSync(cursorFile, 'utf-8')).toBe(SKILL_MD_V2);
+    expect(getInstalledSkills()).toMatchObject([{ name: 'Test Skill', agents: ['codex'] }]);
   });
 
   it('parses explicit GitHub tree/blob refs and marks them as explicit', async () => {
@@ -2138,7 +2153,7 @@ describe('CLI commands with mocked network', () => {
     const result = await runCommand(() => update('Revoked Private Skill', { check: true }));
 
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain('Failed to check');
+    expect(result.stderr).toContain('Failed to check');
     expect(result.stderr).toContain('1 skill(s) could not be checked.');
     expect(result.stdout).not.toContain('All skills are up to date!');
   });
@@ -2195,7 +2210,7 @@ describe('CLI commands with mocked network', () => {
     const result = await runCommand(() => update(skillName, {}));
 
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain('Failed to check');
+    expect(result.stderr).toContain('Failed to check');
     expect(readFileSync(skillFile, 'utf-8')).toBe(v1);
   });
 

@@ -1,8 +1,7 @@
 import { existsSync, rmSync } from 'node:fs';
-import pc from 'picocolors';
 import { AGENTS, getAgentsByIds, getInvalidAgentIds, getSkillPath, type Agent } from '../utils/agents/agents';
 import { getInstalledSkills, removeInstallation } from '../utils/storage/db';
-import { success, error, warn } from '../utils/core/ui';
+import { success, error, warn, hint } from '../utils/core/ui';
 
 interface RemoveOptions {
   global?: boolean;
@@ -69,8 +68,7 @@ export async function remove(skillName: string, options: RemoveOptions): Promise
       for (const agent of agents) {
         const otherDir = getSkillPath(agent, skillName, otherLocation);
         if (existsSync(otherDir)) {
-          console.log(pc.dim(`Found in ${otherLocation ? 'global' : 'project'} directory.`));
-          console.log(pc.dim(`Use ${otherLocation ? '--global' : ''} flag to remove.`));
+          hint(`Found in ${otherLocation ? 'global' : 'project'} directory. ${otherLocation ? 'Use --global to remove it.' : 'Omit --global to remove it.'}`);
           break;
         }
       }

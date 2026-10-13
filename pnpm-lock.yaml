@@ -138,6 +138,9 @@ importers:
       commander:
         specifier: ^15.0.0
         version: 15.0.0
+      fast-string-width:
+        specifier: 3.0.2
+        version: 3.0.2
       inquirer:
         specifier: ^14.1.0
         version: 14.1.0(@types/node@26.2.0)

@@ -1,14 +1,14 @@
-import pc from 'picocolors';
+import { success as showSuccess, warn as showWarning } from '../utils/core/ui';
 import { clearConfig, isAuthenticated, getUser } from '../utils/auth/auth';
 
 export async function logout(): Promise<void> {
   if (!isAuthenticated()) {
-    console.log(pc.yellow('Not currently logged in.'));
+    showWarning('Not currently logged in.');
     return;
   }
 
   const user = getUser();
   clearConfig();
 
-  console.log(pc.green(`Successfully logged out${user?.name ? ` from ${user.name}` : ''}.`));
+  showSuccess(`Successfully logged out${user?.name ? ` from ${user.name}` : ''}.`);
 }

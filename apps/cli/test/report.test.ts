@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { configureAuth, configureRegistry, createWorkspace, resetTestCacheDir, resetTestConfigDir } from './helpers/env';
-import { runCommand } from './helpers/output';
+import { mockInteractiveTerminal, runCommand } from './helpers/output';
 
 const REGISTRY_URL = process.env.SKILLSCAT_TEST_REGISTRY_URL || 'http://localhost:3000/registry';
 const TEST_TOKEN = process.env.SKILLSCAT_TEST_TOKEN || 'sk_test_local_token';
@@ -80,10 +80,11 @@ describe('report command', () => {
   });
 
   it('supports interactive reason selection when --reason is omitted', async () => {
+    mockInteractiveTerminal();
     await configureAuth(TEST_TOKEN);
 
-    const ui = await import('../src/utils/core/ui');
-    const promptSpy = vi.spyOn(ui, 'prompt').mockResolvedValue('copyright');
+    const inquirer = (await import('inquirer')).default;
+    const promptSpy = vi.spyOn(inquirer, 'prompt').mockResolvedValue({ reason: 'copyright' });
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       expect(JSON.parse(String(init?.body))).toMatchObject({
         reason: 'copyright',
