@@ -24,9 +24,48 @@ export function resolveAuthBaseURL(env: Pick<AuthEnv, 'PUBLIC_APP_URL'>, fallbac
   return env.PUBLIC_APP_URL?.trim() || fallback || 'https://skills.cat';
 }
 
+// Keep only the current configuration for each binding. Session results and
+// request headers stay request-local in hooks; only the auth machinery is reused.
+const authByDatabase = new WeakMap<D1Database, {
+  baseURL: string;
+  publicAppURL: string | undefined;
+  secret: string;
+  githubClientId: string;
+  githubClientSecret: string;
+  auth: ReturnType<typeof buildAuth>;
+}>();
+
 export function createAuth(env: AuthEnv, baseURL?: string) {
-  const db = drizzle(env.DB, { schema });
   const resolvedBaseURL = resolveAuthBaseURL(env, baseURL);
+  const cached = authByDatabase.get(env.DB);
+  if (cached
+    && cached.baseURL === resolvedBaseURL
+    && cached.publicAppURL === env.PUBLIC_APP_URL
+    && cached.secret === env.BETTER_AUTH_SECRET
+    && cached.githubClientId === env.GITHUB_CLIENT_ID
+    && cached.githubClientSecret === env.GITHUB_CLIENT_SECRET
+  ) {
+    return cached.auth;
+  }
+
+  const auth = buildAuth(env, resolvedBaseURL);
+  authByDatabase.set(env.DB, {
+    baseURL: resolvedBaseURL,
+    publicAppURL: env.PUBLIC_APP_URL,
+    secret: env.BETTER_AUTH_SECRET,
+    githubClientId: env.GITHUB_CLIENT_ID,
+    githubClientSecret: env.GITHUB_CLIENT_SECRET,
+    auth,
+  });
+  // Failed initialization must not poison subsequent requests in this isolate.
+  void auth.$context.catch(() => {
+    if (authByDatabase.get(env.DB)?.auth === auth) authByDatabase.delete(env.DB);
+  });
+  return auth;
+}
+
+function buildAuth(env: AuthEnv, resolvedBaseURL: string) {
+  const db = drizzle(env.DB, { schema });
 
   return betterAuth({
     baseURL: resolvedBaseURL,

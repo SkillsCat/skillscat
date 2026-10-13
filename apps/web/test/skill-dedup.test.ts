@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   chooseCanonicalSkillCandidate,
+  computeBundleHashes,
   computeBundleManifestHash,
   computeExactBundleFingerprint,
   computeSkillMdHashes,
@@ -12,6 +13,44 @@ import {
   findSkillsByHashGroup,
   storeSkillHashes,
 } from '../src/lib/server/skill/dedup';
+
+describe('combined bundle hashing', () => {
+  it('matches fingerprints captured from the pre-optimization revision', async () => {
+    // 4b17b853: fixed expectations must not follow refactors of the old helpers.
+    expect(await computeBundleHashes([
+      { path: ' z\\nested//file.ts ', sha: 'def', size: 23, type: 'text' },
+      { path: '/skill.md', sha: 'abc', size: 12, type: 'text' },
+      { path: '目录/文件', sha: '', size: 0, type: '' },
+      { path: 'no-metadata' },
+    ], 'normalized-readme')).toEqual({
+      bundleExactHash: '278b94d730a58089930c8d819425f9d32911e4331ed7e96d01077f6f3ee90f7c',
+      bundleManifestHash: '7b44c4a80e5bf4b64a0f93f9d3fd5d3bb09b1484c07eaaf79575893631211e03',
+    });
+  });
+
+  it('preserves both existing fingerprints and leaves input untouched', async () => {
+    const manifests = [
+      [],
+      [{ path: '/skill.md', sha: 'abc', size: 12, type: 'text' }],
+      [
+        { path: ' z\\nested//file.ts ', sha: 'def', size: 23, type: 'text' },
+        { path: '/skill.md', sha: 'abc', size: 12, type: 'text' },
+        { path: '目录/文件', sha: '', size: 0, type: '' },
+        { path: 'no-metadata' },
+      ],
+    ];
+    for (const files of manifests) {
+      const before = structuredClone(files);
+      const expected = {
+        bundleExactHash: await computeExactBundleFingerprint(files),
+        bundleManifestHash: await computeBundleManifestHash(files, 'normalized-readme'),
+      };
+      expect(await computeBundleHashes(files, 'normalized-readme')).toEqual(expected);
+      expect(await computeBundleHashes([...files].reverse(), 'normalized-readme')).toEqual(expected);
+      expect(files).toEqual(before);
+    }
+  });
+});
 
 class SqliteD1Statement {
   private params: unknown[] = [];

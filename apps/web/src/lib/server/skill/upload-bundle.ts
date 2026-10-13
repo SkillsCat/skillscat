@@ -1,8 +1,7 @@
 import { error } from '@sveltejs/kit';
 import type { FileNode } from '$lib/types';
 import {
-  computeBundleManifestHash,
-  computeExactBundleFingerprint,
+  computeBundleHashes,
   computeSha256Hex,
   computeSkillMdHashes,
   type StoredSkillHashes,
@@ -171,8 +170,7 @@ export async function computeUploadBundleMetadata(
     hashes: {
       fullHash,
       normalizedHash,
-      bundleExactHash: await computeExactBundleFingerprint(manifestFiles),
-      bundleManifestHash: await computeBundleManifestHash(manifestFiles, normalizedHash),
+      ...await computeBundleHashes(manifestFiles, normalizedHash),
     },
     manifestFiles,
   };

@@ -16,6 +16,11 @@ export function createMigratedDb() {
       bind(...values: unknown[]) { params = values; record.params = values; return this; },
       async first<T>() { return (sqlite.prepare(sql).get(...params) as T) ?? null; },
       async all<T>() { return { results: sqlite.prepare(sql).all(...params) as T[], success: true, meta: {} }; },
+      async raw() {
+        const statement = sqlite.prepare(sql);
+        statement.setReturnArrays(true);
+        return statement.all(...params);
+      },
       async run() { const result = sqlite.prepare(sql).run(...params); return { success: true, results: [], meta: { changes: Number(result.changes) } }; },
     };
   }

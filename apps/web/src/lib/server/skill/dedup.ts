@@ -108,8 +108,7 @@ export async function computeStandaloneSkillBundleHashes(content: string): Promi
   return {
     fullHash,
     normalizedHash,
-    bundleExactHash: await computeExactBundleFingerprint(bundleFiles),
-    bundleManifestHash: await computeBundleManifestHash(bundleFiles, normalizedHash),
+    ...await computeBundleHashes(bundleFiles, normalizedHash),
   };
 }
 
@@ -123,14 +122,14 @@ function normalizeBundlePath(path: string): string {
   return normalized.toLowerCase() === 'skill.md' ? 'SKILL.md' : normalized;
 }
 
-async function computeBundleFingerprint(
+function normalizeBundleEntries(
   files: BundleManifestFile[],
   getContentId: (file: BundleManifestFile, normalizedPath: string) => string,
   options?: {
     zeroSkillMdSize?: boolean;
   }
-): Promise<string> {
-  const normalizedEntries = files
+) {
+  return files
     .map((file) => {
       const normalizedPath = normalizeBundlePath(file.path);
       const isSkillMd = normalizedPath === 'SKILL.md';
@@ -143,28 +142,46 @@ async function computeBundleFingerprint(
       };
     })
     .sort((left, right) => left.path.localeCompare(right.path));
-
-  return computeSha256Hex(JSON.stringify(normalizedEntries));
 }
 
 export async function computeBundleManifestHash(
   files: BundleManifestFile[],
   skillMdNormalizedHash: string
 ): Promise<string> {
-  return computeBundleFingerprint(
+  return computeSha256Hex(JSON.stringify(normalizeBundleEntries(
     files,
     (file, normalizedPath) => normalizedPath === 'SKILL.md'
       ? `normalized:${skillMdNormalizedHash}`
       : `sha:${file.sha || ''}`,
     { zeroSkillMdSize: true }
-  );
+  )));
 }
 
 export async function computeExactBundleFingerprint(files: BundleManifestFile[]): Promise<string> {
-  return computeBundleFingerprint(
+  return computeSha256Hex(JSON.stringify(normalizeBundleEntries(
     files,
     (file) => `sha:${file.sha || ''}`
-  );
+  )));
+}
+
+/** Indexing needs both hashes; normalize and sort the manifest only once. */
+export async function computeBundleHashes(
+  files: BundleManifestFile[],
+  skillMdNormalizedHash: string
+): Promise<{ bundleExactHash: string; bundleManifestHash: string }> {
+  const entries = normalizeBundleEntries(files, (file) => `sha:${file.sha || ''}`);
+  const exact = JSON.stringify(entries);
+  for (const entry of entries) {
+    if (entry.path === 'SKILL.md') {
+      entry.size = 0;
+      entry.contentId = `normalized:${skillMdNormalizedHash}`;
+    }
+  }
+  const [bundleExactHash, bundleManifestHash] = await Promise.all([
+    computeSha256Hex(exact),
+    computeSha256Hex(JSON.stringify(entries)),
+  ]);
+  return { bundleExactHash, bundleManifestHash };
 }
 
 export function buildSkillHashStatements(

@@ -66,8 +66,7 @@ import { deleteSkillArtifactsAndInvalidateCaches } from '../src/lib/server/skill
 import { getSkillDetailCacheKeys } from '../src/lib/server/skill/detail';
 import {
   compareCanonicalSkillCandidates,
-  computeBundleManifestHash,
-  computeExactBundleFingerprint,
+  computeBundleHashes,
   computeSkillMdHashes,
   convertPrivateSkillToPublicGithub,
   findSkillsByExactHashGroup,
@@ -3473,8 +3472,8 @@ async function processMessage(
 
     const skillMetadata = resolveSkillMetadata(repo, parsedSkillMd);
     const { fullHash, normalizedHash } = await computeSkillMdHashes(skillMdContent);
-    const exactBundleFingerprint = await computeExactBundleFingerprint(directoryFiles);
-    const bundleManifestHash = await computeBundleManifestHash(directoryFiles, normalizedHash);
+    const { bundleExactHash: exactBundleFingerprint, bundleManifestHash } =
+      await computeBundleHashes(directoryFiles, normalizedHash);
     const { lastCommitAt, firstCommitAt } = await getOrCreateBatchPromise(
       batchContext.skillCommitDatesByPath,
       getSkillCommitDatesCacheKey(canonicalRepoOwner, canonicalRepoName, skillMd.path),

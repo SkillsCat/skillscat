@@ -159,7 +159,9 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
         (name, dur, desc) => {
           serverTimings.push({ name, dur, desc });
         },
-        Boolean(isDataRequest)
+        // Both SSR and data navigation use the rendered README cache below.
+        // Fetch raw Markdown only when rendering is actually necessary.
+        true
       ),
       'db+r2'
     );
@@ -169,6 +171,16 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
         'X-Skillscat-Status-Override': '404',
       });
       return finish(createNotFoundResult());
+    }
+
+    // Indexability falls back to raw README content when the description is
+    // absent. Preserve that decision (including frontmatter-only documents).
+    if (!skill.description?.trim() && !skill.readme) {
+      try {
+        skill.readme = await loadSkillReadmeFromR2(env, skill);
+      } catch (readmeError) {
+        console.error('Error reading SKILL.md for indexability:', readmeError);
+      }
     }
 
     const introductions = env.DB && skill.visibility === 'public'
@@ -190,7 +202,12 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     const renderedReadmePromise = timed(
       'readme_html',
       async (): Promise<string> => {
-        const loadRawReadme = async () => skill.readme ?? await loadSkillReadmeFromR2(env, skill);
+        const loadRawReadme = async () => {
+          // An empty D1 value also falls back to R2, as getSkillBySlug did.
+          // Retain source presence even if rendering produces empty HTML.
+          if (!skill.readme) skill.readme = await loadSkillReadmeFromR2(env, skill);
+          return skill.readme;
+        };
 
         if (skill.visibility !== 'public') {
           // Private skills never touch shared caches; highlight per request.

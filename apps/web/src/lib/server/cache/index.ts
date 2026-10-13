@@ -257,6 +257,53 @@ export async function peekCachedText(
   return null;
 }
 
+/** Read a cached body as a stream, without decoding and re-encoding it. */
+export async function peekCachedResponse(
+  cacheKey: string,
+  options?: { waitUntil?: WaitUntilFn; allowLegacyFallback?: boolean }
+): Promise<Response | null> {
+  const versionedKey = getVersionedCacheKey(cacheKey);
+  try {
+    const cache = caches.default;
+    const request = buildCacheRequest(versionedKey);
+    const cached = await cache.match(request);
+    if (cached) return cached;
+
+    if (options?.allowLegacyFallback !== false) {
+      const legacy = await cache.match(buildCacheRequest(cacheKey));
+      if (legacy) {
+        scheduleCacheWrite(cache.put(request, legacy.clone()), options?.waitUntil);
+        return legacy;
+      }
+    }
+  } catch {
+    // Cache API unavailable or failed; the caller can render normally.
+  }
+  return null;
+}
+
+/** Takes ownership of the response body. Callers must pass a clone if needed. */
+export async function putCachedResponse(
+  cacheKey: string,
+  response: Response,
+  ttl: number,
+  options?: { waitUntil?: WaitUntilFn }
+): Promise<void> {
+  // Shared response caches must never persist cookies or error responses.
+  if (!response.ok || response.headers.has('set-cookie')) return;
+  try {
+    scheduleCacheWrite(
+      caches.default.put(
+        buildCacheRequest(getVersionedCacheKey(cacheKey)),
+        cloneResponseWithCacheHeaders(response, ttl)
+      ),
+      options?.waitUntil
+    );
+  } catch {
+    // Cache API unavailable or failed; never fail the request for a cache write.
+  }
+}
+
 export async function putCachedText(
   cacheKey: string,
   data: string,

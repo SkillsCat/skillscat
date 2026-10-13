@@ -427,34 +427,9 @@ export async function replaceSearchTermsForSkill(
   const now = params.now ?? Date.now();
   const skillId = params.skillId;
 
-  await db.prepare('DELETE FROM skill_search_terms WHERE skill_id = ?')
-    .bind(skillId)
-    .run();
-
-  if (!params.terms.length) {
-    return;
-  }
-
-  const insertStmt = db.prepare(`
-    INSERT INTO skill_search_terms (
-      skill_id,
-      term,
-      source,
-      weight,
-      created_at,
-      updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
-  await db.batch(
-    params.terms.map((entry) => insertStmt.bind(
-      skillId,
-      entry.term,
-      entry.source || DEFAULT_SOURCE,
-      entry.weight,
-      now,
-      now
-    ))
+  await replaceSearchEntries(
+    db, 'skill_search_terms', 'term', skillId,
+    params.terms.map((entry) => [entry.term, entry.source || DEFAULT_SOURCE, entry.weight]), now
   );
 }
 
@@ -470,33 +445,34 @@ export async function replaceSearchPrefixesForSkill(
   const now = params.now ?? Date.now();
   const skillId = params.skillId;
 
-  await db.prepare('DELETE FROM skill_search_prefixes WHERE skill_id = ?')
-    .bind(skillId)
-    .run();
-
-  if (!params.prefixes.length) {
-    return;
-  }
-
-  const insertStmt = db.prepare(`
-    INSERT INTO skill_search_prefixes (
-      skill_id,
-      prefix,
-      source,
-      weight,
-      created_at,
-      updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
-  await db.batch(
-    params.prefixes.map((entry) => insertStmt.bind(
-      skillId,
-      entry.prefix,
-      entry.source || DEFAULT_SOURCE,
-      entry.weight,
-      now,
-      now
-    ))
+  await replaceSearchEntries(
+    db, 'skill_search_prefixes', 'prefix', skillId,
+    params.prefixes.map((entry) => [entry.prefix, entry.source || DEFAULT_SOURCE, entry.weight]), now
   );
+}
+
+// D1 allows 100 bound parameters per statement. Six columns per row keeps
+// each insert at 96 parameters and avoids serializing a statement per token.
+const SEARCH_INSERT_ROWS_PER_STATEMENT = 16;
+
+async function replaceSearchEntries(
+  db: D1Database,
+  table: 'skill_search_terms' | 'skill_search_prefixes',
+  column: 'term' | 'prefix',
+  skillId: string,
+  entries: Array<[string, string, number]>,
+  now: number
+): Promise<void> {
+  // D1 batches are transactional: a failed insert must preserve the old index.
+  const statements: D1PreparedStatement[] = [
+    db.prepare(`DELETE FROM ${table} WHERE skill_id = ?`).bind(skillId),
+  ];
+  for (let offset = 0; offset < entries.length; offset += SEARCH_INSERT_ROWS_PER_STATEMENT) {
+    const chunk = entries.slice(offset, offset + SEARCH_INSERT_ROWS_PER_STATEMENT);
+    statements.push(db.prepare(`
+      INSERT INTO ${table} (skill_id, ${column}, source, weight, created_at, updated_at)
+      VALUES ${chunk.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')}
+    `).bind(...chunk.flatMap(([value, source, weight]) => [skillId, value, source, weight, now, now])));
+  }
+  await db.batch(statements);
 }

@@ -99,6 +99,79 @@ beforeEach(() => {
   renderReadmeMarkdown.mockImplementation((value: string) => value);
 });
 
+describe('lazy skill README loading', () => {
+  it.each([null, ''])('loads an R2 README on a render miss when the D1 value is %s', async (readme) => {
+    getSkillBySlug.mockResolvedValue({
+      id: 'r2-readme', name: 'R2', slug: 'acme/r2', description: 'Stored in R2',
+      repoOwner: 'acme', repoName: 'r2', skillPath: '', sourceType: 'github',
+      visibility: 'public', categories: [], readme, indexedAt: 123, updatedAt: 123,
+      stars: 1, forks: 0, contentHash: 'content-version',
+    });
+    loadSkillReadmeFromR2.mockResolvedValue('# R2 instructions');
+    const { load } = await import('../src/routes/skills/[owner]/[...name]/+page.server');
+    const { setHeaders } = createHeadersRecorder();
+    const result = await load({
+      params: { owner: 'acme', name: 'r2' }, platform: createPlatform(),
+      locals: { user: null, locale: 'en' }, request: new Request('https://skills.cat/skills/acme/r2'),
+      fetch: vi.fn(), setHeaders, isDataRequest: false,
+    } as never);
+    expect(loadSkillReadmeFromR2).toHaveBeenCalledOnce();
+    expect(result.renderedReadme).toContain('R2 instructions');
+    expect(result.hasReadme).toBe(true);
+    expect(result.skill?.readme).toBeNull();
+  });
+
+  it.each([false, true])('uses rendered HTML without reading raw R2 Markdown (data request: %s)', async (isDataRequest) => {
+    getSkillBySlug.mockResolvedValue({
+      id: 'cached-readme', name: 'Cached', slug: 'acme/cached', description: 'Cached README',
+      repoOwner: 'acme', repoName: 'cached', skillPath: '', sourceType: 'github',
+      visibility: 'public', categories: [], readme: null, indexedAt: 123, updatedAt: 123,
+      stars: 1, forks: 0, contentHash: 'content-version',
+    });
+    getCached.mockImplementation(async (key: string, fetcher: () => Promise<unknown>) =>
+      key.startsWith('readme:html:hl:')
+        ? { data: '<h1>Cached README</h1>', hit: true }
+        : { data: await fetcher(), hit: false });
+    const { load } = await import('../src/routes/skills/[owner]/[...name]/+page.server');
+    const { setHeaders } = createHeadersRecorder();
+    const result = await load({
+      params: { owner: 'acme', name: 'cached' }, platform: createPlatform(),
+      locals: { user: null, locale: 'en' }, request: new Request('https://skills.cat/skills/acme/cached'),
+      fetch: vi.fn(), setHeaders, isDataRequest,
+    } as never);
+    expect(getSkillBySlug).toHaveBeenCalledWith(expect.anything(), 'acme/cached', null, expect.any(Function), true);
+    expect(loadSkillReadmeFromR2).not.toHaveBeenCalled();
+    expect(renderReadmeMarkdown).not.toHaveBeenCalled();
+    expect(result.renderedReadme).toBe('<h1>Cached README</h1>');
+    expect(result.hasReadme).toBe(true);
+    expect(result.skill?.readme).toBeNull();
+  });
+
+  it('preserves README-based indexability when there is no description', async () => {
+    getSkillBySlug.mockResolvedValue({
+      id: 'no-description', name: 'Cached', slug: 'acme/cached', description: null,
+      repoOwner: 'acme', repoName: 'cached', skillPath: '', sourceType: 'github',
+      visibility: 'public', categories: [], readme: null, indexedAt: 123, updatedAt: 123,
+      stars: 1, forks: 0, contentHash: 'content-version',
+    });
+    loadSkillReadmeFromR2.mockResolvedValue('# Instructions');
+    getCached.mockImplementation(async (key: string, fetcher: () => Promise<unknown>) =>
+      key.startsWith('readme:html:hl:')
+        ? { data: '<h1>Instructions</h1>', hit: true }
+        : { data: await fetcher(), hit: false });
+    const { load } = await import('../src/routes/skills/[owner]/[...name]/+page.server');
+    const { setHeaders } = createHeadersRecorder();
+    const result = await load({
+      params: { owner: 'acme', name: 'cached' }, platform: createPlatform(),
+      locals: { user: null, locale: 'en' }, request: new Request('https://skills.cat/skills/acme/cached'),
+      fetch: vi.fn(), setHeaders, isDataRequest: false,
+    } as never);
+    expect(loadSkillReadmeFromR2).toHaveBeenCalledOnce();
+    expect(result.seoIndexable).toBe(true);
+    expect(result.hasReadme).toBe(true);
+  });
+});
+
 afterAll(() => {
   consoleErrorSpy.mockRestore();
 });

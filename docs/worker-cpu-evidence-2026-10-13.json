@@ -1,0 +1,358 @@
+{
+  "baseline": {
+    "start": "2026-10-12T14:42:31.529821+00:00",
+    "end": "2026-10-13T14:42:31.529821+00:00",
+    "result": {
+      "data": {
+        "viewer": {
+          "accounts": [
+            {
+              "workersInvocationsAdaptive": [
+                {
+                  "dimensions": {
+                    "scriptName": "skillscat-search-precompute-production"
+                  },
+                  "quantiles": {
+                    "cpuTimeP50": 357015,
+                    "cpuTimeP99": 1082094
+                  },
+                  "sum": {
+                    "cpuTimeUs": 9273325,
+                    "errors": 0,
+                    "requests": 24
+                  }
+                },
+                {
+                  "dimensions": {
+                    "scriptName": "skillscat-tier-recalc-production"
+                  },
+                  "quantiles": {
+                    "cpuTimeP50": 132892,
+                    "cpuTimeP99": 132892
+                  },
+                  "sum": {
+                    "cpuTimeUs": 132892,
+                    "errors": 0,
+                    "requests": 1
+                  }
+                },
+                {
+                  "dimensions": {
+                    "scriptName": "skillscat-metrics-production"
+                  },
+                  "quantiles": {
+                    "cpuTimeP50": 1566,
+                    "cpuTimeP99": 6438
+                  },
+                  "sum": {
+                    "cpuTimeUs": 2671627,
+                    "errors": 0,
+                    "requests": 1311
+                  }
+                },
+                {
+                  "dimensions": {
+                    "scriptName": "skillscat-github-events-production"
+                  },
+                  "quantiles": {
+                    "cpuTimeP50": 2456,
+                    "cpuTimeP99": 23916
+                  },
+                  "sum": {
+                    "cpuTimeUs": 837113,
+                    "errors": 0,
+                    "requests": 290
+                  }
+                },
+                {
+                  "dimensions": {
+                    "scriptName": "skillscat-web-production"
+                  },
+                  "quantiles": {
+                    "cpuTimeP50": 44495,
+                    "cpuTimeP99": 385071
+                  },
+                  "sum": {
+                    "cpuTimeUs": 4336599491,
+                    "errors": 0,
+                    "requests": 60854
+                  }
+                },
+                {
+                  "dimensions": {
+                    "scriptName": "skillscat-classification-production"
+                  },
+                  "quantiles": {
+                    "cpuTimeP50": 59195,
+                    "cpuTimeP99": 214124
+                  },
+                  "sum": {
+                    "cpuTimeUs": 6434239,
+                    "errors": 0,
+                    "requests": 98
+                  }
+                },
+                {
+                  "dimensions": {
+                    "scriptName": "skillscat-trending-production"
+                  },
+                  "quantiles": {
+                    "cpuTimeP50": 20195,
+                    "cpuTimeP99": 34242
+                  },
+                  "sum": {
+                    "cpuTimeUs": 483220,
+                    "errors": 24,
+                    "requests": 24
+                  }
+                },
+                {
+                  "dimensions": {
+                    "scriptName": "skillscat-indexing-production"
+                  },
+                  "quantiles": {
+                    "cpuTimeP50": 163686,
+                    "cpuTimeP99": 740032
+                  },
+                  "sum": {
+                    "cpuTimeUs": 15956282,
+                    "errors": 0,
+                    "requests": 89
+                  }
+                },
+                {
+                  "dimensions": {
+                    "scriptName": "skillscat-security-analysis-production"
+                  },
+                  "quantiles": {
+                    "cpuTimeP50": 4329,
+                    "cpuTimeP99": 125690
+                  },
+                  "sum": {
+                    "cpuTimeUs": 4833577,
+                    "errors": 0,
+                    "requests": 173
+                  }
+                },
+                {
+                  "dimensions": {
+                    "scriptName": "skillscat-virustotal-production"
+                  },
+                  "quantiles": {
+                    "cpuTimeP50": 11787,
+                    "cpuTimeP99": 24695
+                  },
+                  "sum": {
+                    "cpuTimeUs": 17156204,
+                    "errors": 0,
+                    "requests": 1447
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "errors": null
+    }
+  },
+  "webVersionObserved": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4",
+  "passiveWebTail": [
+    {
+      "pathname": "/mcp",
+      "method": "POST",
+      "status": 202,
+      "outcome": "ok",
+      "cpuTime": 4,
+      "wallTime": 5,
+      "version": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4"
+    },
+    {
+      "pathname": "/mcp",
+      "method": "POST",
+      "status": 200,
+      "outcome": "ok",
+      "cpuTime": 32,
+      "wallTime": 33,
+      "version": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4"
+    },
+    {
+      "pathname": "/skills/travisjneuman/claude/game-development",
+      "method": "GET",
+      "status": 200,
+      "outcome": "ok",
+      "cpuTime": 118,
+      "wallTime": 5761,
+      "version": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4"
+    }
+  ],
+  "localWorkerd": [
+    {
+      "path": "/setup",
+      "status": 200,
+      "cache": null,
+      "body": "setup ok"
+    },
+    {
+      "path": "/cache",
+      "status": 200,
+      "cache": "MISS",
+      "body": "<html>中文 streamed cache</html>"
+    },
+    {
+      "path": "/cache",
+      "status": 200,
+      "cache": "HIT",
+      "body": "<html>中文 streamed cache</html>"
+    },
+    {
+      "path": "/auth",
+      "status": 200,
+      "cache": null,
+      "body": "{\"reused\":false,\"userId\":null}"
+    },
+    {
+      "path": "/auth",
+      "status": 200,
+      "cache": null,
+      "body": "{\"reused\":true,\"userId\":null}"
+    },
+    {
+      "concurrentSessions": [
+        {
+          "reused": true,
+          "userId": "alice"
+        },
+        {
+          "reused": true,
+          "userId": "bob"
+        },
+        {
+          "reused": true,
+          "userId": null
+        },
+        {
+          "reused": true,
+          "userId": "alice"
+        },
+        {
+          "reused": true,
+          "userId": "bob"
+        },
+        {
+          "reused": true,
+          "userId": null
+        }
+      ],
+      "expectedIdentities": [
+        "alice",
+        "bob",
+        null,
+        "alice",
+        "bob",
+        null
+      ]
+    }
+  ],
+  "localBenchmarks": {
+    "runtime": "Node v26.5.0 arm64",
+    "measuredAt": "2026-10-13T14:57:43.790Z",
+    "baseline": "4b17b853f00552737703b85b61207275c0cb0e87",
+    "measurement": "Median local process CPU ms over five warm rounds; synthetic inputs; not production CPU savings",
+    "authEmptySession": {
+      "beforeCpuMs": 0.47468,
+      "afterCpuMs": 0.03392
+    },
+    "storedZip4MiB": {
+      "beforeCpuMs": 45.7423,
+      "afterCpuMs": 8.56995
+    },
+    "bundleHashes1000Files": {
+      "beforeCpuMs": 0.55533,
+      "afterCpuMs": 0.40697
+    }
+  },
+  "historicalTrendingLogs": {
+    "status": "unavailable",
+    "httpStatus": 403,
+    "reason": "Authentication error"
+  },
+  "deployed": false,
+  "validation": {
+    "webTestFiles": 123,
+    "webTestsPassed": 901,
+    "webTypecheck": "passed",
+    "rootLint": "passed",
+    "webProductionBuild": "passed with pre-existing unused CSS warning",
+    "workerBundles": [
+      "indexing",
+      "virustotal",
+      "search-precompute"
+    ],
+    "localWorkerd": "passed",
+    "productionSavings": "not measured; not deployed"
+  },
+  "review": {
+    "date": "2026-10-13",
+    "fixed": [
+      {
+        "issue": "Empty D1 README skipped R2 on SSR render miss",
+        "introducedByOptimization": true,
+        "regressionReproducedBeforeFix": true
+      },
+      {
+        "issue": "Failed search index replacement lost previously committed rows",
+        "introducedByOptimization": false,
+        "regressionReproducedBeforeFix": true
+      }
+    ],
+    "additionalTests": 7,
+    "authCoverage": [
+      "concurrent signed user sessions and anonymous requests",
+      "response cookie isolation",
+      "session token revocation without session-data cookie",
+      "failed initialization retry",
+      "older initialization failure preserves newer cached configuration"
+    ],
+    "hashCompatibility": "fixed fingerprints extracted from revision 4b17b853f00552737703b85b61207275c0cb0e87",
+    "localD1": {
+      "measuredAt": "2026-10-13T15:32:32.157Z",
+      "runtime": "isolated local workerd D1",
+      "results": [
+        {
+          "kind": "terms",
+          "rejected": true,
+          "previous": [
+            {
+              "value": "previous",
+              "updated_at": 123
+            }
+          ],
+          "retried": {
+            "count": 96
+          },
+          "cleared": {
+            "count": 0
+          }
+        },
+        {
+          "kind": "prefixes",
+          "rejected": true,
+          "previous": [
+            {
+              "value": "previous",
+              "updated_at": 123
+            }
+          ],
+          "retried": {
+            "count": 160
+          },
+          "cleared": {
+            "count": 0
+          }
+        }
+      ]
+    },
+    "productionResourcesUsed": false
+  }
+}

@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   createAuth: vi.fn(),
   getCurrentSkillVisibility: vi.fn(),
-  peekCachedText: vi.fn(),
-  putCachedText: vi.fn(),
+  peekCachedResponse: vi.fn(),
+  putCachedResponse: vi.fn(),
   resolveTokenBackedIdentity: vi.fn(),
   runRequestSecurity: vi.fn(),
 }));
@@ -22,8 +22,10 @@ vi.mock('better-auth/svelte-kit', () => ({
 
 vi.mock('$lib/server/cache', () => ({
   getCachedText: vi.fn(),
-  peekCachedText: mocks.peekCachedText,
-  putCachedText: mocks.putCachedText,
+  peekCachedText: vi.fn(),
+  putCachedText: vi.fn(),
+  peekCachedResponse: mocks.peekCachedResponse,
+  putCachedResponse: mocks.putCachedResponse,
   setCacheVersion: vi.fn(),
 }));
 
@@ -96,16 +98,18 @@ beforeEach(() => {
     api: { getSession: vi.fn(async () => null) },
   });
   mocks.getCurrentSkillVisibility.mockResolvedValue('private');
-  mocks.peekCachedText.mockResolvedValue(null);
-  mocks.putCachedText.mockResolvedValue(undefined);
+  mocks.peekCachedResponse.mockResolvedValue(null);
+  mocks.putCachedResponse.mockImplementation(async (_key: string, _response: Response, _ttl: number, options: { waitUntil?: (promise: Promise<unknown>) => void }) => {
+    options?.waitUntil?.(Promise.resolve());
+  });
   mocks.resolveTokenBackedIdentity.mockResolvedValue(null);
   mocks.runRequestSecurity.mockResolvedValue(null);
 });
 
 describe('discovery HTML cache', () => {
   it('serves cached discovery HTML without running load or auth', async () => {
-    mocks.peekCachedText.mockImplementation(async (key: string) =>
-      key === 'page:discovery:html:v3:trending:en' ? '<html>cached trending</html>' : null
+    mocks.peekCachedResponse.mockImplementation(async (key: string) =>
+      key === 'page:discovery:html:v3:trending:en' ? new Response('<html>cached trending</html>') : null
     );
     const { handle } = await import('../src/hooks.server');
     const { waitUntil } = createWaitUntil();
@@ -151,11 +155,11 @@ describe('discovery HTML cache', () => {
     expect(response.headers.get('Vary')).toBe('Cookie, Host, Accept');
     expect(response.headers.get('set-cookie')).toBeNull();
     expect(waitUntil).toHaveBeenCalled();
-    expect(mocks.putCachedText).toHaveBeenCalledWith(
+    expect(mocks.putCachedResponse).toHaveBeenCalledWith(
       'page:discovery:html:v3:trending:en',
-      '<html>fresh discovery</html>',
+      expect.any(Response),
       300,
-      expect.objectContaining({ contentType: 'text/html; charset=utf-8' })
+      expect.objectContaining({ waitUntil: expect.any(Function) })
     );
   });
 
@@ -178,20 +182,21 @@ describe('discovery HTML cache', () => {
     expect(response.headers.get('Link')).toContain('rel="service-desc"');
     expect(response.headers.get('Link')).toContain('rel="service-doc"');
     expect(response.headers.get('Link')).toContain('rel="describedby"');
-    expect(mocks.putCachedText).toHaveBeenCalledWith(
+    expect(mocks.putCachedResponse).toHaveBeenCalledWith(
       'page:home:html:v3:en',
-      '<html>fresh home</html>',
+      expect.any(Response),
       60,
-      expect.objectContaining({ contentType: 'text/html; charset=utf-8' })
+      expect.objectContaining({ waitUntil: expect.any(Function) })
     );
+    expect(await mocks.putCachedResponse.mock.calls[0][1].text()).toBe('<html>fresh home</html>');
     expect(response.headers.get('Cloudflare-CDN-Cache-Control')).toBe(
       'public, max-age=60, stale-while-revalidate=120'
     );
   });
 
   it('isolates cached HTML per locale', async () => {
-    mocks.peekCachedText.mockImplementation(async (key: string) =>
-      key === 'page:discovery:html:v3:trending:zh-CN' ? '<html>缓存的发现页</html>' : null
+    mocks.peekCachedResponse.mockImplementation(async (key: string) =>
+      key === 'page:discovery:html:v3:trending:zh-CN' ? new Response('<html>缓存的发现页</html>') : null
     );
     const { handle } = await import('../src/hooks.server');
     const { waitUntil } = createWaitUntil();
@@ -211,7 +216,7 @@ describe('discovery HTML cache', () => {
     expect(body).toContain('缓存的发现页');
     expect(response.headers.get('Content-Language')).toBe('zh-CN');
     expect(response.headers.get('X-Cache')).toBe('HIT');
-    expect(mocks.peekCachedText).toHaveBeenCalledWith(
+    expect(mocks.peekCachedResponse).toHaveBeenCalledWith(
       'page:discovery:html:v3:trending:zh-CN',
       expect.anything()
     );
@@ -231,7 +236,7 @@ describe('discovery HTML cache', () => {
     await drain();
 
     expect(response.headers.get('X-Cache')).toBe('MISS');
-    expect(mocks.putCachedText).not.toHaveBeenCalledWith(
+    expect(mocks.putCachedResponse).not.toHaveBeenCalledWith(
       expect.stringContaining('page:discovery:html'),
       expect.anything(),
       expect.anything(),
@@ -258,7 +263,7 @@ describe('discovery HTML cache', () => {
 
     expect(response.status).toBe(404);
     expect(response.headers.get('X-Skillscat-Status-Override')).toBeNull();
-    expect(mocks.putCachedText).not.toHaveBeenCalledWith(
+    expect(mocks.putCachedResponse).not.toHaveBeenCalledWith(
       expect.stringContaining('page:category:html'),
       expect.anything(),
       expect.anything(),
@@ -301,11 +306,11 @@ describe('discovery HTML cache', () => {
     await drain();
 
     expect(response.headers.get('X-Cache')).toBeNull();
-    expect(mocks.peekCachedText).not.toHaveBeenCalledWith(
+    expect(mocks.peekCachedResponse).not.toHaveBeenCalledWith(
       expect.stringContaining('page:discovery:html'),
       expect.anything()
     );
-    expect(mocks.putCachedText).not.toHaveBeenCalledWith(
+    expect(mocks.putCachedResponse).not.toHaveBeenCalledWith(
       expect.stringContaining('page:discovery:html'),
       expect.anything(),
       expect.anything(),

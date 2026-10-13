@@ -4,7 +4,7 @@ import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { building } from '$app/environment';
 import type { Handle, ResolveOptions } from '@sveltejs/kit';
 import { getXRobotsTagForPath, runRequestSecurity } from '$lib/server/security/request';
-import { getCachedText, peekCachedText, putCachedText, setCacheVersion } from '$lib/server/cache';
+import { getCachedText, peekCachedText, putCachedText, peekCachedResponse, putCachedResponse, setCacheVersion } from '$lib/server/cache';
 import { getSkillBySlug } from '$lib/server/db/business/detail';
 import {
   shouldForceDefaultLocaleForPublicPage,
@@ -463,16 +463,14 @@ async function maybeRespondWithCachedSkillHtml(
   }
 
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
-  const cachedHtml = await peekCachedText(getSkillHtmlCacheKey(event.locals.locale, slug), { waitUntil });
+  const cachedHtml = await peekCachedResponse(getSkillHtmlCacheKey(event.locals.locale, slug), { waitUntil });
   if (!cachedHtml) {
     return null;
   }
 
   return applySkillHtmlCacheHeaders(
-    new Response(cachedHtml, {
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-      },
+    new Response(cachedHtml.body, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
     }),
     event.locals.locale,
     'HIT',
@@ -508,16 +506,14 @@ async function maybeRespondWithCachedDiscoveryHtml(
   }
 
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
-  const cachedHtml = await peekCachedText(cacheKey, { waitUntil });
+  const cachedHtml = await peekCachedResponse(cacheKey, { waitUntil });
   if (!cachedHtml) {
     return null;
   }
 
   return applySharedPublicHtmlCacheHeaders(
-    new Response(cachedHtml, {
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-      },
+    new Response(cachedHtml.body, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
     }),
     event.locals.locale,
     'HIT',
@@ -558,24 +554,10 @@ function maybeWriteDiscoveryHtmlCache(
 
   const ttlSeconds = getPublicDiscoveryHtmlCacheTtl(event);
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
-  const cacheWrite = (async () => {
-    const html = await response.text();
-    if (!html) {
-      return;
-    }
-
-    await putCachedText(cacheKey, html, ttlSeconds, {
-      waitUntil,
-      contentType: 'text/html; charset=utf-8',
-    });
-  })();
-
-  if (waitUntil) {
-    waitUntil(cacheWrite);
-    return;
-  }
-
-  void cacheWrite;
+  // Cache the stream directly; buffering HTML here spends CPU even in waitUntil.
+  void putCachedResponse(cacheKey, new Response(response.body, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  }), ttlSeconds, { waitUntil });
 }
 
 function maybeWriteSkillHtmlCache(
@@ -590,7 +572,7 @@ function maybeWriteSkillHtmlCache(
     return;
   }
 
-  if (!response.ok) {
+  if (!response.ok || response.headers.has('set-cookie') || response.headers.has(STATUS_OVERRIDE_HEADER)) {
     return;
   }
 
@@ -605,37 +587,20 @@ function maybeWriteSkillHtmlCache(
   }
 
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
-  const cacheWrite = (async () => {
-    const html = await response.text();
-    if (!html) {
-      return;
-    }
-
-    await Promise.all([
-      putCachedText(
-        getSkillHtmlCacheKey(event.locals.locale, slug),
-        html,
-        SKILL_HTML_CACHE_TTL_SECONDS,
-        {
-          waitUntil,
-          contentType: 'text/html; charset=utf-8',
-        }
-      ),
-      putCachedText(
-        getSkillPublicHintCacheKey(slug),
-        'public',
-        SKILL_PUBLIC_HINT_CACHE_TTL_SECONDS,
-        { waitUntil, contentType: 'text/plain; charset=utf-8' }
-      ),
-    ]);
-  })();
-
-  if (waitUntil) {
-    waitUntil(cacheWrite);
-    return;
-  }
-
-  void cacheWrite;
+  void putCachedResponse(
+    getSkillHtmlCacheKey(event.locals.locale, slug),
+    new Response(response.body, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+    SKILL_HTML_CACHE_TTL_SECONDS,
+    { waitUntil }
+  );
+  void putCachedText(
+    getSkillPublicHintCacheKey(slug),
+    'public',
+    SKILL_PUBLIC_HINT_CACHE_TTL_SECONDS,
+    { waitUntil, contentType: 'text/plain; charset=utf-8' }
+  );
 }
 
 function safeDecodeURIComponent(value: string): string {

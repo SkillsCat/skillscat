@@ -1,3 +1,4 @@
+import { crc32 } from '$lib/zip/crc32';
 import type { SkillFile } from '$lib/server/skill/files';
 import { buildSkillSlug, normalizeSkillSlug, parseSkillSlug } from '$lib/skill-path';
 
@@ -190,32 +191,4 @@ export function createStoredZip(
   }
 
   return zip;
-}
-
-let crc32Table: Uint32Array | null = null;
-
-function getCrc32Table(): Uint32Array {
-  if (crc32Table) return crc32Table;
-
-  crc32Table = new Uint32Array(256);
-  for (let i = 0; i < 256; i += 1) {
-    let c = i;
-    for (let j = 0; j < 8; j += 1) {
-      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    }
-    crc32Table[i] = c;
-  }
-
-  return crc32Table;
-}
-
-function crc32(data: Uint8Array): number {
-  const table = getCrc32Table();
-  let crc = 0xffffffff;
-
-  for (let i = 0; i < data.length; i += 1) {
-    crc = (crc >>> 8) ^ table[(crc ^ data[i]) & 0xff];
-  }
-
-  return (crc ^ 0xffffffff) >>> 0;
 }

@@ -1,3 +1,4 @@
+import { crc32 } from '../../../src/lib/zip/crc32';
 import type { BaseEnv } from '../types';
 import {
   fetchGitHubBlobBytes,
@@ -63,18 +64,6 @@ export async function buildSkillBundleFiles(
   }
 
   return bundleFiles;
-}
-
-function crc32(bytes: Uint8Array): number {
-  let crc = 0xffffffff;
-  for (let index = 0; index < bytes.length; index += 1) {
-    crc ^= bytes[index];
-    for (let bit = 0; bit < 8; bit += 1) {
-      const mask = -(crc & 1);
-      crc = (crc >>> 1) ^ (0xedb88320 & mask);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
 }
 
 export function buildStoredZip(files: Array<Pick<SecurityFileRecord, 'path' | 'bytes'>>): Uint8Array {

@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   createAuth: vi.fn(),
   getCurrentSkillVisibility: vi.fn(),
   peekCachedText: vi.fn(),
+  peekCachedResponse: vi.fn(),
+  putCachedResponse: vi.fn(),
   putCachedText: vi.fn(),
   resolveTokenBackedIdentity: vi.fn(),
   runRequestSecurity: vi.fn(),
@@ -23,6 +25,8 @@ vi.mock('better-auth/svelte-kit', () => ({
 vi.mock('$lib/server/cache', () => ({
   getCachedText: vi.fn(),
   peekCachedText: mocks.peekCachedText,
+  peekCachedResponse: mocks.peekCachedResponse,
+  putCachedResponse: mocks.putCachedResponse,
   putCachedText: mocks.putCachedText,
   setCacheVersion: vi.fn(),
 }));
@@ -77,6 +81,8 @@ beforeEach(() => {
   });
   mocks.getCurrentSkillVisibility.mockResolvedValue('private');
   mocks.peekCachedText.mockResolvedValue(null);
+  mocks.peekCachedResponse.mockResolvedValue(null);
+  mocks.putCachedResponse.mockResolvedValue(undefined);
   mocks.putCachedText.mockResolvedValue(undefined);
   mocks.resolveTokenBackedIdentity.mockResolvedValue(null);
   mocks.runRequestSecurity.mockResolvedValue(null);
@@ -85,10 +91,10 @@ beforeEach(() => {
 describe('skill HTML cache visibility hint', () => {
   it('serves cached public HTML without touching D1 when the hint says public', async () => {
     mocks.peekCachedText.mockImplementation(async (key: string) => {
-      if (key.includes('page:skill:html')) return '<html>cached public content</html>';
       if (key.includes('page:skill:public')) return 'public';
       return null;
     });
+    mocks.peekCachedResponse.mockImplementation(async () => new Response('<html>cached public content</html>'));
     const { handle } = await import('../src/hooks.server');
     const resolve = privateResolve();
 
@@ -104,10 +110,10 @@ describe('skill HTML cache visibility hint', () => {
 
   it('treats legacy hint entries as public', async () => {
     mocks.peekCachedText.mockImplementation(async (key: string) => {
-      if (key.includes('page:skill:html')) return '<html>cached public content</html>';
       if (key.includes('page:skill:public')) return '1';
       return null;
     });
+    mocks.peekCachedResponse.mockImplementation(async () => new Response('<html>cached public content</html>'));
     const { handle } = await import('../src/hooks.server');
     const resolve = privateResolve();
 
@@ -119,10 +125,10 @@ describe('skill HTML cache visibility hint', () => {
 
   it('does not serve cached public HTML when the cached hint says private, without touching D1', async () => {
     mocks.peekCachedText.mockImplementation(async (key: string) => {
-      if (key.includes('page:skill:html')) return '<html>stale public content</html>';
       if (key.includes('page:skill:public')) return 'private';
       return null;
     });
+    mocks.peekCachedResponse.mockResolvedValue(new Response('<html>stale public content</html>'));
     const { handle } = await import('../src/hooks.server');
     const resolve = privateResolve();
 
@@ -133,8 +139,28 @@ describe('skill HTML cache visibility hint', () => {
     expect(body).not.toContain('stale public content');
     expect(response.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
     expect(mocks.getCurrentSkillVisibility).not.toHaveBeenCalled();
+    expect(mocks.peekCachedResponse).not.toHaveBeenCalled();
     expect(mocks.createAuth).toHaveBeenCalledOnce();
     expect(resolve).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { 'set-cookie': 'test-session=private' },
+    { 'X-Skillscat-Status-Override': '404' },
+  ])('does not persist public-marked HTML with unsafe response headers: %j', async (headers) => {
+    mocks.peekCachedText.mockResolvedValue('public');
+    const { handle } = await import('../src/hooks.server');
+    const resolve = vi.fn(async () => new Response('<html>unsafe cache candidate</html>', {
+      headers: {
+        'Content-Type': 'text/html',
+        'X-Skillscat-Public-Skill-Cache': '1',
+        ...headers,
+      },
+    }));
+    const response = await handle({ event: skillEvent(), resolve } as never);
+    await response.text();
+    expect(mocks.putCachedResponse).not.toHaveBeenCalled();
+    expect(mocks.putCachedText).not.toHaveBeenCalled();
   });
 
   it('falls back to a single D1 visibility lookup when the hint is missing and caches the result', async () => {
