@@ -1,0 +1,1330 @@
+{
+  "recordedAt": "2026-10-13T17:35:46.896Z",
+  "sourceCommit": "786610f1ce5d185b8d26ae14f3eeffe2c193251b",
+  "webVersion": "0.9.6",
+  "deploymentStatus": "active; acceptance incomplete for explicitly listed items",
+  "workers": {
+    "web": {
+      "current": [
+        {
+          "version_id": "b887890f-0969-4bcd-99ce-ced5a4157836",
+          "percentage": 100
+        }
+      ],
+      "deployedAt": "2026-10-13T17:25:21.444321Z",
+      "rollback": [
+        {
+          "version_id": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4",
+          "percentage": 100
+        }
+      ],
+      "settingsUnchanged": true,
+      "crons": [],
+      "cronsUnchanged": true,
+      "observedEvents": 430,
+      "firstEvent": "2026-10-13T17:25:26.727Z",
+      "lastEvent": "2026-10-13T17:35:45.163Z",
+      "outcomes": {
+        "ok": 430
+      },
+      "errorEvents": [
+        {
+          "worker": "web",
+          "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+          "at": 1791912714814,
+          "observedAt": "2026-10-13T17:31:55.091Z",
+          "outcome": "ok",
+          "path": "/a2a/tasks/[probe-id]",
+          "method": "GET",
+          "cpuTime": 72,
+          "wallTime": 121,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /a2a/tasks/[probe-id]\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        }
+      ],
+      "naturalCron": []
+    },
+    "indexing": {
+      "current": [
+        {
+          "version_id": "6e03abe4-be7b-40db-8c24-75eae251da0a",
+          "percentage": 100
+        }
+      ],
+      "deployedAt": "2026-10-13T16:59:04.865801Z",
+      "rollback": [
+        {
+          "version_id": "58be10a7-6aae-4007-a799-78681d41f0a5",
+          "percentage": 100
+        }
+      ],
+      "settingsUnchanged": true,
+      "crons": [],
+      "cronsUnchanged": true,
+      "observedEvents": 0,
+      "outcomes": {},
+      "errorEvents": [],
+      "naturalCron": []
+    },
+    "virustotal": {
+      "current": [
+        {
+          "version_id": "3f349028-776a-4152-825b-23831d20a34d",
+          "percentage": 100
+        }
+      ],
+      "deployedAt": "2026-10-13T16:59:11.238588Z",
+      "rollback": [
+        {
+          "version_id": "d4146bcc-816d-498a-8fa2-a38f717c4e1c",
+          "percentage": 100
+        }
+      ],
+      "settingsUnchanged": true,
+      "crons": [
+        "* * * * *"
+      ],
+      "cronsUnchanged": true,
+      "observedEvents": 37,
+      "firstEvent": "2026-10-13T16:59:29.498Z",
+      "lastEvent": "2026-10-13T17:35:40.264Z",
+      "outcomes": {
+        "ok": 37
+      },
+      "errorEvents": [],
+      "naturalCron": [
+        {
+          "at": "2026-10-13T16:59:27.407Z",
+          "outcome": "ok",
+          "cpuTimeMs": 21,
+          "wallTimeMs": 1947,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:00:35.407Z",
+          "outcome": "ok",
+          "cpuTimeMs": 14,
+          "wallTimeMs": 3840,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:02:11.211Z",
+          "outcome": "ok",
+          "cpuTimeMs": 11,
+          "wallTimeMs": 2796,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:02:45.017Z",
+          "outcome": "ok",
+          "cpuTimeMs": 11,
+          "wallTimeMs": 1528,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:03:35.210Z",
+          "outcome": "ok",
+          "cpuTimeMs": 15,
+          "wallTimeMs": 2480,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:04:27.404Z",
+          "outcome": "ok",
+          "cpuTimeMs": 14,
+          "wallTimeMs": 1582,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:05:27.511Z",
+          "outcome": "ok",
+          "cpuTimeMs": 13,
+          "wallTimeMs": 3945,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:06:26.905Z",
+          "outcome": "ok",
+          "cpuTimeMs": 11,
+          "wallTimeMs": 1645,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:07:26.600Z",
+          "outcome": "ok",
+          "cpuTimeMs": 13,
+          "wallTimeMs": 1752,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:08:28.198Z",
+          "outcome": "ok",
+          "cpuTimeMs": 11,
+          "wallTimeMs": 1963,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:09:26.595Z",
+          "outcome": "ok",
+          "cpuTimeMs": 11,
+          "wallTimeMs": 1592,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:10:39.712Z",
+          "outcome": "ok",
+          "cpuTimeMs": 11,
+          "wallTimeMs": 4748,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:11:32.401Z",
+          "outcome": "ok",
+          "cpuTimeMs": 13,
+          "wallTimeMs": 1584,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:12:26.801Z",
+          "outcome": "ok",
+          "cpuTimeMs": 13,
+          "wallTimeMs": 1886,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:13:26.300Z",
+          "outcome": "ok",
+          "cpuTimeMs": 11,
+          "wallTimeMs": 2001,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:14:26.513Z",
+          "outcome": "ok",
+          "cpuTimeMs": 13,
+          "wallTimeMs": 2301,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:15:46.705Z",
+          "outcome": "ok",
+          "cpuTimeMs": 11,
+          "wallTimeMs": 4150,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:16:50.241Z",
+          "outcome": "ok",
+          "cpuTimeMs": 15,
+          "wallTimeMs": 2562,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:17:26.214Z",
+          "outcome": "ok",
+          "cpuTimeMs": 11,
+          "wallTimeMs": 2262,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:18:26.808Z",
+          "outcome": "ok",
+          "cpuTimeMs": 13,
+          "wallTimeMs": 2013,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:19:28.014Z",
+          "outcome": "ok",
+          "cpuTimeMs": 10,
+          "wallTimeMs": 2125,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:20:30.095Z",
+          "outcome": "ok",
+          "cpuTimeMs": 10,
+          "wallTimeMs": 2568,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:21:43.908Z",
+          "outcome": "ok",
+          "cpuTimeMs": 12,
+          "wallTimeMs": 2680,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:22:27.012Z",
+          "outcome": "ok",
+          "cpuTimeMs": 11,
+          "wallTimeMs": 1593,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:23:26.596Z",
+          "outcome": "ok",
+          "cpuTimeMs": 12,
+          "wallTimeMs": 2003,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:24:29.013Z",
+          "outcome": "ok",
+          "cpuTimeMs": 11,
+          "wallTimeMs": 2263,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:25:37.198Z",
+          "outcome": "ok",
+          "cpuTimeMs": 12,
+          "wallTimeMs": 2228,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:26:26.307Z",
+          "outcome": "ok",
+          "cpuTimeMs": 10,
+          "wallTimeMs": 1764,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:27:28.724Z",
+          "outcome": "ok",
+          "cpuTimeMs": 12,
+          "wallTimeMs": 2092,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:28:28.602Z",
+          "outcome": "ok",
+          "cpuTimeMs": 12,
+          "wallTimeMs": 2052,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:29:26.909Z",
+          "outcome": "ok",
+          "cpuTimeMs": 13,
+          "wallTimeMs": 1640,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:30:55.407Z",
+          "outcome": "ok",
+          "cpuTimeMs": 13,
+          "wallTimeMs": 2761,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:31:54.608Z",
+          "outcome": "ok",
+          "cpuTimeMs": 13,
+          "wallTimeMs": 4250,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:32:34.599Z",
+          "outcome": "ok",
+          "cpuTimeMs": 14,
+          "wallTimeMs": 1494,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:33:26.910Z",
+          "outcome": "ok",
+          "cpuTimeMs": 12,
+          "wallTimeMs": 2137,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:34:26.302Z",
+          "outcome": "ok",
+          "cpuTimeMs": 12,
+          "wallTimeMs": 2073,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": "2026-10-13T17:35:38.013Z",
+          "outcome": "ok",
+          "cpuTimeMs": 16,
+          "wallTimeMs": 2193,
+          "errors": [],
+          "exceptions": []
+        }
+      ]
+    },
+    "search-precompute": {
+      "current": [
+        {
+          "version_id": "718af839-9231-4a3d-8cfc-a06985d38d0f",
+          "percentage": 100
+        }
+      ],
+      "deployedAt": "2026-10-13T16:59:17.489565Z",
+      "rollback": [
+        {
+          "version_id": "0c337bd6-b8a0-4d41-a517-8d6c91990c80",
+          "percentage": 100
+        }
+      ],
+      "settingsUnchanged": true,
+      "crons": [
+        "15 * * * *"
+      ],
+      "cronsUnchanged": true,
+      "observedEvents": 1,
+      "firstEvent": "2026-10-13T17:16:27.768Z",
+      "lastEvent": "2026-10-13T17:16:27.768Z",
+      "outcomes": {
+        "ok": 1
+      },
+      "errorEvents": [],
+      "naturalCron": [
+        {
+          "at": "2026-10-13T17:15:46.717Z",
+          "outcome": "ok",
+          "cpuTimeMs": 396,
+          "wallTimeMs": 40066,
+          "errors": [],
+          "exceptions": []
+        }
+      ]
+    },
+    "trending": {
+      "current": [
+        {
+          "version_id": "67c66825-815a-45d8-9872-d741f26a32a5",
+          "percentage": 100
+        }
+      ],
+      "deployedAt": "2026-10-13T17:07:04.215805Z",
+      "rollback": [
+        {
+          "version_id": "a1785a96-f215-4689-99aa-f6c786373a67",
+          "percentage": 100
+        }
+      ],
+      "settingsUnchanged": true,
+      "crons": [
+        "0 * * * *"
+      ],
+      "cronsUnchanged": true,
+      "observedEvents": 0,
+      "outcomes": {},
+      "errorEvents": [],
+      "naturalCron": []
+    }
+  },
+  "queueConfigurationUnchanged": true,
+  "queueSnapshots": [
+    {
+      "at": "2026-10-13T17:08:17.038Z",
+      "metrics": {
+        "skillscat-classification": {
+          "backlog_count": 0,
+          "backlog_bytes": 0,
+          "oldest_message_timestamp_ms": 0
+        },
+        "skillscat-indexing": {
+          "backlog_count": 5,
+          "backlog_bytes": 1184,
+          "oldest_message_timestamp_ms": 1791852067451
+        },
+        "skillscat-indexing-dlq": {
+          "backlog_count": 12764,
+          "backlog_bytes": 2693809,
+          "oldest_message_timestamp_ms": 0
+        },
+        "skillscat-security-analysis": {
+          "backlog_count": 0,
+          "backlog_bytes": 0,
+          "oldest_message_timestamp_ms": 0
+        }
+      }
+    },
+    {
+      "at": "2026-10-13T17:32:02.446Z",
+      "queues": {
+        "indexing": {
+          "backlog_count": 5,
+          "backlog_bytes": 1184,
+          "oldest_message_timestamp_ms": 1791852067451
+        },
+        "indexing-dlq": {
+          "backlog_count": 12764,
+          "backlog_bytes": 2693809,
+          "oldest_message_timestamp_ms": 0
+        }
+      }
+    }
+  ],
+  "tests": [
+    {
+      "name": "web",
+      "status": "passed",
+      "passedTests": 870,
+      "logSha256": "d62ff43d15072bc758e882b306ce4f7576912185342b76a09de062a1c341cc55"
+    },
+    {
+      "name": "cli",
+      "status": "passed",
+      "passedTests": 191,
+      "logSha256": "3ab6f99dbd7739c7856a4e6f9a4966912a60096306d6a8491e6020a7429cb05c"
+    },
+    {
+      "name": "typecheck",
+      "status": "passed",
+      "passedTests": null,
+      "logSha256": "f1059ce7d6d8e90b407b67e9fce85b1080348185f138be5aae396971b652c833"
+    },
+    {
+      "name": "lint",
+      "status": "passed",
+      "passedTests": null,
+      "logSha256": "050c69da23536758722729aeda55a8d0fb9d557495ef6d33d70873a3b64a71c1"
+    },
+    {
+      "name": "build",
+      "status": "passed",
+      "passedTests": null,
+      "logSha256": "f3cf006764a26e05cd383590dd854e5926a539f9baaea6d7c8d38610a752fd71"
+    }
+  ],
+  "http": {
+    "at": "2026-10-13T17:30:40.168Z",
+    "results": [
+      {
+        "at": "2026-10-13T17:30:36.277Z",
+        "path": "/recent",
+        "expected": 200,
+        "status": 200,
+        "title": "Recently Added - SkillsCat",
+        "skillLinks": 24,
+        "has500Body": false,
+        "cache": "HIT",
+        "cfCache": "HIT",
+        "cacheControl": "no-store",
+        "bodyBytes": 108095
+      },
+      {
+        "at": "2026-10-13T17:30:36.341Z",
+        "path": "/recent?page=2",
+        "expected": 200,
+        "status": 200,
+        "title": "Recently Added - Page 2 - SkillsCat",
+        "skillLinks": 24,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=180, private=Set-Cookie",
+        "bodyBytes": 120592
+      },
+      {
+        "at": "2026-10-13T17:30:36.784Z",
+        "path": "/top",
+        "expected": 200,
+        "status": 200,
+        "title": "Top Rated - SkillsCat",
+        "skillLinks": 24,
+        "has500Body": false,
+        "cache": "HIT",
+        "cfCache": "HIT",
+        "cacheControl": "no-store",
+        "bodyBytes": 109050
+      },
+      {
+        "at": "2026-10-13T17:30:36.802Z",
+        "path": "/top?page=2",
+        "expected": 200,
+        "status": 200,
+        "title": "Top Rated - Page 2 - SkillsCat",
+        "skillLinks": 24,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=300, stale-while-revalidate=900, private=Set-Cookie",
+        "bodyBytes": 105185
+      },
+      {
+        "at": "2026-10-13T17:30:36.860Z",
+        "path": "/trending",
+        "expected": 200,
+        "status": 200,
+        "title": "Trending Skills - SkillsCat",
+        "skillLinks": 24,
+        "has500Body": false,
+        "cache": "HIT",
+        "cfCache": "HIT",
+        "cacheControl": "no-store",
+        "bodyBytes": 116247
+      },
+      {
+        "at": "2026-10-13T17:30:36.880Z",
+        "path": "/trending?page=2",
+        "expected": 200,
+        "status": 200,
+        "title": "Trending Skills - Page 2 - SkillsCat",
+        "skillLinks": 24,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=180, private=Set-Cookie",
+        "bodyBytes": 114600
+      },
+      {
+        "at": "2026-10-13T17:30:37.032Z",
+        "path": "/search?q=testing",
+        "expected": 200,
+        "status": 200,
+        "title": "Search: testing - SkillsCat",
+        "skillLinks": 50,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+        "bodyBytes": 222272
+      },
+      {
+        "at": "2026-10-13T17:30:37.117Z",
+        "path": "/search?q=testing&page=2",
+        "expected": 200,
+        "status": 200,
+        "title": "Search: testing - Page 2 - SkillsCat",
+        "skillLinks": 50,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+        "bodyBytes": 208982
+      },
+      {
+        "at": "2026-10-13T17:30:37.248Z",
+        "path": "/search?q=skillscatverifynotfound20261014",
+        "expected": 200,
+        "status": 200,
+        "title": "Search: skillscatverifynotfound20261014 - SkillsCat",
+        "skillLinks": 0,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+        "bodyBytes": 22353
+      },
+      {
+        "at": "2026-10-13T17:30:37.291Z",
+        "path": "/search?q=testing&page=101",
+        "expected": 404,
+        "status": 404,
+        "title": "404 - SkillsCat",
+        "skillLinks": 0,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
+        "bodyBytes": 17958
+      },
+      {
+        "at": "2026-10-13T17:30:37.320Z",
+        "path": "/categories",
+        "expected": 200,
+        "status": 200,
+        "title": "Categories - SkillsCat",
+        "skillLinks": 0,
+        "has500Body": false,
+        "cache": "HIT",
+        "cfCache": "HIT",
+        "cacheControl": "no-store",
+        "bodyBytes": 119334
+      },
+      {
+        "at": "2026-10-13T17:30:37.343Z",
+        "path": "/category/testing",
+        "expected": 200,
+        "status": 200,
+        "title": "Testing - SkillsCat",
+        "skillLinks": 24,
+        "has500Body": false,
+        "cache": "HIT",
+        "cfCache": "HIT",
+        "cacheControl": "no-store",
+        "bodyBytes": 112524
+      },
+      {
+        "at": "2026-10-13T17:30:37.365Z",
+        "path": "/category/skillscatverifynotfound20261014",
+        "expected": 404,
+        "status": 404,
+        "title": "Category Not Found - SkillsCat",
+        "skillLinks": 0,
+        "has500Body": false,
+        "cache": "MISS",
+        "cfCache": "HIT",
+        "cacheControl": "no-store",
+        "bodyBytes": 20165
+      },
+      {
+        "at": "2026-10-13T17:30:37.385Z",
+        "path": "/u/anthropics",
+        "expected": 200,
+        "status": 200,
+        "title": "anthropics AI Agent Skills (126) | SkillsCat",
+        "skillLinks": 24,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600, private=Set-Cookie",
+        "bodyBytes": 105050
+      },
+      {
+        "at": "2026-10-13T17:30:37.459Z",
+        "path": "/u/anthropics?page=2",
+        "expected": 200,
+        "status": 200,
+        "title": "anthropics AI Agent Skills (126) | SkillsCat - Page 2",
+        "skillLinks": 24,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600, private=Set-Cookie",
+        "bodyBytes": 100173
+      },
+      {
+        "at": "2026-10-13T17:30:37.505Z",
+        "path": "/u/anthropics?page=101",
+        "expected": 404,
+        "status": 404,
+        "title": "404 - SkillsCat",
+        "skillLinks": 0,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600",
+        "bodyBytes": 17966
+      },
+      {
+        "at": "2026-10-13T17:30:37.535Z",
+        "path": "/u/skillscatverifynotfound20261014",
+        "expected": 404,
+        "status": 404,
+        "title": "User Not Found - SkillsCat",
+        "skillLinks": 0,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600",
+        "bodyBytes": 19837
+      },
+      {
+        "at": "2026-10-13T17:30:37.569Z",
+        "path": "/org/yottameta",
+        "expected": 200,
+        "status": 200,
+        "title": "YottaMeta Organization AI Agent Skills | SkillsCat",
+        "skillLinks": 0,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "no-store",
+        "bodyBytes": 22815
+      },
+      {
+        "at": "2026-10-13T17:30:37.654Z",
+        "path": "/org/skillscatverifynotfound20261014",
+        "expected": 404,
+        "status": 404,
+        "title": "Organization Not Found - SkillsCat",
+        "skillLinks": 0,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "no-store",
+        "bodyBytes": 20168
+      },
+      {
+        "at": "2026-10-13T17:30:37.733Z",
+        "path": "/skills/anthropics/skills/discernment-nudge",
+        "expected": 200,
+        "status": 200,
+        "title": "discernment-nudge | Prompts AI Agent Skill | SkillsCat",
+        "skillLinks": 5,
+        "has500Body": false,
+        "cache": "HIT",
+        "cfCache": "MISS",
+        "cacheControl": "no-store",
+        "bodyBytes": 73564
+      },
+      {
+        "at": "2026-10-13T17:30:37.894Z",
+        "path": "/skills/skillscatverifynotfound20261014/no-skill",
+        "expected": 404,
+        "status": 404,
+        "title": "Skill Not Found - SkillsCat",
+        "skillLinks": 0,
+        "has500Body": false,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": null,
+        "bodyBytes": 19651
+      },
+      {
+        "at": "2026-10-13T17:30:38.028Z",
+        "path": "/zh-CN/categories",
+        "expected": 200,
+        "status": 200,
+        "title": "分类 - SkillsCat",
+        "skillLinks": 0,
+        "has500Body": false,
+        "cache": "MISS",
+        "cfCache": "HIT",
+        "cacheControl": "no-store",
+        "bodyBytes": 119337
+      },
+      {
+        "at": "2026-10-13T17:30:38.049Z",
+        "path": "/zh-CN/category/testing",
+        "expected": 200,
+        "status": 200,
+        "title": "测试 - SkillsCat",
+        "skillLinks": 24,
+        "has500Body": false,
+        "cache": "HIT",
+        "cfCache": "HIT",
+        "cacheControl": "no-store",
+        "bodyBytes": 112662
+      },
+      {
+        "path": "/",
+        "skipped": "No fresh stats object; browser home already tested while fresh"
+      },
+      {
+        "at": "2026-10-13T17:30:38.728Z",
+        "path": "/registry/search?q=testing&limit=5",
+        "status": 200,
+        "keys": [
+          "skills",
+          "total"
+        ],
+        "total": 3087,
+        "count": 5,
+        "cache": "HIT",
+        "cacheControl": "private, no-cache"
+      },
+      {
+        "at": "2026-10-13T17:30:38.771Z",
+        "path": "/registry/search?q=testing&limit=5",
+        "status": 200,
+        "keys": [
+          "skills",
+          "total"
+        ],
+        "total": 3087,
+        "count": 5,
+        "cache": "HIT",
+        "cacheControl": "private, no-cache"
+      },
+      {
+        "at": "2026-10-13T17:30:39.792Z",
+        "path": "/registry/search?q=skillscatverifynotfound20261014&limit=5",
+        "status": 200,
+        "keys": [
+          "skills",
+          "total"
+        ],
+        "total": 0,
+        "count": 0,
+        "cache": "MISS",
+        "cacheControl": "private, no-cache"
+      },
+      {
+        "at": "2026-10-13T17:30:40.080Z",
+        "path": "/registry/skill/anthropics/skills/discernment-nudge",
+        "status": 200,
+        "keys": [
+          "slug",
+          "name",
+          "description",
+          "owner",
+          "repo",
+          "stars",
+          "updatedAt",
+          "categories",
+          "content",
+          "contentHash",
+          "githubUrl",
+          "skillPath",
+          "visibility"
+        ],
+        "slug": "anthropics/skills/discernment-nudge",
+        "contentBytes": 10592,
+        "contentHash": "9191177c4a8ef11a20dace786d708506b22d43e748c71287bb823de0dc812dad",
+        "cache": "MISS",
+        "cacheControl": "private, no-cache"
+      },
+      {
+        "at": "2026-10-13T17:30:40.168Z",
+        "path": "/registry/skill/skillscatverifynotfound20261014/no-skill",
+        "status": 404,
+        "keys": [
+          "error"
+        ],
+        "cache": "BYPASS",
+        "cacheControl": "no-store"
+      }
+    ]
+  },
+  "additionalHttp": [
+    {
+      "path": "/api/skills/anthropics%2Fskills%2Fdiscernment-nudge/file?path=SKILL.md",
+      "status": 200,
+      "cache": "MISS",
+      "cacheControl": "private, no-cache",
+      "redirect": null,
+      "contentBytes": 10592,
+      "contentHash": "9191177c4a8ef11a20dace786d708506b22d43e748c71287bb823de0dc812dad"
+    },
+    {
+      "path": "/api/skills/anthropics%2Fskills%2Fdiscernment-nudge/file?path=../secret",
+      "status": 400,
+      "cache": null,
+      "cacheControl": "no-store",
+      "redirect": null
+    },
+    {
+      "path": "/api/auth/get-session",
+      "status": 200,
+      "cache": null,
+      "cacheControl": "no-store",
+      "redirect": null,
+      "anonymousSession": true
+    },
+    {
+      "path": "/api/notifications/unread-count",
+      "status": 401,
+      "cache": null,
+      "cacheControl": "no-store",
+      "redirect": null
+    },
+    {
+      "path": "/user/skills",
+      "status": 302,
+      "cache": null,
+      "cacheControl": null,
+      "redirect": "/"
+    }
+  ],
+  "retainedOldAsset": {
+    "path": "/_app/immutable/entry/app.Bxhy42Qr.js",
+    "status": 200
+  },
+  "correlatedFinalWebEvents": [
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912342777,
+      "observedAt": "2026-10-13T17:25:43.419Z",
+      "outcome": "ok",
+      "path": "/recent",
+      "method": "GET",
+      "cpuTime": 69,
+      "wallTime": 393,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912477616,
+      "observedAt": "2026-10-13T17:27:57.722Z",
+      "outcome": "ok",
+      "path": "/top",
+      "method": "GET",
+      "cpuTime": 35,
+      "wallTime": 101,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912477786,
+      "observedAt": "2026-10-13T17:27:58.131Z",
+      "outcome": "ok",
+      "path": "/trending",
+      "method": "GET",
+      "cpuTime": 32,
+      "wallTime": 339,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912478243,
+      "observedAt": "2026-10-13T17:27:58.286Z",
+      "outcome": "ok",
+      "path": "/categories",
+      "method": "GET",
+      "cpuTime": 14,
+      "wallTime": 37,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912478403,
+      "observedAt": "2026-10-13T17:27:58.663Z",
+      "outcome": "ok",
+      "path": "/category/testing",
+      "method": "GET",
+      "cpuTime": 52,
+      "wallTime": 250,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912544433,
+      "observedAt": "2026-10-13T17:29:04.582Z",
+      "outcome": "ok",
+      "path": "/search",
+      "method": "GET",
+      "cpuTime": 57,
+      "wallTime": 125,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912518926,
+      "observedAt": "2026-10-13T17:28:39.420Z",
+      "outcome": "ok",
+      "path": "/u/anthropics",
+      "method": "GET",
+      "cpuTime": 97,
+      "wallTime": 485,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912532143,
+      "observedAt": "2026-10-13T17:28:52.432Z",
+      "outcome": "ok",
+      "path": "/org/yottameta",
+      "method": "GET",
+      "cpuTime": 32,
+      "wallTime": 248,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912546278,
+      "observedAt": "2026-10-13T17:29:06.636Z",
+      "outcome": "ok",
+      "path": "/skills/anthropics/skills/discernment-nudge",
+      "method": "GET",
+      "cpuTime": 43,
+      "wallTime": 352,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912343899,
+      "observedAt": "2026-10-13T17:25:44.247Z",
+      "outcome": "ok",
+      "path": "/api/auth/get-session",
+      "method": "GET",
+      "cpuTime": 42,
+      "wallTime": 57,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912344297,
+      "observedAt": "2026-10-13T17:25:45.667Z",
+      "outcome": "ok",
+      "path": "/api/notifications/unread-count",
+      "method": "GET",
+      "cpuTime": 46,
+      "wallTime": 685,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912407017,
+      "observedAt": "2026-10-13T17:26:47.765Z",
+      "outcome": "ok",
+      "path": "/user/skills",
+      "method": "GET",
+      "cpuTime": 70,
+      "wallTime": 284,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912352929,
+      "observedAt": "2026-10-13T17:25:53.043Z",
+      "outcome": "ok",
+      "path": "/user/skills/__data.json",
+      "method": "GET",
+      "cpuTime": 8,
+      "wallTime": 104,
+      "errors": [],
+      "exceptions": []
+    },
+    {
+      "worker": "web",
+      "version": "b887890f-0969-4bcd-99ce-ced5a4157836",
+      "at": 1791912488445,
+      "observedAt": "2026-10-13T17:28:09.266Z",
+      "outcome": "ok",
+      "path": "/search/__data.json",
+      "method": "GET",
+      "cpuTime": 82,
+      "wallTime": 175,
+      "errors": [],
+      "exceptions": []
+    }
+  ],
+  "trendingLocalWorkerd": [
+    {
+      "variant": "before",
+      "status": 500,
+      "result": {
+        "error": "D1_ERROR: too many terms in compound SELECT: SQLITE_ERROR"
+      }
+    },
+    {
+      "variant": "after",
+      "status": 200,
+      "result": {
+        "count": 10,
+        "ids": [
+          "repo-1",
+          "repo-10",
+          "repo-2",
+          "repo-3",
+          "repo-4",
+          "repo-5",
+          "repo-6",
+          "repo-7",
+          "repo-8",
+          "repo-9"
+        ],
+        "correctMetrics": true
+      }
+    }
+  ],
+  "trendingOriginalFailure": {
+    "worker": "trending",
+    "version": "a1785a96-f215-4689-99aa-f6c786373a67",
+    "at": 1791910835325,
+    "observedAt": "2026-10-13T17:00:44.366Z",
+    "outcome": "exception",
+    "cron": "0 * * * *",
+    "cpuTime": 19,
+    "wallTime": 8221,
+    "errors": [],
+    "exceptions": [
+      {
+        "name": "Error",
+        "message": "D1_ERROR: too many terms in compound SELECT: SQLITE_ERROR"
+      }
+    ]
+  },
+  "browser": {
+    "browser": "Edge",
+    "existingAuthorizedSession": true,
+    "finalVersion": "b887890f-0969-4bcd-99ce-ced5a4157836",
+    "windowUTC": [
+      "2026-10-13T17:25:43Z",
+      "2026-10-13T17:30:02Z"
+    ],
+    "session": {
+      "status": 200,
+      "validUserAndSession": true,
+      "cacheControl": "no-store"
+    },
+    "unreadCount": {
+      "status": 200,
+      "success": true,
+      "countIsNumber": true,
+      "cacheControl": "no-store"
+    },
+    "privateSkills": {
+      "clientDataStatus": 200,
+      "clientDataCacheControl": "private, no-store",
+      "refreshStayedAuthenticated": true
+    },
+    "bookmarksReadOnly": true,
+    "publicPages": [
+      {
+        "path": "/recent",
+        "skillCards": 24
+      },
+      {
+        "path": "/top",
+        "skillCards": 24
+      },
+      {
+        "path": "/trending",
+        "skillCards": 24
+      },
+      {
+        "path": "/categories",
+        "rendered": true
+      },
+      {
+        "path": "/category/testing",
+        "skillCards": 24
+      },
+      {
+        "path": "/search?q=testing&pageSize=51",
+        "skillCards": 51,
+        "dataStatus": 200
+      },
+      {
+        "path": "/search?q=skillscatverifynotfound20261014&pageSize=51",
+        "skillCards": 0,
+        "dataStatus": 200
+      },
+      {
+        "path": "/u/anthropics",
+        "skillCards": 24,
+        "total": 126
+      },
+      {
+        "path": "/u/anthropics?page=2",
+        "skillCards": 24,
+        "total": 126
+      },
+      {
+        "path": "/org/yottameta",
+        "skillCards": 0,
+        "organizationExists": true
+      },
+      {
+        "path": "/zh-CN/category/testing",
+        "skillCards": 24,
+        "heading": "测试"
+      },
+      {
+        "path": "/skills/anthropics/skills/discernment-nudge",
+        "readmeCharacters": 8934,
+        "recommendations": 5,
+        "exactSlugInstallCommand": true,
+        "visualScreenshotInspected": true
+      },
+      {
+        "path": "/skills/skillscatverifynotfound20261014/no-skill",
+        "status": 404,
+        "heading": "404",
+        "has500Body": false
+      }
+    ],
+    "home": {
+      "version": "d6f1b395-772e-4356-b297-45226cae0706",
+      "directLoadPassed": true,
+      "skillCards": 36,
+      "finalVersionRecheck": "skipped: stale R2 statistics would cause a derived-object write"
+    },
+    "fixture": {
+      "before": {
+        "started": 1,
+        "completed": 0,
+        "aborted": 1,
+        "count": 0
+      },
+      "afterNavigation": {
+        "started": 3,
+        "completed": 1,
+        "aborted": 2,
+        "count": 7
+      },
+      "afterSignOut": {
+        "started": 4,
+        "completed": 1,
+        "aborted": 3,
+        "count": 0
+      },
+      "externalRequests": false
+    },
+    "finalFaviconClientNavigation": {
+      "beforeNested404Count": 10,
+      "afterNested404Count": 0
+    },
+    "unhandledExceptionsObserved": 0,
+    "networkCaptureLimitations": "Some batches were truncated; no claim of complete session capture.",
+    "expectedBlockedPaths": [
+      "/api/skills/access",
+      "/api/skills/*/track-install",
+      "/api/skills/*/download",
+      "/api/skills/*/recommend",
+      "/cdn-cgi/rum",
+      "/cdn-cgi/speculation",
+      "https://static.cloudflareinsights.com/*"
+    ],
+    "expectedApplicationConsoleError": "Failed to record public skill access: Failed to fetch, caused by blocked metrics request"
+  },
+  "pending": [
+    "Final-version home recheck when existing stats can be read without refreshing R2",
+    "Trending new-version natural cron at 2026-10-13T18:00:00Z",
+    "Indexing new-version natural queue consumption and existing backlog investigation",
+    "Production fresh OAuth sign-in and business writes not exercised; isolated auth and write tests passed",
+    "Full 24-hour comparable cost window"
+  ]
+}
