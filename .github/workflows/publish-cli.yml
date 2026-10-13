@@ -88,7 +88,19 @@ jobs:
       - name: Install npm with trusted publishing support
         run: npm install --global npm@11.18.0
 
+      - name: Check whether release is already published
+        id: published
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if test "$(npm view "skillscat@$RELEASE_VERSION" version --registry=https://registry.npmjs.org --prefer-online 2>/dev/null)" = "$RELEASE_VERSION"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish to npm using OIDC
+        if: steps.published.outputs.exists != 'true'
         working-directory: apps/cli
         run: npm publish --access public --provenance
 
@@ -96,11 +108,11 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
-          for attempt in 1 2 3 4 5; do
+          for attempt in $(seq 1 31); do
             echo "Checking npm version (attempt $attempt)"
-            if test "$(npm view "skillscat@$RELEASE_VERSION" version)" = "$RELEASE_VERSION"; then
+            if test "$(npm view "skillscat@$RELEASE_VERSION" version --registry=https://registry.npmjs.org --prefer-online)" = "$RELEASE_VERSION"; then
               exit 0
             fi
-            sleep 10
+            if test "$attempt" -lt 31; then sleep 10; fi
           done
           exit 1
