@@ -126,6 +126,34 @@ function createRepoMetricsDb() {
 }
 
 describe('loadRepoSiblingRefreshUpdates', () => {
+  it('splits repository lookups at the workerd compound SELECT limit', async () => {
+    const sqlite = createRepoMetricsDb();
+    try {
+      const repos = Array.from({ length: 11 }, (_, index) => ({
+        owner: 'owner', name: `repo-${index}`, stars: 42, forks: 8, pushedAt: null,
+      }));
+      for (const repo of repos) {
+        sqlite.prepare(`INSERT INTO skills (id, repo_owner, repo_name, indexed_at, stars, forks, tier)
+          VALUES (?, ?, ?, 1700000000000, 1, 1, 'cool')`).run(repo.name, repo.owner, repo.name);
+      }
+      const queries: string[] = [];
+      const db = new SqliteD1Database(sqlite);
+      const prepare = db.prepare.bind(db);
+      vi.spyOn(db, 'prepare').mockImplementation((sql) => {
+        queries.push(sql);
+        // Stock SQLite allows 500 terms; workerd permits only five.
+        if ((sql.match(/UNION ALL/g)?.length ?? 0) >= 5) {
+          throw new Error('D1_ERROR: too many terms in compound SELECT: SQLITE_ERROR');
+        }
+        return prepare(sql);
+      });
+      const updates = await loadRepoSiblingRefreshUpdates(db as never, repos, ['repo-0']);
+      expect(updates.map((update) => update.id).sort()).toEqual(repos.slice(1).map((repo) => repo.name).sort());
+      expect(updates.every((update) => update.stars === 42 && update.forks === 8)).toBe(true);
+      expect(queries).toHaveLength(3);
+    } finally { sqlite.close(); }
+  });
+
   it('recomputes all derived fields for changed skills from the same repository', async () => {
     const sqlite = createRepoMetricsDb();
     sqlite.exec(`

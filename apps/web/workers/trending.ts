@@ -60,7 +60,9 @@ const CATEGORY_STATS_LAST_SYNC_KEY = 'category-stats:last-sync-day';
 const CATEGORY_STATS_DIRTY_SLUGS_KEY = 'category-stats:dirty-slugs';
 const CATEGORY_STATS_STATE_TTL_SECONDS = 3 * 86400;
 const D1_SKILL_UPDATE_BATCH_SIZE = 50;
-const D1_REPO_REFRESH_LOOKUP_BATCH_SIZE = 40;
+// workerd limits compound SELECTs to five terms (stricter than stock SQLite).
+// Each repository contributes one UNION ALL branch to the sibling lookup.
+const D1_REPO_REFRESH_LOOKUP_BATCH_SIZE = 5;
 const MAX_SIBLINGS_PER_REPO = 100;
 const MAX_SIBLING_ROWS_SCANNED_PER_RUN = 500;
 const MAX_SECURITY_PREMIUM_TOP_N = 100;
