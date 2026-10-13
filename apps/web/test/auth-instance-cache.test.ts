@@ -14,6 +14,65 @@ function environment(): AuthEnv {
 }
 
 describe('auth instance reuse', () => {
+  it('completes independent GitHub OAuth callbacks and logout on one reused instance', async () => {
+    const { sqlite, db } = createMigratedDb();
+    const env = { ...environment(), DB: db };
+    const cookies = (response: Response) => response.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
+    const providerFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      if (request.url === 'https://github.com/login/oauth/access_token') {
+        const code = new URLSearchParams(await request.text()).get('code');
+        return Response.json({ access_token: code, token_type: 'bearer', scope: 'read:user,user:email,read:org' });
+      }
+      const identity = request.headers.get('authorization')?.replace('Bearer ', '');
+      if (!['alice', 'bob'].includes(identity ?? '')) throw new Error('Unexpected provider identity');
+      if (request.url === 'https://api.github.com/user') {
+        return Response.json({ id: identity === 'alice' ? 101 : 102, login: identity, name: identity, email: `${identity}@example.test`, avatar_url: null });
+      }
+      if (request.url === 'https://api.github.com/user/emails') {
+        return Response.json([{ email: `${identity}@example.test`, primary: true, verified: true }]);
+      }
+      throw new Error(`Unexpected provider URL: ${request.url}`);
+    });
+    vi.stubGlobal('fetch', providerFetch);
+    try {
+      const auth = createAuth(env);
+      const starts = await Promise.all(['alice', 'bob'].map(async (id) => {
+        const response = await createAuth({ ...env }).handler(new Request('https://skills.cat/api/auth/sign-in/social', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://skills.cat' },
+          body: JSON.stringify({ provider: 'github', callbackURL: `https://skills.cat/settings?flow=${id}` }),
+        }));
+        expect(response.status).toBe(200);
+        const url = new URL((await response.json()).url);
+        expect(url.origin).toBe('https://github.com');
+        expect(url.searchParams.get('redirect_uri')).toBe('https://skills.cat/api/auth/callback/github');
+        return { id, state: url.searchParams.get('state')!, cookie: cookies(response) };
+      }));
+      expect(starts[0].state).not.toBe(starts[1].state);
+      const callbacks = [];
+      for (const flow of starts) {
+        const response = await auth.handler(new Request(`https://skills.cat/api/auth/callback/github?code=${flow.id}&state=${encodeURIComponent(flow.state)}`, {
+          headers: { Cookie: flow.cookie },
+        }));
+        expect(response.status).toBe(302);
+        expect(response.headers.get('location')).toBe(`https://skills.cat/settings?flow=${flow.id}`);
+        callbacks.push(cookies(response));
+      }
+      const sessions = await Promise.all(callbacks.map((cookie) => auth.api.getSession({ headers: new Headers({ cookie }) })));
+      expect(sessions.map((session) => session?.user.name)).toEqual(['alice', 'bob']);
+      const signOut = await auth.handler(new Request('https://skills.cat/api/auth/sign-out', {
+        method: 'POST', headers: { Cookie: callbacks[0], Origin: 'https://skills.cat' },
+      }));
+      expect(signOut.status).toBe(200);
+      // Exclude the cookie cache when checking revocation against the database.
+      const tokenOnly = callbacks.map((cookie) => cookie.split('; ').filter((value) => value.startsWith('__Secure-better-auth.session_token=')).join('; '));
+      expect(await auth.api.getSession({ headers: new Headers({ cookie: tokenOnly[0] }) })).toBeNull();
+      expect((await auth.api.getSession({ headers: new Headers({ cookie: tokenOnly[1] }) }))?.user.name).toBe('bob');
+      expect(createAuth(env)).toBe(auth);
+      expect(providerFetch).toHaveBeenCalledTimes(6);
+    } finally { vi.unstubAllGlobals(); sqlite.close(); }
+  });
+
   it('keeps signed sessions, response cookies and revocation isolated on a shared instance', async () => {
     const { sqlite, db } = createMigratedDb();
     const env = { ...environment(), DB: db };
