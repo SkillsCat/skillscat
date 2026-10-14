@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   runRequestSecurity: vi.fn(),
 }));
 
-vi.mock('$app/environment', () => ({ building: false }));
+vi.mock('$app/environment', () => ({ building: false, version: 'test-build' }));
 
 vi.mock('$lib/server/auth', () => ({
   createAuth: mocks.createAuth,
@@ -107,9 +107,24 @@ beforeEach(() => {
 });
 
 describe('discovery HTML cache', () => {
+  it.each([undefined, 'previous-build'])('rerenders old-build discovery HTML and marks the new cache entry (%s)', async (build) => {
+    mocks.peekCachedResponse.mockResolvedValue(new Response('<html>old assets</html>', {
+      headers: build ? { 'X-Skillscat-Html-Build': build } : {},
+    }));
+    const { handle } = await import('../src/hooks.server');
+    const resolve = htmlResolve('<html>current assets</html>');
+    const response = await handle({ event: discoveryEvent({
+      pathname: '/trending', routeId: '/trending', waitUntil: () => {},
+    }), resolve } as never);
+    expect(await response.text()).toContain('current assets');
+    expect(resolve).toHaveBeenCalledOnce();
+    const stored = mocks.putCachedResponse.mock.calls[0][1] as Response;
+    expect(stored.headers.get('X-Skillscat-Html-Build')).toBe('test-build');
+  });
+
   it('serves cached discovery HTML without running load or auth', async () => {
     mocks.peekCachedResponse.mockImplementation(async (key: string) =>
-      key === 'page:discovery:html:v5:trending:en' ? new Response('<html>cached trending</html>') : null
+      key === 'page:discovery:html:v5:trending:en' ? new Response('<html>cached trending</html>', { headers: { 'X-Skillscat-Html-Build': 'test-build' } }) : null
     );
     const { handle } = await import('../src/hooks.server');
     const { waitUntil } = createWaitUntil();
@@ -190,13 +205,13 @@ describe('discovery HTML cache', () => {
     );
     expect(await mocks.putCachedResponse.mock.calls[0][1].text()).toBe('<html>fresh home</html>');
     expect(response.headers.get('Cloudflare-CDN-Cache-Control')).toBe(
-      'public, max-age=60, stale-while-revalidate=120'
+      'public, max-age=60, stale-while-revalidate=300'
     );
   });
 
   it('isolates cached HTML per locale', async () => {
     mocks.peekCachedResponse.mockImplementation(async (key: string) =>
-      key === 'page:discovery:html:v5:trending:zh-CN' ? new Response('<html>缓存的发现页</html>') : null
+      key === 'page:discovery:html:v5:trending:zh-CN' ? new Response('<html>缓存的发现页</html>', { headers: { 'X-Skillscat-Html-Build': 'test-build' } }) : null
     );
     const { handle } = await import('../src/hooks.server');
     const { waitUntil } = createWaitUntil();

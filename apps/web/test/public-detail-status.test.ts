@@ -129,8 +129,8 @@ describe('lazy skill README loading', () => {
       stars: 1, forks: 0, contentHash: 'content-version',
     });
     getCached.mockImplementation(async (key: string, fetcher: () => Promise<unknown>) =>
-      key.startsWith('readme:html:hl:')
-        ? { data: '<h1>Cached README</h1>', hit: true }
+      key.startsWith('readme:html:display:v2:')
+        ? { data: { html: '<h1>Cached README</h1>', highlighted: true }, hit: true }
         : { data: await fetcher(), hit: false });
     const { load } = await import('../src/routes/skills/[owner]/[...name]/+page.server');
     const { setHeaders } = createHeadersRecorder();
@@ -156,8 +156,8 @@ describe('lazy skill README loading', () => {
     });
     loadSkillReadmeFromR2.mockResolvedValue('# Instructions');
     getCached.mockImplementation(async (key: string, fetcher: () => Promise<unknown>) =>
-      key.startsWith('readme:html:hl:')
-        ? { data: '<h1>Instructions</h1>', hit: true }
+      key.startsWith('readme:html:display:v2:')
+        ? { data: { html: '<h1>Instructions</h1>', highlighted: true }, hit: true }
         : { data: await fetcher(), hit: false });
     const { load } = await import('../src/routes/skills/[owner]/[...name]/+page.server');
     const { setHeaders } = createHeadersRecorder();
@@ -402,10 +402,7 @@ describe('public detail status overrides', () => {
     expect(headers.has('Cache-Control')).toBe(false);
   });
 
-  it.each([false, true])('renders detail when related quality lookup fails: %s', async (qualityLookupFails) => {
-    if (qualityLookupFails) {
-      vi.mocked(filterQualityEligibleSkills).mockRejectedValueOnce(new Error('D1 unavailable'));
-    }
+  it('uses prevalidated cached related skills without repeating the quality query', async () => {
     getSkillBySlug.mockResolvedValue({
       id: 'skill_1',
       name: 'Demo Skill',
@@ -475,7 +472,8 @@ describe('public detail status overrides', () => {
       isDataRequest: false,
     } as never);
 
-    expect(result.recommendSkills).toHaveLength(qualityLookupFails ? 0 : 1);
+    expect(result.recommendSkills).toHaveLength(1);
+    expect(filterQualityEligibleSkills).not.toHaveBeenCalled();
     expect(result.skill?.id).toBe('skill_1');
     expect(headers.has('X-Skillscat-Status-Override')).toBe(false);
     expect(fetch).not.toHaveBeenCalled();

@@ -17,7 +17,7 @@ export async function resolvePublicSkillDataCache<T>(input: {
     input.cacheKey,
     input.load,
     input.ttlSeconds,
-    { waitUntil: input.waitUntil }
+    { waitUntil: input.waitUntil, staleWhileRevalidate: Math.min(input.ttlSeconds * 2, 120) }
   );
 
   const skills = input.getSkills(cached.data);

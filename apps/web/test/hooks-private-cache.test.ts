@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   runRequestSecurity: vi.fn(),
 }));
 
-vi.mock('$app/environment', () => ({ building: false }));
+vi.mock('$app/environment', () => ({ building: false, version: 'test-build' }));
 
 vi.mock('$lib/server/auth', () => ({
   createAuth: mocks.createAuth,
@@ -89,12 +89,28 @@ beforeEach(() => {
 });
 
 describe('skill HTML cache visibility hint', () => {
+  it.each([undefined, 'previous-build'])('does not serve HTML referencing assets from another build (%s)', async (build) => {
+    mocks.peekCachedText.mockResolvedValue('public');
+    mocks.peekCachedResponse.mockResolvedValue(new Response('<html>old assets</html>', {
+      headers: build ? { 'X-Skillscat-Html-Build': build } : {},
+    }));
+    const { handle } = await import('../src/hooks.server');
+    const resolve = vi.fn(async () => new Response('<html>current assets</html>', {
+      headers: { 'Content-Type': 'text/html', 'X-Skillscat-Public-Skill-Cache': '1' },
+    }));
+    const response = await handle({ event: skillEvent(), resolve } as never);
+    expect(await response.text()).toContain('current assets');
+    expect(resolve).toHaveBeenCalledOnce();
+    const stored = mocks.putCachedResponse.mock.calls[0][1] as Response;
+    expect(stored.headers.get('X-Skillscat-Html-Build')).toBe('test-build');
+  });
+
   it('serves cached public HTML without touching D1 when the hint says public', async () => {
     mocks.peekCachedText.mockImplementation(async (key: string) => {
       if (key.includes('page:skill:public')) return 'public';
       return null;
     });
-    mocks.peekCachedResponse.mockImplementation(async () => new Response('<html>cached public content</html>'));
+    mocks.peekCachedResponse.mockImplementation(async () => new Response('<html>cached public content</html>', { headers: { 'X-Skillscat-Html-Build': 'test-build' } }));
     const { handle } = await import('../src/hooks.server');
     const resolve = privateResolve();
 
@@ -113,7 +129,7 @@ describe('skill HTML cache visibility hint', () => {
       if (key.includes('page:skill:public')) return '1';
       return null;
     });
-    mocks.peekCachedResponse.mockImplementation(async () => new Response('<html>cached public content</html>'));
+    mocks.peekCachedResponse.mockImplementation(async () => new Response('<html>cached public content</html>', { headers: { 'X-Skillscat-Html-Build': 'test-build' } }));
     const { handle } = await import('../src/hooks.server');
     const resolve = privateResolve();
 

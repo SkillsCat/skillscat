@@ -1,3 +1,4 @@
+import { writeHomeSnapshot } from '../src/lib/server/cache/home-snapshot';
 import { backfillSkillQuality } from './shared/quality-backfill';
 import { countQualityEligibleSkills, QUALITY_DISCOVERY_COUNT_KEY } from '../src/lib/server/skill/quality-discovery';
 import { firstPublishedSql } from '../src/lib/server/seo/freshness';
@@ -1097,6 +1098,8 @@ async function regenerateListCaches(env: TrendingEnv): Promise<void> {
       env.R2.put(path, recentPayload, { httpMetadata: { contentType: 'application/json' } })
     )
   );
+
+  await writeHomeSnapshot(env, { stats: publicStats, trending: snapshot.data, recent: recent.results || [], top: top.results || [] }, now);
 
   console.log('Cache lists regenerated');
 }

@@ -15,6 +15,7 @@ declare const caches: CacheStorage & { default: Cache };
 
 let activeCacheVersion = DEFAULT_CACHE_VERSION;
 const pendingJsonFetches = new Map<string, Promise<unknown>>();
+const pendingJsonWrites = new Map<string, Promise<void>>();
 const pendingTextFetches = new Map<string, Promise<string>>();
 const pendingBinaryFetches = new Map<string, Promise<Uint8Array>>();
 const pendingResponseFetches = new Map<string, Promise<Response>>();
@@ -88,71 +89,78 @@ export async function getCached<T>(
   ttl: number,
   options?: {
     waitUntil?: WaitUntilFn;
+    /** Opt-in only: retain public data for a bounded background refresh window. */
+    staleWhileRevalidate?: number;
+    shouldCache?: (data: T) => boolean;
   }
-): Promise<{ data: T; hit: boolean }> {
+): Promise<{ data: T; hit: boolean; stale?: boolean }> {
   const versionedKey = getVersionedCacheKey(cacheKey);
+  const staleSeconds = Math.max(0, options?.staleWhileRevalidate ?? 0);
+  const request = buildCacheRequest(versionedKey);
 
-  // Try to get from cache
+  const refresh = (): Promise<T> => {
+    const inFlight = pendingJsonFetches.get(versionedKey) as Promise<T> | undefined;
+    if (inFlight) return inFlight;
+
+    // Defer execution until the promise has been registered for coalescing.
+    const pending = Promise.resolve().then(fetcher).then((data) => {
+      let write: Promise<void> = Promise.resolve();
+      try {
+        // An explicit invalidation also cancels publication of an older refresh.
+        if (pendingJsonFetches.get(versionedKey) === pending && (options?.shouldCache?.(data) ?? true)) {
+          write = caches.default.put(request, new Response(JSON.stringify(data), {
+            headers: {
+              'Cache-Control': `public, max-age=${ttl + staleSeconds}`,
+              'Content-Type': 'application/json',
+              'X-Cache-Fresh-Until': String(Date.now() + ttl * 1000),
+            },
+          }));
+        }
+      } catch { /* Cache failures must not fail a successful fetch. */ }
+      pendingJsonWrites.set(versionedKey, write);
+      const completion = write.catch(() => undefined).finally(() => {
+        if (pendingJsonFetches.get(versionedKey) === pending) pendingJsonFetches.delete(versionedKey);
+        if (pendingJsonWrites.get(versionedKey) === write) pendingJsonWrites.delete(versionedKey);
+      });
+      scheduleCacheWrite(completion, options?.waitUntil);
+      return data;
+    }, (error: unknown) => {
+      if (pendingJsonFetches.get(versionedKey) === pending) pendingJsonFetches.delete(versionedKey);
+      throw error;
+    });
+    pendingJsonFetches.set(versionedKey, pending);
+    return pending;
+  };
+
   try {
     const cache = caches.default;
-    const versionedRequest = buildCacheRequest(versionedKey);
-    const legacyRequest = buildCacheRequest(cacheKey);
-
-    const cached = await cache.match(versionedRequest);
-
+    const cached = await cache.match(request);
     if (cached) {
-      const data = await cached.json() as T;
-      return { data, hit: true };
+      const freshUntilHeader = cached.headers.get('X-Cache-Fresh-Until');
+      const freshUntil = Number(freshUntilHeader);
+      const now = Date.now();
+      if (freshUntilHeader === null || (Number.isFinite(freshUntil) && now < freshUntil)) {
+        return { data: await cached.json() as T, hit: true };
+      }
+      if (options?.waitUntil && Number.isFinite(freshUntil) && now < freshUntil + staleSeconds * 1000) {
+        const data = await cached.json() as T;
+        options.waitUntil(refresh().catch(() => undefined));
+        return { data, hit: true, stale: true };
+      }
+    } else if (staleSeconds === 0) {
+      // Retain legacy compatibility for existing callers; SWR uses only its
+      // versioned entry so invalidation never revives a legacy stale payload.
+      const legacy = await cache.match(buildCacheRequest(cacheKey));
+      if (legacy) {
+        const promoted = legacy.clone();
+        const data = await legacy.json() as T;
+        scheduleCacheWrite(cache.put(request, promoted), options?.waitUntil);
+        return { data, hit: true };
+      }
     }
+  } catch { /* Cache unavailable or corrupt: fetch normally. */ }
 
-    // Backward-compatible fallback:
-    // keep serving legacy cache after deploy, and promote it to current version.
-    const legacyCached = await cache.match(legacyRequest);
-    if (legacyCached) {
-      const promoted = legacyCached.clone();
-      const data = await legacyCached.json() as T;
-      scheduleCacheWrite(cache.put(versionedRequest, promoted), options?.waitUntil);
-      return { data, hit: true };
-    }
-  } catch {
-    // Cache API not available (local dev) or error, continue to fetch
-  }
-
-  const inFlight = pendingJsonFetches.get(versionedKey) as Promise<T> | undefined;
-  if (inFlight) {
-    const data = await inFlight;
-    return { data, hit: false };
-  }
-
-  const fetchPromise = (async (): Promise<T> => {
-    const data = await fetcher();
-
-    // Store in cache (fire and forget)
-    try {
-      const cache = caches.default;
-      const cacheUrl = buildCacheRequest(versionedKey);
-      const response = new Response(JSON.stringify(data), {
-        headers: {
-          'Cache-Control': `public, max-age=${ttl}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      scheduleCacheWrite(cache.put(cacheUrl, response), options?.waitUntil);
-    } catch {
-      // Ignore cache write errors
-    }
-
-    return data;
-  })();
-
-  pendingJsonFetches.set(versionedKey, fetchPromise as Promise<unknown>);
-
-  try {
-    const data = await fetchPromise;
-    return { data, hit: false };
-  } finally {
-    pendingJsonFetches.delete(versionedKey);
-  }
+  return { data: await refresh(), hit: false };
 }
 
 /**
@@ -476,6 +484,11 @@ export async function getCachedResponse(
  * Invalidate a cache entry
  */
 export async function invalidateCache(cacheKey: string): Promise<void> {
+  const versionedKey = getVersionedCacheKey(cacheKey);
+  pendingJsonFetches.delete(versionedKey);
+  // If publication already started, delete after it finishes rather than
+  // letting a slow Cache API write resurrect the invalidated entry.
+  await pendingJsonWrites.get(versionedKey)?.catch(() => undefined);
   try {
     const cache = caches.default;
     const versionedUrl = buildCacheRequest(getVersionedCacheKey(cacheKey));

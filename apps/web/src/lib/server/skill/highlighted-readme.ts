@@ -1,10 +1,11 @@
+import { renderReadmeMarkdown } from '$lib/server/text/markdown';
 import type { DbEnv } from '$lib/server/db/shared/types';
 
 /**
  * Highlighted README HTML is a derived object: the source of truth is the
  * SKILL.md markdown (D1 column or R2 source object). Public skills cache the
- * highlighted HTML in R2 so the (CPU-heavy) shiki transform runs at most once
- * per skill version globally, instead of once per edge colo.
+ * highlighted HTML in R2 so edge colos can reuse the CPU-heavy shiki result
+ * for a skill version. Concurrent misses can still render independently.
  *
  * Keys embed the source content hash (or immutable upload version), so a skill
  * content update produces a new key and old objects become unreachable —
@@ -74,4 +75,53 @@ export async function getOrRenderHighlightedReadme(
   }
 
   return html;
+}
+
+const pendingHighlights = new WeakMap<object, Map<string, Promise<void>>>();
+
+/** Cold public pages render complete, sanitized Markdown without waiting for Shiki.
+ * Highlighting fills the existing versioned R2 object for later requests.
+ */
+export async function getPublicReadmeHtml(options: {
+  r2: DbEnv['R2'];
+  skillId: string;
+  readmeVersion: string | number;
+  waitUntil?: (promise: Promise<unknown>) => void;
+  loadMarkdown: () => Promise<string | null>;
+}): Promise<{ html: string; highlighted: boolean }> {
+  const { r2, waitUntil } = options;
+  const key = buildHighlightedReadmeR2Key(options.skillId, options.readmeVersion);
+  if (r2) {
+    try {
+      const cached = await r2.get(key);
+      if (cached) return { html: await cached.text(), highlighted: true };
+    } catch { /* Fall back to the source, never to an empty document. */ }
+  }
+  const markdown = await options.loadMarkdown();
+  const plain = renderReadmeMarkdown(markdown);
+  if (!plain || !plain.includes('<pre><code')) return { html: plain, highlighted: true };
+
+  const render = async () => {
+    const { highlightReadmeHtml } = await import('$lib/server/text/highlight');
+    return highlightReadmeHtml(plain);
+  };
+  if (!r2 || !waitUntil) {
+    // Without a durable destination/lifetime there is no useful deferred job.
+    try { return { html: await render(), highlighted: true }; }
+    catch { return { html: plain, highlighted: false }; }
+  }
+  let jobs = pendingHighlights.get(r2);
+  if (!jobs) {
+    jobs = new Map();
+    pendingHighlights.set(r2, jobs);
+  }
+  const pending = jobs.get(key) ?? Promise.resolve().then(async () => {
+    const html = await render();
+    await r2.put(key, html, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
+  }).catch((error: unknown) => {
+    console.warn('Background README highlighting failed:', error);
+  }).finally(() => { jobs.delete(key); });
+  jobs.set(key, pending);
+  waitUntil(pending);
+  return { html: plain, highlighted: false };
 }

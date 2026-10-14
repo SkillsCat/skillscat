@@ -1,7 +1,7 @@
 import { stripSeoLocale, isLocalizedPublicPath, localizeHref } from '$lib/seo/locale-path';
 import { createAuth, linkAuthorToUser, type AuthEnv } from '$lib/server/auth';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
-import { building } from '$app/environment';
+import { building, version } from '$app/environment';
 import type { Handle, ResolveOptions } from '@sveltejs/kit';
 import { getXRobotsTagForPath, runRequestSecurity } from '$lib/server/security/request';
 import { getCachedText, peekCachedText, putCachedText, peekCachedResponse, putCachedResponse, setCacheVersion } from '$lib/server/cache';
@@ -48,6 +48,8 @@ const SKILL_PUBLIC_HINT_CACHE_TTL_SECONDS = 60;
 const HOME_HTML_CACHE_TTL_SECONDS = 60;
 const DISCOVERY_HTML_CACHE_TTL_SECONDS = 5 * 60;
 const PUBLIC_HTML_CDN_CACHE_HEADER = 'Cloudflare-CDN-Cache-Control';
+// Cache API survives deployments, but HTML references build-specific assets.
+const HTML_BUILD_HEADER = 'X-Skillscat-Html-Build';
 const OPENCLAW_HOME_CACHE_KEY = 'ua:openclaw:home:v1';
 const OPENCLAW_HOME_CACHE_TTL_SECONDS = 3600;
 const OPENCLAW_SKILL_CACHE_TTL_SECONDS = 300;
@@ -209,7 +211,7 @@ function applySharedPublicHtmlCacheHeaders(
     // anonymous response to be served directly from the edge.
     [PUBLIC_HTML_CDN_CACHE_HEADER]: hasRequestCookie
       ? 'no-store'
-      : `public, max-age=${ttlSeconds}, stale-while-revalidate=${ttlSeconds * 2}`,
+      : `public, max-age=${ttlSeconds}, stale-while-revalidate=${Math.max(300, ttlSeconds * 2)}`,
     'Content-Language': locale,
     'Content-Type': response.headers.get('Content-Type') || 'text/html; charset=utf-8',
     // Cookie partitions anonymous responses from sessions and locale choices;
@@ -464,7 +466,7 @@ async function maybeRespondWithCachedSkillHtml(
 
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
   const cachedHtml = await peekCachedResponse(getSkillHtmlCacheKey(event.locals.locale, slug), { waitUntil });
-  if (!cachedHtml) {
+  if (!cachedHtml || cachedHtml.headers.get(HTML_BUILD_HEADER) !== version) {
     return null;
   }
 
@@ -507,7 +509,7 @@ async function maybeRespondWithCachedDiscoveryHtml(
 
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
   const cachedHtml = await peekCachedResponse(cacheKey, { waitUntil });
-  if (!cachedHtml) {
+  if (!cachedHtml || cachedHtml.headers.get(HTML_BUILD_HEADER) !== version) {
     return null;
   }
 
@@ -556,7 +558,7 @@ function maybeWriteDiscoveryHtmlCache(
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
   // Cache the stream directly; buffering HTML here spends CPU even in waitUntil.
   void putCachedResponse(cacheKey, new Response(response.body, {
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    headers: { 'Content-Type': 'text/html; charset=utf-8', [HTML_BUILD_HEADER]: version },
   }), ttlSeconds, { waitUntil });
 }
 
@@ -590,7 +592,7 @@ function maybeWriteSkillHtmlCache(
   void putCachedResponse(
     getSkillHtmlCacheKey(event.locals.locale, slug),
     new Response(response.body, {
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      headers: { 'Content-Type': 'text/html; charset=utf-8', [HTML_BUILD_HEADER]: version },
     }),
     SKILL_HTML_CACHE_TTL_SECONDS,
     { waitUntil }

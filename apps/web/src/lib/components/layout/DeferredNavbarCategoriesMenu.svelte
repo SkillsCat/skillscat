@@ -1,6 +1,5 @@
 <script lang="ts">
   import { NavigationMenu } from 'bits-ui';
-  import { onMount } from 'svelte';
   import { useI18n } from '$lib/i18n/runtime';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { ArrowDown01Icon } from '@hugeicons/core-free-icons';
@@ -53,40 +52,6 @@
   function preloadNavbarCategoriesContent(): void {
     void loadNavbarCategoriesContent();
   }
-
-  onMount(() => {
-    const preload = () => {
-      preloadNavbarCategoriesContent();
-    };
-
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let idleId = 0;
-
-    if ('requestIdleCallback' in window) {
-      idleId = (
-        window as Window & {
-          requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
-          cancelIdleCallback?: (id: number) => void;
-        }
-      ).requestIdleCallback(preload, { timeout: 2500 });
-    } else {
-      timeoutId = setTimeout(preload, 1500);
-    }
-
-    return () => {
-      if (timeoutId !== null) {
-        clearTimeout(timeoutId);
-      }
-
-      if (idleId && 'cancelIdleCallback' in window) {
-        (
-          window as Window & {
-            cancelIdleCallback?: (id: number) => void;
-          }
-        ).cancelIdleCallback?.(idleId);
-      }
-    };
-  });
 
   $effect(() => {
     if (value !== 'categories' || NavbarCategoriesContentComponent || loadFailed) {

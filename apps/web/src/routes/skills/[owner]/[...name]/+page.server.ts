@@ -9,7 +9,7 @@ import { getLightweightRecommendedSkills, getRecommendedSkills } from '$lib/serv
 import { loadSkillReadmeFromR2 } from '$lib/server/db/business/readme';
 import { getCached } from '$lib/server/cache';
 import { renderHighlightedReadmeMarkdown } from '$lib/server/text/highlight';
-import { getOrRenderHighlightedReadme } from '$lib/server/skill/highlighted-readme';
+import { getPublicReadmeHtml } from '$lib/server/skill/highlighted-readme';
 import { setPublicPageCache } from '$lib/server/cache/page';
 import { buildSkillSeoPayload } from '$lib/seo/skill-seo';
 import { normalizeRecommendAlgoVersion } from '$lib/server/ranking/recommend-precompute';
@@ -183,16 +183,17 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
       }
     }
 
-    const introductions = env.DB && skill.visibility === 'public'
-      ? await readSkillLocalizations(env.DB, skill.id, skill.contentHash ?? String(skill.indexedAt)) : {};
-    const hasChineseIntroduction = Boolean(introductions['zh-CN']) && isSeoIndexableSkill(skill);
-    if (locals.locale === 'zh-CN' && !hasChineseIntroduction) {
-      throw redirect(307, buildSkillPathFromOwnerAndName(normalizedOwner, normalizedName));
+    const introductionsPromise: ReturnType<typeof readSkillLocalizations> = env.DB && skill.visibility === 'public'
+      ? readSkillLocalizations(env.DB, skill.id, skill.contentHash ?? String(skill.indexedAt)) : Promise.resolve({});
+    // Attach a rejection handler immediately while independent work is in flight.
+    void introductionsPromise.catch(() => undefined);
+    // A missing translation redirects before doing secondary work, as before.
+    if (locals.locale === 'zh-CN') {
+      const introductions = await introductionsPromise;
+      if (!introductions['zh-CN'] || !isSeoIndexableSkill(skill)) {
+        throw redirect(307, buildSkillPathFromOwnerAndName(normalizedOwner, normalizedName));
+      }
     }
-    const localizedSkill: SkillDetail = { ...skill,
-      summary: locals.locale === 'zh-CN' ? introductions['zh-CN'] : introductions.en ?? sanitizeSummary(skill.summary),
-      description: locals.locale === 'zh-CN' ? introductions['zh-CN'] ?? skill.description : introductions.en ?? skill.description,
-    };
     const shouldDeferUserState = skill.visibility === 'public';
     const waitUntil = platform?.context?.waitUntil?.bind(platform.context);
 
@@ -219,24 +220,23 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
         // skill update: colo-local Cache API in front of the R2 derived object.
         const readmeVersion = skill.contentHash ?? skill.currentVersionId ?? skill.updatedAt ?? skill.indexedAt ?? 0;
         const { data } = await getCached(
-          `readme:html:hl:${skill.id}:${readmeVersion}`,
-          () => getOrRenderHighlightedReadme({
+          `readme:html:display:v2:${skill.id}:${readmeVersion}`,
+          () => getPublicReadmeHtml({
             r2: env.R2,
             skillId: skill.id,
             readmeVersion,
             waitUntil,
-            render: async () => {
-              const rawReadme = await loadRawReadme();
-              return rawReadme ? renderHighlightedReadmeMarkdown(rawReadme) : '';
-            },
+            loadMarkdown: loadRawReadme,
           }),
           README_HTML_CACHE_TTL,
-          { waitUntil }
+          { waitUntil, shouldCache: (result) => result.highlighted }
         );
-        return data;
+        return data.html;
       },
       'secondary'
     );
+
+    void renderedReadmePromise.catch(() => undefined);
 
     const isBookmarkedPromise = shouldDeferUserState
       ? Promise.resolve(false)
@@ -334,9 +334,10 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
               },
               false
             ),
-            RECOMMEND_ONLINE_CACHE_TTL_SECONDS
+            RECOMMEND_ONLINE_CACHE_TTL_SECONDS,
+            { waitUntil, staleWhileRevalidate: 120 }
           );
-          return data;
+          return filterQualityEligibleSkills(env.DB, data);
         }
 
         const shouldUseRecommendSignals = shouldLoadRecommendSignals(realtimeRecommendMode);
@@ -356,10 +357,10 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
           ),
           RECOMMEND_ONLINE_CACHE_TTL_SECONDS
         );
-        return data;
+        return filterQualityEligibleSkills(env.DB, data);
       },
       'secondary'
-    ).then((rows) => filterQualityEligibleSkills(env.DB, rows));
+    );
 
     const [recommendSkillsResult, renderedReadmeResult, isBookmarkedResult] = await Promise.allSettled([
       recommendSkillsPromise,
@@ -378,6 +379,13 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     const isBookmarked = isBookmarkedResult.status === 'fulfilled'
       ? isBookmarkedResult.value
       : (console.error('Failed to load bookmark state:', isBookmarkedResult.reason), false);
+
+    const introductions = await introductionsPromise;
+    const hasChineseIntroduction = Boolean(introductions['zh-CN']) && isSeoIndexableSkill(skill);
+    const localizedSkill: SkillDetail = { ...skill,
+      summary: locals.locale === 'zh-CN' ? introductions['zh-CN'] : introductions.en ?? sanitizeSummary(skill.summary),
+      description: locals.locale === 'zh-CN' ? introductions['zh-CN'] ?? skill.description : introductions.en ?? skill.description,
+    };
 
     // Determine if this is a dot-folder skill (e.g., .claude/SKILL.md)
     const isDotFolderSkill = skill.skillPath ? /^\.[\w-]+/.test(skill.skillPath) : false;

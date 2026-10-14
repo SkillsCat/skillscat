@@ -504,8 +504,13 @@ export async function getLightweightRecommendedSkills(
     }
   };
 
-  if (normalizedCategories.length > 0) {
-    const discovery = await loadRecommendDiscoveryCategories(db, normalizedCategories, timingCollector);
+  const [discovery, fresh] = await Promise.all([
+    normalizedCategories.length > 0
+      ? loadRecommendDiscoveryCategories(db, normalizedCategories, timingCollector)
+      : Promise.resolve(null),
+    loadFreshRelatedCandidates(db, skillId, normalizedCategories),
+  ]);
+  if (discovery) {
     const seedSkillIds = discovery.seedSkillIds
       .filter((candidateId) => !excludedIds.has(candidateId))
       .slice(0, Math.min(Math.max(limit * 4, 24), D1_SAFE_VARIABLE_LIMIT));
@@ -542,7 +547,6 @@ export async function getLightweightRecommendedSkills(
     }
   }
 
-  const fresh = await loadFreshRelatedCandidates(db, skillId, normalizedCategories);
   pushCandidates(fresh);
   if (collected.length === 0) return [];
 

@@ -2,6 +2,7 @@
 
 import {
   CACHE_NAMES,
+  IMMUTABLE_CACHE_MAX_ENTRIES,
   STATIC_PATTERNS,
   API_CACHE_CONFIGS,
   PAGE_DATA_CACHE_CONFIGS,
@@ -18,54 +19,59 @@ const SESSION_COOKIE_PATTERN = /(better-auth|session|auth\.session|session_token
  * Cache First for static assets.
  * Serve from cache when available, otherwise fetch and cache the response.
  */
-export async function cacheFirst(request: Request): Promise<Response> {
-  const cache = await caches.open(CACHE_NAMES.static);
-  const cached = await cache.match(request);
+type CacheWriteOptions = { waitUntil?: (promise: Promise<unknown>) => void };
 
-  if (cached) {
-    return cached;
-  }
+function persist(task: Promise<unknown>, options?: CacheWriteOptions): void {
+  const guarded = task.catch(() => undefined);
+  if (options?.waitUntil) options.waitUntil(guarded);
+}
 
+export async function cacheFirst(
+  request: Request,
+  options?: CacheWriteOptions & { immutable?: boolean }
+): Promise<Response> {
+  const cache = await caches.open(options?.immutable ? CACHE_NAMES.immutable : CACHE_NAMES.static).catch(() => null);
+  const cached = await cache?.match(request).catch(() => undefined);
+  if (cached) return cached;
   const response = await fetch(request);
-
-  if (response.ok) {
-    cache.put(request, response.clone());
+  if (response.ok && cache) {
+    persist(cache.put(request, response.clone()).then(async () => {
+      if (!options?.immutable) return;
+      const keys = await cache.keys();
+      await Promise.all(keys.slice(0, Math.max(0, keys.length - IMMUTABLE_CACHE_MAX_ENTRIES)).map((key) => cache.delete(key)));
+    }), options);
   }
-
   return response;
 }
 
-/**
- * Network First for HTML documents and SvelteKit data requests.
- * Prefer fresh network responses and fall back to cache when offline.
- */
+/** Network responses stream immediately; cache storage is not on the response path. */
 export async function networkFirst(
   request: Request,
   cacheName: string,
-  shouldCacheResponse: (response: Response) => boolean = (response) => response.ok
+  shouldCacheResponse: (response: Response) => boolean = (response) => response.ok,
+  options?: CacheWriteOptions
 ): Promise<Response> {
-  const cache = await caches.open(cacheName);
-
+  const cachePromise = caches.open(cacheName).catch(() => null);
+  let response: Response;
   try {
-    const response = await fetch(request);
-
-    // Only update or clear cache on successful responses to avoid caching error pages.
-    if (response.ok) {
-      if (shouldCacheResponse(response)) {
-        await cache.put(request, response.clone());
-      } else {
-        await cache.delete(request);
-      }
-    }
-
-    return response;
+    response = await fetch(request);
   } catch (error) {
-    const cached = await cache.match(request);
-    if (cached) {
-      return cached;
-    }
+    const cache = await cachePromise;
+    const cached = await cache?.match(request).catch(() => undefined);
+    if (cached) return cached;
     throw error;
   }
+  // Keep eviction synchronous when a response is no longer public.
+  if (response.ok && !shouldCacheResponse(response)) {
+    const cache = await cachePromise;
+    await cache?.delete(request).catch(() => undefined);
+  } else if (response.ok) {
+    const copy = response.clone();
+    persist(cachePromise.then(async (cache) => {
+      if (cache) await cache.put(request, copy);
+    }), options);
+  }
+  return response;
 }
 
 /**
@@ -81,8 +87,8 @@ export async function staleWhileRevalidate(
     waitUntil?: (promise: Promise<unknown>) => void;
   }
 ): Promise<Response> {
-  const cache = await caches.open(options?.cacheName || CACHE_NAMES.api);
-  const cached = await cache.match(request);
+  const cache = await caches.open(options?.cacheName || CACHE_NAMES.api).catch(() => null);
+  const cached = await cache?.match(request).catch(() => undefined);
 
   const now = Date.now();
   const shouldCacheResponse = options?.shouldCacheResponse ?? ((response: Response) => response.ok);
@@ -102,9 +108,9 @@ export async function staleWhileRevalidate(
           headers,
         });
 
-        await cache.put(request, cachedResponse);
+        await cache?.put(request, cachedResponse);
       } else if (response.ok) {
-        await cache.delete(request);
+        await cache?.delete(request);
       }
     } catch {
       // Silently ignore refresh failures
@@ -145,9 +151,9 @@ export async function staleWhileRevalidate(
       headers,
     });
 
-    await cache.put(request, cachedResponse);
-  } else if (response.ok) {
-    await cache.delete(request);
+    if (cache) persist(cache.put(request, cachedResponse), options);
+  } else if (response.ok && cache) {
+    await cache.delete(request).catch(() => undefined);
   }
 
   return response;
@@ -257,7 +263,7 @@ export async function cleanupOldCaches(): Promise<void> {
 
   await Promise.all(
     cacheNames
-      .filter((name) => !currentCaches.has(name))
+      .filter((name) => name.startsWith('skillscat-') && !currentCaches.has(name))
       .map((name) => caches.delete(name))
   );
 }

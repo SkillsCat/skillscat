@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('$app/environment', () => ({ building: false }));
+vi.mock('$app/environment', () => ({ building: false, version: 'test-build' }));
 
 import {
   acceptsMarkdown,

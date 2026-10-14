@@ -7,6 +7,10 @@ import {
   PUBLIC_SKILLS_STATS_CACHE_KEY,
 } from '$lib/server/cache/keys';
 
+const readHomeSnapshot = vi.fn();
+const storeHomeSnapshot = vi.fn();
+vi.mock('$lib/server/cache/home-snapshot', () => ({ readHomeSnapshot, storeHomeSnapshot }));
+
 const getCached = vi.fn();
 const invalidateCache = vi.fn();
 const setPublicPageCache = vi.fn();
@@ -42,6 +46,7 @@ vi.mock('$lib/server/db/business/stats', () => ({
 describe('home page caching', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    readHomeSnapshot.mockResolvedValue(null);
     getCached.mockImplementation(async (_cacheKey: string, fetcher: () => Promise<unknown>) => ({
       data: await fetcher(),
       hit: false,
@@ -77,25 +82,39 @@ describe('home page caching', () => {
       HOME_CRITICAL_CACHE_KEY,
       expect.any(Function),
       30,
-      { waitUntil: undefined }
+      { waitUntil: undefined, staleWhileRevalidate: 120 }
     );
     expect(getCached).toHaveBeenCalledWith(
       HOME_RECENT_CACHE_KEY,
       expect.any(Function),
       30,
-      { waitUntil: undefined }
+      { waitUntil: undefined, staleWhileRevalidate: 120 }
     );
     expect(getCached).toHaveBeenCalledWith(
       HOME_TOP_CACHE_KEY,
       expect.any(Function),
       30,
-      { waitUntil: undefined }
+      { waitUntil: undefined, staleWhileRevalidate: 120 }
     );
     expect(getCached).toHaveBeenCalledWith(
       PUBLIC_SKILLS_STATS_CACHE_KEY,
       expect.any(Function),
-      120
+      120,
+      { waitUntil: undefined, staleWhileRevalidate: 120 }
     );
+  });
+
+  it('reuses one complete snapshot instead of waiting for three live list chains', async () => {
+    const snapshot = { stats: { totalSkills: 5 }, trending: [{ id: 'a' }], recent: [{ id: 'b' }], top: [{ id: 'c' }] };
+    readHomeSnapshot.mockResolvedValue(snapshot);
+    const { load } = await import('../src/routes/+page.server');
+    const result = await load({ platform: { env: {} }, setHeaders: vi.fn(), locals: { user: null }, request: new Request('https://skills.cat/') } as never);
+    expect(result).toEqual(snapshot);
+    expect(readHomeSnapshot).toHaveBeenCalledOnce();
+    expect(getTrendingSkills).not.toHaveBeenCalled();
+    expect(getRecentSkills).not.toHaveBeenCalled();
+    expect(getTopSkills).not.toHaveBeenCalled();
+    expect(getStats).not.toHaveBeenCalled();
   });
 
   it('serves cached lists immediately and schedules an async visibility recheck', async () => {

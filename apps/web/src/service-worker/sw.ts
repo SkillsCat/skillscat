@@ -88,7 +88,7 @@ self.addEventListener('fetch', (event) => {
   // Page navigations: Network First (cache only explicitly public responses)
   if (isSameOrigin && isNavigationRequest(request)) {
     event.respondWith(
-      networkFirst(request, CACHE_NAMES.pages, isExplicitlyPublicResponse)
+      networkFirst(request, CACHE_NAMES.pages, isExplicitlyPublicResponse, { waitUntil: event.waitUntil.bind(event) })
     );
     return;
   }
@@ -108,14 +108,17 @@ self.addEventListener('fetch', (event) => {
     }
 
     event.respondWith(
-      networkFirst(request, CACHE_NAMES.pageData, isExplicitlyPublicResponse)
+      networkFirst(request, CACHE_NAMES.pageData, isExplicitlyPublicResponse, { waitUntil: event.waitUntil.bind(event) })
     );
     return;
   }
 
   // Static assets: Cache First
   if (isStaticAsset(url)) {
-    event.respondWith(cacheFirst(request));
+    event.respondWith(cacheFirst(request, {
+      waitUntil: event.waitUntil.bind(event),
+      immutable: isSameOrigin && url.pathname.startsWith('/_app/immutable/'),
+    }));
     return;
   }
 

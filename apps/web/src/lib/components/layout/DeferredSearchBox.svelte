@@ -94,40 +94,7 @@
   onMount(() => {
     if (autofocus) {
       void loadSearchBox({ autofocus: true });
-      return;
     }
-
-    const preload = () => {
-      void loadSearchBox();
-    };
-
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let idleId = 0;
-
-    if ('requestIdleCallback' in window) {
-      idleId = (
-        window as Window & {
-          requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
-          cancelIdleCallback?: (id: number) => void;
-        }
-      ).requestIdleCallback(preload, { timeout: 2500 });
-    } else {
-      timeoutId = setTimeout(preload, 1500);
-    }
-
-    return () => {
-      if (timeoutId !== null) {
-        clearTimeout(timeoutId);
-      }
-
-      if (idleId && 'cancelIdleCallback' in window) {
-        (
-          window as Window & {
-            cancelIdleCallback?: (id: number) => void;
-          }
-        ).cancelIdleCallback?.(idleId);
-      }
-    };
   });
 </script>
 

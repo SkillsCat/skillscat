@@ -162,8 +162,6 @@
     let rafId = 0;
     let lavaBackgroundTimeoutId: ReturnType<typeof setTimeout> | null = null;
     let lavaBackgroundIdleId = 0;
-    let toastTimeoutId: ReturnType<typeof setTimeout> | null = null;
-    let toastIdleId = 0;
     const handleScroll = () => {
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
@@ -184,21 +182,6 @@
       ).requestIdleCallback(enableLavaBackground, { timeout: 1500 });
     } else {
       lavaBackgroundTimeoutId = setTimeout(enableLavaBackground, 750);
-    }
-
-    if ('requestIdleCallback' in window) {
-      toastIdleId = (
-        window as Window & {
-          requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
-          cancelIdleCallback?: (id: number) => void;
-        }
-      ).requestIdleCallback(() => {
-        void loadToastUi();
-      }, { timeout: 2500 });
-    } else {
-      toastTimeoutId = setTimeout(() => {
-        void loadToastUi();
-      }, 1800);
     }
 
     // 注册 Service Worker (仅生产环境)
@@ -249,19 +232,19 @@
           }
         ).cancelIdleCallback?.(lavaBackgroundIdleId);
       }
-      if (toastTimeoutId !== null) {
-        clearTimeout(toastTimeoutId);
-      }
-      if (toastIdleId && 'cancelIdleCallback' in window) {
-        (
-          window as Window & {
-            cancelIdleCallback?: (id: number) => void;
-          }
-        ).cancelIdleCallback?.(toastIdleId);
-      }
     };
   });
 </script>
+
+<svelte:head>
+  <link
+    rel="preload"
+    as="font"
+    type="font/woff2"
+    href={$page.route.id === '/' ? '/fonts/poppins-latin-700.woff2' : '/fonts/poppins-latin-800.woff2'}
+    crossorigin="anonymous"
+  />
+</svelte:head>
 
 <div class="app-wrapper">
   <!-- Navbar Background - fades in when scrolled -->

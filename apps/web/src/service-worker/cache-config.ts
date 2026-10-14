@@ -5,7 +5,10 @@ declare const __SW_VERSION__: string;
 export const SW_VERSION = __SW_VERSION__;
 
 // Cache names
+export const IMMUTABLE_CACHE_MAX_ENTRIES = 256;
+
 export const CACHE_NAMES = {
+  immutable: 'skillscat-immutable-v1',
   static: `skillscat-static-v${SW_VERSION}`,
   api: `skillscat-api-v${SW_VERSION}`,
   pages: `skillscat-pages-v${SW_VERSION}`,
