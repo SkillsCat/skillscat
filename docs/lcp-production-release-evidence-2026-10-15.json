@@ -1,0 +1,2162 @@
+{
+  "recordedAt": "2026-10-14T17:08:00.248Z",
+  "sourceCommit": "962da77",
+  "webVersion": "0.9.7",
+  "gitCommits": [
+    {
+      "sha": "fcdb3f7",
+      "scope": "Jev fallback and previous verification records"
+    },
+    {
+      "sha": "e972ac5",
+      "scope": "Bounded D1 reads, generated indexes and previous hotfix evidence"
+    },
+    {
+      "sha": "962da77",
+      "scope": "LCP, CDN/Cache API/SW changes and version 0.9.7"
+    }
+  ],
+  "status": "Code pushed and all affected deployments active. Listed public read-only checks passed. Full production acceptance remains incomplete for the explicit limitations below.",
+  "checklistPreparedBeforeDeployment": [
+    "Record active and rollback versions, resource bindings, cron and queue configuration",
+    "Verify generated migration 0036 already applied and additive rollback compatibility",
+    "Run Web and CLI tests, monorepo typecheck/lint and production build",
+    "Inspect server-side read side effects and guard verification using existing R2/D1 results",
+    "Exercise core public routes, pagination, empty and missing cases through HTTP and real Chrome",
+    "Observe ordinary URLs through natural cache expiry without purging or cache-busting",
+    "Verify SW artifact, repeat static cache use, deferred enhancements and mobile/no-JS rendering",
+    "Capture version-correlated natural Worker events and queue backlog without synthetic work"
+  ],
+  "localValidation": {
+    "web": {
+      "files": 129,
+      "tests": 944,
+      "passed": true
+    },
+    "cli": {
+      "files": 20,
+      "tests": 191,
+      "passed": true
+    },
+    "typecheck": "Web and CLI passed; Svelte 0 errors/0 warnings",
+    "lint": "Full repository passed",
+    "build": "Production build passed; pre-existing unused .sr-only CSS warning in SkillManageDialog.svelte",
+    "drizzleGenerate": "No schema changes; nothing to generate",
+    "gitDiffCheck": "Passed",
+    "isolatedBrowser": "Complete SSR Markdown on cold path, cache invalidation/coalescing/failures, SW version upgrade retention verified earlier in isolated local fixtures",
+    "remoteCI": "No workflow runs for source commit; repository has CLI publishing workflow only"
+  },
+  "migration": {
+    "name": "0036_dashing_purifiers.sql",
+    "alreadyAppliedAt": "2026-10-14 16:27:41",
+    "performedDuringThisRelease": false,
+    "compatibility": "Two additive partial indexes; previous deployed versions remain schema-compatible"
+  },
+  "workers": {
+    "trending": {
+      "uploadedAt": "2026-10-14T16:55:54.823Z",
+      "version": "40f14b70-48c3-45ad-b0c1-f251a0c817de",
+      "rollback": [
+        {
+          "version_id": "67c66825-815a-45d8-9872-d741f26a32a5",
+          "percentage": 100
+        }
+      ],
+      "deployedAt": "2026-10-14T16:55:58.386Z",
+      "bindingsUnchanged": true,
+      "cronsUnchanged": true,
+      "schedules": [
+        "0 * * * *"
+      ],
+      "observedEvents": 1,
+      "naturalExecutions": [
+        {
+          "at": 1791997204164,
+          "outcome": "ok",
+          "cron": "0 * * * *",
+          "cpuTime": 279,
+          "wallTime": 86253,
+          "errors": [],
+          "exceptions": []
+        }
+      ],
+      "errorEvents": [],
+      "executionCoverage": "Natural scheduled execution observed; AI provider calls and writes not established"
+    },
+    "classification": {
+      "uploadedAt": "2026-10-14T16:56:01.623Z",
+      "version": "1e2427c1-3c06-4d4a-a56f-1f4bd7a1a68d",
+      "rollback": [
+        {
+          "version_id": "06643792-9a2f-4724-8dbc-24628aebda2e",
+          "percentage": 100
+        }
+      ],
+      "deployedAt": "2026-10-14T16:56:05.548Z",
+      "bindingsUnchanged": true,
+      "cronsUnchanged": true,
+      "schedules": [
+        "17 * * * *"
+      ],
+      "observedEvents": 0,
+      "naturalExecutions": [],
+      "errorEvents": [],
+      "executionCoverage": "No natural execution during bounded window; not counted as validated"
+    },
+    "security-analysis": {
+      "uploadedAt": "2026-10-14T16:56:09.247Z",
+      "version": "8ac93337-a456-4aa9-b7bb-5392704a6edc",
+      "rollback": [
+        {
+          "version_id": "e119bcc7-7d72-4edb-8f7f-82ed2f200ce4",
+          "percentage": 100
+        }
+      ],
+      "deployedAt": "2026-10-14T16:56:12.420Z",
+      "bindingsUnchanged": true,
+      "cronsUnchanged": true,
+      "schedules": [
+        "*/15 * * * *"
+      ],
+      "observedEvents": 1,
+      "naturalExecutions": [
+        {
+          "at": 1791997204149,
+          "outcome": "ok",
+          "cron": "*/15 * * * *",
+          "cpuTime": 4,
+          "wallTime": 1064,
+          "errors": [],
+          "exceptions": []
+        }
+      ],
+      "errorEvents": [],
+      "executionCoverage": "Natural scheduled execution observed; AI provider calls and writes not established"
+    },
+    "virustotal": {
+      "uploadedAt": "2026-10-14T16:56:16.124Z",
+      "version": "b695b48a-c915-4057-9ded-1ad7e0dc42b0",
+      "rollback": [
+        {
+          "version_id": "eac9c1b7-9e59-42db-bf29-24713594f1cb",
+          "percentage": 100
+        }
+      ],
+      "deployedAt": "2026-10-14T16:56:19.489Z",
+      "bindingsUnchanged": true,
+      "cronsUnchanged": true,
+      "schedules": [
+        "* * * * *"
+      ],
+      "observedEvents": 11,
+      "naturalExecutions": [
+        {
+          "at": 1791997024142,
+          "outcome": "ok",
+          "cron": "* * * * *",
+          "cpuTime": 1,
+          "wallTime": 19,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": 1791997084141,
+          "outcome": "ok",
+          "cron": "* * * * *",
+          "cpuTime": 0,
+          "wallTime": 17,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": 1791997144151,
+          "outcome": "ok",
+          "cron": "* * * * *",
+          "cpuTime": 1,
+          "wallTime": 13,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": 1791997204157,
+          "outcome": "ok",
+          "cron": "* * * * *",
+          "cpuTime": 0,
+          "wallTime": 14,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": 1791997275799,
+          "outcome": "ok",
+          "cron": "* * * * *",
+          "cpuTime": 1,
+          "wallTime": 129,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": 1791997324150,
+          "outcome": "ok",
+          "cron": "* * * * *",
+          "cpuTime": 0,
+          "wallTime": 15,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": 1791997384148,
+          "outcome": "ok",
+          "cron": "* * * * *",
+          "cpuTime": 0,
+          "wallTime": 120,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": 1791997444150,
+          "outcome": "ok",
+          "cron": "* * * * *",
+          "cpuTime": 1,
+          "wallTime": 39,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": 1791997504143,
+          "outcome": "ok",
+          "cron": "* * * * *",
+          "cpuTime": 0,
+          "wallTime": 16,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": 1791997564144,
+          "outcome": "ok",
+          "cron": "* * * * *",
+          "cpuTime": 1,
+          "wallTime": 27,
+          "errors": [],
+          "exceptions": []
+        },
+        {
+          "at": 1791997624141,
+          "outcome": "ok",
+          "cron": "* * * * *",
+          "cpuTime": 0,
+          "wallTime": 14,
+          "errors": [],
+          "exceptions": []
+        }
+      ],
+      "errorEvents": [],
+      "executionCoverage": "Natural scheduled execution observed; AI provider calls and writes not established"
+    },
+    "web": {
+      "uploadedAt": "2026-10-14T16:56:29.547Z",
+      "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+      "rollback": [
+        {
+          "version_id": "d78aa20d-cea8-4753-be21-968611614657",
+          "percentage": 100
+        }
+      ],
+      "deployedAt": "2026-10-14T16:56:33.917Z",
+      "bindingsUnchanged": true,
+      "cronsUnchanged": true,
+      "schedules": [],
+      "observedEvents": 4680,
+      "naturalExecutions": [],
+      "errorEvents": [
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997483229,
+          "observedAt": "2026-10-14T17:04:43.410Z",
+          "outcome": "ok",
+          "path": "/xmlrpc.php",
+          "method": "POST",
+          "cpuTime": 53,
+          "wallTime": 55,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] POST /xmlrpc.php\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997545824,
+          "observedAt": "2026-10-14T17:05:46.316Z",
+          "outcome": "ok",
+          "path": "/aaabbbccc",
+          "method": "GET",
+          "cpuTime": 26,
+          "wallTime": 32,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /aaabbbccc\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997547603,
+          "observedAt": "2026-10-14T17:05:47.869Z",
+          "outcome": "ok",
+          "path": "/1",
+          "method": "GET",
+          "cpuTime": 28,
+          "wallTime": 42,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /1\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997548512,
+          "observedAt": "2026-10-14T17:05:48.891Z",
+          "outcome": "ok",
+          "path": "/fb",
+          "method": "GET",
+          "cpuTime": 38,
+          "wallTime": 48,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /fb\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997549417,
+          "observedAt": "2026-10-14T17:05:49.938Z",
+          "outcome": "ok",
+          "path": "/fwc",
+          "method": "GET",
+          "cpuTime": 15,
+          "wallTime": 37,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /fwc\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997549907,
+          "observedAt": "2026-10-14T17:05:50.174Z",
+          "outcome": "ok",
+          "path": "/fzh",
+          "method": "GET",
+          "cpuTime": 6,
+          "wallTime": 14,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /fzh\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997550149,
+          "observedAt": "2026-10-14T17:05:50.464Z",
+          "outcome": "ok",
+          "path": "/news5c/assets/images/logo.svg",
+          "method": "GET",
+          "cpuTime": 25,
+          "wallTime": 38,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /news5c/assets/images/logo.svg\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997550811,
+          "observedAt": "2026-10-14T17:05:51.094Z",
+          "outcome": "ok",
+          "path": "/res/favicon.ico",
+          "method": "GET",
+          "cpuTime": 30,
+          "wallTime": 35,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /res/favicon.ico\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997551006,
+          "observedAt": "2026-10-14T17:05:51.205Z",
+          "outcome": "ok",
+          "path": "/main.c6d13be3ea6fc9cb.js",
+          "method": "GET",
+          "cpuTime": 35,
+          "wallTime": 47,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /main.c6d13be3ea6fc9cb.js\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997551355,
+          "observedAt": "2026-10-14T17:05:51.512Z",
+          "outcome": "ok",
+          "path": "/assets/favicon-aOK6_042.ico",
+          "method": "GET",
+          "cpuTime": 28,
+          "wallTime": 38,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /assets/favicon-aOK6_042.ico\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997551774,
+          "observedAt": "2026-10-14T17:05:51.934Z",
+          "outcome": "ok",
+          "path": "/images/01.jpg",
+          "method": "GET",
+          "cpuTime": 27,
+          "wallTime": 39,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /images/01.jpg\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997551831,
+          "observedAt": "2026-10-14T17:05:52.011Z",
+          "outcome": "ok",
+          "path": "/wp-content/uploads/2020/10/official-logo-512x512.png",
+          "method": "GET",
+          "cpuTime": 49,
+          "wallTime": 55,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /wp-content/uploads/2020/10/official-logo-512x512.png\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997552346,
+          "observedAt": "2026-10-14T17:05:52.552Z",
+          "outcome": "ok",
+          "path": "/wp-content/uploads/2023/02/1677572030-814390417fe413b.png",
+          "method": "GET",
+          "cpuTime": 26,
+          "wallTime": 34,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /wp-content/uploads/2023/02/1677572030-814390417fe413b.png\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997553000,
+          "observedAt": "2026-10-14T17:05:53.159Z",
+          "outcome": "ok",
+          "path": "/icons/favicon.ico",
+          "method": "GET",
+          "cpuTime": 17,
+          "wallTime": 27,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /icons/favicon.ico\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997553041,
+          "observedAt": "2026-10-14T17:05:53.566Z",
+          "outcome": "ok",
+          "path": "/wp-content/uploads/2023/08/logo-gold.png",
+          "method": "GET",
+          "cpuTime": 56,
+          "wallTime": 76,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /wp-content/uploads/2023/08/logo-gold.png\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997554820,
+          "observedAt": "2026-10-14T17:05:55.431Z",
+          "outcome": "ok",
+          "path": "/assets/REDACTED.js",
+          "method": "GET",
+          "cpuTime": 78,
+          "wallTime": 88,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /assets/GanjingAbout-Cb73sJYd.js\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997585886,
+          "observedAt": "2026-10-14T17:06:26.038Z",
+          "outcome": "ok",
+          "path": "/aaabbbccc",
+          "method": "GET",
+          "cpuTime": 13,
+          "wallTime": 19,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /aaabbbccc\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997589904,
+          "observedAt": "2026-10-14T17:06:29.982Z",
+          "outcome": "ok",
+          "path": "/fb",
+          "method": "GET",
+          "cpuTime": 33,
+          "wallTime": 38,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /fb\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997590726,
+          "observedAt": "2026-10-14T17:06:31.083Z",
+          "outcome": "ok",
+          "path": "/fwc",
+          "method": "GET",
+          "cpuTime": 53,
+          "wallTime": 67,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /fwc\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997591831,
+          "observedAt": "2026-10-14T17:06:31.877Z",
+          "outcome": "ok",
+          "path": "/fzh",
+          "method": "GET",
+          "cpuTime": 24,
+          "wallTime": 28,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /fzh\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997592556,
+          "observedAt": "2026-10-14T17:06:32.682Z",
+          "outcome": "ok",
+          "path": "/news5c/assets/images/logo.svg",
+          "method": "GET",
+          "cpuTime": 10,
+          "wallTime": 18,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /news5c/assets/images/logo.svg\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997593510,
+          "observedAt": "2026-10-14T17:06:34.261Z",
+          "outcome": "ok",
+          "path": "/res/favicon.ico",
+          "method": "GET",
+          "cpuTime": 75,
+          "wallTime": 93,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /res/favicon.ico\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997594813,
+          "observedAt": "2026-10-14T17:06:34.854Z",
+          "outcome": "ok",
+          "path": "/main.c6d13be3ea6fc9cb.js",
+          "method": "GET",
+          "cpuTime": 5,
+          "wallTime": 10,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /main.c6d13be3ea6fc9cb.js\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997595563,
+          "observedAt": "2026-10-14T17:06:35.617Z",
+          "outcome": "ok",
+          "path": "/assets/favicon-aOK6_042.ico",
+          "method": "GET",
+          "cpuTime": 7,
+          "wallTime": 22,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /assets/favicon-aOK6_042.ico\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997596381,
+          "observedAt": "2026-10-14T17:06:36.928Z",
+          "outcome": "ok",
+          "path": "/images/01.jpg",
+          "method": "GET",
+          "cpuTime": 77,
+          "wallTime": 101,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /images/01.jpg\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997597552,
+          "observedAt": "2026-10-14T17:06:37.906Z",
+          "outcome": "ok",
+          "path": "/wp-content/uploads/2020/10/official-logo-512x512.png",
+          "method": "GET",
+          "cpuTime": 46,
+          "wallTime": 51,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /wp-content/uploads/2020/10/official-logo-512x512.png\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997598602,
+          "observedAt": "2026-10-14T17:06:38.905Z",
+          "outcome": "ok",
+          "path": "/wp-content/uploads/2023/02/1677572030-814390417fe413b.png",
+          "method": "GET",
+          "cpuTime": 43,
+          "wallTime": 50,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /wp-content/uploads/2023/02/1677572030-814390417fe413b.png\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997600378,
+          "observedAt": "2026-10-14T17:06:40.429Z",
+          "outcome": "ok",
+          "path": "/icons/favicon.ico",
+          "method": "GET",
+          "cpuTime": 5,
+          "wallTime": 10,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /icons/favicon.ico\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997601106,
+          "observedAt": "2026-10-14T17:06:41.458Z",
+          "outcome": "ok",
+          "path": "/wp-content/uploads/2023/08/logo-gold.png",
+          "method": "GET",
+          "cpuTime": 59,
+          "wallTime": 73,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /wp-content/uploads/2023/08/logo-gold.png\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997605948,
+          "observedAt": "2026-10-14T17:06:46.003Z",
+          "outcome": "ok",
+          "path": "/assets/REDACTED.js",
+          "method": "GET",
+          "cpuTime": 10,
+          "wallTime": 14,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /assets/GanjingAbout-Cb73sJYd.js\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        },
+        {
+          "worker": "web",
+          "version": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+          "at": 1791997615877,
+          "observedAt": "2026-10-14T17:06:56.017Z",
+          "outcome": "ok",
+          "path": "/1",
+          "method": "GET",
+          "cpuTime": 4,
+          "wallTime": 14,
+          "errors": [
+            "[\"\\n\\u001b[1;31m[404] GET /1\\u001b[0m\"]"
+          ],
+          "exceptions": []
+        }
+      ],
+      "executionCoverage": "HTTP requests observed"
+    }
+  },
+  "queueConfigurationUnchanged": true,
+  "queueMetrics": {
+    "at": "2026-10-14T17:01:12.622Z",
+    "queues": [
+      {
+        "name": "skillscat-classification",
+        "metrics": {
+          "backlog_count": 0,
+          "backlog_bytes": 0,
+          "oldest_message_timestamp_ms": 0
+        }
+      },
+      {
+        "name": "skillscat-classification-dlq",
+        "metrics": {
+          "backlog_count": 3,
+          "backlog_bytes": 870,
+          "oldest_message_timestamp_ms": 0
+        }
+      },
+      {
+        "name": "skillscat-security-analysis",
+        "metrics": {
+          "backlog_count": 0,
+          "backlog_bytes": 0,
+          "oldest_message_timestamp_ms": 0
+        }
+      },
+      {
+        "name": "skillscat-security-analysis-dlq",
+        "metrics": {
+          "backlog_count": 6,
+          "backlog_bytes": 1166,
+          "oldest_message_timestamp_ms": 0
+        }
+      }
+    ]
+  },
+  "httpBefore": [
+    {
+      "path": "/search?q=testing",
+      "status": 200,
+      "title": "Search: testing - SkillsCat",
+      "cache": null,
+      "errorBody": false
+    },
+    {
+      "path": "/categories",
+      "status": 200,
+      "title": "Categories - SkillsCat",
+      "cache": "MISS",
+      "errorBody": false
+    },
+    {
+      "path": "/u/anthropics",
+      "status": 200,
+      "title": "anthropics AI Agent Skills (126) | SkillsCat",
+      "cache": null,
+      "errorBody": false
+    },
+    {
+      "path": "/org/yottameta",
+      "status": 200,
+      "title": "YottaMeta Organization AI Agent Skills | SkillsCat",
+      "cache": null,
+      "errorBody": false
+    },
+    {
+      "path": "/skills/skillscatverifynotfound20261015/no-skill",
+      "status": 404,
+      "title": "Skill Not Found - SkillsCat",
+      "cache": null,
+      "errorBody": false
+    }
+  ],
+  "http": {
+    "safety": {
+      "at": "2026-10-14T16:58:14.268Z",
+      "safe": {
+        "/recent": true,
+        "/top": true,
+        "/": true,
+        "/skills/anthropics/skills/discernment-nudge": true,
+        "/categories": true
+      },
+      "objects": {
+        "recent": {
+          "primaryPresent": false,
+          "legacyPresent": false,
+          "age": null
+        },
+        "top": {
+          "primaryPresent": false,
+          "legacyPresent": false,
+          "age": null
+        },
+        "home": {
+          "present": true,
+          "generatedAt": 1791997088060,
+          "currentCount": 35
+        },
+        "detail": {
+          "htmlPresent": true,
+          "recommendPresent": false,
+          "state": {
+            "dirty": 1,
+            "next_update_at": 1791679398881,
+            "algo_version": null
+          }
+        },
+        "categories": {
+          "expected": 49,
+          "existing": 49
+        }
+      }
+    },
+    "results": [
+      {
+        "at": "2026-10-14T16:58:20.255Z",
+        "path": "/",
+        "expected": 200,
+        "status": 200,
+        "title": "SkillsCat | AI Agent Skill Registry and CLI",
+        "skillLinks": 36,
+        "errorBody": false,
+        "bytes": 152379,
+        "ttfbMs": 1229,
+        "cache": "MISS",
+        "cfCache": "MISS",
+        "cacheControl": "no-store",
+        "cdnCache": null,
+        "serverTiming": "home_data;dur=320.0;desc=\"MISS/MISS/MISS\", cfCacheStatus;desc=\"MISS\", cfEdge;dur=1171,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:21.264Z",
+        "path": "/recent",
+        "expected": 200,
+        "status": 200,
+        "title": "Recently Added - SkillsCat",
+        "skillLinks": 24,
+        "errorBody": false,
+        "bytes": 117179,
+        "ttfbMs": 1006,
+        "cache": "MISS",
+        "cfCache": "MISS",
+        "cacheControl": "no-store",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=992,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:21.928Z",
+        "path": "/recent?page=2",
+        "expected": 200,
+        "status": 200,
+        "title": "Recently Added - Page 2 - SkillsCat",
+        "skillLinks": 24,
+        "errorBody": false,
+        "bytes": 110332,
+        "ttfbMs": 657,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=180, private=Set-Cookie",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=643,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:22.373Z",
+        "path": "/top",
+        "expected": 200,
+        "status": 200,
+        "title": "Top Rated - SkillsCat",
+        "skillLinks": 24,
+        "errorBody": false,
+        "bytes": 108308,
+        "ttfbMs": 436,
+        "cache": "MISS",
+        "cfCache": "MISS",
+        "cacheControl": "no-store",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=414,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:23.414Z",
+        "path": "/top?page=2",
+        "expected": 200,
+        "status": 200,
+        "title": "Top Rated - Page 2 - SkillsCat",
+        "skillLinks": 24,
+        "errorBody": false,
+        "bytes": 106466,
+        "ttfbMs": 1018,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=300, stale-while-revalidate=900, private=Set-Cookie",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=973,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:23.789Z",
+        "path": "/trending",
+        "expected": 200,
+        "status": 200,
+        "title": "Trending Skills - SkillsCat",
+        "skillLinks": 24,
+        "errorBody": false,
+        "bytes": 118342,
+        "ttfbMs": 373,
+        "cache": "MISS",
+        "cfCache": "MISS",
+        "cacheControl": "no-store",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=359,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:24.368Z",
+        "path": "/trending?page=2",
+        "expected": 200,
+        "status": 200,
+        "title": "Trending Skills - Page 2 - SkillsCat",
+        "skillLinks": 24,
+        "errorBody": false,
+        "bytes": 114247,
+        "ttfbMs": 560,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=180, private=Set-Cookie",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=541,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:24.590Z",
+        "path": "/search?q=testing",
+        "expected": 200,
+        "status": 200,
+        "title": "Search: testing - SkillsCat",
+        "skillLinks": 50,
+        "errorBody": false,
+        "bytes": 209673,
+        "ttfbMs": 219,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=204,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:26.000Z",
+        "path": "/search?q=testing&page=2",
+        "expected": 200,
+        "status": 200,
+        "title": "Search: testing - Page 2 - SkillsCat",
+        "skillLinks": 50,
+        "errorBody": false,
+        "bytes": 206140,
+        "ttfbMs": 1406,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=1392,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:26.881Z",
+        "path": "/search?q=skillscatverifynotfound20261015",
+        "expected": 200,
+        "status": 200,
+        "title": "Search: skillscatverifynotfound20261015 - SkillsCat",
+        "skillLinks": 0,
+        "errorBody": false,
+        "bytes": 22249,
+        "ttfbMs": 881,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=863,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:26.981Z",
+        "path": "/search?q=testing&page=101",
+        "expected": 404,
+        "status": 404,
+        "title": "404 - SkillsCat",
+        "skillLinks": 0,
+        "errorBody": false,
+        "bytes": 17853,
+        "ttfbMs": 100,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=86,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:27.089Z",
+        "path": "/categories",
+        "expected": 200,
+        "status": 200,
+        "title": "Categories - SkillsCat",
+        "skillLinks": 0,
+        "errorBody": false,
+        "bytes": 119230,
+        "ttfbMs": 103,
+        "cache": "MISS",
+        "cfCache": "MISS",
+        "cacheControl": "no-store",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=90,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:27.375Z",
+        "path": "/category/testing",
+        "expected": 200,
+        "status": 200,
+        "title": "Testing - SkillsCat",
+        "skillLinks": 24,
+        "errorBody": false,
+        "bytes": 113047,
+        "ttfbMs": 285,
+        "cache": "MISS",
+        "cfCache": "MISS",
+        "cacheControl": "no-store",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=270,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:27.588Z",
+        "path": "/category/testing?page=2",
+        "expected": 200,
+        "status": 200,
+        "title": "Testing - Page 2 - SkillsCat",
+        "skillLinks": 24,
+        "errorBody": false,
+        "bytes": 107157,
+        "ttfbMs": 212,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=120, stale-while-revalidate=600, private=Set-Cookie",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=199,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:27.740Z",
+        "path": "/category/skillscatverifynotfound20261015",
+        "expected": 404,
+        "status": 404,
+        "title": "Category Not Found - SkillsCat",
+        "skillLinks": 0,
+        "errorBody": false,
+        "bytes": 20060,
+        "ttfbMs": 151,
+        "cache": "MISS",
+        "cfCache": "MISS",
+        "cacheControl": "no-store",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=140,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:28.202Z",
+        "path": "/u/anthropics",
+        "expected": 200,
+        "status": 200,
+        "title": "anthropics AI Agent Skills (126) | SkillsCat",
+        "skillLinks": 24,
+        "errorBody": false,
+        "bytes": 105220,
+        "ttfbMs": 459,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600, private=Set-Cookie",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=447,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:28.273Z",
+        "path": "/u/anthropics?page=2",
+        "expected": 200,
+        "status": 200,
+        "title": "anthropics AI Agent Skills (126) | SkillsCat - Page 2",
+        "skillLinks": 24,
+        "errorBody": false,
+        "bytes": 97290,
+        "ttfbMs": 69,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600, private=Set-Cookie",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=56,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:28.327Z",
+        "path": "/u/anthropics?page=101",
+        "expected": 404,
+        "status": 404,
+        "title": "404 - SkillsCat",
+        "skillLinks": 0,
+        "errorBody": false,
+        "bytes": 17861,
+        "ttfbMs": 53,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=42,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:28.914Z",
+        "path": "/u/skillscatverifynotfound20261015",
+        "expected": 404,
+        "status": 404,
+        "title": "User Not Found - SkillsCat",
+        "skillLinks": 0,
+        "errorBody": false,
+        "bytes": 19731,
+        "ttfbMs": 587,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=575,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:29.579Z",
+        "path": "/org/yottameta",
+        "expected": 200,
+        "status": 200,
+        "title": "YottaMeta Organization AI Agent Skills | SkillsCat",
+        "skillLinks": 0,
+        "errorBody": false,
+        "bytes": 22709,
+        "ttfbMs": 664,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "no-store",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=652,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:29.738Z",
+        "path": "/org/skillscatverifynotfound20261015",
+        "expected": 404,
+        "status": 404,
+        "title": "Organization Not Found - SkillsCat",
+        "skillLinks": 0,
+        "errorBody": false,
+        "bytes": 20062,
+        "ttfbMs": 159,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": "no-store",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=141,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:30.092Z",
+        "path": "/skills/anthropics/skills/discernment-nudge",
+        "expected": 200,
+        "status": 200,
+        "title": "discernment-nudge | Prompts AI Agent Skill | SkillsCat",
+        "skillLinks": 0,
+        "errorBody": false,
+        "bytes": 63088,
+        "ttfbMs": 351,
+        "cache": "MISS",
+        "cfCache": "MISS",
+        "cacheControl": "no-store",
+        "cdnCache": null,
+        "serverTiming": "sd_row;dur=46;desc=\"skill row\", sd_filetree;dur=0;desc=\"file tree parse\", skill_detail;dur=46;desc=\"db+r2\", recommend_cached;dur=13;desc=\"cache+r2\", recommend;dur=4;desc=\"secondary\", readme_html;dur=124;desc=\"secondary\", total;dur=170;desc=\"html\", cfCacheStatus;desc=\"MISS\", cfEdge;dur=336,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:30.435Z",
+        "path": "/skills/skillscatverifynotfound20261015/no-skill",
+        "expected": 404,
+        "status": 404,
+        "title": "Skill Not Found - SkillsCat",
+        "skillLinks": 0,
+        "errorBody": false,
+        "bytes": 19542,
+        "ttfbMs": 342,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "cacheControl": null,
+        "cdnCache": null,
+        "serverTiming": "sd_row;dur=94;desc=\"skill row\", skill_detail;dur=94;desc=\"db+r2\", total;dur=94;desc=\"html\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=331,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:30.543Z",
+        "path": "/zh-CN/categories",
+        "expected": 200,
+        "status": 200,
+        "title": "分类 - SkillsCat",
+        "skillLinks": 0,
+        "errorBody": false,
+        "bytes": 119232,
+        "ttfbMs": 105,
+        "cache": "MISS",
+        "cfCache": "MISS",
+        "cacheControl": "no-store",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=89,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:30.651Z",
+        "path": "/zh-CN/category/testing",
+        "expected": 200,
+        "status": 200,
+        "title": "测试 - SkillsCat",
+        "skillLinks": 24,
+        "errorBody": false,
+        "bytes": 113183,
+        "ttfbMs": 107,
+        "cache": "MISS",
+        "cfCache": "MISS",
+        "cacheControl": "no-store",
+        "cdnCache": null,
+        "serverTiming": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=89,cfOrigin;dur=0"
+      },
+      {
+        "at": "2026-10-14T16:58:31.721Z",
+        "path": "/registry/search?q=testing&limit=5",
+        "status": 200,
+        "expected": 200,
+        "keys": [
+          "skills",
+          "total"
+        ],
+        "count": 5,
+        "total": 3125,
+        "cache": "MISS",
+        "cacheControl": "private, no-cache"
+      },
+      {
+        "at": "2026-10-14T16:58:31.775Z",
+        "path": "/registry/search?q=testing&limit=5",
+        "status": 200,
+        "expected": 200,
+        "keys": [
+          "skills",
+          "total"
+        ],
+        "count": 5,
+        "total": 3125,
+        "cache": "HIT",
+        "cacheControl": "private, no-cache"
+      },
+      {
+        "at": "2026-10-14T16:58:32.368Z",
+        "path": "/registry/search?q=skillscatverifynotfound20261015&limit=5",
+        "status": 200,
+        "expected": 200,
+        "keys": [
+          "skills",
+          "total"
+        ],
+        "count": 0,
+        "total": 0,
+        "cache": "MISS",
+        "cacheControl": "private, no-cache"
+      },
+      {
+        "at": "2026-10-14T16:58:32.621Z",
+        "path": "/registry/skill/anthropics/skills/discernment-nudge",
+        "status": 200,
+        "expected": 200,
+        "keys": [
+          "slug",
+          "name",
+          "description",
+          "owner",
+          "repo",
+          "stars",
+          "updatedAt",
+          "categories",
+          "content",
+          "contentHash",
+          "githubUrl",
+          "skillPath",
+          "visibility"
+        ],
+        "slug": "anthropics/skills/discernment-nudge",
+        "contentBytes": 10492,
+        "cache": "MISS",
+        "cacheControl": "private, no-cache"
+      },
+      {
+        "at": "2026-10-14T16:58:32.717Z",
+        "path": "/registry/skill/skillscatverifynotfound20261015/no-skill",
+        "status": 404,
+        "expected": 404,
+        "keys": [
+          "error"
+        ],
+        "cache": "BYPASS",
+        "cacheControl": "no-store"
+      }
+    ]
+  },
+  "browser": {
+    "at": "2026-10-14T16:59:43.083Z",
+    "safety": {
+      "at": "2026-10-14T16:59:20.159Z",
+      "safe": {
+        "/recent": true,
+        "/top": true,
+        "/": true,
+        "/skills/anthropics/skills/discernment-nudge": true,
+        "/categories": true
+      },
+      "objects": {
+        "recent": {
+          "primaryPresent": false,
+          "legacyPresent": false,
+          "age": null
+        },
+        "top": {
+          "primaryPresent": false,
+          "legacyPresent": false,
+          "age": null
+        },
+        "home": {
+          "present": true,
+          "generatedAt": 1791997088060,
+          "currentCount": 35
+        },
+        "detail": {
+          "htmlPresent": true,
+          "recommendPresent": false,
+          "state": {
+            "dirty": 1,
+            "next_update_at": 1791679398881,
+            "algo_version": null
+          }
+        },
+        "categories": {
+          "expected": 49,
+          "existing": 49
+        }
+      }
+    },
+    "results": [
+      {
+        "label": "/recent",
+        "url": "https://skills.cat/recent",
+        "status": 200,
+        "heading": "Recently Added",
+        "skillLinks": 24,
+        "bodyLength": 9597,
+        "errorBody": false
+      },
+      {
+        "label": "/top",
+        "url": "https://skills.cat/top",
+        "status": 200,
+        "heading": "Top Rated",
+        "skillLinks": 24,
+        "bodyLength": 6047,
+        "errorBody": false
+      },
+      {
+        "label": "/trending",
+        "url": "https://skills.cat/trending",
+        "status": 200,
+        "heading": "Trending Skills",
+        "skillLinks": 24,
+        "bodyLength": 10591,
+        "errorBody": false
+      },
+      {
+        "label": "/search?q=testing",
+        "url": "https://skills.cat/search?q=testing&pageSize=51",
+        "status": 200,
+        "heading": "搜索",
+        "skillLinks": 51,
+        "bodyLength": 14502,
+        "errorBody": false
+      },
+      {
+        "label": "/categories",
+        "url": "https://skills.cat/categories",
+        "status": 200,
+        "heading": "Categories",
+        "skillLinks": 0,
+        "bodyLength": 2859,
+        "errorBody": false
+      },
+      {
+        "label": "/org/yottameta",
+        "url": "https://skills.cat/org/yottameta",
+        "status": 200,
+        "heading": "YottaMeta",
+        "skillLinks": 0,
+        "bodyLength": 455,
+        "errorBody": false
+      },
+      {
+        "label": "/skills/anthropics/skills/discernment-nudge",
+        "url": "https://skills.cat/skills/anthropics/skills/discernment-nudge",
+        "status": 200,
+        "heading": "discernment-nudge",
+        "skillLinks": 0,
+        "bodyLength": 10179,
+        "errorBody": false
+      },
+      {
+        "label": "detail refresh",
+        "url": "https://skills.cat/skills/anthropics/skills/discernment-nudge",
+        "status": 200,
+        "heading": "discernment-nudge",
+        "skillLinks": 0,
+        "bodyLength": 10179,
+        "errorBody": false
+      },
+      {
+        "label": "detail Markdown",
+        "paragraphs": 0,
+        "codeBlocks": 1,
+        "installCommand": true
+      },
+      {
+        "label": "profile direct",
+        "url": "https://skills.cat/u/anthropics",
+        "status": 200,
+        "heading": "anthropics",
+        "skillLinks": 24,
+        "bodyLength": 13384,
+        "errorBody": false
+      },
+      {
+        "label": "profile page 2 click",
+        "url": "https://skills.cat/u/anthropics?page=2",
+        "heading": "anthropics",
+        "skillLinks": 24,
+        "bodyLength": 8875,
+        "errorBody": false
+      },
+      {
+        "label": "profile pagination separation",
+        "overlap": 0
+      },
+      {
+        "label": "profile page 2 refresh",
+        "url": "https://skills.cat/u/anthropics?page=2",
+        "status": 200,
+        "heading": "anthropics",
+        "skillLinks": 24,
+        "bodyLength": 8821,
+        "errorBody": false
+      },
+      {
+        "label": "category click",
+        "url": "https://skills.cat/category/testing",
+        "heading": "Testing",
+        "skillLinks": 24,
+        "bodyLength": 7093,
+        "errorBody": false
+      },
+      {
+        "label": "production SW repeat navigation",
+        "names": [
+          "skillscat-pages-vmv8co559",
+          "skillscat-immutable-v1",
+          "skillscat-static-vmv8co559",
+          "skillscat-public-assets-vmv8co559"
+        ],
+        "immutableEntries": 56,
+        "controller": "https://skills.cat/sw.js",
+        "immutableResponses": 56,
+        "immutableFromSW": 56,
+        "documentFromSW": true
+      }
+    ],
+    "errors": [],
+    "failed": [],
+    "badResponses": [],
+    "dataRequests": [
+      {
+        "path": "/search/__data.json",
+        "status": 200,
+        "sw": false
+      },
+      {
+        "path": "/u/anthropics/__data.json",
+        "status": 200,
+        "sw": false
+      },
+      {
+        "path": "/category/testing/__data.json",
+        "status": 200,
+        "sw": false
+      },
+      {
+        "path": "/search/__data.json",
+        "status": 200,
+        "sw": false
+      }
+    ],
+    "blocked": [
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "POST",
+        "path": "/api/skills/access"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "POST",
+        "path": "/api/skills/access"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      }
+    ]
+  },
+  "homeBrowser": {
+    "at": "2026-10-14T17:03:31.595Z",
+    "safety": {
+      "at": "2026-10-14T17:03:17.840Z",
+      "safe": {
+        "/recent": true,
+        "/top": true,
+        "/": true,
+        "/skills/anthropics/skills/discernment-nudge": true,
+        "/categories": true
+      },
+      "objects": {
+        "recent": {
+          "primaryPresent": false,
+          "legacyPresent": false,
+          "age": null
+        },
+        "top": {
+          "primaryPresent": false,
+          "legacyPresent": false,
+          "age": null
+        },
+        "home": {
+          "present": true,
+          "generatedAt": 1791997283671,
+          "currentCount": 35
+        },
+        "detail": {
+          "htmlPresent": true,
+          "recommendPresent": false,
+          "state": {
+            "dirty": 1,
+            "next_update_at": 1791679398881,
+            "algo_version": null
+          }
+        },
+        "categories": {
+          "expected": 49,
+          "existing": 49
+        }
+      }
+    },
+    "results": [
+      {
+        "label": "home mobile",
+        "status": 200,
+        "heading": "An open platform for discovering, sharing, and installing AI Agent Skills.",
+        "preloads": [
+          "/fonts/poppins-latin-400.woff2",
+          "/fonts/poppins-latin-700.woff2"
+        ],
+        "skillLinks": 36,
+        "overflow": false,
+        "lcp": {
+          "startTime": 192,
+          "size": 45672,
+          "tag": "H1",
+          "text": "An open platform for discovering, sharing, and installing AI Agent Skills."
+        },
+        "ttfb": 46.60000002384186,
+        "deferredChunksLoadedBeforeInteraction": []
+      },
+      {
+        "label": "home scroll Recently Added",
+        "visible": true
+      },
+      {
+        "label": "home scroll Top Rated",
+        "visible": true
+      },
+      {
+        "label": "home to recent click",
+        "heading": "Recently Added",
+        "cards": 24
+      },
+      {
+        "label": "recent to home click",
+        "cards": 36
+      },
+      {
+        "label": "home refresh",
+        "status": 200,
+        "cards": 36
+      },
+      {
+        "label": "desktop search interaction loads enhancement",
+        "chunks": [
+          {
+            "path": "/_app/immutable/chunks/CQcbvmam.js",
+            "sw": false
+          }
+        ]
+      },
+      {
+        "label": "home without JS",
+        "heading": "An open platform for discovering, sharing, and installing AI Agent Skills.",
+        "cards": 36
+      },
+      {
+        "label": "SW repeat actual network",
+        "immutableEntries": 56,
+        "immutableNetworkRequests": []
+      }
+    ],
+    "errors": [],
+    "failed": [],
+    "data": [
+      {
+        "url": "https://skills.cat/recent/__data.json?x-sveltekit-invalidated=01",
+        "status": 200
+      },
+      {
+        "url": "https://skills.cat/__data.json?x-sveltekit-trailing-slash=1&x-sveltekit-invalidated=01",
+        "status": 200,
+        "timing": "home_data;dur=8.0;desc=\"STALE/STALE/STALE\""
+      },
+      {
+        "url": "https://skills.cat/search/__data.json?q=testing&pageSize=51&x-sveltekit-invalidated=01",
+        "status": 200
+      }
+    ],
+    "blocked": [
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "path": "/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920"
+      },
+      {
+        "method": "GET",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      }
+    ],
+    "disabledScriptRequests": [
+      "/_app/immutable/entry/start.CgoOlqPx.js",
+      "/_app/immutable/chunks/DES0p1GD.js",
+      "/_app/immutable/chunks/BLtvB7Cl.js",
+      "/_app/immutable/entry/app.CGRUIgQu.js",
+      "/_app/immutable/chunks/HclGiUj8.js",
+      "/_app/immutable/chunks/DTQ0EZvi.js",
+      "/_app/immutable/chunks/xihTtKlq.js",
+      "/_app/immutable/nodes/0.B1Y7toCh.js",
+      "/_app/immutable/chunks/DX4sRU7M.js",
+      "/_app/immutable/chunks/BS9A0srJ.js",
+      "/_app/immutable/chunks/1hVer-jm.js",
+      "/_app/immutable/chunks/C8BjVExo.js",
+      "/_app/immutable/chunks/Dt6BxdbT.js",
+      "/_app/immutable/chunks/DGbno1WT.js",
+      "/_app/immutable/chunks/CJQgHG8M.js",
+      "/_app/immutable/chunks/CawnjIc5.js",
+      "/_app/immutable/chunks/CyPqYxHO.js",
+      "/_app/immutable/chunks/qGLuNJQs.js",
+      "/_app/immutable/chunks/DTZnteLJ.js",
+      "/_app/immutable/chunks/lNclofbH.js",
+      "/_app/immutable/chunks/lJmw0rEM.js",
+      "/_app/immutable/chunks/DChf1320.js",
+      "/_app/immutable/chunks/C30WSr1U.js",
+      "/_app/immutable/nodes/4.yXhUDOQg.js",
+      "/_app/immutable/chunks/DZGEeo5H.js",
+      "/_app/immutable/chunks/CTGXLTP5.js",
+      "/_app/immutable/chunks/DRmJHZ2g.js",
+      "/_app/immutable/chunks/BNMEI_FQ.js",
+      "/_app/immutable/chunks/CBPBoSC7.js",
+      "/_app/immutable/chunks/CR6q4QtR.js",
+      "/_app/immutable/chunks/LbYiiTbl.js",
+      "/_app/immutable/chunks/CNJvoiR2.js",
+      "/_app/immutable/chunks/DEUMy8jG.js"
+    ]
+  },
+  "cache": {
+    "safety": {
+      "at": "2026-10-14T17:03:49.382Z",
+      "safe": {
+        "/recent": true,
+        "/top": true,
+        "/": true,
+        "/skills/anthropics/skills/discernment-nudge": true,
+        "/categories": true
+      },
+      "objects": {
+        "recent": {
+          "primaryPresent": false,
+          "legacyPresent": false,
+          "age": null
+        },
+        "top": {
+          "primaryPresent": false,
+          "legacyPresent": false,
+          "age": null
+        },
+        "home": {
+          "present": true,
+          "generatedAt": 1791997283671,
+          "currentCount": 35
+        },
+        "detail": {
+          "htmlPresent": true,
+          "recommendPresent": false,
+          "state": {
+            "dirty": 1,
+            "next_update_at": 1791679398881,
+            "algo_version": null
+          }
+        },
+        "categories": {
+          "expected": 49,
+          "existing": 49
+        }
+      }
+    },
+    "results": [
+      {
+        "label": "home normal URL first",
+        "path": "/",
+        "at": "2026-10-14T17:03:54.508Z",
+        "status": 200,
+        "ms": 88,
+        "cache": "MISS",
+        "cfCache": "UPDATING",
+        "age": "334",
+        "cacheControl": "no-store",
+        "timing": "home_data;dur=320.0;desc=\"MISS/MISS/MISS\", cfCacheStatus;desc=\"UPDATING\", cfEdge;dur=28,cfOrigin;dur=0",
+        "font700": true
+      },
+      {
+        "label": "home normal URL repeated",
+        "path": "/",
+        "at": "2026-10-14T17:03:54.559Z",
+        "status": 200,
+        "ms": 50,
+        "cache": "MISS",
+        "cfCache": "UPDATING",
+        "age": "334",
+        "cacheControl": "no-store",
+        "timing": "home_data;dur=320.0;desc=\"MISS/MISS/MISS\", cfCacheStatus;desc=\"UPDATING\", cfEdge;dur=13,cfOrigin;dur=0",
+        "font700": true
+      },
+      {
+        "label": "data first",
+        "path": "/__data.json?x-sveltekit-trailing-slash=1&x-sveltekit-invalidated=01",
+        "at": "2026-10-14T17:03:54.624Z",
+        "status": 200,
+        "ms": 66,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "age": null,
+        "cacheControl": "public, max-age=0, s-maxage=30, stale-while-revalidate=120",
+        "timing": "home_data;dur=10.0;desc=\"HIT/HIT/HIT\"",
+        "font700": false
+      },
+      {
+        "label": "data after natural 30s expiry",
+        "path": "/__data.json?x-sveltekit-trailing-slash=1&x-sveltekit-invalidated=01",
+        "at": "2026-10-14T17:04:27.708Z",
+        "status": 200,
+        "ms": 82,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "age": null,
+        "cacheControl": "public, max-age=0, s-maxage=30, stale-while-revalidate=120",
+        "timing": "home_data;dur=10.0;desc=\"STALE/STALE/STALE\"",
+        "font700": false
+      },
+      {
+        "label": "data after background refresh",
+        "path": "/__data.json?x-sveltekit-trailing-slash=1&x-sveltekit-invalidated=01",
+        "at": "2026-10-14T17:04:29.748Z",
+        "status": 200,
+        "ms": 39,
+        "cache": null,
+        "cfCache": "BYPASS",
+        "age": null,
+        "cacheControl": "public, max-age=0, s-maxage=30, stale-while-revalidate=120",
+        "timing": "home_data;dur=8.0;desc=\"HIT/HIT/HIT\"",
+        "font700": false
+      },
+      {
+        "label": "home after natural 60s expiry",
+        "path": "/",
+        "at": "2026-10-14T17:04:59.906Z",
+        "status": 200,
+        "ms": 157,
+        "cache": "HIT",
+        "cfCache": "UPDATING",
+        "age": "65",
+        "cacheControl": "no-store",
+        "timing": "cfCacheStatus;desc=\"UPDATING\", cfEdge;dur=16,cfOrigin;dur=0",
+        "font700": true
+      },
+      {
+        "label": "detail normal URL",
+        "path": "/skills/anthropics/skills/discernment-nudge",
+        "at": "2026-10-14T17:04:59.969Z",
+        "status": 200,
+        "ms": 63,
+        "cache": "MISS",
+        "cfCache": "UPDATING",
+        "age": "389",
+        "cacheControl": "no-store",
+        "timing": "sd_row;dur=46;desc=\"skill row\", sd_filetree;dur=0;desc=\"file tree parse\", skill_detail;dur=46;desc=\"db+r2\", recommend_cached;dur=13;desc=\"cache+r2\", recommend;dur=4;desc=\"secondary\", readme_html;dur=124;desc=\"secondary\", total;dur=170;desc=\"html\", cfCacheStatus;desc=\"UPDATING\", cfEdge;dur=11,cfOrigin;dur=0",
+        "font700": false
+      },
+      {
+        "label": "detail repeated",
+        "path": "/skills/anthropics/skills/discernment-nudge",
+        "at": "2026-10-14T17:05:00.027Z",
+        "status": 200,
+        "ms": 58,
+        "cache": "MISS",
+        "cfCache": "UPDATING",
+        "age": "389",
+        "cacheControl": "no-store",
+        "timing": "sd_row;dur=46;desc=\"skill row\", sd_filetree;dur=0;desc=\"file tree parse\", skill_detail;dur=46;desc=\"db+r2\", recommend_cached;dur=13;desc=\"cache+r2\", recommend;dur=4;desc=\"secondary\", readme_html;dur=124;desc=\"secondary\", total;dur=170;desc=\"html\", cfCacheStatus;desc=\"UPDATING\", cfEdge;dur=5,cfOrigin;dur=0",
+        "font700": false
+      },
+      {
+        "label": "deployed SW matches built artifact",
+        "status": 200,
+        "matches": true
+      },
+      {
+        "label": "normal URL refreshed cache",
+        "path": "/",
+        "at": "2026-10-14T17:06:19.335Z",
+        "status": 200,
+        "cache": "MISS",
+        "cfCache": "MISS",
+        "age": null
+      },
+      {
+        "label": "normal URL refreshed cache",
+        "path": "/skills/anthropics/skills/discernment-nudge",
+        "at": "2026-10-14T17:06:20.213Z",
+        "status": 200,
+        "cache": "MISS",
+        "cfCache": "MISS",
+        "age": null
+      }
+    ]
+  },
+  "homeSnapshot": {
+    "at": "2026-10-14T17:06:17.918Z",
+    "generatedAt": 1791997283671,
+    "counts": {
+      "trending": 12,
+      "recent": 12,
+      "top": 12
+    },
+    "statsTotal": 70125
+  },
+  "interpretation": {
+    "performance": "Single-machine observations, no controlled before/after LCP benchmark or field p75 claim. Home internal cache naturally moved HIT -> STALE (10 ms) -> HIT (8 ms); CDN returned UPDATING promptly; repeat SW navigation made zero network requests for 56 cached immutable assets.",
+    "noJs": "Chrome reports csp request failures when JavaScript is explicitly disabled. These 33 script requests were separated from real failures; enabled-JS contexts had no unexpected failures.",
+    "detail": "Rendered existing README, code and exact slug install command checked visually. The sample has no precomputed recommendations and returned an empty recommendation list; absence is not claimed as successful recommendation population.",
+    "logError": "31 error-level events were 404s on unrelated unsupported routes such as /xmlrpc.php and WordPress/resource probes. These were not test traffic; no uncaught exceptions, failed execution outcomes or tested-route error logs were observed.",
+    "credentials": "Cloudflare OAuth expired during metrics inspection; a standard Wrangler read refreshed it and metrics then succeeded. No credentials were saved to this evidence."
+  },
+  "safety": {
+    "productionBusinessMutations": false,
+    "syntheticQueuesOrCron": false,
+    "modelTestRequests": false,
+    "cachePurges": false,
+    "r2TestWrites": false,
+    "analyticsAndMutationRequests": "Blocked in isolated anonymous verification browsers",
+    "readOnlyPreflight": "Fresh existing home snapshot and eligible IDs; existing highlighted README; absent precomputed recommendations; complete predefined category aggregates; Recent/Top cache object conditions checked before requests",
+    "loginCodeChanged": false
+  },
+  "limitations": [
+    "Authenticated pages and login/logout were not exercised. The connected user browser could not provide the required request-interception command; its static-resource-only tab was closed without entering user data pages.",
+    "Production write flows (publish, upload, bookmark mutation, permissions, organizations, tokens and notifications) were not executed. Local tests cover relevant contracts; no production fixtures were created.",
+    "Classification had no natural event during the bounded window. Security cron success does not demonstrate Jev/OpenRouter inference, retry or persistence; no test tasks or paid calls were injected.",
+    "Classification and security main queues were empty at inspection; their DLQs held 3 and 6 messages. These were neither read nor replayed; no before-deploy DLQ count was collected, so this release is not attributed as their cause.",
+    "True missing-R2 Markdown highlighting and recommendation refresh writes were tested in isolation, not forced on production.",
+    "Cross-deployment SW cache retention was verified locally; production verified current artifact and repeat cached loads only."
+  ],
+  "screenshotsInspected": [
+    "tmp/lcp-release-20261015/detail.png",
+    "tmp/lcp-release-20261015/home-mobile.png",
+    "tmp/lcp-release-20261015/home-mobile-bottom.png"
+  ]
+}
