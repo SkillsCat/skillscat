@@ -1,4 +1,5 @@
 import type { ClassificationMessage, IndexingMessage, SecurityAnalysisMessage } from './messages';
+import type { TypeSafeEnv } from '../ai/typesafe';
 
 export interface BaseEnv {
   DB: D1Database;
@@ -90,7 +91,7 @@ export interface IndexingEnv extends BaseEnv {
   GITHUB_INDEXING_RATE_LIMIT_MAX_AGE_SECONDS?: string;
 }
 
-export interface ClassificationEnv extends BaseEnv {
+export interface ClassificationEnv extends BaseEnv, TypeSafeEnv {
   OPENROUTER_API_KEY?: string;
   AI_MODEL?: string;
   CLASSIFICATION_PAID_MODEL?: string;
@@ -134,7 +135,7 @@ export interface SearchPrecomputeEnv {
   SEARCH_MISSING_STATE_SCAN_LIMIT?: string;
 }
 
-export interface SecurityAnalysisEnv extends BaseEnv {
+export interface SecurityAnalysisEnv extends BaseEnv, TypeSafeEnv {
   INDEXING_QUEUE?: Queue<IndexingMessage>;
   OPENROUTER_API_KEY?: string;
   SECURITY_FREE_MODEL?: string;

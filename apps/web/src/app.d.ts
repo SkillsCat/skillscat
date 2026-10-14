@@ -23,6 +23,8 @@ declare global {
         GITHUB_CLIENT_SECRET: string;
         BETTER_AUTH_SECRET: string;
         OPENROUTER_API_KEY: string;
+        TYPESAFE_API_KEY?: string;
+        TYPESAFE_MODEL?: string;
         VIRUSTOTAL_API_KEY?: string;
         GITHUB_TOKEN?: string;
         GITHUB_TOKENS?: string;

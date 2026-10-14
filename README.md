@@ -176,6 +176,16 @@ pnpm preview:web
 - `apps/web/.dev.vars.example`
 - `apps/web/wrangler.preview.toml.example`
 
+### TypeSafe Jev tagging
+
+The `classification` and `security-analysis` workers support TypeSafe's native
+System One API as a fallback after OpenRouter free models for standard tagging.
+Configure the optional `TYPESAFE_API_KEY` secret on both workers
+(or in local `.dev.vars`). `pnpm init:project` includes the optional key setup.
+`TYPESAFE_MODEL` defaults to the pinned `jev-1.13.0` in code and worker templates;
+it can be overridden per worker. See [the integration notes](docs/typesafe.md)
+for routing, uncertainty handling, and validation requirements.
+
 ## License
 
 This project is licensed under **AGPL-3.0**. See [`LICENSE`](LICENSE).

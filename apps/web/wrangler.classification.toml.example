@@ -3,11 +3,10 @@
 # 消费 classification 队列，使用 AI 对 skill 进行分类
 #
 # AI 分类 Fallback 策略:
-# 1. 优先使用默认模型 deepseek/deepseek-v4-flash-0731(provider 路由锁定 GMICloud 折扣)
-# 2. 失败后在首个模型上重试一次
-# 3. 尝试 openrouter/free
-# 4. 以上都失败后使用付费模型(CLASSIFICATION_PAID_MODEL,默认同为 deepseek/deepseek-v4-flash-0731)
-# 5. 最终降级到关键词分类
+# 1. OpenRouter 免费候选优先（首个重试一次），有效结果直接返回
+# 2. 免费候选不可用后用 Jev Noul 批量判断标签（可选 TYPESAFE_API_KEY）
+# 3. Jev 未配置、低置信度或失败时使用 CLASSIFICATION_PAID_MODEL（DeepSeek 路由 GMICloud）
+# 4. 最终降级到关键词分类；摘要仍由 OpenRouter 生成
 
 name = "skillscat-classification"
 main = "workers/classification.ts"
@@ -57,6 +56,7 @@ dataset = "skillscat_classification_batches"
 crons = ["17 * * * *"]
 
 [vars]
+TYPESAFE_MODEL = "jev-1.13.0"
 AI_MODEL = "deepseek/deepseek-v4-flash-0731"
 FREE_MODELS = "openrouter/free"
 CLASSIFICATION_PAID_MODEL = "deepseek/deepseek-v4-flash-0731"
@@ -94,6 +94,7 @@ binding = "CLASSIFICATION_ANALYTICS"
 dataset = "skillscat_classification_batches"
 
 [env.production.vars]
+TYPESAFE_MODEL = "jev-1.13.0"
 AI_MODEL = "deepseek/deepseek-v4-flash-0731"
 FREE_MODELS = "openrouter/free"
 CLASSIFICATION_PAID_MODEL = "deepseek/deepseek-v4-flash-0731"

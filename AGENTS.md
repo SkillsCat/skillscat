@@ -188,6 +188,10 @@ pnpm --filter ./apps/cli typecheck
 
 ## 开发规范
 
+### TypeSafe skill
+
+涉及 AI 分类、标签、安全判断等语义决策时，使用 [TypeSafe skill](https://github.com/typesafe-ai/skills/blob/main/skills/typesafe-ai/SKILL.md)，并阅读它要求的实时 API / primitive 文档。项目接入及验证边界见 [docs/typesafe.md](docs/typesafe.md)。
+
 ### 0. 提交与发布确认规范
 
 - 未经用户明确确认，不得自行执行任何 `git commit`、`git push`、创建 PR、打 tag、`pnpm deploy`、`pnpm deploy:workers`、`pnpm publish:cli`、`wrangler deploy`、上线发布或其他会产生提交、发布、部署结果的操作。

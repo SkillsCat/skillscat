@@ -1,0 +1,1020 @@
+{
+  "webVersion": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4",
+  "rollbackVersion": "d22fda5f-fe6e-4e8a-92ed-52aa57845278",
+  "runtimeByVersion": {
+    "d22fda5f-fe6e-4e8a-92ed-52aa57845278": {
+      "worker": "preview",
+      "events": 263,
+      "errorLogs": 2,
+      "exceptions": 0,
+      "firstObservedAt": "2026-09-19T09:50:28.924Z",
+      "lastObservedAt": "2026-09-19T10:02:30.611Z"
+    },
+    "e119bcc7-7d72-4edb-8f7f-82ed2f200ce4": {
+      "worker": "security-analysis",
+      "events": 1,
+      "errorLogs": 0,
+      "exceptions": 0,
+      "firstObservedAt": "2026-09-19T10:01:20.331Z",
+      "lastObservedAt": "2026-09-19T10:01:20.331Z"
+    },
+    "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4": {
+      "worker": "preview",
+      "events": 206,
+      "errorLogs": 0,
+      "exceptions": 0,
+      "firstObservedAt": "2026-09-19T10:02:31.845Z",
+      "lastObservedAt": "2026-09-19T10:06:51.834Z"
+    }
+  },
+  "profileRuntimeEvents": [
+    {
+      "worker": "preview",
+      "observedAt": "2026-09-19T09:50:43.794Z",
+      "eventTimestamp": 1789811443434,
+      "version": "d22fda5f-fe6e-4e8a-92ed-52aa57845278",
+      "outcome": "ok",
+      "eventType": "http",
+      "errorLogs": 1,
+      "exceptions": [],
+      "providers": [],
+      "path": "/u/anthropics",
+      "responseStatus": 500,
+      "errors": [
+        "D1_ERROR: too many SQL variables; hydrateCategories -> public user profile load"
+      ]
+    },
+    {
+      "worker": "preview",
+      "observedAt": "2026-09-19T10:02:55.665Z",
+      "eventTimestamp": 1789812174594,
+      "version": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4",
+      "outcome": "ok",
+      "eventType": "http",
+      "errorLogs": 0,
+      "exceptions": [],
+      "providers": [],
+      "path": "/u/anthropics",
+      "responseStatus": 200,
+      "errors": []
+    },
+    {
+      "worker": "preview",
+      "observedAt": "2026-09-19T10:02:56.525Z",
+      "eventTimestamp": 1789812175471,
+      "version": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4",
+      "outcome": "ok",
+      "eventType": "http",
+      "errorLogs": 0,
+      "exceptions": [],
+      "providers": [],
+      "path": "/u/anthropics",
+      "responseStatus": 200,
+      "errors": []
+    },
+    {
+      "worker": "preview",
+      "observedAt": "2026-09-19T10:02:57.059Z",
+      "eventTimestamp": 1789812176984,
+      "version": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4",
+      "outcome": "ok",
+      "eventType": "http",
+      "errorLogs": 0,
+      "exceptions": [],
+      "providers": [],
+      "path": "/u/anthropics",
+      "responseStatus": 200,
+      "errors": []
+    },
+    {
+      "worker": "preview",
+      "observedAt": "2026-09-19T10:02:57.241Z",
+      "eventTimestamp": 1789812176654,
+      "version": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4",
+      "outcome": "ok",
+      "eventType": "http",
+      "errorLogs": 0,
+      "exceptions": [],
+      "providers": [],
+      "path": "/u/anthropics",
+      "responseStatus": 404,
+      "errors": []
+    },
+    {
+      "worker": "preview",
+      "observedAt": "2026-09-19T10:03:00.477Z",
+      "eventTimestamp": 1789812180429,
+      "version": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4",
+      "outcome": "ok",
+      "eventType": "http",
+      "errorLogs": 0,
+      "exceptions": [],
+      "providers": [],
+      "path": "/u/anthropics",
+      "responseStatus": 200,
+      "errors": []
+    },
+    {
+      "worker": "preview",
+      "observedAt": "2026-09-19T10:05:03.447Z",
+      "eventTimestamp": 1789812302648,
+      "version": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4",
+      "outcome": "ok",
+      "eventType": "http",
+      "errorLogs": 0,
+      "exceptions": [],
+      "providers": [],
+      "path": "/u/anthropics",
+      "responseStatus": 200,
+      "errors": []
+    },
+    {
+      "worker": "preview",
+      "observedAt": "2026-09-19T10:05:05.318Z",
+      "eventTimestamp": 1789812303454,
+      "version": "de99cb3b-b5ba-4b82-b7d6-9d30150e71c4",
+      "outcome": "ok",
+      "eventType": "http",
+      "errorLogs": 0,
+      "exceptions": [],
+      "providers": [],
+      "path": "/u/anthropics",
+      "responseStatus": 404,
+      "errors": []
+    }
+  ],
+  "workerEvents": [
+    {
+      "worker": "security-analysis",
+      "observedAt": "2026-09-19T10:01:20.331Z",
+      "eventTimestamp": 1789812077001,
+      "version": "e119bcc7-7d72-4edb-8f7f-82ed2f200ce4",
+      "outcome": "ok",
+      "eventType": "cron",
+      "cron": "*/15 * * * *",
+      "errorLogs": 0,
+      "exceptions": [],
+      "providers": []
+    }
+  ],
+  "http-production": [
+    {
+      "at": "2026-09-19T10:02:55.459Z",
+      "path": "/u/anthropics",
+      "status": 200,
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600, private=Set-Cookie",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "anthropics AI Agent Skills (124) | SkillsCat",
+      "bytes": 104595,
+      "skillLinks": 24,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:02:56.642Z",
+      "path": "/u/anthropics?page=2",
+      "status": 200,
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600, private=Set-Cookie",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "anthropics AI Agent Skills (124) | SkillsCat - Page 2",
+      "bytes": 99318,
+      "skillLinks": 24,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:02:57.269Z",
+      "path": "/u/anthropics?page=101",
+      "status": 404,
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "404 - SkillsCat",
+      "bytes": 17537,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:02:59.748Z",
+      "path": "/search?q=testing",
+      "status": 200,
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "Search: testing - SkillsCat",
+      "bytes": 221631,
+      "skillLinks": 50,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:03:00.603Z",
+      "path": "/search?q=jevemptyzz20260919",
+      "status": 200,
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "Search: jevemptyzz20260919 - SkillsCat",
+      "bytes": 21743,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:03:02.140Z",
+      "path": "/search?q=testing&page=2",
+      "status": 200,
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "Search: testing - Page 2 - SkillsCat",
+      "bytes": 208535,
+      "skillLinks": 50,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:03:02.200Z",
+      "path": "/search?q=testing&page=101",
+      "status": 404,
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "404 - SkillsCat",
+      "bytes": 17516,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:03:03.095Z",
+      "path": "/categories",
+      "status": 200,
+      "cacheControl": "no-store",
+      "xCache": "MISS",
+      "cfCache": "MISS",
+      "contentType": "text/html",
+      "title": "Categories - SkillsCat",
+      "bytes": 118890,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:03:03.384Z",
+      "path": "/category/testing",
+      "status": 200,
+      "cacheControl": "no-store",
+      "xCache": "MISS",
+      "cfCache": "MISS",
+      "contentType": "text/html",
+      "title": "Testing - SkillsCat",
+      "bytes": 111990,
+      "skillLinks": 24,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:03:04.148Z",
+      "path": "/category/jev-nonexistent-20260919",
+      "status": 404,
+      "cacheControl": "no-store",
+      "xCache": "MISS",
+      "cfCache": "MISS",
+      "contentType": "text/html",
+      "title": "Category Not Found - SkillsCat",
+      "bytes": 19736,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:03:04.746Z",
+      "path": "/trending",
+      "status": 200,
+      "cacheControl": "no-store",
+      "xCache": "MISS",
+      "cfCache": "MISS",
+      "contentType": "text/html",
+      "title": "Trending Skills - SkillsCat",
+      "bytes": 113827,
+      "skillLinks": 24,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:03:04.925Z",
+      "path": "/org/yottameta",
+      "status": 200,
+      "cacheControl": "no-store",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "YottaMeta Organization AI Agent Skills | SkillsCat",
+      "bytes": 22384,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:03:05.331Z",
+      "path": "/u/jev-nonexistent-20260919",
+      "status": 404,
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "User Not Found - SkillsCat",
+      "bytes": 19386,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:03:05.489Z",
+      "path": "/org/jev-nonexistent-20260919",
+      "status": 404,
+      "cacheControl": "no-store",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "Organization Not Found - SkillsCat",
+      "bytes": 19731,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:03:05.757Z",
+      "path": "/skills/jev-nonexistent-20260919/no-such-skill",
+      "status": 404,
+      "cacheControl": null,
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "Skill Not Found - SkillsCat",
+      "bytes": 19257,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T10:03:06.821Z",
+      "path": "/registry/search?q=testing&limit=5",
+      "status": 200,
+      "cacheControl": "private, no-cache",
+      "xCache": "MISS",
+      "cfCache": "BYPASS",
+      "contentType": "application/json",
+      "bytes": 2939,
+      "skillLinks": 0,
+      "errorBody": false,
+      "keys": [
+        "skills",
+        "total"
+      ],
+      "count": 5
+    },
+    {
+      "at": "2026-09-19T10:03:06.959Z",
+      "path": "/registry/search?q=testing&limit=5",
+      "status": 200,
+      "cacheControl": "private, no-cache",
+      "xCache": "HIT",
+      "cfCache": "BYPASS",
+      "contentType": "application/json",
+      "bytes": 2939,
+      "skillLinks": 0,
+      "errorBody": false,
+      "keys": [
+        "skills",
+        "total"
+      ],
+      "count": 5
+    }
+  ],
+  "profile-last-page": [
+    {
+      "path": "/u/anthropics?page=6",
+      "status": 200,
+      "title": "anthropics AI Agent Skills (124) | SkillsCat - Page 6",
+      "skillLinks": 4
+    },
+    {
+      "path": "/u/anthropics?page=7",
+      "status": 404,
+      "title": "404 - SkillsCat",
+      "skillLinks": 0
+    }
+  ],
+  "isolated-http": [
+    {
+      "path": "/u/acceptance-author",
+      "status": 200,
+      "title": "Acceptance Author AI Agent Skills (137) | SkillsCat",
+      "skillLinks": 24,
+      "bytes": 82446,
+      "error": false
+    },
+    {
+      "path": "/u/acceptance-author?page=2",
+      "status": 200,
+      "title": "Acceptance Author AI Agent Skills (137) | SkillsCat - Page 2",
+      "skillLinks": 24,
+      "bytes": 82534,
+      "error": false
+    },
+    {
+      "path": "/u/acceptance-author?page=6",
+      "status": 200,
+      "title": "Acceptance Author AI Agent Skills (137) | SkillsCat - Page 6",
+      "skillLinks": 17,
+      "bytes": 66177,
+      "error": false
+    },
+    {
+      "path": "/u/acceptance-author?page=7",
+      "status": 404,
+      "title": "404 - SkillsCat",
+      "skillLinks": 0,
+      "bytes": 16599,
+      "error": false
+    },
+    {
+      "path": "/u/missing",
+      "status": 404,
+      "title": "User Not Found - SkillsCat",
+      "skillLinks": 0,
+      "bytes": 18398,
+      "error": false
+    },
+    {
+      "path": "/",
+      "status": 200,
+      "title": "SkillsCat | AI Agent Skill Registry and CLI",
+      "skillLinks": 26,
+      "bytes": 99970,
+      "error": false
+    },
+    {
+      "path": "/recent",
+      "status": 200,
+      "title": "Recently Added - SkillsCat",
+      "skillLinks": 24,
+      "bytes": 98437,
+      "error": false
+    },
+    {
+      "path": "/top",
+      "status": 200,
+      "title": "Top Rated - SkillsCat",
+      "skillLinks": 24,
+      "bytes": 98423,
+      "error": false
+    },
+    {
+      "path": "/trending",
+      "status": 200,
+      "title": "Trending Skills - SkillsCat",
+      "skillLinks": 2,
+      "bytes": 29360,
+      "error": false
+    },
+    {
+      "path": "/categories",
+      "status": 200,
+      "title": "Categories - SkillsCat",
+      "skillLinks": 0,
+      "bytes": 115984,
+      "error": false
+    },
+    {
+      "path": "/category/testing",
+      "status": 200,
+      "title": "Testing - SkillsCat",
+      "skillLinks": 24,
+      "bytes": 101367,
+      "error": false
+    },
+    {
+      "path": "/org/acceptance-org",
+      "status": 200,
+      "title": "acceptance-org Organization AI Agent Skills | SkillsCat",
+      "skillLinks": 0,
+      "bytes": 20687,
+      "error": false
+    },
+    {
+      "path": "/skills/acceptance-author/skill-000",
+      "status": 200,
+      "title": "Acceptance Skill 000 | Testing AI Agent Skill | SkillsCat",
+      "skillLinks": 2,
+      "bytes": 36913,
+      "error": false
+    }
+  ],
+  "browser-isolated": {
+    "origin": "http://127.0.0.1:8793",
+    "startedAt": "2026-09-19T10:02:19.974Z",
+    "scenarios": [
+      {
+        "scenario": "direct profile",
+        "url": "http://127.0.0.1:8793/u/acceptance-author",
+        "status": 200,
+        "title": "Acceptance Author AI Agent Skills (137) | SkillsCat",
+        "h1": [
+          "Acceptance Author"
+        ],
+        "skillLinks": 24,
+        "bodyLength": 3245
+      },
+      {
+        "scenario": "profile page 2 click",
+        "url": "http://127.0.0.1:8793/u/acceptance-author?page=2",
+        "title": "Acceptance Author AI Agent Skills (137) | SkillsCat - Page 2",
+        "h1": [
+          "Acceptance Author"
+        ],
+        "skillLinks": 24,
+        "bodyLength": 3307
+      },
+      {
+        "scenario": "profile page 2 refresh",
+        "url": "http://127.0.0.1:8793/u/acceptance-author?page=2",
+        "status": 200,
+        "title": "Acceptance Author AI Agent Skills (137) | SkillsCat - Page 2",
+        "h1": [
+          "Acceptance Author"
+        ],
+        "skillLinks": 24,
+        "bodyLength": 3246
+      }
+    ],
+    "blocked": [],
+    "pageErrors": [],
+    "consoleErrors": [],
+    "failures": [],
+    "responses": [
+      {
+        "path": "/u/acceptance-author/__data.json",
+        "status": 200
+      }
+    ],
+    "distinctPages": true,
+    "endedAt": "2026-09-19T10:02:25.333Z"
+  },
+  "browser-production": {
+    "origin": "https://skills.cat",
+    "startedAt": "2026-09-19T10:02:55.787Z",
+    "scenarios": [
+      {
+        "scenario": "direct profile",
+        "url": "https://skills.cat/u/anthropics",
+        "status": 200,
+        "title": "anthropics AI Agent Skills (124) | SkillsCat",
+        "h1": [
+          "anthropics"
+        ],
+        "skillLinks": 24,
+        "bodyLength": 13263
+      },
+      {
+        "scenario": "profile page 2 click",
+        "url": "https://skills.cat/u/anthropics?page=2",
+        "title": "anthropics AI Agent Skills (124) | SkillsCat - Page 2",
+        "h1": [
+          "anthropics"
+        ],
+        "skillLinks": 24,
+        "bodyLength": 10000
+      },
+      {
+        "scenario": "profile page 2 refresh",
+        "url": "https://skills.cat/u/anthropics?page=2",
+        "status": 200,
+        "title": "anthropics AI Agent Skills (124) | SkillsCat - Page 2",
+        "h1": [
+          "anthropics"
+        ],
+        "skillLinks": 24,
+        "bodyLength": 9946
+      }
+    ],
+    "blocked": [
+      {
+        "method": "GET",
+        "host": "skills.cat",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "host": "static.cloudflareinsights.com",
+        "path": "/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495"
+      },
+      {
+        "method": "GET",
+        "host": "skills.cat",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "host": "static.cloudflareinsights.com",
+        "path": "/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495"
+      },
+      {
+        "method": "GET",
+        "host": "skills.cat",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "host": "skills.cat",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      }
+    ],
+    "pageErrors": [],
+    "consoleErrors": [
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED"
+    ],
+    "failures": [],
+    "responses": [
+      {
+        "path": "/u/anthropics/__data.json",
+        "status": 200
+      }
+    ],
+    "distinctPages": true,
+    "endedAt": "2026-09-19T10:03:01.978Z"
+  },
+  "browser-core-isolated": {
+    "origin": "http://127.0.0.1:8793",
+    "startedAt": "2026-09-19T10:05:01.582Z",
+    "scenarios": [
+      {
+        "scenario": "direct /",
+        "url": "http://127.0.0.1:8793/",
+        "status": 200,
+        "title": "SkillsCat | AI Agent Skill Registry and CLI",
+        "h1": [
+          "An open platform for discovering, sharing, and installing AI Agent Skills."
+        ],
+        "skillLinks": 26,
+        "bodyLength": 3544
+      },
+      {
+        "scenario": "direct /recent",
+        "url": "http://127.0.0.1:8793/recent",
+        "status": 200,
+        "title": "Recently Added - SkillsCat",
+        "h1": [
+          " Recently Added"
+        ],
+        "skillLinks": 24,
+        "bodyLength": 3252
+      },
+      {
+        "scenario": "direct /top",
+        "url": "http://127.0.0.1:8793/top",
+        "status": 200,
+        "title": "Top Rated - SkillsCat",
+        "h1": [
+          " Top Rated"
+        ],
+        "skillLinks": 24,
+        "bodyLength": 3242
+      },
+      {
+        "scenario": "direct /skills/acceptance-author/skill-000",
+        "url": "http://127.0.0.1:8793/skills/acceptance-author/skill-000",
+        "status": 200,
+        "title": "Acceptance Skill 000 | Testing AI Agent Skill | SkillsCat",
+        "h1": [
+          "Acceptance Skill 000",
+          "Acceptance Skill"
+        ],
+        "skillLinks": 2,
+        "bodyLength": 837
+      }
+    ],
+    "blocked": [
+      {
+        "method": "POST",
+        "host": "127.0.0.1",
+        "path": "/api/skills/access"
+      }
+    ],
+    "pageErrors": [],
+    "consoleErrors": [
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to record public skill access: TypeError: Failed to fetch\n    at window.fetch (http://127.0.0.1:8793/_app/immutable/chunks/Cu5u26U7.js:1:1463)\n    at http://127.0.0.1:8793/_app/immutable/nodes/24.B_8aOmyo.js:2:34061\n    at qr (http://127.0.0.1:8793/_app/immutable/chunks/BLtvB7Cl.js:1:27668)\n    at Xr (http://127.0.0.1:8793/_app/immutable/chunks/BLtvB7Cl.js:1:28784)\n    at kn (http://127.0.0.1:8793/_app/immutable/chunks/BLtvB7Cl.js:1:18009)\n    at #g (http://127.0.0.1:8793/_app/immutable/c"
+    ],
+    "failures": [],
+    "responses": [],
+    "endedAt": "2026-09-19T10:05:09.144Z"
+  },
+  "browser-core-production": {
+    "origin": "https://skills.cat",
+    "startedAt": "2026-09-19T10:05:01.582Z",
+    "scenarios": [
+      {
+        "scenario": "direct /search?q=testing",
+        "url": "https://skills.cat/search?q=testing&pageSize=51",
+        "status": 200,
+        "title": "Search: testing - SkillsCat",
+        "h1": [
+          " Search"
+        ],
+        "skillLinks": 51,
+        "bodyLength": 21886
+      },
+      {
+        "scenario": "direct /categories",
+        "url": "https://skills.cat/categories",
+        "status": 200,
+        "title": "Categories - SkillsCat",
+        "h1": [
+          "Categories"
+        ],
+        "skillLinks": 0,
+        "bodyLength": 2859
+      },
+      {
+        "scenario": "category detail navigation",
+        "url": "https://skills.cat/category/testing",
+        "title": "Testing - SkillsCat",
+        "h1": [
+          "Testing"
+        ],
+        "skillLinks": 24,
+        "bodyLength": 6772
+      },
+      {
+        "scenario": "direct /trending",
+        "url": "https://skills.cat/trending",
+        "status": 200,
+        "title": "Trending Skills - SkillsCat",
+        "h1": [
+          " Trending Skills"
+        ],
+        "skillLinks": 24,
+        "bodyLength": 8632
+      },
+      {
+        "scenario": "direct /org/yottameta",
+        "url": "https://skills.cat/org/yottameta",
+        "status": 200,
+        "title": "YottaMeta Organization AI Agent Skills | SkillsCat",
+        "h1": [
+          "YottaMeta"
+        ],
+        "skillLinks": 0,
+        "bodyLength": 455
+      }
+    ],
+    "blocked": [
+      {
+        "method": "GET",
+        "host": "skills.cat",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "host": "static.cloudflareinsights.com",
+        "path": "/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495"
+      },
+      {
+        "method": "GET",
+        "host": "skills.cat",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "host": "skills.cat",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "host": "static.cloudflareinsights.com",
+        "path": "/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495"
+      },
+      {
+        "method": "GET",
+        "host": "skills.cat",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "host": "skills.cat",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "host": "static.cloudflareinsights.com",
+        "path": "/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495"
+      },
+      {
+        "method": "GET",
+        "host": "skills.cat",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      },
+      {
+        "method": "GET",
+        "host": "static.cloudflareinsights.com",
+        "path": "/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495"
+      },
+      {
+        "method": "GET",
+        "host": "skills.cat",
+        "path": "/cdn-cgi/speculation"
+      },
+      {
+        "method": "GET",
+        "host": "skills.cat",
+        "path": "/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      }
+    ],
+    "pageErrors": [],
+    "consoleErrors": [
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED",
+      "Failed to load resource: net::ERR_FAILED"
+    ],
+    "failures": [],
+    "responses": [
+      {
+        "path": "/search/__data.json",
+        "status": 200
+      },
+      {
+        "path": "/category/testing/__data.json",
+        "status": 200
+      }
+    ],
+    "endedAt": "2026-09-19T10:05:15.434Z"
+  },
+  "infra-after": {
+    "at": "2026-09-19T10:05:01.953103+00:00",
+    "bindings": [
+      {
+        "name": "ASSETS",
+        "type": "assets"
+      },
+      {
+        "name": "BETTER_AUTH_SECRET",
+        "type": "secret_text"
+      },
+      {
+        "name": "CACHE_VERSION",
+        "type": "plain_text"
+      },
+      {
+        "name": "CLASSIFICATION_QUEUE",
+        "type": "queue"
+      },
+      {
+        "name": "DB",
+        "type": "d1"
+      },
+      {
+        "name": "DEEPSEEK_API_KEY",
+        "type": "secret_text"
+      },
+      {
+        "name": "GITHUB_CLIENT_ID",
+        "type": "secret_text"
+      },
+      {
+        "name": "GITHUB_CLIENT_SECRET",
+        "type": "secret_text"
+      },
+      {
+        "name": "GITHUB_HTML_SUBMIT_FALLBACK_ENABLED",
+        "type": "plain_text"
+      },
+      {
+        "name": "GITHUB_TOKEN",
+        "type": "secret_text"
+      },
+      {
+        "name": "INDEXING_QUEUE",
+        "type": "queue"
+      },
+      {
+        "name": "INDEXNOW_ENABLED",
+        "type": "plain_text"
+      },
+      {
+        "name": "INDEXNOW_KEY",
+        "type": "secret_text"
+      },
+      {
+        "name": "KV",
+        "type": "kv_namespace"
+      },
+      {
+        "name": "METRICS_QUEUE",
+        "type": "queue"
+      },
+      {
+        "name": "OPENROUTER_API_KEY",
+        "type": "secret_text"
+      },
+      {
+        "name": "PUBLIC_APP_URL",
+        "type": "plain_text"
+      },
+      {
+        "name": "R2",
+        "type": "r2_bucket"
+      },
+      {
+        "name": "RATE_LIMIT_BURST_THRESHOLD",
+        "type": "plain_text"
+      },
+      {
+        "name": "RATE_LIMIT_BURST_WINDOW_SECONDS",
+        "type": "plain_text"
+      },
+      {
+        "name": "RATE_LIMIT_MAX_PENALTY_LEVEL",
+        "type": "plain_text"
+      },
+      {
+        "name": "RATE_LIMIT_PENALTY_TTL_LEVEL_1_SECONDS",
+        "type": "plain_text"
+      },
+      {
+        "name": "RATE_LIMIT_PENALTY_TTL_LEVEL_2_SECONDS",
+        "type": "plain_text"
+      },
+      {
+        "name": "RATE_LIMIT_PENALTY_TTL_LEVEL_3_SECONDS",
+        "type": "plain_text"
+      },
+      {
+        "name": "RECOMMEND_ALGO_VERSION",
+        "type": "plain_text"
+      },
+      {
+        "name": "SECURITY_ANALYSIS_QUEUE",
+        "type": "queue"
+      },
+      {
+        "name": "SITEMAP_REFRESH_MIN_INTERVAL_SECONDS",
+        "type": "plain_text"
+      },
+      {
+        "name": "STATE_DO",
+        "type": "durable_object_namespace"
+      },
+      {
+        "name": "WORKER_SECRET",
+        "type": "secret_text"
+      }
+    ],
+    "queueMetrics": {
+      "classification": {
+        "backlog_count": 0,
+        "backlog_bytes": 0,
+        "oldest_message_timestamp_ms": 0
+      },
+      "security-analysis": {
+        "backlog_count": 0,
+        "backlog_bytes": 0,
+        "oldest_message_timestamp_ms": 0
+      }
+    }
+  },
+  "r2-preconditions": {
+    "at": "2026-09-19T10:03:35.019901+00:00",
+    "objects": [
+      {
+        "key": "cache/lists/v2/stats/public.json",
+        "status": 200,
+        "ageMs": 265144,
+        "generatedAt": 1789811948320,
+        "freshForReadOnlyCheck": false,
+        "items": null
+      },
+      {
+        "key": "cache/lists/v2/recent-quality-v1.json",
+        "status": 404,
+        "freshForReadOnlyCheck": false
+      },
+      {
+        "key": "cache/lists/v2/top-quality-v1.json",
+        "status": 404,
+        "freshForReadOnlyCheck": false
+      }
+    ]
+  }
+}

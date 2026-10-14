@@ -8,12 +8,15 @@ import type {
 } from './shared/types';
 import type { D1Database } from '@cloudflare/workers-types';
 import { createLogger, generateId } from './shared/utils';
+import { assessSecurityWithJev } from './shared/ai/jev-security';
+import { TypeSafeRateLimitError } from './shared/ai/typesafe';
 import {
   formatOpenRouterErrorForLog,
   getOpenRouterJsonGenerationOptions,
   getOpenRouterFreePauseUntil,
   getOpenRouterFreePauseStore,
   getOpenRouterProviderRouting,
+  isOpenRouterFreeModel,
   isOpenRouterFreePauseError,
   normalizeOpenRouterModelId,
   OpenRouterApiError,
@@ -529,18 +532,77 @@ function isStableAssessment(previous: SecurityDimensionScore[], next: SecurityDi
     .every((dimension) => Math.abs(getDimensionScore(previous, dimension as SecurityDimension) - getDimensionScore(next, dimension as SecurityDimension)) <= 1.5);
 }
 
-async function runAiPipeline(
+export async function runAiPipeline(
   allFiles: SecurityFileInput[],
   files: SecurityFileInput[],
   heuristic: ReturnType<typeof runSecurityHeuristics>,
   tier: SecurityAnalysisTier,
   env: SecurityAnalysisEnv
 ): Promise<AiAssessmentResult | null> {
-  if (!env.OPENROUTER_API_KEY) {
-    return null;
+  const candidates = getTierModelCandidates(tier, env);
+  if (tier === 'premium') {
+    return runOpenRouterPipeline(allFiles, files, heuristic, tier, env, candidates);
   }
 
-  const modelCandidates = getTierModelCandidates(tier, env);
+  // Only actual free models may run before Jev, even if a paid model was
+  // historically configured in SECURITY_FREE_MODEL(S).
+  let freeError: unknown;
+  if (env.OPENROUTER_API_KEY) {
+    const pauseStore = getOpenRouterFreePauseStore(env);
+    const pausedUntil = await getOpenRouterFreePauseUntil(pauseStore, Date.now());
+    if (pausedUntil) {
+      freeError = new OpenRouterApiError({
+        model: 'openrouter/free', status: 429,
+        retryAfterMs: Math.max(1, pausedUntil - Date.now()),
+        message: 'OpenRouter free security models are paused',
+      });
+    } else {
+      try {
+        const assessment = await runOpenRouterPipeline(allFiles, files, heuristic, tier, env, candidates.filter(isOpenRouterFreeModel));
+        if (assessment) return assessment;
+      } catch (error) {
+        freeError = error;
+        if (isOpenRouterFreePauseError(error)) {
+          // Preserve the shared cooldown even when Jev succeeds below.
+          await pauseOpenRouterFreeModels(pauseStore, { now: Date.now(), retryAfterMs: error.retryAfterMs });
+        }
+      }
+    }
+  }
+
+  let typeSafeRateLimit: TypeSafeRateLimitError | null = null;
+  try {
+    const assessment = await assessSecurityWithJev(allFiles, files, env);
+    if (assessment) return assessment;
+  } catch (error) {
+    if (error instanceof TypeSafeRateLimitError) typeSafeRateLimit = error;
+    log.warn('TypeSafe security fallback unavailable');
+  }
+
+  // Preserve the existing pause/deferral behavior rather than spending on a
+  // configured paid compatibility candidate while the free pool is paused.
+  if (isOpenRouterFreePauseError(freeError)) throw freeError;
+  try {
+    const assessment = await runOpenRouterPipeline(allFiles, files, heuristic, tier, env, candidates.filter((model) => !isOpenRouterFreeModel(model)));
+    if (assessment) return assessment;
+  } catch (error) {
+    if (typeSafeRateLimit) throw typeSafeRateLimit;
+    throw error;
+  }
+  if (typeSafeRateLimit) throw typeSafeRateLimit;
+  if (freeError) throw freeError;
+  return null;
+}
+
+async function runOpenRouterPipeline(
+  allFiles: SecurityFileInput[],
+  files: SecurityFileInput[],
+  heuristic: ReturnType<typeof runSecurityHeuristics>,
+  tier: SecurityAnalysisTier,
+  env: SecurityAnalysisEnv,
+  modelCandidates: string[]
+): Promise<AiAssessmentResult | null> {
+  if (!env.OPENROUTER_API_KEY) return null;
   const stabilityRounds = parsePositiveInt(env.SECURITY_STABILITY_ROUNDS, DEFAULT_STABILITY_ROUNDS, MAX_STABILITY_ROUNDS);
   let lastError: Error | null = null;
 
@@ -1207,7 +1269,7 @@ async function markSecurityAnalysisBlockedForMissingContent(
     .run();
 }
 
-async function deferSecurityAnalysisForOpenRouterFreePause(
+async function deferSecurityAnalysisForAiPause(
   db: D1Database,
   params: {
     skillId: string;
@@ -1457,25 +1519,6 @@ async function processSecurityMessage(
   let aiResult: AiAssessmentResult | null = null;
   let executedTier: SecurityAnalysisTier = 'free';
   const openRouterPauseStore = getOpenRouterFreePauseStore(env);
-  let freePauseUntil = aiEligible && aiFiles.length > 0
-    ? await getOpenRouterFreePauseUntil(openRouterPauseStore, now)
-    : null;
-
-  if (requestedTier === 'free' && freePauseUntil) {
-    await deferSecurityAnalysisForOpenRouterFreePause(env.DB, {
-      skillId: skill.id,
-      contentFingerprint,
-      reportCount: reportSummary.openSecurityReportCount,
-      reportRiskLevel: reportSummary.reportRiskLevel,
-      premiumDueReason,
-      premiumRequestedFingerprint,
-      premiumLastAnalyzedFingerprint,
-      nextAttemptAt: freePauseUntil,
-      now,
-    });
-    log.log(`Deferred free security AI for ${skill.id} until ${new Date(freePauseUntil).toISOString()}`);
-    return;
-  }
 
   if (requestedTier === 'premium' && canRunPremiumAnalysis(env) && aiEligible && aiFiles.length > 0) {
     try {
@@ -1508,32 +1551,14 @@ async function processSecurityMessage(
   }
 
   if (executedTier === 'free' && aiEligible && aiFiles.length > 0) {
-    freePauseUntil = freePauseUntil ?? await getOpenRouterFreePauseUntil(openRouterPauseStore, now);
-    if (freePauseUntil) {
-      await deferSecurityAnalysisForOpenRouterFreePause(env.DB, {
-        skillId: skill.id,
-        contentFingerprint,
-        reportCount: reportSummary.openSecurityReportCount,
-        reportRiskLevel: reportSummary.reportRiskLevel,
-        premiumDueReason,
-        premiumRequestedFingerprint,
-        premiumLastAnalyzedFingerprint,
-        nextAttemptAt: freePauseUntil,
-        now,
-      });
-      log.log(`Deferred free security AI fallback for ${skill.id} until ${new Date(freePauseUntil).toISOString()}`);
-      return;
-    }
-
     try {
       aiResult = await runAiPipeline(securityFiles, aiFiles, heuristic, 'free', env);
     } catch (aiError) {
-      if (isOpenRouterFreePauseError(aiError)) {
-        freePauseUntil = await pauseOpenRouterFreeModels(openRouterPauseStore, {
-          now,
-          retryAfterMs: aiError.retryAfterMs,
-        });
-        await deferSecurityAnalysisForOpenRouterFreePause(env.DB, {
+      if (isOpenRouterFreePauseError(aiError) || aiError instanceof TypeSafeRateLimitError) {
+        const freePauseUntil = aiError instanceof TypeSafeRateLimitError
+          ? Date.now() + aiError.retryAfterMs
+          : await pauseOpenRouterFreeModels(openRouterPauseStore, { now, retryAfterMs: aiError.retryAfterMs });
+        await deferSecurityAnalysisForAiPause(env.DB, {
           skillId: skill.id,
           contentFingerprint,
           reportCount: reportSummary.openSecurityReportCount,

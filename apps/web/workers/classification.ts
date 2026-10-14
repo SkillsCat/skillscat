@@ -42,6 +42,7 @@ import {
   resolveOpenRouterFreeModelCandidates,
 } from './shared/ai/openrouter';
 import { createLogger } from './shared/utils';
+import { classifyWithJev } from './shared/ai/jev-classification';
 import { buildGithubSkillR2Keys, buildUploadSkillR2Key } from '../src/lib/skill-path';
 import { invalidateCache } from '../src/lib/server/cache';
 import { invalidateCategoryCaches } from '../src/lib/server/cache/categories';
@@ -997,8 +998,9 @@ export function classifyByKeywords(content: string, tags?: string[]): Classifica
 /**
  * Classify skill using AI with multi-model fallback strategy:
  * 1. Try configured free candidates in order, retrying the first once
- * 2. Try the configured paid model
- * 3. Fall back to keyword classification
+ * 2. Try TypeSafe Jev's independent category judgments when configured
+ * 3. Try the configured paid model
+ * 4. Fall back to keyword classification
  */
 export async function classifyWithAI(
   skillMdContent: string,
@@ -1052,7 +1054,15 @@ export async function classifyWithAI(
     console.log(`[OpenRouter] Free classification models paused until ${new Date(freePausedUntil).toISOString()}`);
   }
 
-  // 2. Use the configured paid model only after the ordered free pool is unavailable or exhausted.
+  // 2. Jev is a paid fallback; successful free judgments never call it.
+  try {
+    const result = await classifyWithJev(skillMdContent, tags || [], env);
+    if (result) return result;
+  } catch {
+    log.warn('TypeSafe classification unavailable; using existing classification fallback');
+  }
+
+  // 3. Use the configured paid model after free candidates and Jev are exhausted.
   if (env.OPENROUTER_API_KEY) {
     try {
       console.log(`[OpenRouter] Trying paid classification model: ${paidModel}`);
@@ -1062,7 +1072,7 @@ export async function classifyWithAI(
     }
   }
 
-  // 3. Final fallback to keyword classification
+  // 4. Final fallback to keyword classification
   if (freeRateLimited) {
     console.log('[Fallback] Free classification models are rate limited, using keyword classification');
   } else {
@@ -1173,7 +1183,7 @@ function writeClassificationBatchMetric(
     env.CLASSIFICATION_ANALYTICS.writeDataPoint({
       blobs: [
         preloadStatus,
-        getFreeModelCandidates(env)[0] || getDefaultOpenRouterFreeModel(),
+        getFreeModelCandidates(env).find(isOpenRouterFreeModel) || getDefaultOpenRouterFreeModel(),
         getClassificationPaidModel(env),
       ],
       doubles: [

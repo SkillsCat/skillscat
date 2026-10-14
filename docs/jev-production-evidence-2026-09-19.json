@@ -1,0 +1,398 @@
+{
+  "productionOrigin": "https://skills.cat",
+  "observation": {
+    "startedAt": "2026-09-19T09:37:14.268Z",
+    "workers": {
+      "classification": {
+        "events": 0,
+        "versions": {},
+        "outcomes": {},
+        "errorLogs": 0,
+        "exceptions": 0,
+        "connected": false,
+        "exitCode": null
+      },
+      "security-analysis": {
+        "events": 1,
+        "versions": {
+          "e119bcc7-7d72-4edb-8f7f-82ed2f200ce4": 1
+        },
+        "outcomes": {
+          "ok": 1
+        },
+        "errorLogs": 0,
+        "exceptions": 0,
+        "connected": true,
+        "exitCode": null
+      },
+      "preview": {
+        "events": 332,
+        "versions": {
+          "d22fda5f-fe6e-4e8a-92ed-52aa57845278": 332
+        },
+        "outcomes": {
+          "ok": 332
+        },
+        "errorLogs": 1,
+        "exceptions": 0,
+        "connected": true,
+        "exitCode": null
+      }
+    },
+    "endedAt": "2026-09-19T09:47:40.911Z"
+  },
+  "relevantEvents": [
+    {
+      "worker": "preview",
+      "observedAt": "2026-09-19T09:39:46.472Z",
+      "eventTimestamp": 1789810786029,
+      "version": "d22fda5f-fe6e-4e8a-92ed-52aa57845278",
+      "outcome": "ok",
+      "eventType": "http",
+      "errorLogs": 1,
+      "exceptions": [],
+      "providers": []
+    },
+    {
+      "worker": "security-analysis",
+      "observedAt": "2026-09-19T09:46:15.684Z",
+      "eventTimestamp": 1789811172894,
+      "version": "e119bcc7-7d72-4edb-8f7f-82ed2f200ce4",
+      "outcome": "ok",
+      "eventType": "cron",
+      "cron": "*/15 * * * *",
+      "errorLogs": 0,
+      "exceptions": [],
+      "providers": []
+    }
+  ],
+  "queueMetrics": {
+    "at": "2026-09-19T09:42:24.434987+00:00",
+    "queues": {
+      "classification": {
+        "success": true,
+        "errors": [],
+        "messages": [],
+        "result": {
+          "backlog_count": 0,
+          "backlog_bytes": 0,
+          "oldest_message_timestamp_ms": 0
+        }
+      },
+      "security-analysis": {
+        "success": true,
+        "errors": [],
+        "messages": [],
+        "result": {
+          "backlog_count": 0,
+          "backlog_bytes": 0,
+          "oldest_message_timestamp_ms": 0
+        }
+      }
+    }
+  },
+  "http": [
+    {
+      "at": "2026-09-19T09:39:40.471Z",
+      "path": "/search?q=testing",
+      "status": 200,
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "Search: testing - SkillsCat",
+      "bytes": 221630,
+      "skillLinks": 50,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T09:39:42.137Z",
+      "path": "/search?q=jevemptyzz20260919",
+      "status": 200,
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "Search: jevemptyzz20260919 - SkillsCat",
+      "bytes": 21742,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T09:39:43.486Z",
+      "path": "/search?q=testing&page=2",
+      "status": 200,
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "Search: testing - Page 2 - SkillsCat",
+      "bytes": 208534,
+      "skillLinks": 50,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T09:39:43.805Z",
+      "path": "/search?q=testing&page=101",
+      "status": 404,
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "404 - SkillsCat",
+      "bytes": 17515,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T09:39:44.203Z",
+      "path": "/categories",
+      "status": 200,
+      "cacheControl": "no-store",
+      "xCache": "MISS",
+      "cfCache": "MISS",
+      "contentType": "text/html",
+      "title": "Categories - SkillsCat",
+      "bytes": 118889,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T09:39:44.637Z",
+      "path": "/category/testing",
+      "status": 200,
+      "cacheControl": "no-store",
+      "xCache": "MISS",
+      "cfCache": "MISS",
+      "contentType": "text/html",
+      "title": "Testing - SkillsCat",
+      "bytes": 111989,
+      "skillLinks": 24,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T09:39:44.773Z",
+      "path": "/category/jev-nonexistent-20260919",
+      "status": 404,
+      "cacheControl": "no-store",
+      "xCache": "MISS",
+      "cfCache": "MISS",
+      "contentType": "text/html",
+      "title": "Category Not Found - SkillsCat",
+      "bytes": 19735,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T09:39:45.789Z",
+      "path": "/trending",
+      "status": 200,
+      "cacheControl": "no-store",
+      "xCache": "MISS",
+      "cfCache": "MISS",
+      "contentType": "text/html",
+      "title": "Trending Skills - SkillsCat",
+      "bytes": 113826,
+      "skillLinks": 24,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T09:39:45.988Z",
+      "path": "/org/yottameta",
+      "status": 200,
+      "cacheControl": "no-store",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "YottaMeta Organization AI Agent Skills | SkillsCat",
+      "bytes": 22383,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T09:39:46.420Z",
+      "path": "/u/anthropics",
+      "status": 500,
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "500 - SkillsCat",
+      "bytes": 17534,
+      "skillLinks": 0,
+      "errorBody": true
+    },
+    {
+      "at": "2026-09-19T09:39:46.630Z",
+      "path": "/u/jev-nonexistent-20260919",
+      "status": 404,
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "User Not Found - SkillsCat",
+      "bytes": 19280,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T09:39:46.774Z",
+      "path": "/org/jev-nonexistent-20260919",
+      "status": 404,
+      "cacheControl": "no-store",
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "Organization Not Found - SkillsCat",
+      "bytes": 19730,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T09:39:46.972Z",
+      "path": "/skills/jev-nonexistent-20260919/no-such-skill",
+      "status": 404,
+      "cacheControl": null,
+      "xCache": null,
+      "cfCache": "BYPASS",
+      "contentType": "text/html",
+      "title": "Skill Not Found - SkillsCat",
+      "bytes": 19256,
+      "skillLinks": 0,
+      "errorBody": false
+    },
+    {
+      "at": "2026-09-19T09:39:47.064Z",
+      "path": "/registry/search?q=testing&limit=5",
+      "status": 200,
+      "cacheControl": "private, no-cache",
+      "xCache": "HIT",
+      "cfCache": "BYPASS",
+      "contentType": "application/json",
+      "bytes": 2939,
+      "skillLinks": 0,
+      "errorBody": false,
+      "keys": [
+        "skills",
+        "total"
+      ],
+      "count": 5
+    },
+    {
+      "at": "2026-09-19T09:39:47.122Z",
+      "path": "/registry/search?q=testing&limit=5",
+      "status": 200,
+      "cacheControl": "private, no-cache",
+      "xCache": "HIT",
+      "cfCache": "BYPASS",
+      "contentType": "application/json",
+      "bytes": 2939,
+      "skillLinks": 0,
+      "errorBody": false,
+      "keys": [
+        "skills",
+        "total"
+      ],
+      "count": 5
+    }
+  ],
+  "browser": [
+    {
+      "startedAt": "2026-09-19T09:39:53.029Z",
+      "endedAt": "2026-09-19T09:40:32.367Z",
+      "scenarios": [
+        {
+          "scenario": "direct search",
+          "url": "https://skills.cat/search?q=testing&pageSize=51",
+          "status": 200,
+          "title": "搜索：testing - SkillsCat",
+          "h1": [
+            " 搜索"
+          ],
+          "skillLinks": 51,
+          "bodyLength": 21130
+        },
+        {
+          "scenario": "refresh search",
+          "url": "https://skills.cat/search?q=testing&pageSize=51",
+          "status": 200,
+          "title": "搜索：testing - SkillsCat",
+          "h1": [
+            " 搜索"
+          ],
+          "skillLinks": 51,
+          "bodyLength": 21107
+        }
+      ],
+      "pageErrors": [],
+      "responses": [
+        {
+          "path": "/search/__data.json",
+          "status": 200
+        }
+      ],
+      "failures": [],
+      "error": {
+        "name": "TimeoutError",
+        "message": "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('a[href=\"/categories\"]').first()\u001b[22m\n"
+      }
+    },
+    {
+      "startedAt": "2026-09-19T09:41:53.823Z",
+      "endedAt": "2026-09-19T09:42:03.575Z",
+      "scenarios": [
+        {
+          "scenario": "direct categories",
+          "url": "https://skills.cat/categories",
+          "status": 200,
+          "title": "Categories - SkillsCat",
+          "h1": [
+            "Categories"
+          ],
+          "skillLinks": 0,
+          "bodyLength": 2859
+        },
+        {
+          "scenario": "in-site category detail",
+          "url": "https://skills.cat/category/testing",
+          "title": "Testing - SkillsCat",
+          "h1": [
+            "Testing"
+          ],
+          "skillLinks": 24,
+          "bodyLength": 6772
+        },
+        {
+          "scenario": "direct trending",
+          "url": "https://skills.cat/trending",
+          "status": 200,
+          "title": "Trending Skills - SkillsCat",
+          "h1": [
+            " Trending Skills"
+          ],
+          "skillLinks": 24,
+          "bodyLength": 8632
+        },
+        {
+          "scenario": "existing organization",
+          "url": "https://skills.cat/org/yottameta",
+          "status": 200,
+          "title": "YottaMeta Organization AI Agent Skills | SkillsCat",
+          "h1": [
+            "YottaMeta"
+          ],
+          "skillLinks": 0,
+          "bodyLength": 455
+        }
+      ],
+      "pageErrors": [],
+      "responses": [
+        {
+          "path": "/category/testing/__data.json",
+          "status": 200
+        }
+      ],
+      "failures": []
+    }
+  ]
+}

@@ -152,8 +152,8 @@ const OPTIONAL_SECRETS_BY_WORKER = {
   state: [],
   'github-events': ['X_BEARER_TOKEN'],
   indexing: ['INDEXNOW_KEY'],
-  classification: ['OPENROUTER_API_KEY', 'INDEXNOW_KEY'],
-  'security-analysis': ['OPENROUTER_API_KEY'],
+  classification: ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY', 'INDEXNOW_KEY'],
+  'security-analysis': ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY'],
   metrics: [],
   trending: [],
   virustotal: ['VIRUSTOTAL_API_KEY'],
@@ -957,6 +957,7 @@ id = "<your-production-kv-namespace-id>"
 
 [env.production.vars]
 AI_MODEL = "deepseek/deepseek-v4-flash-0731"
+TYPESAFE_MODEL = "jev-1.13.0"
 FREE_MODELS = "openrouter/free"
 CLASSIFICATION_PAID_MODEL = "deepseek/deepseek-v4-flash-0731"
 INDEXNOW_ENABLED = "1"
@@ -999,6 +1000,7 @@ script_name = "skillscat-state-production"
 
 [env.production.vars]
 SECURITY_FREE_MODEL = "deepseek/deepseek-v4-flash-0731"
+TYPESAFE_MODEL = "jev-1.13.0"
 SECURITY_FREE_MODELS = "openrouter/free"
 SECURITY_PREMIUM_MODEL = "deepseek/deepseek-v4-flash-0731"
 SECURITY_MAX_AI_FILES = "8"
@@ -2215,6 +2217,7 @@ async function main() {
   const needsGitHubClientSecret = requiredSecretKeys.has('GITHUB_CLIENT_SECRET');
   const needsGitHubToken = requiredSecretKeys.has('GITHUB_TOKEN');
   const needsOpenRouter = optionalSecretKeys.has('OPENROUTER_API_KEY');
+  const needsTypeSafe = optionalSecretKeys.has('TYPESAFE_API_KEY');
   const needsVirusTotal = optionalSecretKeys.has('VIRUSTOTAL_API_KEY');
   const needsIndexNowKey = optionalSecretKeys.has('INDEXNOW_KEY');
   const includePreviewWorker = !hasWorkerSelection || selectedWorkerKeys.includes('preview');
@@ -2228,6 +2231,7 @@ async function main() {
     || needsGitHubClientSecret
     || needsGitHubToken
     || needsOpenRouter
+    || needsTypeSafe
     || needsVirusTotal
     || (isProduction && needsProductionAppUrl);
   const needsStateBootstrap = isProduction && (
@@ -2529,6 +2533,7 @@ ${colors.cyan}╔═════════════════════
     let githubClientSecret = '';
     let githubToken = '';
     let openrouterApiKey = '';
+    let typesafeApiKey = '';
     let virusTotalApiKey = '';
     let indexNowKey = '';
     let productionAppUrl = '';
@@ -2547,6 +2552,9 @@ ${colors.cyan}╔═════════════════════
       }
       if (needsOpenRouter) {
         lines.push('- OpenRouter: https://openrouter.ai/keys (可选，用于 AI 分类/安全分析)');
+      }
+      if (needsTypeSafe) {
+        lines.push('- TypeSafe: https://console.typesafe.ai (可选，Jev 分类/常规安全打标)');
       }
       if (needsVirusTotal) {
         lines.push('- VirusTotal: https://www.virustotal.com/gui/join-us (可选，public API 需要 API Key)');
@@ -2599,6 +2607,9 @@ ${colors.cyan}╔═════════════════════
         if (needsOpenRouter) {
           openrouterApiKey = existingVars.OPENROUTER_API_KEY || '';
         }
+        if (needsTypeSafe) {
+          typesafeApiKey = existingVars.TYPESAFE_API_KEY || '';
+        }
         if (needsVirusTotal) {
           virusTotalApiKey = existingVars.VIRUSTOTAL_API_KEY || '';
         }
@@ -2621,6 +2632,9 @@ ${colors.cyan}╔═════════════════════
         }
         if (needsOpenRouter) {
           openrouterApiKey = existingVars.OPENROUTER_API_KEY || await ask(rl, 'OpenRouter API Key (可选，DeepSeek 模型)', '');
+        }
+        if (needsTypeSafe) {
+          typesafeApiKey = existingVars.TYPESAFE_API_KEY || await ask(rl, 'TypeSafe API Key (可选，Jev 打标模型)', '');
         }
         if (needsVirusTotal) {
           virusTotalApiKey = existingVars.VIRUSTOTAL_API_KEY || await ask(rl, 'VirusTotal API Key (可选，public API)', '');
@@ -2720,6 +2734,9 @@ ${colors.cyan}╔═════════════════════
               if (workerOptionalSecrets.has('OPENROUTER_API_KEY') && openrouterApiKey) {
                 secrets.OPENROUTER_API_KEY = openrouterApiKey;
               }
+              if (workerOptionalSecrets.has('TYPESAFE_API_KEY') && typesafeApiKey) {
+                secrets.TYPESAFE_API_KEY = typesafeApiKey;
+              }
               if (workerOptionalSecrets.has('VIRUSTOTAL_API_KEY') && virusTotalApiKey) {
                 secrets.VIRUSTOTAL_API_KEY = virusTotalApiKey;
               }
@@ -2783,6 +2800,9 @@ ${colors.cyan}╔═════════════════════
         }
         if (needsOpenRouter) {
           devVars.OPENROUTER_API_KEY = openrouterApiKey || '';
+        }
+        if (needsTypeSafe) {
+          devVars.TYPESAFE_API_KEY = typesafeApiKey || '';
         }
         if (needsVirusTotal) {
           devVars.VIRUSTOTAL_API_KEY = virusTotalApiKey || '';

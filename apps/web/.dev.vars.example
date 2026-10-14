@@ -38,7 +38,14 @@ GITHUB_HTML_INDEXING_FALLBACK_ENABLED=1
 # 文档: https://www.indexnow.org/documentation
 INDEXNOW_KEY=
 
-# ========== OpenRouter API (用于 AI 分类/安全分析) ==========
+# ========== TypeSafe Jev (分类 / 常规安全打标的免费模型回退) ==========
+# 获取 API Key: https://console.typesafe.ai
+# 留空保留原有 OpenRouter / 关键词 / 启发式流程；配置在 classification 和 security-analysis workers。
+TYPESAFE_API_KEY=
+# 固定版本便于验证概率阈值；更新模型时应重新评估打标准确率。
+TYPESAFE_MODEL=jev-1.13.0
+
+# ========== OpenRouter API (分类/常规安全优先免费、premium 复核和摘要生成) ==========
 # 获取 API Key: https://openrouter.ai/keys
 # 查看可用免费模型: https://openrouter.ai/models?q=:free
 # DeepSeek V4 Flash 请求已通过 provider 路由锁定 GMICloud(折扣 SKU,允许 fallback)
