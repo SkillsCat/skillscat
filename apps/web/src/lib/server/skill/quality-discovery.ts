@@ -12,7 +12,7 @@ export async function countQualityEligibleSkills(db: D1Database): Promise<number
   return row?.total ?? 0;
 }
 
-/** Recheck old R2/edge recommendation payloads with one bounded, cached PK lookup. */
+/** Recheck old R2/edge recommendation payloads with one bounded, cached ID lookup. */
 export async function filterQualityEligibleSkills<T extends { id: string }>(
   db: D1Database | undefined, skills: T[]
 ): Promise<T[]> {
@@ -22,8 +22,10 @@ export async function filterQualityEligibleSkills<T extends { id: string }>(
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serialized));
   const key = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('');
   const { data } = await getCached(`quality:eligible:v1:${key}`, async () => {
+    // Pin both equality keys: the planner can otherwise choose the quality review
+    // index and scan every eligible skill before checking this small ID list.
     const rows = await db.prepare(`
-      SELECT id FROM skills
+      SELECT id FROM skills INDEXED BY skills_visibility_id_idx
       WHERE id IN (SELECT value FROM json_each(?))
         AND visibility = 'public' AND quality_status = 'eligible'
     `).bind(serialized).all<{ id: string }>();

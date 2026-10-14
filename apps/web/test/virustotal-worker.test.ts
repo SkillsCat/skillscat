@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { loadPendingSkills, parseRetryAfterMs, tryClaimVirusTotalWork, tryConsumeBudget } from '../workers/virustotal';
+import worker, { loadPendingSkills, parseRetryAfterMs, tryClaimVirusTotalWork, tryConsumeBudget } from '../workers/virustotal';
 
 function createKv(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial));
@@ -78,7 +78,7 @@ describe('virustotal worker helpers', () => {
     expect(parsed).toBeLessThanOrEqual(60_000);
   });
 
-  it('only loads pending VT work for public skills', async () => {
+  it('stops after the bounded queue lookup when there is no due work', async () => {
     let capturedSql = '';
     let capturedBindings: unknown[] = [];
     const db = {
@@ -98,9 +98,22 @@ describe('virustotal worker helpers', () => {
     const rows = await loadPendingSkills(db as never, 1_234);
 
     expect(rows).toEqual([]);
-    expect(capturedSql).toContain("ss.vt_eligibility = 'eligible'");
-    expect(capturedSql).toContain("s.visibility = 'public'");
+    expect(capturedSql).toContain("vt_eligibility = 'eligible'");
+    expect(capturedSql).toContain('skill_security_state_vt_queue_due_idx');
     expect(capturedBindings).toEqual([1_234]);
+  });
+
+  it.each(['day', 'minute'])('does not query D1 after the VT %s budget is exhausted', async (period) => {
+    const kv = createKv({
+      'vt:budget:day': JSON.stringify({ bucket: '2026-03-17', count: period === 'day' ? 300 : 0 }),
+      'vt:budget:minute': JSON.stringify({ bucket: '2026-03-17T10:20', count: period === 'minute' ? 4 : 0 }),
+    });
+    const prepare = vi.fn();
+    await worker.scheduled({} as never, {
+      DB: { prepare }, KV: kv, VIRUSTOTAL_API_KEY: 'test-only',
+    } as never, {} as never);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(kv.put).not.toHaveBeenCalled();
   });
 
   it('claims VT work only when the row is due and unchanged', async () => {

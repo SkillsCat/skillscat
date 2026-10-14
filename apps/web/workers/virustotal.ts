@@ -16,6 +16,8 @@ const DEFAULT_DAILY_REQUEST_BUDGET = 300;
 const DEFAULT_MINUTE_REQUEST_BUDGET = 4;
 const DEFAULT_UPLOAD_MAX_BYTES = 32 * 1024 * 1024;
 const DEFAULT_VT_CLAIM_LEASE_MS = 10 * 60 * 1000;
+export const VT_CANDIDATE_WINDOW = 64;
+const VT_PROCESSING_LIMIT = 10;
 
 interface PendingVirusTotalRow extends SecuritySkillRow {
   skill_id: string;
@@ -212,6 +214,78 @@ async function updateVirusTotalState(
 }
 
 export async function loadPendingSkills(db: D1Database, now: number): Promise<PendingVirusTotalRow[]> {
+  // Bound reads before joining or sorting by skill popularity. Global priority
+  // sorting made LIMIT 10 scan the entire backlog on every minute's cron.
+  // An oldest-due window ensures progress; a separate priority window lets
+  // newly urgent work bypass an old backlog. Both windows have fixed limits.
+  const candidates = await db.prepare(`
+    SELECT skill_id, vt_priority, open_security_report_count, updated_at
+    FROM skill_security_state INDEXED BY skill_security_state_vt_queue_due_idx
+    WHERE vt_eligibility = 'eligible'
+      AND vt_status IN ('pending_lookup', 'pending_upload', 'pending_analysis_poll')
+      AND (CASE WHEN vt_next_attempt_at IS NULL THEN 0 ELSE vt_next_attempt_at END) <= ?
+    ORDER BY CASE WHEN vt_next_attempt_at IS NULL THEN 0 ELSE vt_next_attempt_at END, vt_priority DESC,
+             open_security_report_count DESC, updated_at, skill_id
+    LIMIT ${VT_CANDIDATE_WINDOW}
+  `).bind(now).all<{
+    skill_id: string;
+    vt_priority: number;
+    open_security_report_count: number;
+    updated_at: number;
+  }>();
+  if (!candidates.results.length) return [];
+
+  // Filter future retries AFTER the bounded priority read. Filtering in SQL
+  // before LIMIT could scan an arbitrarily large future/leased backlog.
+  const urgent = await db.prepare(`
+    SELECT skill_id, vt_priority, open_security_report_count, updated_at, vt_next_attempt_at
+    FROM skill_security_state INDEXED BY skill_security_state_vt_queue_priority_idx
+    WHERE vt_eligibility = 'eligible'
+      AND vt_status IN ('pending_lookup', 'pending_upload', 'pending_analysis_poll')
+    ORDER BY vt_priority DESC, open_security_report_count DESC, updated_at, skill_id
+    LIMIT ${VT_CANDIDATE_WINDOW}
+  `).all<{
+    skill_id: string;
+    vt_priority: number;
+    open_security_report_count: number;
+    updated_at: number;
+    vt_next_attempt_at: number | null;
+  }>();
+  const window = [...new Map([
+    ...candidates.results,
+    ...urgent.results.filter((row) => (row.vt_next_attempt_at ?? 0) <= now),
+  ].map((row) => [row.skill_id, row])).values()];
+  const candidateIds = JSON.stringify(window.map((row) => row.skill_id));
+  const publicSkills = await db.prepare(`
+    SELECT id, stars FROM skills INDEXED BY skills_visibility_id_idx
+    WHERE visibility = 'public' AND id IN (SELECT value FROM json_each(?))
+  `).bind(candidateIds).all<{ id: string; stars: number | null }>();
+  const stars = new Map(publicSkills.results.map((row) => [row.id, row.stars ?? -Infinity]));
+  const hiddenIds = window.filter((row) => !stars.has(row.skill_id)).map((row) => row.skill_id);
+  if (hiddenIds.length) {
+    // Repair stale visibility state in this bounded window so hidden entries
+    // cannot permanently block the queue. Recheck visibility atomically.
+    await db.prepare(`
+      UPDATE skill_security_state
+      SET vt_eligibility = 'skipped_visibility', vt_status = 'skipped',
+          vt_priority = 0, vt_next_attempt_at = NULL, updated_at = ?
+      WHERE skill_id IN (SELECT value FROM json_each(?))
+        AND NOT EXISTS (
+          SELECT 1 FROM skills INDEXED BY skills_visibility_id_idx
+          WHERE visibility = 'public' AND id = skill_security_state.skill_id
+        )
+    `).bind(now, JSON.stringify(hiddenIds)).run();
+  }
+  const selectedIds = window.filter((row) => stars.has(row.skill_id))
+    .sort((a, b) => b.vt_priority - a.vt_priority
+      || b.open_security_report_count - a.open_security_report_count
+      || stars.get(b.skill_id)! - stars.get(a.skill_id)!
+      || a.updated_at - b.updated_at
+      || a.skill_id.localeCompare(b.skill_id))
+    .slice(0, VT_PROCESSING_LIMIT).map((row) => row.skill_id);
+  if (!selectedIds.length) return [];
+
+  // Hydrate large readme/file_structure fields only for the selected ten IDs.
   const result = await db.prepare(`
     SELECT
       ss.skill_id,
@@ -234,22 +308,19 @@ export async function loadPendingSkills(db: D1Database, now: number): Promise<Pe
       s.tier,
       s.file_structure,
       s.updated_at
-    FROM skill_security_state ss
-    INNER JOIN skills s ON s.id = ss.skill_id
+    FROM skills s INDEXED BY skills_visibility_id_idx
+    CROSS JOIN skill_security_state ss ON ss.skill_id = s.id
     WHERE ss.vt_eligibility = 'eligible'
       AND ss.vt_status IN ('pending_lookup', 'pending_upload', 'pending_analysis_poll')
       AND s.visibility = 'public'
+      AND s.id IN (SELECT value FROM json_each(?))
       AND (ss.vt_next_attempt_at IS NULL OR ss.vt_next_attempt_at <= ?)
-    ORDER BY ss.vt_priority DESC,
-             ss.open_security_report_count DESC,
-             s.stars DESC,
-             ss.updated_at ASC
-    LIMIT 10
   `)
-    .bind(now)
+    .bind(JSON.stringify(selectedIds), now)
     .all<PendingVirusTotalRow>();
 
-  return result.results || [];
+  const rowsById = new Map(result.results.map((row) => [row.skill_id, row]));
+  return selectedIds.flatMap((id) => rowsById.has(id) ? [rowsById.get(id)!] : []);
 }
 
 export async function tryClaimVirusTotalWork(
@@ -612,11 +683,15 @@ export default {
     }
 
     const now = Date.now();
+    if (!await hasBudgetCapacity(env)) {
+      return;
+    }
     const pending = await loadPendingSkills(env.DB, now);
     log.log(`Processing ${pending.length} pending VirusTotal candidates`);
 
     for (const row of pending) {
       try {
+        if (!await hasBudgetCapacity(env)) break;
         const claimed = await tryClaimVirusTotalWork(env.DB, {
           skillId: row.skill_id,
           status: row.vt_status,

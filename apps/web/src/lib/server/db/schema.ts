@@ -570,6 +570,17 @@ export const skillSecurityState = sqliteTable('skill_security_state', {
   index('skill_security_state_premium_due_idx').on(table.premiumDueReason, table.premiumRequestedAt),
   index('skill_security_state_vt_due_idx').on(table.vtStatus, table.vtNextAttemptAt),
   index('skill_security_state_vt_priority_idx').on(table.vtPriority, table.vtNextAttemptAt),
+  index('skill_security_state_vt_queue_due_idx').on(
+    sql.raw('CASE WHEN vt_next_attempt_at IS NULL THEN 0 ELSE vt_next_attempt_at END'),
+    sql.raw('vt_priority DESC'),
+    sql.raw('open_security_report_count DESC'),
+    table.updatedAt,
+    table.skillId,
+  ).where(sql`${table.vtEligibility} = 'eligible' AND ${table.vtStatus} IN ('pending_lookup', 'pending_upload', 'pending_analysis_poll')`),
+  index('skill_security_state_vt_queue_priority_idx').on(
+    sql.raw('vt_priority DESC'), sql.raw('open_security_report_count DESC'),
+    table.updatedAt, table.skillId, table.vtNextAttemptAt,
+  ).where(sql`${table.vtEligibility} = 'eligible' AND ${table.vtStatus} IN ('pending_lookup', 'pending_upload', 'pending_analysis_poll')`),
   index('skill_security_state_vt_sha_idx').on(table.vtBundleSha256)
 ]);
 
