@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentSkillVisibility: vi.fn(),
   peekCachedResponse: vi.fn(),
   putCachedResponse: vi.fn(),
+  refreshCachedResponse: vi.fn(),
   resolveTokenBackedIdentity: vi.fn(),
   runRequestSecurity: vi.fn(),
 }));
@@ -26,6 +27,7 @@ vi.mock('$lib/server/cache', () => ({
   putCachedText: vi.fn(),
   peekCachedResponse: mocks.peekCachedResponse,
   putCachedResponse: mocks.putCachedResponse,
+  refreshCachedResponse: mocks.refreshCachedResponse,
   setCacheVersion: vi.fn(),
 }));
 
@@ -107,6 +109,53 @@ beforeEach(() => {
 });
 
 describe('discovery HTML cache', () => {
+  it('serves near-expiry HTML immediately and refreshes through the anonymous renderer', async () => {
+    const { createPublicHtmlCacheResponse } = await import('$lib/server/cache/public-ssr');
+    const now = vi.spyOn(Date, 'now').mockReturnValue(100_000);
+    mocks.peekCachedResponse.mockResolvedValue(createPublicHtmlCacheResponse(
+      new Response('<html>existing</html>', { headers: { 'content-type': 'text/html' } }), 'test-build', 300
+    ));
+    now.mockReturnValue(370_000);
+    try {
+      const { handle } = await import('../src/hooks.server');
+      const { waitUntil } = createWaitUntil();
+      const resolve = htmlResolve('<html>refreshed</html>');
+      const response = await handle({ event: discoveryEvent({
+        pathname: '/trending', routeId: '/trending', waitUntil,
+      }), resolve } as never);
+      expect(await response.text()).toContain('existing');
+      expect(response.headers.get('X-Cache')).toBe('STALE');
+      expect(response.headers.get('Server-Timing')).toContain('ssr_cache');
+      expect(response.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+      expect(resolve).not.toHaveBeenCalled();
+      expect(mocks.refreshCachedResponse).toHaveBeenCalledWith(
+        'page:discovery:html:v5:trending:en', expect.any(Function), 300, { waitUntil: expect.any(Function) }
+      );
+      const render = mocks.refreshCachedResponse.mock.calls[0][1] as () => Promise<Response>;
+      const refreshed = await render();
+      expect(await refreshed.text()).toBe('<html>refreshed</html>');
+      expect(mocks.createAuth).not.toHaveBeenCalled();
+      expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
+        locals: expect.objectContaining({ user: null, session: null, authPrincipal: null }),
+      }), expect.anything());
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('keeps navigation data outside the HTML cache and preserves its existing session resolution', async () => {
+    const { handle } = await import('../src/hooks.server');
+    const event = discoveryEvent({ pathname: '/recent', routeId: '/recent', waitUntil: () => {} });
+    event.isDataRequest = true;
+    const resolve = vi.fn(async () => new Response('{"type":"data"}', { headers: { 'content-type': 'application/json' } }));
+    const response = await handle({ event, resolve } as never);
+    expect(await response.text()).toContain('data');
+    expect(mocks.createAuth).toHaveBeenCalledOnce();
+    expect(mocks.peekCachedResponse).not.toHaveBeenCalled();
+    expect(mocks.putCachedResponse).not.toHaveBeenCalled();
+    expect(mocks.refreshCachedResponse).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, 'previous-build'])('rerenders old-build discovery HTML and marks the new cache entry (%s)', async (build) => {
     mocks.peekCachedResponse.mockResolvedValue(new Response('<html>old assets</html>', {
       headers: build ? { 'X-Skillscat-Html-Build': build } : {},

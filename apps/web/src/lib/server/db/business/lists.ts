@@ -328,10 +328,15 @@ export async function getTrendingSkillsPaginated(
   env: DbEnv, page = 1, limit = 24
 ): Promise<{ skills: SkillCardData[]; total: number; totalPages?: number }> {
   if (!env.DB || page < 1 || limit < 1) return { skills: [], total: 0, totalPages: 0 };
-  const total = await getPublicSkillTotal(env);
+  // The first page always needs both reads; later pages check the bound first
+  // so an invalid page never starts an unnecessary snapshot/R2 query.
+  const [total, firstPageSnapshot] = await Promise.all([
+    getPublicSkillTotal(env),
+    page === 1 ? loadTrendingSnapshot(env) : null,
+  ]);
   // Even a completely empty first page can add at most one page of padding.
   if ((page - 1) * limit >= total + limit) return { skills: [], total };
-  const snapshot = await loadTrendingSnapshot(env);
+  const snapshot = firstPageSnapshot ?? await loadTrendingSnapshot(env);
   const offset = (page - 1) * limit;
   const head = snapshot.data;
   // A deliberately short first page still consumes one pagination slot. Keep
@@ -450,14 +455,14 @@ export async function getRecentSkillsPaginated(
   const hasMoreOnFirstPage = offset === 0 && result.results.length > limit;
   const pageRows = hasMoreOnFirstPage ? result.results.slice(0, limit) : result.results;
 
-  let total: number;
-  if (offset === 0 && !hasMoreOnFirstPage) {
-    total = pageRows.length;
-  } else {
-    total = knownTotal ?? await getPublicSkillTotal(env);
-  }
-
-  const skills = await addCategoriesToSkills(env.DB, pageRows);
+  // Category hydration is independent of the total. Keep the empty/short-page
+  // fast path (no count query) and overlap the two reads on a full first page.
+  const [total, skills] = await Promise.all([
+    offset === 0 && !hasMoreOnFirstPage
+      ? pageRows.length
+      : knownTotal ?? getPublicSkillTotal(env),
+    addCategoriesToSkills(env.DB, pageRows),
+  ]);
 
   return {
     skills,
@@ -571,14 +576,14 @@ export async function getTopSkillsPaginated(
   const hasMoreOnFirstPage = offset === 0 && result.results.length > limit;
   const pageRows = hasMoreOnFirstPage ? result.results.slice(0, limit) : result.results;
 
-  let total: number;
-  if (offset === 0 && !hasMoreOnFirstPage) {
-    total = pageRows.length;
-  } else {
-    total = knownTotal ?? await getPublicSkillTotal(env);
-  }
-
-  const skills = await addCategoriesToSkills(env.DB, pageRows);
+  // Category hydration is independent of the total. Keep the empty/short-page
+  // fast path (no count query) and overlap the two reads on a full first page.
+  const [total, skills] = await Promise.all([
+    offset === 0 && !hasMoreOnFirstPage
+      ? pageRows.length
+      : knownTotal ?? getPublicSkillTotal(env),
+    addCategoriesToSkills(env.DB, pageRows),
+  ]);
 
   return {
     skills,

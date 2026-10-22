@@ -19,6 +19,8 @@ const pendingJsonWrites = new Map<string, Promise<void>>();
 const pendingTextFetches = new Map<string, Promise<string>>();
 const pendingBinaryFetches = new Map<string, Promise<Uint8Array>>();
 const pendingResponseFetches = new Map<string, Promise<Response>>();
+const pendingResponseRefreshes = new Map<string, { expiresAt: number }>();
+const pendingResponseWrites = new Map<string, Promise<void>>();
 
 function normalizeCacheVersion(version: string | undefined | null): string {
   const normalized = (version || '').trim();
@@ -312,6 +314,50 @@ export async function putCachedResponse(
   }
 }
 
+/**
+ * Refresh a public response in its originating request's waitUntil context.
+ * Only the reservation is shared across requests: never share response streams
+ * or await another request's I/O (which Workers does not allow).
+ */
+export function refreshCachedResponse(
+  cacheKey: string,
+  render: () => Promise<Response | null>,
+  ttl: number,
+  options: { waitUntil: WaitUntilFn }
+): void {
+  const versionedKey = getVersionedCacheKey(cacheKey);
+  const existing = pendingResponseRefreshes.get(versionedKey);
+  if (existing && Date.now() < existing.expiresAt) return;
+  // Workers may cancel unfinished waitUntil work after 30 seconds. Do not
+  // depend on a cancelled task's finally running to release this isolate lock.
+  const reservation = { expiresAt: Date.now() + 30_000 };
+  pendingResponseRefreshes.set(versionedKey, reservation);
+  const refresh = Promise.resolve().then(render).then(async (response) => {
+    if (!response) return;
+    if (pendingResponseRefreshes.get(versionedKey) !== reservation
+      || !response.ok || response.headers.has('set-cookie')) {
+      await response.body?.cancel();
+      return;
+    }
+    try {
+      const write = caches.default.put(
+        buildCacheRequest(versionedKey), cloneResponseWithCacheHeaders(response, ttl)
+      );
+      pendingResponseWrites.set(versionedKey, write);
+      try {
+        await write;
+      } finally {
+        if (pendingResponseWrites.get(versionedKey) === write) pendingResponseWrites.delete(versionedKey);
+      }
+    } catch { /* A failed refresh must not fail the cached response. */ }
+  }).catch(() => {
+    // Keep the existing entry until its original expiry when rendering fails.
+  }).finally(() => {
+    if (pendingResponseRefreshes.get(versionedKey) === reservation) pendingResponseRefreshes.delete(versionedKey);
+  });
+  options.waitUntil(refresh);
+}
+
 export async function putCachedText(
   cacheKey: string,
   data: string,
@@ -486,12 +532,14 @@ export async function getCachedResponse(
 export async function invalidateCache(cacheKey: string): Promise<void> {
   const versionedKey = getVersionedCacheKey(cacheKey);
   pendingJsonFetches.delete(versionedKey);
+  pendingResponseRefreshes.delete(versionedKey);
   // If publication already started, delete after it finishes rather than
   // letting a slow Cache API write resurrect the invalidated entry.
   await pendingJsonWrites.get(versionedKey)?.catch(() => undefined);
+  await pendingResponseWrites.get(versionedKey)?.catch(() => undefined);
   try {
     const cache = caches.default;
-    const versionedUrl = buildCacheRequest(getVersionedCacheKey(cacheKey));
+    const versionedUrl = buildCacheRequest(versionedKey);
     const legacyUrl = buildCacheRequest(cacheKey);
     await Promise.all([
       cache.delete(versionedUrl),

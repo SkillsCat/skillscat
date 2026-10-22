@@ -4,7 +4,7 @@ import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { building, version } from '$app/environment';
 import type { Handle, ResolveOptions } from '@sveltejs/kit';
 import { getXRobotsTagForPath, runRequestSecurity } from '$lib/server/security/request';
-import { getCachedText, peekCachedText, putCachedText, peekCachedResponse, putCachedResponse, setCacheVersion } from '$lib/server/cache';
+import { getCachedText, peekCachedText, putCachedText, peekCachedResponse, putCachedResponse, refreshCachedResponse, setCacheVersion } from '$lib/server/cache';
 import { getSkillBySlug } from '$lib/server/db/business/detail';
 import {
   shouldForceDefaultLocaleForPublicPage,
@@ -29,6 +29,7 @@ import {
   getSkillPublicHintCacheKey,
 } from '$lib/server/cache/keys';
 import { getPublicDiscoveryHtmlCacheKey } from '$lib/server/cache/public-html';
+import { createPublicHtmlCacheResponse, getPublicHtmlCacheStatus, type PublicHtmlCacheStatus } from '$lib/server/cache/public-ssr';
 import { resolveTokenBackedIdentity } from '$lib/server/auth/request-user';
 import type { SkillAccessPrincipal } from '$lib/server/auth/permissions';
 import { getCurrentSkillVisibility } from '$lib/server/skill/visibility';
@@ -48,8 +49,6 @@ const SKILL_PUBLIC_HINT_CACHE_TTL_SECONDS = 60;
 const HOME_HTML_CACHE_TTL_SECONDS = 60;
 const DISCOVERY_HTML_CACHE_TTL_SECONDS = 5 * 60;
 const PUBLIC_HTML_CDN_CACHE_HEADER = 'Cloudflare-CDN-Cache-Control';
-// Cache API survives deployments, but HTML references build-specific assets.
-const HTML_BUILD_HEADER = 'X-Skillscat-Html-Build';
 const OPENCLAW_HOME_CACHE_KEY = 'ua:openclaw:home:v1';
 const OPENCLAW_HOME_CACHE_TTL_SECONDS = 3600;
 const OPENCLAW_SKILL_CACHE_TTL_SECONDS = 300;
@@ -197,7 +196,7 @@ function isPublicDiscoveryHtmlCacheableRequest(event: Parameters<Handle>[0]['eve
 function applySharedPublicHtmlCacheHeaders(
   response: Response,
   locale: SupportedLocale,
-  cacheStatus: 'HIT' | 'MISS',
+  cacheStatus: PublicHtmlCacheStatus,
   ttlSeconds: number,
   hasRequestCookie: boolean
 ): Response {
@@ -209,7 +208,7 @@ function applySharedPublicHtmlCacheHeaders(
     // Workers Cache reads this Cloudflare-only directive before invoking the
     // Worker. Keep browser caching disabled while allowing a short-lived,
     // anonymous response to be served directly from the edge.
-    [PUBLIC_HTML_CDN_CACHE_HEADER]: hasRequestCookie
+    [PUBLIC_HTML_CDN_CACHE_HEADER]: hasRequestCookie || cacheStatus === 'STALE'
       ? 'no-store'
       : `public, max-age=${ttlSeconds}, stale-while-revalidate=${Math.max(300, ttlSeconds * 2)}`,
     'Content-Language': locale,
@@ -229,7 +228,7 @@ function getPublicDiscoveryHtmlCacheTtl(event: Parameters<Handle>[0]['event']): 
 function applySkillHtmlCacheHeaders(
   response: Response,
   locale: SupportedLocale,
-  cacheStatus: 'HIT' | 'MISS',
+  cacheStatus: PublicHtmlCacheStatus,
   hasRequestCookie: boolean
 ): Response {
   return cloneResponseWithHeaders(response, {
@@ -237,7 +236,7 @@ function applySkillHtmlCacheHeaders(
     // locale-aware keys. Keep the HTTP response itself out of generic URL-based
     // caches so locale or auth cookie variants cannot bleed across users.
     'Cache-Control': 'no-store',
-    [PUBLIC_HTML_CDN_CACHE_HEADER]: hasRequestCookie
+    [PUBLIC_HTML_CDN_CACHE_HEADER]: hasRequestCookie || cacheStatus === 'STALE'
       ? 'no-store'
       : 'public, max-age=300, stale-while-revalidate=600',
     'Content-Language': locale,
@@ -449,7 +448,8 @@ function resolveSkillPageVisibility(
 }
 
 async function maybeRespondWithCachedSkillHtml(
-  event: Parameters<Handle>[0]['event']
+  event: Parameters<Handle>[0]['event'],
+  render: () => Promise<Response>
 ): Promise<Response | null> {
   if (!isSkillHtmlCacheableRequest(event)) {
     return null;
@@ -465,17 +465,35 @@ async function maybeRespondWithCachedSkillHtml(
   }
 
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
-  const cachedHtml = await peekCachedResponse(getSkillHtmlCacheKey(event.locals.locale, slug), { waitUntil });
-  if (!cachedHtml || cachedHtml.headers.get(HTML_BUILD_HEADER) !== version) {
+  const cacheKey = getSkillHtmlCacheKey(event.locals.locale, slug);
+  const startedAt = performance.now();
+  const cachedHtml = await peekCachedResponse(cacheKey, { waitUntil });
+  const status = cachedHtml ? getPublicHtmlCacheStatus(cachedHtml, version) : 'MISS';
+  if (!cachedHtml || status === 'MISS') {
+    void cachedHtml?.body?.cancel().catch(() => undefined);
     return null;
+  }
+
+  if (status === 'STALE' && waitUntil) {
+    refreshCachedResponse(cacheKey, async () => {
+      const response = await render();
+      if (response.headers.get(PUBLIC_SKILL_HTML_CACHE_HEADER) !== '1') {
+        void response.body?.cancel().catch(() => undefined);
+        return null;
+      }
+      return createPublicHtmlCacheResponse(response, version, SKILL_HTML_CACHE_TTL_SECONDS);
+    }, SKILL_HTML_CACHE_TTL_SECONDS, { waitUntil });
   }
 
   return applySkillHtmlCacheHeaders(
     new Response(cachedHtml.body, {
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Server-Timing': `ssr_cache;dur=${(performance.now() - startedAt).toFixed(1)};desc="${status}"`,
+      },
     }),
     event.locals.locale,
-    'HIT',
+    status,
     Boolean(event.request.headers.get('cookie'))
   );
 }
@@ -496,7 +514,8 @@ async function shouldSkipAuthForSharedSkillHtml(
 }
 
 async function maybeRespondWithCachedDiscoveryHtml(
-  event: Parameters<Handle>[0]['event']
+  event: Parameters<Handle>[0]['event'],
+  render: () => Promise<Response>
 ): Promise<Response | null> {
   if (event.request.method !== 'GET' || event.isDataRequest) {
     return null;
@@ -508,17 +527,30 @@ async function maybeRespondWithCachedDiscoveryHtml(
   }
 
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
+  const startedAt = performance.now();
   const cachedHtml = await peekCachedResponse(cacheKey, { waitUntil });
-  if (!cachedHtml || cachedHtml.headers.get(HTML_BUILD_HEADER) !== version) {
+  const status = cachedHtml ? getPublicHtmlCacheStatus(cachedHtml, version) : 'MISS';
+  if (!cachedHtml || status === 'MISS') {
+    void cachedHtml?.body?.cancel().catch(() => undefined);
     return null;
+  }
+
+  if (status === 'STALE' && waitUntil) {
+    const ttl = getPublicDiscoveryHtmlCacheTtl(event);
+    refreshCachedResponse(cacheKey, async () => createPublicHtmlCacheResponse(
+      await render(), version, ttl
+    ), ttl, { waitUntil });
   }
 
   return applySharedPublicHtmlCacheHeaders(
     new Response(cachedHtml.body, {
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Server-Timing': `ssr_cache;dur=${(performance.now() - startedAt).toFixed(1)};desc="${status}"`,
+      },
     }),
     event.locals.locale,
-    'HIT',
+    status,
     getPublicDiscoveryHtmlCacheTtl(event),
     Boolean(event.request.headers.get('cookie'))
   );
@@ -557,9 +589,8 @@ function maybeWriteDiscoveryHtmlCache(
   const ttlSeconds = getPublicDiscoveryHtmlCacheTtl(event);
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
   // Cache the stream directly; buffering HTML here spends CPU even in waitUntil.
-  void putCachedResponse(cacheKey, new Response(response.body, {
-    headers: { 'Content-Type': 'text/html; charset=utf-8', [HTML_BUILD_HEADER]: version },
-  }), ttlSeconds, { waitUntil });
+  const cachedResponse = createPublicHtmlCacheResponse(response, version, ttlSeconds);
+  if (cachedResponse) void putCachedResponse(cacheKey, cachedResponse, ttlSeconds, { waitUntil });
 }
 
 function maybeWriteSkillHtmlCache(
@@ -589,14 +620,10 @@ function maybeWriteSkillHtmlCache(
   }
 
   const waitUntil = event.platform?.context?.waitUntil?.bind(event.platform.context);
-  void putCachedResponse(
-    getSkillHtmlCacheKey(event.locals.locale, slug),
-    new Response(response.body, {
-      headers: { 'Content-Type': 'text/html; charset=utf-8', [HTML_BUILD_HEADER]: version },
-    }),
-    SKILL_HTML_CACHE_TTL_SECONDS,
-    { waitUntil }
-  );
+  const cachedResponse = createPublicHtmlCacheResponse(response, version, SKILL_HTML_CACHE_TTL_SECONDS);
+  if (!cachedResponse) return;
+  void putCachedResponse(getSkillHtmlCacheKey(event.locals.locale, slug), cachedResponse,
+    SKILL_HTML_CACHE_TTL_SECONDS, { waitUntil });
   void putCachedText(
     getSkillPublicHintCacheKey(slug),
     'public',
@@ -895,12 +922,28 @@ const baseHandle: Handle = async ({ event, resolve }) => {
     return openClawHomeResponse;
   }
 
-  const cachedSkillResponse = await maybeRespondWithCachedSkillHtml(event);
+  // The same anonymous rendering already used below, also available to refresh
+  // an existing public HTML entry. Auth eligibility and user-state paths stay
+  // unchanged; a refresh never resolves sessions or stores response cookies.
+  const renderPublicHtml = async () => {
+    event.locals.auth = async () => ({ user: null });
+    event.locals.session = null;
+    event.locals.user = null;
+    event.locals.authPrincipal = null;
+    const startedAt = performance.now();
+    const response = await resolve(event, withHtmlLangTransform(event.locals.htmlLang));
+    if (!isHtmlResponse(response)) return response;
+    const timings = [response.headers.get('Server-Timing'),
+      `ssr_render;dur=${(performance.now() - startedAt).toFixed(1)}`].filter(Boolean);
+    return cloneResponseWithHeader(response, 'Server-Timing', timings.join(', '));
+  };
+
+  const cachedSkillResponse = await maybeRespondWithCachedSkillHtml(event, renderPublicHtml);
   if (cachedSkillResponse) {
     return applyResponseSecurityHeaders(event.url.pathname, cachedSkillResponse);
   }
 
-  const cachedDiscoveryResponse = await maybeRespondWithCachedDiscoveryHtml(event);
+  const cachedDiscoveryResponse = await maybeRespondWithCachedDiscoveryHtml(event, renderPublicHtml);
   if (cachedDiscoveryResponse) {
     return applyResponseSecurityHeaders(event.url.pathname, cachedDiscoveryResponse);
   }
@@ -928,11 +971,7 @@ const baseHandle: Handle = async ({ event, resolve }) => {
     || shouldSkipAuthForSharedSkill
     || shouldSkipAuthForPublicDiscovery
   ) {
-    event.locals.auth = async () => ({ user: null });
-    event.locals.session = null;
-    event.locals.user = null;
-    event.locals.authPrincipal = null;
-    const response = await resolve(event, withHtmlLangTransform(event.locals.htmlLang));
+    const response = await renderPublicHtml();
     const skillCacheWriteCandidate = isSkillHtmlCacheableRequest(event) ? response.clone() : null;
     const shouldApplySharedPublicHtmlOptimization = isPublicDiscoveryHtmlCacheableRequest(event)
       && isHtmlResponse(response);

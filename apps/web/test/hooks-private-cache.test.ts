@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   peekCachedText: vi.fn(),
   peekCachedResponse: vi.fn(),
   putCachedResponse: vi.fn(),
+  refreshCachedResponse: vi.fn(),
   putCachedText: vi.fn(),
   resolveTokenBackedIdentity: vi.fn(),
   runRequestSecurity: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('$lib/server/cache', () => ({
   peekCachedText: mocks.peekCachedText,
   peekCachedResponse: mocks.peekCachedResponse,
   putCachedResponse: mocks.putCachedResponse,
+  refreshCachedResponse: mocks.refreshCachedResponse,
   putCachedText: mocks.putCachedText,
   setCacheVersion: vi.fn(),
 }));
@@ -89,6 +91,34 @@ beforeEach(() => {
 });
 
 describe('skill HTML cache visibility hint', () => {
+  it.each([
+    { 'Cache-Control': 'private, no-cache' },
+    { 'X-Skillscat-Public-Skill-Cache': '1', 'set-cookie': 'test-session=private' },
+    { 'X-Skillscat-Public-Skill-Cache': '1', 'X-Skillscat-Status-Override': '404' },
+  ])('does not publish unsafe background renders: %j', async (headers) => {
+    mocks.peekCachedText.mockResolvedValue('public');
+    mocks.peekCachedResponse.mockResolvedValue(new Response('<html>existing public</html>', {
+      headers: {
+        'X-Skillscat-Html-Build': 'test-build',
+        'X-Skillscat-Html-Refresh-After': String(Date.now() - 1000),
+        'X-Skillscat-Html-Expires': String(Date.now() + 20_000),
+      },
+    }));
+    const { handle } = await import('../src/hooks.server');
+    const resolve = vi.fn(async () => new Response('<html>unsafe refresh</html>', {
+      headers: { 'content-type': 'text/html', ...headers },
+    }));
+    const response = await handle({ event: skillEvent(), resolve } as never);
+    expect(await response.text()).toContain('existing public');
+    expect(response.headers.get('X-Cache')).toBe('STALE');
+    expect(resolve).not.toHaveBeenCalled();
+    const refresh = mocks.refreshCachedResponse.mock.calls[0][1] as () => Promise<Response | null>;
+    expect(await refresh()).toBeNull();
+    expect(mocks.putCachedResponse).not.toHaveBeenCalled();
+    expect(mocks.putCachedText).not.toHaveBeenCalled();
+    expect(mocks.createAuth).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, 'previous-build'])('does not serve HTML referencing assets from another build (%s)', async (build) => {
     mocks.peekCachedText.mockResolvedValue('public');
     mocks.peekCachedResponse.mockResolvedValue(new Response('<html>old assets</html>', {
@@ -156,6 +186,7 @@ describe('skill HTML cache visibility hint', () => {
     expect(response.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
     expect(mocks.getCurrentSkillVisibility).not.toHaveBeenCalled();
     expect(mocks.peekCachedResponse).not.toHaveBeenCalled();
+    expect(mocks.refreshCachedResponse).not.toHaveBeenCalled();
     expect(mocks.createAuth).toHaveBeenCalledOnce();
     expect(resolve).toHaveBeenCalledOnce();
   });

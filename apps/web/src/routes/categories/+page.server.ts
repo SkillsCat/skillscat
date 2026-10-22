@@ -31,18 +31,20 @@ export const load: PageServerLoad = async ({ platform, setHeaders, locals, reque
   const { data } = await getCached(
     CATEGORIES_PAGE_CACHE_KEY,
     async () => {
-      const stats = await getCategoryStats(env);
+      const [stats, dynamicCategories] = await Promise.all([
+        getCategoryStats(env),
+        getDynamicCategories(env.DB) as Promise<DynamicCategory[]>,
+      ]);
 
       const categories: CategoryWithCount[] = CATEGORIES.map((cat) => ({
         ...cat,
         skillCount: stats[cat.slug] || 0,
       }));
 
-      const dynamicCategories = await getDynamicCategories(env.DB) as DynamicCategory[];
-
       return { categories, dynamicCategories };
     },
-    3600
+    3600,
+    { waitUntil: platform?.context?.waitUntil?.bind(platform.context), staleWhileRevalidate: 21600 }
   );
 
   return data;

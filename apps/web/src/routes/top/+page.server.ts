@@ -35,7 +35,8 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
   if (page > PUBLIC_LIST_MAX_PAGE) {
     throw error(404, 'Page not found');
   }
-  const { data } = await resolvePublicSkillDataCache({
+  const startedAt = performance.now();
+  const { data, hit, stale } = await resolvePublicSkillDataCache({
     db: env.DB,
     requireQuality: true,
     cacheKey: `page:top:v2:${page}`,
@@ -43,6 +44,9 @@ export const load: PageServerLoad = async ({ url, platform, setHeaders, locals, 
     ttlSeconds: TOP_PAGE_CACHE_TTL_SECONDS,
     getSkills: (value) => value.skills,
     waitUntil: platform?.context?.waitUntil?.bind(platform.context),
+  });
+  setHeaders({
+    'Server-Timing': `list_data;dur=${(performance.now() - startedAt).toFixed(1)};desc="${stale ? 'STALE' : hit ? 'HIT' : 'MISS'}"`,
   });
   const { skills, total } = data;
   const totalPages = Math.min(PUBLIC_LIST_MAX_PAGE, Math.ceil(total / ITEMS_PER_PAGE));

@@ -12,7 +12,7 @@ export async function resolvePublicSkillDataCache<T>(input: {
   ttlSeconds: number;
   getSkills: (data: T) => SkillCardData[];
   waitUntil?: WaitUntilFn;
-}): Promise<{ data: T; hit: boolean }> {
+}): Promise<{ data: T; hit: boolean; stale?: boolean }> {
   const cached = await getCached(
     input.cacheKey,
     input.load,
