@@ -1,0 +1,2418 @@
+{
+  "recordedAt": "2026-10-22T17:50:06.132234+00:00",
+  "release": {
+    "version": "0.9.8",
+    "sourceCommit": "5fd6067",
+    "implementationCommits": [
+      "fb84c58",
+      "7731852"
+    ],
+    "worker": "skillscat-web-production",
+    "workerVersion": "85397e08-571c-4704-af1f-03990be08c6b",
+    "createdOn": "2026-10-22T17:37:21.953136Z",
+    "deploymentId": "a552807c-8695-44ac-9937-0cb82453c56c",
+    "trafficPercent": 100,
+    "rollbackWorkerVersion": "f416aeb4-a3a2-413b-b667-b4df81e26f61",
+    "bindingsUnchanged": true,
+    "compatibilityDate": "2025-01-01",
+    "compatibilityFlags": [
+      "nodejs_compat"
+    ],
+    "cacheOptions": {
+      "enabled": true,
+      "cross_version_cache": false
+    }
+  },
+  "localValidation": {
+    "webTests": 970,
+    "webTestFiles": 132,
+    "workspaceTypecheck": "passed; Web 0 errors / 0 warnings; CLI passed",
+    "lint": "passed",
+    "build": "passed",
+    "assetsDryRun": "passed after existing prepare:assetsignore script",
+    "browserUI": {
+      "checks": [
+        {
+          "name": "Home SSR and lazy desktop menu hover",
+          "status": "passed"
+        },
+        {
+          "name": "Lazy menu keyboard focus and Escape",
+          "status": "passed"
+        },
+        {
+          "name": "List filter upgrade retains text and focus; clear works",
+          "status": "passed"
+        },
+        {
+          "name": "IME composition and caret survive search enhancement",
+          "status": "passed"
+        },
+        {
+          "name": "Recent pagination click, back, direct refresh",
+          "status": "passed"
+        },
+        {
+          "name": "Category filter suggestions and no-match state",
+          "status": "passed"
+        },
+        {
+          "name": "Language selector Chinese and English; dark theme",
+          "status": "passed"
+        },
+        {
+          "name": "Mobile menu, detail README, no overflow",
+          "status": "passed"
+        }
+      ],
+      "errors": [],
+      "failed": []
+    },
+    "IMEEnter": {
+      "passed": true,
+      "composingEnterAndSubmitIgnored": true,
+      "normalEnterNavigates": true,
+      "errors": []
+    },
+    "publicSSR": [
+      {
+        "path": "/",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 36,
+        "actualCount": 36,
+        "text": "SKILLSCAT\n\nAn open platform for discovering, sharing, and installing AI Agent Skills.\n\nBrowse 72 community skills to extend agent ",
+        "cache": "no-store",
+        "pass": true
+      },
+      {
+        "path": "/zh-CN",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 36,
+        "actualCount": 36,
+        "text": "SKILLSCAT\n\n一个用于发现、分享和安装 AI Agent Skills 的开放平台。\n\n浏览 72 个社区技能，扩展 agent 的能力。\n\n热门技能\n查看全部\n->\nworkflow-6\n\nfixture-5\n\nReusable agent work",
+        "cache": "no-store",
+        "pass": true
+      },
+      {
+        "path": "/recent",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 24,
+        "actualCount": 24,
+        "text": "Recently Added\n\nFresh skills just added to the collection. Be the first to try them out!\n\nShowing 1-24 of 72 skills\nworkflow-1\n\nby",
+        "cache": "no-store",
+        "pass": true
+      },
+      {
+        "path": "/recent?page=2",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 24,
+        "actualCount": 24,
+        "text": "Recently Added\n\nFresh skills just added to the collection. Be the first to try them out!\n\nShowing 25-48 of 72 skills\nworkflow-25\n\n",
+        "cache": "public, max-age=0, s-maxage=60, stale-while-revalidate=180, private=Set-Cookie",
+        "pass": true
+      },
+      {
+        "path": "/top",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 24,
+        "actualCount": 24,
+        "text": "Top Rated\n\nThe most starred skills loved by the community. Quality guaranteed!\n\nShowing 1-24 of 72 skills\nworkflow-1\n\nby fixture-0",
+        "cache": "no-store",
+        "pass": true
+      },
+      {
+        "path": "/trending",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 24,
+        "actualCount": 24,
+        "text": "Trending Skills\n\nThe hottest skills gaining momentum in the community right now.\n\nShowing 1-24 of 72 skills\nworkflow-6\n\nby fixture",
+        "cache": "no-store",
+        "pass": true
+      },
+      {
+        "path": "/categories",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 1,
+        "actualCount": 1,
+        "text": "Categories\n\nBrowse skills by category to find exactly what you need.\n\nDevelopment\nCode Gen\n\nGenerate code, boilerplate, scaffoldin",
+        "cache": "no-store",
+        "pass": true
+      },
+      {
+        "path": "/category/testing",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 24,
+        "actualCount": 24,
+        "text": "Home\n/\nCategories\n/\nTesting\nTesting\n\nUnit tests, integration tests, test automation\n\nUses and selection guide\n\nUse these skills to",
+        "cache": "no-store",
+        "pass": true
+      },
+      {
+        "path": "/zh-CN/category/testing",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 24,
+        "actualCount": 24,
+        "text": "首页\n/\n分类\n/\n测试\n测试\n\n单元测试、集成测试与测试自动化\n\n用途与选择建议\n\n这类技能帮助你把可复现的问题或变更需求转化为可审查的代码修改。选择时核对语言、框架和测试工具是否匹配项目；采用修改前，检查差异并运行项目自身的验证。\n\n代码生成\n重构\n调试\n",
+        "cache": "no-store",
+        "pass": true
+      },
+      {
+        "path": "/skills/fixture-0/workflow-1",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 1,
+        "actualCount": 1,
+        "text": "Skills\n/\nfixture-0\n/\nworkflow-1\nworkflow-1\n\nReusable agent workflow for generating reliable code, reviewing changes, and running f",
+        "cache": "no-store",
+        "pass": true
+      },
+      {
+        "path": "/docs",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 1,
+        "actualCount": 1,
+        "text": "DOCUMENTATION\n\n/docs\nSkillsCat Documentation\n\nStart here to understand SkillsCat, learn the CLI, and connect it to OpenClaw.\n\nCLI\n",
+        "pass": true
+      },
+      {
+        "path": "/privacy",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 1,
+        "actualCount": 1,
+        "text": "Privacy Policy\n\nLast updated: July 16, 2026\n\nSkillsCat (\"we\", \"our\", or \"us\") is an open platform for discovering, sharing, and in",
+        "pass": true
+      },
+      {
+        "path": "/terms",
+        "status": 200,
+        "expectedStatus": 200,
+        "expectedCount": 1,
+        "actualCount": 1,
+        "text": "Terms of Service\n\nLast updated: February 14, 2026\n\nBy accessing or using SkillsCat, you agree to these Terms of Service. Please re",
+        "pass": true
+      },
+      {
+        "path": "/recent?page=101",
+        "status": 404,
+        "expectedStatus": 404,
+        "expectedCount": 0,
+        "actualCount": 0,
+        "text": "404\nPage Not Found\n\nPage not found\n\nGo Home\nGo Back",
+        "cache": "public, max-age=0, s-maxage=60, stale-while-revalidate=180",
+        "pass": true
+      },
+      {
+        "path": "/skills/fixture/missing",
+        "status": 404,
+        "expectedStatus": 404,
+        "expectedCount": 0,
+        "actualCount": 0,
+        "text": "404\nSkill Not Found\n\nSkill not found or you do not have permission to view it.\n\nBrowse Skills",
+        "pass": true
+      },
+      {
+        "path": "/category/missing-fixture",
+        "status": 404,
+        "expectedStatus": 404,
+        "expectedCount": 0,
+        "actualCount": 0,
+        "text": "Category Not Found\n\nCategory not found on SkillsCat.\n\nBrowse Categories",
+        "cache": "no-store",
+        "pass": true
+      },
+      {
+        "path": "tablet menu",
+        "bounds": {
+          "x": 10,
+          "y": 73.25,
+          "width": 802,
+          "height": 286
+        },
+        "pass": true
+      }
+    ],
+    "workerdRefresh": {
+      "compatibilityDate": "2025-01-01",
+      "coalesced": {
+        "renders": 1,
+        "cached": "render-1"
+      },
+      "cancelled": {
+        "renders": 2,
+        "cached": null
+      },
+      "recovered": {
+        "renders": 3,
+        "cached": "render-3"
+      }
+    }
+  },
+  "httpBefore": [
+    {
+      "at": "2026-10-22T17:30:27.586Z",
+      "path": "/recent",
+      "expected": 200,
+      "status": 200,
+      "title": "Recently Added - SkillsCat",
+      "cards": 24,
+      "bytes": 104259,
+      "ttfbMs": 796,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=690,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:28.637Z",
+      "path": "/recent?page=2",
+      "expected": 200,
+      "status": 200,
+      "title": "Recently Added - Page 2 - SkillsCat",
+      "cards": 24,
+      "bytes": 109793,
+      "ttfbMs": 921,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=180, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=902,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:29.813Z",
+      "path": "/top",
+      "expected": 200,
+      "status": 200,
+      "title": "Top Rated - SkillsCat",
+      "cards": 24,
+      "bytes": 110404,
+      "ttfbMs": 513,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=495,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:30.582Z",
+      "path": "/top?page=2",
+      "expected": 200,
+      "status": 200,
+      "title": "Top Rated - Page 2 - SkillsCat",
+      "cards": 24,
+      "bytes": 108021,
+      "ttfbMs": 1044,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=300, stale-while-revalidate=900, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=1028,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:31.881Z",
+      "path": "/trending",
+      "expected": 200,
+      "status": 200,
+      "title": "Trending Skills - SkillsCat",
+      "cards": 24,
+      "bytes": 114766,
+      "ttfbMs": 1132,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=1115,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:33.268Z",
+      "path": "/trending?page=2",
+      "expected": 200,
+      "status": 200,
+      "title": "Trending Skills - Page 2 - SkillsCat",
+      "cards": 24,
+      "bytes": 119013,
+      "ttfbMs": 427,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=180, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=411,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:33.949Z",
+      "path": "/search?q=testing",
+      "expected": 200,
+      "status": 200,
+      "title": "Search: testing - SkillsCat",
+      "cards": 50,
+      "bytes": 208578,
+      "ttfbMs": 7676,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=7659,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:41.882Z",
+      "path": "/search?q=testing&page=2",
+      "expected": 200,
+      "status": 200,
+      "title": "Search: testing - Page 2 - SkillsCat",
+      "cards": 50,
+      "bytes": 205800,
+      "ttfbMs": 1289,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=1273,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:43.431Z",
+      "path": "/search?q=skillscatverifynotfound20261023",
+      "expected": 200,
+      "status": 200,
+      "title": "Search: skillscatverifynotfound20261023 - SkillsCat",
+      "cards": 0,
+      "bytes": 22226,
+      "ttfbMs": 770,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=756,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:44.453Z",
+      "path": "/search?q=testing&page=101",
+      "expected": 404,
+      "status": 404,
+      "title": "404 - SkillsCat",
+      "cards": 0,
+      "bytes": 17830,
+      "ttfbMs": 98,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=81,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:44.803Z",
+      "path": "/categories",
+      "expected": 200,
+      "status": 200,
+      "title": "Categories - SkillsCat",
+      "cards": 0,
+      "bytes": 119207,
+      "ttfbMs": 311,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=291,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:45.369Z",
+      "path": "/category/testing",
+      "expected": 200,
+      "status": 200,
+      "title": "Testing - SkillsCat",
+      "cards": 24,
+      "bytes": 112271,
+      "ttfbMs": 311,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=292,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:45.936Z",
+      "path": "/category/testing?page=2",
+      "expected": 200,
+      "status": 200,
+      "title": "Testing - Page 2 - SkillsCat",
+      "cards": 24,
+      "bytes": 109203,
+      "ttfbMs": 240,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=120, stale-while-revalidate=600, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=226,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:46.428Z",
+      "path": "/category/skillscatverifynotfound20261023",
+      "expected": 404,
+      "status": 404,
+      "title": "Category Not Found - SkillsCat",
+      "cards": 0,
+      "bytes": 20037,
+      "ttfbMs": 380,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=367,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:47.060Z",
+      "path": "/u/anthropics",
+      "expected": 200,
+      "status": 200,
+      "title": "anthropics AI Agent Skills (126) | SkillsCat",
+      "cards": 24,
+      "bytes": 104854,
+      "ttfbMs": 587,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=571,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:47.902Z",
+      "path": "/u/anthropics?page=2",
+      "expected": 200,
+      "status": 200,
+      "title": "anthropics AI Agent Skills (126) | SkillsCat - Page 2",
+      "cards": 24,
+      "bytes": 100021,
+      "ttfbMs": 479,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=464,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:48.635Z",
+      "path": "/u/anthropics?page=101",
+      "expected": 404,
+      "status": 404,
+      "title": "404 - SkillsCat",
+      "cards": 0,
+      "bytes": 17838,
+      "ttfbMs": 50,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=36,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:48.936Z",
+      "path": "/u/skillscatverifynotfound20261023",
+      "expected": 404,
+      "status": 404,
+      "title": "User Not Found - SkillsCat",
+      "cards": 0,
+      "bytes": 19708,
+      "ttfbMs": 299,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=286,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:49.486Z",
+      "path": "/org/yottameta",
+      "expected": 200,
+      "status": 200,
+      "title": "YottaMeta Organization AI Agent Skills | SkillsCat",
+      "cards": 0,
+      "bytes": 22685,
+      "ttfbMs": 705,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "no-store",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=691,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:50.442Z",
+      "path": "/org/skillscatverifynotfound20261023",
+      "expected": 404,
+      "status": 404,
+      "title": "Organization Not Found - SkillsCat",
+      "cards": 0,
+      "bytes": 20040,
+      "ttfbMs": 111,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "no-store",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=97,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:50.805Z",
+      "path": "/skills/anthropics/skills/discernment-nudge",
+      "expected": 200,
+      "status": 200,
+      "title": "discernment-nudge | Prompts AI Agent Skill | SkillsCat",
+      "cards": 0,
+      "bytes": 73015,
+      "ttfbMs": 639,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "sd_row;dur=49;desc=\"skill row\", sd_filetree;dur=0;desc=\"file tree parse\", skill_detail;dur=49;desc=\"db+r2\", recommend_cached;dur=154;desc=\"cache+r2\", rel_t1_stats;dur=48;desc=\"category rarity\", readme_html;dur=208;desc=\"secondary\", rel_lw_seed;dur=48;desc=\"lightweight category seeds\", rel_add_cats;dur=0;desc=\"skipped\", rel_add_auth;dur=45;desc=\"hydrate author avatars\", recommend;dur=199;desc=\"secondary\", total;dur=402;desc=\"html\", cfCacheStatus;desc=\"MISS\", cfEdge;dur=622,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:51.697Z",
+      "path": "/skills/skillscatverifynotfound20261023/no-skill",
+      "expected": 404,
+      "status": 404,
+      "title": "Skill Not Found - SkillsCat",
+      "cards": 0,
+      "bytes": 19519,
+      "ttfbMs": 229,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": null,
+      "timing": "sd_row;dur=56;desc=\"skill row\", skill_detail;dur=56;desc=\"db+r2\", total;dur=56;desc=\"html\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=216,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:52.178Z",
+      "path": "/zh-CN/categories",
+      "expected": 200,
+      "status": 200,
+      "title": "分类 - SkillsCat",
+      "cards": 0,
+      "bytes": 117411,
+      "ttfbMs": 105,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=87,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:52.536Z",
+      "path": "/zh-CN/category/testing",
+      "expected": 200,
+      "status": 200,
+      "title": "测试 - SkillsCat",
+      "cards": 24,
+      "bytes": 111272,
+      "ttfbMs": 89,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=72,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:52.879Z",
+      "path": "/docs",
+      "expected": 200,
+      "status": 200,
+      "title": "SkillsCat Documentation",
+      "cards": 0,
+      "bytes": 24388,
+      "ttfbMs": 76,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": null,
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=63,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:53.206Z",
+      "path": "/privacy",
+      "expected": 200,
+      "status": 200,
+      "title": "Privacy Policy - SkillsCat",
+      "cards": 0,
+      "bytes": 27176,
+      "ttfbMs": 39,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": null,
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=25,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:30:53.497Z",
+      "path": "/terms",
+      "expected": 200,
+      "status": 200,
+      "title": "Terms of Service - SkillsCat",
+      "cards": 0,
+      "bytes": 27192,
+      "ttfbMs": 50,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": null,
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=37,cfOrigin;dur=0",
+      "pass": true
+    }
+  ],
+  "httpAfter": [
+    {
+      "at": "2026-10-22T17:37:42.549Z",
+      "path": "/recent",
+      "expected": 200,
+      "status": 200,
+      "title": "Recently Added - SkillsCat",
+      "cards": 24,
+      "bytes": 148787,
+      "ttfbMs": 826,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "list_data;dur=449.0;desc=\"MISS\", ssr_render;dur=449.0, cfCacheStatus;desc=\"MISS\", cfEdge;dur=761,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:43.631Z",
+      "path": "/recent?page=2",
+      "expected": 200,
+      "status": 200,
+      "title": "Recently Added - Page 2 - SkillsCat",
+      "cards": 24,
+      "bytes": 154322,
+      "ttfbMs": 726,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=180, private=Set-Cookie",
+      "timing": "list_data;dur=380.0;desc=\"MISS\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=712,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:44.610Z",
+      "path": "/top",
+      "expected": 200,
+      "status": 200,
+      "title": "Top Rated - SkillsCat",
+      "cards": 24,
+      "bytes": 154932,
+      "ttfbMs": 687,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "list_data;dur=314.0;desc=\"MISS\", ssr_render;dur=314.0, cfCacheStatus;desc=\"MISS\", cfEdge;dur=672,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:45.553Z",
+      "path": "/top?page=2",
+      "expected": 200,
+      "status": 200,
+      "title": "Top Rated - Page 2 - SkillsCat",
+      "cards": 24,
+      "bytes": 152550,
+      "ttfbMs": 1005,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=300, stale-while-revalidate=900, private=Set-Cookie",
+      "timing": "list_data;dur=470.0;desc=\"MISS\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=991,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:46.813Z",
+      "path": "/trending",
+      "expected": 200,
+      "status": 200,
+      "title": "Trending Skills - SkillsCat",
+      "cards": 24,
+      "bytes": 159295,
+      "ttfbMs": 398,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "list_data;dur=313.0;desc=\"MISS\", ssr_render;dur=313.0, cfCacheStatus;desc=\"MISS\", cfEdge;dur=384,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:47.466Z",
+      "path": "/trending?page=2",
+      "expected": 200,
+      "status": 200,
+      "title": "Trending Skills - Page 2 - SkillsCat",
+      "cards": 24,
+      "bytes": 163542,
+      "ttfbMs": 218,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=180, private=Set-Cookie",
+      "timing": "list_data;dur=121.0;desc=\"MISS\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=203,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:47.938Z",
+      "path": "/search?q=testing",
+      "expected": 200,
+      "status": 200,
+      "title": "Search: testing - SkillsCat",
+      "cards": 50,
+      "bytes": 264325,
+      "ttfbMs": 91,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=77,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:48.286Z",
+      "path": "/search?q=testing&page=2",
+      "expected": 200,
+      "status": 200,
+      "title": "Search: testing - Page 2 - SkillsCat",
+      "cards": 50,
+      "bytes": 261548,
+      "ttfbMs": 5439,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=5423,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:53.983Z",
+      "path": "/search?q=skillscatverifynotfound20261023",
+      "expected": 200,
+      "status": 200,
+      "title": "Search: skillscatverifynotfound20261023 - SkillsCat",
+      "cards": 0,
+      "bytes": 76174,
+      "ttfbMs": 63,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=50,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:54.302Z",
+      "path": "/search?q=testing&page=101",
+      "expected": 404,
+      "status": 404,
+      "title": "404 - SkillsCat",
+      "cards": 0,
+      "bytes": 54033,
+      "ttfbMs": 50,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=34,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:54.605Z",
+      "path": "/categories",
+      "expected": 200,
+      "status": 200,
+      "title": "Categories - SkillsCat",
+      "cards": 0,
+      "bytes": 164965,
+      "ttfbMs": 102,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "ssr_render;dur=6.0, cfCacheStatus;desc=\"MISS\", cfEdge;dur=86,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:54.961Z",
+      "path": "/category/testing",
+      "expected": 200,
+      "status": 200,
+      "title": "Testing - SkillsCat",
+      "cards": 24,
+      "bytes": 158796,
+      "ttfbMs": 263,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "ssr_render;dur=179.0, cfCacheStatus;desc=\"MISS\", cfEdge;dur=248,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:55.481Z",
+      "path": "/category/testing?page=2",
+      "expected": 200,
+      "status": 200,
+      "title": "Testing - Page 2 - SkillsCat",
+      "cards": 24,
+      "bytes": 155728,
+      "ttfbMs": 215,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=120, stale-while-revalidate=600, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=202,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:55.952Z",
+      "path": "/category/skillscatverifynotfound20261023",
+      "expected": 404,
+      "status": 404,
+      "title": "Category Not Found - SkillsCat",
+      "cards": 0,
+      "bytes": 65688,
+      "ttfbMs": 91,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "ssr_render;dur=52.0, cfCacheStatus;desc=\"MISS\", cfEdge;dur=79,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:56.298Z",
+      "path": "/u/anthropics",
+      "expected": 200,
+      "status": 200,
+      "title": "anthropics AI Agent Skills (126) | SkillsCat",
+      "cards": 24,
+      "bytes": 153090,
+      "ttfbMs": 54,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=38,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:56.607Z",
+      "path": "/u/anthropics?page=2",
+      "expected": 200,
+      "status": 200,
+      "title": "anthropics AI Agent Skills (126) | SkillsCat - Page 2",
+      "cards": 24,
+      "bytes": 148257,
+      "ttfbMs": 43,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600, private=Set-Cookie",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=29,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:56.904Z",
+      "path": "/u/anthropics?page=101",
+      "expected": 404,
+      "status": 404,
+      "title": "404 - SkillsCat",
+      "cards": 0,
+      "bytes": 54046,
+      "ttfbMs": 449,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=436,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:57.607Z",
+      "path": "/u/skillscatverifynotfound20261023",
+      "expected": 404,
+      "status": 404,
+      "title": "User Not Found - SkillsCat",
+      "cards": 0,
+      "bytes": 67081,
+      "ttfbMs": 814,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "public, max-age=0, s-maxage=1800, stale-while-revalidate=3600",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=800,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:58.673Z",
+      "path": "/org/yottameta",
+      "expected": 200,
+      "status": 200,
+      "title": "YottaMeta Organization AI Agent Skills | SkillsCat",
+      "cards": 0,
+      "bytes": 65963,
+      "ttfbMs": 246,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "no-store",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=235,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:59.181Z",
+      "path": "/org/skillscatverifynotfound20261023",
+      "expected": 404,
+      "status": 404,
+      "title": "Organization Not Found - SkillsCat",
+      "cards": 0,
+      "bytes": 63317,
+      "ttfbMs": 99,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": "no-store",
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=86,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:37:59.534Z",
+      "path": "/skills/anthropics/skills/discernment-nudge",
+      "expected": 200,
+      "status": 200,
+      "title": "discernment-nudge | Prompts AI Agent Skill | SkillsCat",
+      "cards": 0,
+      "bytes": 146533,
+      "ttfbMs": 375,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "sd_row;dur=54;desc=\"skill row\", sd_filetree;dur=0;desc=\"file tree parse\", skill_detail;dur=54;desc=\"db+r2\", recommend_cached;dur=6;desc=\"cache+r2\", readme_html;dur=7;desc=\"secondary\", recommend;dur=67;desc=\"secondary\", total;dur=127;desc=\"html\", ssr_render;dur=127.0, cfCacheStatus;desc=\"MISS\", cfEdge;dur=361,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:38:00.163Z",
+      "path": "/skills/skillscatverifynotfound20261023/no-skill",
+      "expected": 404,
+      "status": 404,
+      "title": "Skill Not Found - SkillsCat",
+      "cards": 0,
+      "bytes": 93022,
+      "ttfbMs": 153,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": null,
+      "timing": "sd_row;dur=43;desc=\"skill row\", skill_detail;dur=43;desc=\"db+r2\", total;dur=43;desc=\"html\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=141,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:38:00.570Z",
+      "path": "/zh-CN/categories",
+      "expected": 200,
+      "status": 200,
+      "title": "分类 - SkillsCat",
+      "cards": 0,
+      "bytes": 163163,
+      "ttfbMs": 77,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "ssr_render;dur=4.0, cfCacheStatus;desc=\"MISS\", cfEdge;dur=64,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:38:00.902Z",
+      "path": "/zh-CN/category/testing",
+      "expected": 200,
+      "status": 200,
+      "title": "测试 - SkillsCat",
+      "cards": 24,
+      "bytes": 157780,
+      "ttfbMs": 593,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "cacheControl": "no-store",
+      "timing": "ssr_render;dur=5.0, cfCacheStatus;desc=\"MISS\", cfEdge;dur=579,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:38:01.753Z",
+      "path": "/docs",
+      "expected": 200,
+      "status": 200,
+      "title": "SkillsCat Documentation",
+      "cards": 0,
+      "bytes": 71663,
+      "ttfbMs": 39,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": null,
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=25,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:38:02.046Z",
+      "path": "/privacy",
+      "expected": 200,
+      "status": 200,
+      "title": "Privacy Policy - SkillsCat",
+      "cards": 0,
+      "bytes": 63316,
+      "ttfbMs": 106,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": null,
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=95,cfOrigin;dur=0",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:38:02.406Z",
+      "path": "/terms",
+      "expected": 200,
+      "status": 200,
+      "title": "Terms of Service - SkillsCat",
+      "cards": 0,
+      "bytes": 63281,
+      "ttfbMs": 158,
+      "cache": null,
+      "cfCache": "BYPASS",
+      "cacheControl": null,
+      "timing": "cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=146,cfOrigin;dur=0",
+      "pass": true
+    }
+  ],
+  "cacheSamples": [
+    {
+      "at": "2026-10-22T17:41:39.322Z",
+      "path": "/recent",
+      "nonSessionCookie": false,
+      "status": 200,
+      "elapsedMs": 84,
+      "cards": 24,
+      "cache": "MISS",
+      "cfCache": "HIT",
+      "age": "236",
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "list_data;dur=449.0;desc=\"MISS\", ssr_render;dur=449.0, cfCacheStatus;desc=\"HIT\", cfEdge;dur=24,cfOrigin;dur=0",
+      "setCookie": false
+    },
+    {
+      "at": "2026-10-22T17:41:39.910Z",
+      "path": "/recent",
+      "nonSessionCookie": true,
+      "status": 200,
+      "elapsedMs": 36,
+      "cards": 24,
+      "cache": "HIT",
+      "cfCache": "BYPASS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "ssr_cache;dur=4.0;desc=\"HIT\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=22,cfOrigin;dur=0",
+      "setCookie": true
+    },
+    {
+      "at": "2026-10-22T17:41:40.447Z",
+      "path": "/categories",
+      "nonSessionCookie": false,
+      "status": 200,
+      "elapsedMs": 42,
+      "cards": 0,
+      "cache": "MISS",
+      "cfCache": "HIT",
+      "age": "225",
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "ssr_render;dur=6.0, cfCacheStatus;desc=\"HIT\", cfEdge;dur=22,cfOrigin;dur=0",
+      "setCookie": false
+    },
+    {
+      "at": "2026-10-22T17:41:40.990Z",
+      "path": "/categories",
+      "nonSessionCookie": true,
+      "status": 200,
+      "elapsedMs": 58,
+      "cards": 0,
+      "cache": "HIT",
+      "cfCache": "BYPASS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "ssr_cache;dur=6.0;desc=\"HIT\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=41,cfOrigin;dur=0",
+      "setCookie": true
+    },
+    {
+      "at": "2026-10-22T17:41:41.550Z",
+      "path": "/skills/anthropics/skills/discernment-nudge",
+      "nonSessionCookie": false,
+      "status": 200,
+      "elapsedMs": 35,
+      "cards": 0,
+      "cache": "MISS",
+      "cfCache": "HIT",
+      "age": "221",
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "sd_row;dur=54;desc=\"skill row\", sd_filetree;dur=0;desc=\"file tree parse\", skill_detail;dur=54;desc=\"db+r2\", recommend_cached;dur=6;desc=\"cache+r2\", readme_html;dur=7;desc=\"secondary\", recommend;dur=67;desc=\"secondary\", total;dur=127;desc=\"html\", ssr_render;dur=127.0, cfCacheStatus;desc=\"HIT\", cfEdge;dur=16,cfOrigin;dur=0",
+      "setCookie": false
+    },
+    {
+      "at": "2026-10-22T17:41:42.086Z",
+      "path": "/skills/anthropics/skills/discernment-nudge",
+      "nonSessionCookie": true,
+      "status": 200,
+      "elapsedMs": 103,
+      "cards": 0,
+      "cache": "HIT",
+      "cfCache": "BYPASS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "ssr_cache;dur=7.0;desc=\"HIT\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=87,cfOrigin;dur=0",
+      "setCookie": true
+    },
+    {
+      "at": "2026-10-22T17:42:24.861Z",
+      "path": "/recent",
+      "nonSessionCookie": false,
+      "status": 200,
+      "elapsedMs": 103,
+      "cards": 24,
+      "cache": "STALE",
+      "cfCache": "BYPASS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "ssr_cache;dur=3.0;desc=\"STALE\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=41,cfOrigin;dur=0",
+      "setCookie": true
+    },
+    {
+      "at": "2026-10-22T17:42:25.468Z",
+      "path": "/recent",
+      "nonSessionCookie": true,
+      "status": 200,
+      "elapsedMs": 53,
+      "cards": 24,
+      "cache": "HIT",
+      "cfCache": "BYPASS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "ssr_cache;dur=3.0;desc=\"HIT\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=33,cfOrigin;dur=0",
+      "setCookie": true
+    },
+    {
+      "at": "2026-10-22T17:43:00.369Z",
+      "path": "/categories",
+      "nonSessionCookie": false,
+      "status": 200,
+      "elapsedMs": 155,
+      "cards": 0,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "ssr_render;dur=6.0, cfCacheStatus;desc=\"MISS\", cfEdge;dur=82,cfOrigin;dur=0",
+      "setCookie": false
+    },
+    {
+      "at": "2026-10-22T17:43:01.028Z",
+      "path": "/categories",
+      "nonSessionCookie": true,
+      "status": 200,
+      "elapsedMs": 50,
+      "cards": 0,
+      "cache": "HIT",
+      "cfCache": "BYPASS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "ssr_cache;dur=5.0;desc=\"HIT\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=33,cfOrigin;dur=0",
+      "setCookie": true
+    },
+    {
+      "at": "2026-10-22T17:43:01.580Z",
+      "path": "/skills/anthropics/skills/discernment-nudge",
+      "nonSessionCookie": false,
+      "status": 200,
+      "elapsedMs": 255,
+      "cards": 0,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "sd_row;dur=49;desc=\"skill row\", sd_filetree;dur=0;desc=\"file tree parse\", skill_detail;dur=49;desc=\"db+r2\", recommend_cached;dur=6;desc=\"cache+r2\", readme_html;dur=8;desc=\"secondary\", recommend;dur=65;desc=\"secondary\", total;dur=120;desc=\"html\", ssr_render;dur=120.0, cfCacheStatus;desc=\"MISS\", cfEdge;dur=238,cfOrigin;dur=0",
+      "setCookie": false
+    },
+    {
+      "at": "2026-10-22T17:43:02.337Z",
+      "path": "/skills/anthropics/skills/discernment-nudge",
+      "nonSessionCookie": true,
+      "status": 200,
+      "elapsedMs": 46,
+      "cards": 0,
+      "cache": "HIT",
+      "cfCache": "BYPASS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "ssr_cache;dur=5.0;desc=\"HIT\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=29,cfOrigin;dur=0",
+      "setCookie": true
+    },
+    {
+      "at": "2026-10-22T17:44:06.595Z",
+      "path": "/",
+      "nonSessionCookie": false,
+      "status": 200,
+      "elapsedMs": 88,
+      "cards": 36,
+      "cache": "HIT",
+      "cfCache": "MISS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "ssr_cache;dur=4.0;desc=\"HIT\", cfCacheStatus;desc=\"MISS\", cfEdge;dur=29,cfOrigin;dur=0",
+      "setCookie": false
+    },
+    {
+      "at": "2026-10-22T17:44:07.186Z",
+      "path": "/",
+      "nonSessionCookie": true,
+      "status": 200,
+      "elapsedMs": 45,
+      "cards": 36,
+      "cache": "HIT",
+      "cfCache": "BYPASS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "ssr_cache;dur=3.0;desc=\"HIT\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=28,cfOrigin;dur=0",
+      "setCookie": true
+    },
+    {
+      "at": "2026-10-22T17:44:07.732Z",
+      "path": "/zh-CN",
+      "nonSessionCookie": false,
+      "status": 200,
+      "elapsedMs": 309,
+      "cards": 36,
+      "cache": "MISS",
+      "cfCache": "MISS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "home_data;dur=3.0;desc=\"HIT/HIT/HIT\", ssr_render;dur=3.0, cfCacheStatus;desc=\"MISS\", cfEdge;dur=293,cfOrigin;dur=0",
+      "setCookie": false
+    },
+    {
+      "at": "2026-10-22T17:44:08.543Z",
+      "path": "/zh-CN",
+      "nonSessionCookie": true,
+      "status": 200,
+      "elapsedMs": 30,
+      "cards": 36,
+      "cache": "HIT",
+      "cfCache": "BYPASS",
+      "age": null,
+      "cdn": null,
+      "cacheControl": "no-store",
+      "timing": "ssr_cache;dur=3.0;desc=\"HIT\", cfCacheStatus;desc=\"BYPASS\", cfEdge;dur=15,cfOrigin;dur=0",
+      "setCookie": true
+    }
+  ],
+  "browser": {
+    "production-browser": {
+      "checks": [
+        {
+          "name": "Recent direct open, full SSR cards, reload",
+          "at": "2026-10-22T17:40:19.344Z",
+          "pass": true
+        },
+        {
+          "name": "Recent pagination click and back uses SvelteKit data",
+          "at": "2026-10-22T17:40:21.407Z",
+          "pass": true
+        },
+        {
+          "name": "Local filter upgrade, clear and focus",
+          "at": "2026-10-22T17:40:21.498Z",
+          "pass": true
+        },
+        {
+          "name": "Trending navigation link and Top direct page",
+          "at": "2026-10-22T17:40:21.523Z",
+          "pass": true
+        },
+        {
+          "name": "Lazy categories menu, keyboard Escape, categories link",
+          "at": "2026-10-22T17:40:22.506Z",
+          "pass": true
+        },
+        {
+          "name": "Category page two and refresh",
+          "at": "2026-10-22T17:40:24.203Z",
+          "pass": true
+        },
+        {
+          "name": "Search results, pagination and empty result",
+          "at": "2026-10-22T17:40:25.172Z",
+          "pass": true
+        },
+        {
+          "name": "Public user pagination and existing organization",
+          "at": "2026-10-22T17:40:30.562Z",
+          "pass": true
+        },
+        {
+          "name": "Public skill direct open, SSR README and refresh",
+          "at": "2026-10-22T17:40:34.270Z",
+          "pass": true
+        },
+        {
+          "name": "Localized category language switch and theme",
+          "at": "2026-10-22T17:40:37.224Z",
+          "pass": true
+        },
+        {
+          "name": "Mobile menu, detail and viewport",
+          "at": "2026-10-22T17:40:41.262Z",
+          "pass": true
+        },
+        {
+          "name": "Missing skill/category/user/org and page limit show 404",
+          "at": "2026-10-22T17:40:44.210Z",
+          "pass": true
+        }
+      ],
+      "errors": [],
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 ()",
+        "Failed to load resource: the server responded with a status of 404 ()",
+        "Failed to load resource: the server responded with a status of 404 ()",
+        "Failed to load resource: the server responded with a status of 404 ()",
+        "Failed to load resource: the server responded with a status of 404 ()"
+      ],
+      "failed": [],
+      "unexpectedResponses": [],
+      "responses": [
+        {
+          "path": "/recent",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=4.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=16,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/recent",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=4.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=3,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/recent/__data.json",
+          "status": 200,
+          "type": "fetch",
+          "timing": "list_data;dur=5.0;desc=\"STALE\""
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/recent/__data.json",
+          "status": 200,
+          "type": "fetch",
+          "timing": "list_data;dur=4.0;desc=\"STALE\""
+        },
+        {
+          "path": "/trending/__data.json",
+          "status": 200,
+          "type": "fetch",
+          "timing": "list_data;dur=5.0;desc=\"STALE\""
+        },
+        {
+          "path": "/top",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=4.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=5,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/categories",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=6.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=8,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/category/testing/__data.json",
+          "status": 200,
+          "type": "fetch"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/category/testing/__data.json",
+          "status": 200,
+          "type": "fetch"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/category/testing",
+          "status": 200,
+          "type": "document",
+          "timing": "cfCacheStatus;desc=\"BYPASS\"\ncfEdge;dur=32,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/search",
+          "status": 200,
+          "type": "document",
+          "timing": "cfCacheStatus;desc=\"BYPASS\"\ncfEdge;dur=41,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/search/__data.json",
+          "status": 200,
+          "type": "fetch"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/search/__data.json",
+          "status": 200,
+          "type": "fetch"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/search",
+          "status": 200,
+          "type": "document",
+          "timing": "cfCacheStatus;desc=\"BYPASS\"\ncfEdge;dur=25,cfOrigin;dur=0"
+        },
+        {
+          "path": "/search/__data.json",
+          "status": 200,
+          "type": "fetch"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/u/anthropics",
+          "status": 200,
+          "type": "document",
+          "timing": "cfCacheStatus;desc=\"BYPASS\"\ncfEdge;dur=23,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/u/anthropics/__data.json",
+          "status": 200,
+          "type": "fetch"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/org/yottameta",
+          "status": 200,
+          "type": "document",
+          "timing": "cfCacheStatus;desc=\"BYPASS\"\ncfEdge;dur=129,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/skills/anthropics/skills/discernment-nudge",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=5.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=5,cfOrigin;dur=0"
+        },
+        {
+          "path": "/api/skills/access",
+          "status": 200,
+          "type": "fetch"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/skills/anthropics/skills/discernment-nudge",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=5.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=4,cfOrigin;dur=0"
+        },
+        {
+          "path": "/api/skills/access",
+          "status": 200,
+          "type": "fetch"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/category/testing",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=6.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=5,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/zh-CN/category/testing",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=8.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=6,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/category/testing",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=6.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=4,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/recent",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=4.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=4,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/skills/anthropics/skills/discernment-nudge",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=5.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=8,cfOrigin;dur=0"
+        },
+        {
+          "path": "/api/skills/access",
+          "status": 200,
+          "type": "fetch"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/skills/skillscatverifynotfound20261023/no-skill",
+          "status": 404,
+          "type": "document",
+          "timing": "sd_row;dur=57;desc=\"skill row\", skill_detail;dur=57;desc=\"db+r2\", total;dur=57;desc=\"html\"\ncfCacheStatus;desc=\"BYPASS\"\ncfEdge;dur=134,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/category/skillscatverifynotfound20261023",
+          "status": 404,
+          "type": "document",
+          "cache": "MISS",
+          "timing": "ssr_render;dur=3.0\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=5,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/u/skillscatverifynotfound20261023",
+          "status": 404,
+          "type": "document",
+          "timing": "cfCacheStatus;desc=\"BYPASS\"\ncfEdge;dur=16,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/org/skillscatverifynotfound20261023",
+          "status": 404,
+          "type": "document",
+          "timing": "cfCacheStatus;desc=\"BYPASS\"\ncfEdge;dur=83,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/recent",
+          "status": 404,
+          "type": "document",
+          "timing": "cfCacheStatus;desc=\"BYPASS\"\ncfEdge;dur=27,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        }
+      ],
+      "interceptionSummary": [
+        {
+          "reason": "external-or-avatar",
+          "method": "GET",
+          "count": 129
+        },
+        {
+          "reason": "mutation-or-unverified-api",
+          "method": "POST",
+          "count": 57
+        }
+      ],
+      "staticAssetSummary": {
+        "uniquePaths": 85,
+        "responses": 1006,
+        "failedResponses": []
+      }
+    },
+    "production-home": {
+      "snapshotGeneratedAt": 1792690767697,
+      "checks": [
+        {
+          "name": "Mobile home direct open and SSR cards",
+          "at": "2026-10-22T17:44:05.922Z",
+          "pass": true
+        },
+        {
+          "name": "Home refresh keeps complete cards",
+          "at": "2026-10-22T17:44:07.697Z",
+          "pass": true
+        },
+        {
+          "name": "trending touch data request",
+          "pass": true,
+          "elapsedIncludingNetworkIdleMs": 458
+        },
+        {
+          "name": "Home touch navigation to trending",
+          "at": "2026-10-22T17:44:09.206Z",
+          "pass": true
+        },
+        {
+          "name": "recent touch data request",
+          "pass": true,
+          "elapsedIncludingNetworkIdleMs": 85
+        },
+        {
+          "name": "Home touch navigation to recent",
+          "at": "2026-10-22T17:44:11.126Z",
+          "pass": true
+        },
+        {
+          "name": "top touch data request",
+          "pass": true,
+          "elapsedIncludingNetworkIdleMs": 105
+        },
+        {
+          "name": "Home touch navigation to top",
+          "at": "2026-10-22T17:44:13.369Z",
+          "pass": true
+        },
+        {
+          "name": "Chinese home SSR and desktop layout",
+          "at": "2026-10-22T17:44:15.006Z",
+          "pass": true
+        }
+      ],
+      "errors": [],
+      "responses": [
+        {
+          "path": "/",
+          "status": 200,
+          "type": "document",
+          "cache": "MISS",
+          "timing": "home_data;dur=242.0;desc=\"MISS/MISS/MISS\", ssr_render;dur=242.0\ncfCacheStatus;desc=\"MISS\"\ncfEdge;dur=287,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=4.0;desc=\"HIT\"\ncfCacheStatus;desc=\"MISS\"\ncfEdge;dur=13,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=4.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=3,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/trending/__data.json",
+          "status": 200,
+          "type": "fetch",
+          "timing": "list_data;dur=360.0;desc=\"MISS\""
+        },
+        {
+          "path": "/",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=4.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=4,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/recent/__data.json",
+          "status": 200,
+          "type": "fetch",
+          "timing": "list_data;dur=5.0;desc=\"STALE\""
+        },
+        {
+          "path": "/",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=4.0;desc=\"HIT\"\ncfCacheStatus;desc=\"HIT\"\ncfEdge;dur=6,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/top/__data.json",
+          "status": 200,
+          "type": "fetch",
+          "timing": "list_data;dur=10.0;desc=\"STALE\""
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/zh-CN",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=3.0;desc=\"HIT\"\ncfCacheStatus;desc=\"MISS\"\ncfEdge;dur=12,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        }
+      ],
+      "interceptionSummary": [
+        {
+          "reason": "avatar-or-external",
+          "method": "GET",
+          "count": 63
+        },
+        {
+          "reason": "api-or-mutation",
+          "method": "POST",
+          "count": 16
+        }
+      ],
+      "staticAssetSummary": {
+        "uniquePaths": 63,
+        "responses": 368,
+        "failedResponses": []
+      }
+    },
+    "production-home-detail": {
+      "snapshotGeneratedAt": 1792691150446,
+      "checks": [
+        {
+          "name": "Home touch skill card loads real SSR detail",
+          "at": "2026-10-22T17:48:09.895Z",
+          "pass": true
+        }
+      ],
+      "errors": [],
+      "responses": [
+        {
+          "path": "/",
+          "status": 200,
+          "type": "document",
+          "cache": "HIT",
+          "timing": "ssr_cache;dur=4.0;desc=\"HIT\"\ncfCacheStatus;desc=\"UPDATING\"\ncfEdge;dur=14,cfOrigin;dur=0"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        },
+        {
+          "path": "/skills/tin-computer/tin/product-demo-video/__data.json",
+          "status": 200,
+          "type": "fetch",
+          "timing": "sd_row;dur=50;desc=\"skill row\", sd_filetree;dur=0;desc=\"file tree parse\", skill_detail;dur=50;desc=\"db+r2\", recommend_cached;dur=173;desc=\"cache+r2\", readme_html;dur=191;desc=\"secondary\", rel_t1_stats;dur=46;desc=\"category rarity\", rel_lw_seed;dur=58;desc=\"lightweight category seeds\", rel_add_cats;dur=0;desc=\"skipped\", rel_add_auth;dur=368;desc=\"hydrate author avatars\", recommend;dur=533;desc=\"secondary\", total;dur=756;desc=\"data\""
+        },
+        {
+          "path": "/api/skills/access",
+          "status": 200,
+          "type": "fetch"
+        },
+        {
+          "path": "/favicon-32x32.png",
+          "status": 200,
+          "type": "other"
+        }
+      ],
+      "interceptionSummary": [
+        {
+          "reason": "avatar-or-external",
+          "method": "GET",
+          "count": 8
+        },
+        {
+          "reason": "api-or-mutation",
+          "method": "POST",
+          "count": 5
+        }
+      ],
+      "staticAssetSummary": {
+        "uniquePaths": 62,
+        "responses": 63,
+        "failedResponses": []
+      }
+    },
+    "production-sw": {
+      "unexpected": [
+        {
+          "path": "/terms",
+          "status": 503,
+          "fromServiceWorker": true,
+          "type": "other",
+          "purpose": "prefetch",
+          "body": ""
+        }
+      ],
+      "at": "2026-10-22T17:42:27.458Z",
+      "swVersion": "mvjtirsy",
+      "cacheNames": [
+        "skillscat-static-vmvjtirsy",
+        "skillscat-pages-vmvjtirsy",
+        "skillscat-immutable-v1"
+      ],
+      "remoteSha256": "ac3aefb1644586a89d9454f784712881693f508a97f88c531d56f3a2afa6f4a7",
+      "localSha256": "ac3aefb1644586a89d9454f784712881693f508a97f88c531d56f3a2afa6f4a7",
+      "errors": [],
+      "blocked": [
+        {
+          "method": "POST",
+          "path": "/cdn-cgi/rum"
+        },
+        {
+          "method": "POST",
+          "path": "/cdn-cgi/challenge-platform/[redacted]"
+        },
+        {
+          "method": "POST",
+          "path": "/cdn-cgi/rum"
+        },
+        {
+          "method": "POST",
+          "path": "/cdn-cgi/challenge-platform/[redacted]"
+        },
+        {
+          "method": "POST",
+          "path": "/cdn-cgi/rum"
+        },
+        {
+          "method": "POST",
+          "path": "/cdn-cgi/rum"
+        }
+      ],
+      "responses": [
+        {
+          "path": "/privacy",
+          "status": 200,
+          "fromServiceWorker": false,
+          "type": "document"
+        },
+        {
+          "path": "/privacy",
+          "status": 200,
+          "fromServiceWorker": true,
+          "type": "document"
+        },
+        {
+          "path": "/terms",
+          "status": 503,
+          "fromServiceWorker": true,
+          "type": "other",
+          "purpose": "prefetch"
+        }
+      ],
+      "pass": true,
+      "expectedPrefetchResponseExplanation": "Cloudflare Speed Brain returns 503 for unsuccessful speculative prefetches; actual navigation and resources completed. See https://developers.cloudflare.com/speed/optimization/content/speed-brain/",
+      "staticAssetSummary": {
+        "uniquePaths": 39,
+        "responses": 76,
+        "failedResponses": []
+      }
+    }
+  },
+  "deployedAssets": [
+    {
+      "at": "2026-10-22T17:46:48.954Z",
+      "path": "/_app/version.json",
+      "status": 200,
+      "cacheControl": "no-cache",
+      "remoteSha256": "64537cddc9dc58029baa81d8207edea8ff5a5f34aebc0d1ef84fdd8b6cf45a8d",
+      "localSha256": "64537cddc9dc58029baa81d8207edea8ff5a5f34aebc0d1ef84fdd8b6cf45a8d",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:46:48.977Z",
+      "path": "/_app/immutable/entry/start.BFif40Uz.js",
+      "status": 200,
+      "cacheControl": "public, immutable, max-age=31536000",
+      "remoteSha256": "c073aa750a7d3fb3afb3568915508432478c60455a9090a1d1ee2a9c18451dbb",
+      "localSha256": "c073aa750a7d3fb3afb3568915508432478c60455a9090a1d1ee2a9c18451dbb",
+      "pass": true
+    },
+    {
+      "at": "2026-10-22T17:46:49.011Z",
+      "path": "/_app/immutable/entry/app.B8v3WK1q.js",
+      "status": 200,
+      "cacheControl": "public, immutable, max-age=31536000",
+      "remoteSha256": "6576205bea270348ed7aca8b3dbfc54859e60a6328f7821c0a33518513efd2f3",
+      "localSha256": "6576205bea270348ed7aca8b3dbfc54859e60a6328f7821c0a33518513efd2f3",
+      "pass": true
+    }
+  ],
+  "logs": {
+    "start": 1792690647698,
+    "end": 1792691403602,
+    "newVersionEventCount": 442,
+    "outcomes": {
+      "ok": 442
+    },
+    "exceptions": 0,
+    "http5xx": 0,
+    "errorOrWarningEvents": 0,
+    "testPathCoverage": [
+      {
+        "path": "/recent",
+        "method": "GET",
+        "status": 200,
+        "count": 7,
+        "firstAt": 1792690662628,
+        "lastAt": 1792691384371,
+        "exceptions": 0
+      },
+      {
+        "path": "/top",
+        "method": "GET",
+        "status": 200,
+        "count": 3,
+        "firstAt": 1792690664640,
+        "lastAt": 1792690735823,
+        "exceptions": 0
+      },
+      {
+        "path": "/trending",
+        "method": "GET",
+        "status": 200,
+        "count": 2,
+        "firstAt": 1792690666844,
+        "lastAt": 1792690667495,
+        "exceptions": 0
+      },
+      {
+        "path": "/search",
+        "method": "GET",
+        "status": 200,
+        "count": 6,
+        "firstAt": 1792690667957,
+        "lastAt": 1792690828391,
+        "exceptions": 0
+      },
+      {
+        "path": "/search",
+        "method": "GET",
+        "status": 404,
+        "count": 1,
+        "firstAt": 1792690674334,
+        "lastAt": 1792690674334,
+        "exceptions": 0
+      },
+      {
+        "path": "/categories",
+        "method": "GET",
+        "status": 200,
+        "count": 5,
+        "firstAt": 1792690674633,
+        "lastAt": 1792690981056,
+        "exceptions": 0
+      },
+      {
+        "path": "/category/testing",
+        "method": "GET",
+        "status": 200,
+        "count": 5,
+        "firstAt": 1792690674981,
+        "lastAt": 1792690824297,
+        "exceptions": 0
+      },
+      {
+        "path": "/category/skillscatverifynotfound20261023",
+        "method": "GET",
+        "status": 404,
+        "count": 2,
+        "firstAt": 1792690675967,
+        "lastAt": 1792690751501,
+        "exceptions": 0
+      },
+      {
+        "path": "/u/anthropics",
+        "method": "GET",
+        "status": 200,
+        "count": 4,
+        "firstAt": 1792690676316,
+        "lastAt": 1792690830582,
+        "exceptions": 0
+      },
+      {
+        "path": "/u/anthropics",
+        "method": "GET",
+        "status": 404,
+        "count": 1,
+        "firstAt": 1792690676925,
+        "lastAt": 1792690676925,
+        "exceptions": 0
+      },
+      {
+        "path": "/u/skillscatverifynotfound20261023",
+        "method": "GET",
+        "status": 404,
+        "count": 3,
+        "firstAt": 1792690677648,
+        "lastAt": 1792690846826,
+        "exceptions": 0
+      },
+      {
+        "path": "/org/yottameta",
+        "method": "GET",
+        "status": 200,
+        "count": 3,
+        "firstAt": 1792690678717,
+        "lastAt": 1792690832385,
+        "exceptions": 0
+      },
+      {
+        "path": "/org/skillscatverifynotfound20261023",
+        "method": "GET",
+        "status": 404,
+        "count": 3,
+        "firstAt": 1792690679212,
+        "lastAt": 1792690848040,
+        "exceptions": 0
+      },
+      {
+        "path": "/skills/anthropics/skills/discernment-nudge",
+        "method": "GET",
+        "status": 200,
+        "count": 5,
+        "firstAt": 1792690679565,
+        "lastAt": 1792690982355,
+        "exceptions": 0
+      },
+      {
+        "path": "/skills/skillscatverifynotfound20261023/no-skill",
+        "method": "GET",
+        "status": 404,
+        "count": 3,
+        "firstAt": 1792690680191,
+        "lastAt": 1792690844225,
+        "exceptions": 0
+      },
+      {
+        "path": "/zh-CN/categories",
+        "method": "GET",
+        "status": 200,
+        "count": 1,
+        "firstAt": 1792690680599,
+        "lastAt": 1792690680599,
+        "exceptions": 0
+      },
+      {
+        "path": "/zh-CN/category/testing",
+        "method": "GET",
+        "status": 200,
+        "count": 2,
+        "firstAt": 1792690680925,
+        "lastAt": 1792690747547,
+        "exceptions": 0
+      },
+      {
+        "path": "/docs",
+        "method": "GET",
+        "status": 200,
+        "count": 1,
+        "firstAt": 1792690681773,
+        "lastAt": 1792690681773,
+        "exceptions": 0
+      },
+      {
+        "path": "/privacy",
+        "method": "GET",
+        "status": 200,
+        "count": 9,
+        "firstAt": 1792690682103,
+        "lastAt": 1792690946105,
+        "exceptions": 0
+      },
+      {
+        "path": "/terms",
+        "method": "GET",
+        "status": 200,
+        "count": 1,
+        "firstAt": 1792690682533,
+        "lastAt": 1792690682533,
+        "exceptions": 0
+      },
+      {
+        "path": "/",
+        "method": "GET",
+        "status": 200,
+        "count": 13,
+        "firstAt": 1792690730297,
+        "lastAt": 1792691381252,
+        "exceptions": 0
+      },
+      {
+        "path": "/recent/__data.json",
+        "method": "GET",
+        "status": 200,
+        "count": 5,
+        "firstAt": 1792690735046,
+        "lastAt": 1792691053349,
+        "exceptions": 0
+      },
+      {
+        "path": "/trending/__data.json",
+        "method": "GET",
+        "status": 200,
+        "count": 3,
+        "firstAt": 1792690735759,
+        "lastAt": 1792691050737,
+        "exceptions": 0
+      },
+      {
+        "path": "/category/testing/__data.json",
+        "method": "GET",
+        "status": 200,
+        "count": 4,
+        "firstAt": 1792690738664,
+        "lastAt": 1792690824252,
+        "exceptions": 0
+      },
+      {
+        "path": "/search/__data.json",
+        "method": "GET",
+        "status": 200,
+        "count": 4,
+        "firstAt": 1792690740248,
+        "lastAt": 1792690828510,
+        "exceptions": 0
+      },
+      {
+        "path": "/u/anthropics/__data.json",
+        "method": "GET",
+        "status": 200,
+        "count": 2,
+        "firstAt": 1792690743270,
+        "lastAt": 1792690832343,
+        "exceptions": 0
+      },
+      {
+        "path": "/recent",
+        "method": "GET",
+        "status": 404,
+        "count": 2,
+        "firstAt": 1792690753785,
+        "lastAt": 1792690849498,
+        "exceptions": 0
+      },
+      {
+        "path": "/zh-CN",
+        "method": "GET",
+        "status": 200,
+        "count": 3,
+        "firstAt": 1792691047763,
+        "lastAt": 1792691055046,
+        "exceptions": 0
+      },
+      {
+        "path": "/top/__data.json",
+        "method": "GET",
+        "status": 200,
+        "count": 1,
+        "firstAt": 1792691054974,
+        "lastAt": 1792691054974,
+        "exceptions": 0
+      },
+      {
+        "path": "/trending",
+        "method": "GET",
+        "status": 404,
+        "count": 1,
+        "firstAt": 1792691068288,
+        "lastAt": 1792691068288,
+        "exceptions": 0
+      },
+      {
+        "path": "/",
+        "method": "GET",
+        "status": 304,
+        "count": 1,
+        "firstAt": 1792691233616,
+        "lastAt": 1792691233616,
+        "exceptions": 0
+      },
+      {
+        "path": "/skills/tin-computer/tin/product-demo-video/__data.json",
+        "method": "GET",
+        "status": 200,
+        "count": 1,
+        "firstAt": 1792691291548,
+        "lastAt": 1792691291548,
+        "exceptions": 0
+      }
+    ]
+  },
+  "readOnlyPreflight": {
+    "categoryAggregateRows": 49,
+    "homeEligibleIDs": 34,
+    "homeSnapshotGeneratedAt": 1792690767697,
+    "homeDetailSnapshotGeneratedAt": 1792691150446,
+    "d1RowsWritten": 0,
+    "recentAndTopR2PrimaryAndLegacyAbsent": true,
+    "detailReadmeArtifactsPresent": [
+      "anthropics/skills/discernment-nudge",
+      "tin-computer/tin/product-demo-video"
+    ],
+    "detailRecommendPrecomputeAbsent": true,
+    "note": "An initial SELECT-only D1 --file attempt used the import API; rows_written=0 but changed_db=true metadata. Repeated with --command returned the bounded SELECT results and changed_db=false. No production business data was changed.",
+    "statsAndMutationsIntercepted": true,
+    "noCachePurge": true,
+    "noManualCronOrQueue": true
+  },
+  "verificationCorrections": [
+    "Search desktop pagination adjusts 50 SSR rows to 51 after hydration; fixed assertion and reran all 12 browser scenarios.",
+    "Initial avatar fixtures and analytics script substitution produced test-only resource errors; intercepted avatars and allowed the intact analytics script while blocking reporting.",
+    "Blocked service-worker registration caused a test-only console error; main tests remove the unsupported API, and a separate real service-worker context verified registration, reload and navigation.",
+    "Service-worker version is build timestamp mvjtirsy, not package version; compared remote/local SHA-256 and actual GET_VERSION.",
+    "Cloudflare Speed Brain prefetch of /terms returned expected 503 with sec-purpose=prefetch; actual page navigation succeeded; no Worker 5xx."
+  ],
+  "limitations": [
+    "Anonymous public read-only samples only; no production login/logout or authenticated writes.",
+    "Avatar proxy and external images substituted to avoid GitHub requests; image source availability not validated.",
+    "No production billing CPU, cross-region concurrency or CrUX/RUM P75 measurement.",
+    "Background cron/queue consumers unchanged and not manually triggered.",
+    "No online publish/upload/favorite/token/membership/install/download mutations."
+  ],
+  "references": [
+    "https://developers.cloudflare.com/workers/runtime-apis/cache/",
+    "https://developers.cloudflare.com/workers/runtime-apis/context/",
+    "https://developers.cloudflare.com/speed/optimization/content/speed-brain/"
+  ]
+}

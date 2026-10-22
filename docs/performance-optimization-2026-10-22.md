@@ -1,6 +1,6 @@
 # 页面切换与 LCP 优化 — 2026-10-22
 
-状态：本地实现、生产构建和隔离浏览器验证完成；后续获授权的发布记录见 [Cloudflare 发布验收](performance-release-2026-10-23.md)。基线为 `27d941970d5dd617b04165c5b0ee9ec1976e6563`。
+状态：本地实现和验证完成，Web 0.9.8 已部署并完成有界公共链路验收；发布记录见 [Cloudflare 发布验收](performance-release-2026-10-23.md)。基线为 `27d941970d5dd617b04165c5b0ee9ec1976e6563`。
 
 登录、OAuth、session、用户菜单、鉴权判断与私有缓存策略均未修改。10 月 23 日的追加优化修改了 hooks 的公共 SSR 缓存分支，见下文。没有 schema、migration、binding、secret、独立 Worker 或 CLI 改动。首页列表、详情 README 和推荐仍由 SSR 输出，不以空壳或客户端补加载换取首屏指标。
 
