@@ -8,6 +8,9 @@ const config = {
   ],
 
   kit: {
+    // Inline the small shared/page styles in SSR to remove render-blocking
+    // round trips. Larger route styles keep their immutable browser cache.
+    inlineStyleThreshold: 32 * 1024,
     adapter: adapter({
       routes: {
         include: ['/*'],

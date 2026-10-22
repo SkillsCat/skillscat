@@ -79,7 +79,7 @@
   structuredData={homeStructuredData}
 />
 
-<div class="home-page">
+<div class="home-page" data-sveltekit-preload-code="viewport">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
     <!-- Hero Section -->
     <div class="hero-section">
@@ -107,15 +107,15 @@
           </span>
           {messages.home.trendingTitle}
         </h2>
-        <a href={i18n.href('/trending')} class="home-view-all-link">
+        <a href={i18n.href('/trending')} class="home-view-all-link" data-sveltekit-preload-data="hover">
           {messages.common.viewAll}
           <span aria-hidden="true">-></span>
         </a>
       </div>
       {#if data.trending.length > 0}
         <Grid cols={3} gap="xl">
-          {#each data.trending as skill (skill.id)}
-            <SkillCard {skill} />
+          {#each data.trending as skill, i (skill.id)}
+            <SkillCard {skill} priority={i < 3} preloadCode="viewport" />
           {/each}
         </Grid>
       {:else}
@@ -139,7 +139,7 @@
             </span>
             {messages.home.recentTitle}
           </h2>
-          <a href={i18n.href('/recent')} class="home-view-all-link">
+          <a href={i18n.href('/recent')} class="home-view-all-link" data-sveltekit-preload-data="hover">
             {messages.common.viewAll}
             <span aria-hidden="true">-></span>
           </a>
@@ -147,7 +147,7 @@
         {#if data.recent.length > 0}
           <Grid cols={3} gap="xl">
             {#each data.recent as skill (skill.id)}
-              <SkillCard {skill} />
+              <SkillCard {skill} preloadCode="viewport" />
             {/each}
           </Grid>
         {:else}
@@ -172,7 +172,7 @@
             </span>
             {messages.home.topTitle}
           </h2>
-          <a href={i18n.href('/top')} class="home-view-all-link">
+          <a href={i18n.href('/top')} class="home-view-all-link" data-sveltekit-preload-data="hover">
             {messages.common.viewAll}
             <span aria-hidden="true">-></span>
           </a>
@@ -180,7 +180,7 @@
         {#if data.top.length > 0}
           <Grid cols={3} gap="xl">
             {#each data.top as skill (skill.id)}
-              <SkillCard {skill} />
+              <SkillCard {skill} preloadCode="viewport" />
             {/each}
           </Grid>
         {:else}

@@ -241,7 +241,7 @@
     rel="preload"
     as="font"
     type="font/woff2"
-    href={$page.route.id === '/' ? '/fonts/poppins-latin-700.woff2' : '/fonts/poppins-latin-800.woff2'}
+    href={($page.route.id?.startsWith('/skills/') || $page.route.id === '/category/[slug]') ? '/fonts/poppins-latin-800.woff2' : '/fonts/poppins-latin-700.woff2'}
     crossorigin="anonymous"
   />
 </svelte:head>
@@ -304,7 +304,7 @@
     border-radius: 50%;
     backface-visibility: hidden;
     transform: translateZ(0);
-    will-change: transform, filter;
+    will-change: transform;
   }
 
   /*

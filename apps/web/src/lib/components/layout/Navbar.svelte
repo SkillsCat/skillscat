@@ -132,9 +132,10 @@
       </div>
 
       <!-- Nav Links (Desktop) -->
-      <div class="nav-links">
+      <div class="nav-links" data-sveltekit-preload-code="hover">
         <a
           href={i18n.href('/trending')}
+          data-sveltekit-preload-data="hover"
           class="nav-link"
           data-active={matchesPath('/trending') ? '' : undefined}
         >
@@ -238,6 +239,7 @@
           {/if}
           <a
             href={i18n.href('/trending')}
+            data-sveltekit-preload-data="hover"
             class="mobile-link"
             data-active={matchesPath('/trending') ? '' : undefined}
             onclick={() => mobileMenuOpen = false}
@@ -466,9 +468,9 @@
     top: 100%;
     transform: translateX(-50%);
     margin-top: 0.75rem;
-    width: min(var(--bits-navigation-menu-viewport-width), calc(100vw - 1rem));
+    width: min(calc(var(--bits-navigation-menu-viewport-width) + 6px), calc(100vw - 1rem));
     max-width: calc(100vw - 1rem);
-    height: var(--bits-navigation-menu-viewport-height);
+    height: calc(var(--bits-navigation-menu-viewport-height) + 6px);
     overflow: hidden;
     background-color: var(--card);
     border: 3px solid var(--border-sketch);

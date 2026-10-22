@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { goto } from '$app/navigation';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { Search01Icon } from '@hugeicons/core-free-icons';
 
@@ -18,6 +17,9 @@
     class?: string;
     autofocus?: boolean;
     isLoading?: boolean;
+    suggestionMode?: 'categories' | 'skills';
+    showHistory?: boolean;
+    suggestionCategory?: string;
   }
 
   let {
@@ -28,11 +30,35 @@
     class: className = '',
     autofocus = false,
     isLoading = false,
+    suggestionMode = 'skills',
+    showHistory = true,
+    suggestionCategory = '',
   }: Props = $props();
 
   let SearchBoxComponent = $state<SearchBoxComponentType | null>(null);
   let shouldAutofocusOnUpgrade = $state(false);
   let loadingPromise: Promise<void> | null = null;
+  let loadedComponent: SearchBoxComponentType | null = null;
+  let fallbackInput = $state<HTMLInputElement>();
+  let upgradeTimer: ReturnType<typeof setTimeout> | undefined;
+  let composing = false;
+  let disposed = false;
+  let initialSelection = $state<readonly [number, number] | undefined>();
+
+  function scheduleSearchUpgrade() {
+    clearTimeout(upgradeTimer);
+    if (!loadedComponent || composing || disposed) return;
+    // Keep the actual input in place while typing/pasting or composing IME
+    // text. A cached import can otherwise replace it between focus and input.
+    upgradeTimer = setTimeout(() => {
+      if (composing || disposed) return;
+      shouldAutofocusOnUpgrade = document.activeElement === fallbackInput;
+      initialSelection = fallbackInput
+        ? [fallbackInput.selectionStart ?? value.length, fallbackInput.selectionEnd ?? value.length]
+        : undefined;
+      SearchBoxComponent = loadedComponent;
+    }, 120);
+  }
 
   async function loadSearchBox(options?: { autofocus?: boolean }) {
     if (options?.autofocus) {
@@ -40,6 +66,11 @@
     }
 
     if (SearchBoxComponent) {
+      return;
+    }
+
+    if (loadedComponent) {
+      scheduleSearchUpgrade();
       return;
     }
 
@@ -51,7 +82,8 @@
     loadingPromise = (async () => {
       try {
         const module = await import('$lib/components/common/SearchBox.svelte');
-        SearchBoxComponent = module.default;
+        loadedComponent = module.default;
+        scheduleSearchUpgrade();
       } catch (error) {
         console.error('Failed to load search box enhancement:', error);
       } finally {
@@ -73,16 +105,17 @@
       return;
     }
 
-    void goto(`/search?q=${encodeURIComponent(query)}`);
+    // Local list filters have no submit action; typing already filters the page.
   }
 
   function handleFallbackSubmit(event: SubmitEvent) {
     event.preventDefault();
+    if (composing) return;
     commitFallbackSearch();
   }
 
   function handleFallbackKeydown(event: KeyboardEvent) {
-    if (event.key !== 'Enter') {
+    if (event.key !== 'Enter' || event.isComposing || composing) {
       return;
     }
 
@@ -93,8 +126,13 @@
 
   onMount(() => {
     if (autofocus) {
+      fallbackInput?.focus();
       void loadSearchBox({ autofocus: true });
     }
+    return () => {
+      disposed = true;
+      clearTimeout(upgradeTimer);
+    };
   });
 </script>
 
@@ -106,8 +144,11 @@
     {onSearch}
     {onSelectSkill}
     {isLoading}
-    suggestionMode="skills"
+    {suggestionMode}
+    {showHistory}
+    {suggestionCategory}
     autofocus={shouldAutofocusOnUpgrade}
+    {initialSelection}
   />
 {:else}
   <form class={`deferred-search-form ${className}`.trim()} onsubmit={handleFallbackSubmit}>
@@ -118,8 +159,13 @@
 
       <input
         type="search"
+        bind:this={fallbackInput}
         bind:value
+        oninput={scheduleSearchUpgrade}
+        oncompositionstart={() => { composing = true; clearTimeout(upgradeTimer); }}
+        oncompositionend={() => { composing = false; scheduleSearchUpgrade(); }}
         placeholder={placeholder}
+        aria-label={placeholder}
         class="deferred-search-input"
         autocomplete="off"
         onkeydown={handleFallbackKeydown}

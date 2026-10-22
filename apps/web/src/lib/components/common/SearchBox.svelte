@@ -51,6 +51,7 @@
     showHistory?: boolean;
     suggestionCategory?: string;
     autofocus?: boolean;
+    initialSelection?: readonly [number, number];
     isLoading?: boolean;
   }
 
@@ -91,6 +92,7 @@
     showHistory = true,
     suggestionCategory = '',
     autofocus = false,
+    initialSelection,
     isLoading = false
   }: Props = $props();
   const i18n = useI18n();
@@ -175,7 +177,8 @@
         inputElement?.focus();
         if (inputElement) {
           const end = inputElement.value.length;
-          inputElement.setSelectionRange(end, end);
+          const selection = initialSelection ?? [end, end];
+          inputElement.setSelectionRange(selection[0], selection[1]);
         }
         isFocused = true;
       });

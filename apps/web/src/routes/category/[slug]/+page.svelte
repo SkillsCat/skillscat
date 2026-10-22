@@ -1,6 +1,6 @@
 <script lang="ts">
   import { categoryGuide } from '$lib/seo/category-guide';
-  import SearchBox from '$lib/components/common/SearchBox.svelte';
+  import SearchBox from '$lib/components/layout/DeferredSearchBox.svelte';
   import SEO from '$lib/components/common/SEO.svelte';
   import Grid from '$lib/components/layout/Grid.svelte';
   import SkillCard from '$lib/components/skill/SkillCard.svelte';

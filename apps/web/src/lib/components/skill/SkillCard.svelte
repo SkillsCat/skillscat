@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { HugeiconsIcon } from '$lib/components/ui/hugeicons';
   import { StarIcon, Clock01Icon } from '@hugeicons/core-free-icons';
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
@@ -24,13 +23,13 @@
     hideAvatar?: boolean;
     /** Eager-load the avatar for above-the-fold cards (e.g. first row of a list) */
     priority?: boolean;
+    /** Home entry points can warm the shared detail route without fetching data. */
+    preloadCode?: 'hover' | 'viewport';
   }
 
-  let { skill, hideAvatar = false, priority = false }: Props = $props();
+  let { skill, hideAvatar = false, priority = false, preloadCode = 'hover' }: Props = $props();
   let titleEl: HTMLHeadingElement | null = $state(null);
   let titleTruncated = $state(false);
-  let resizeObserver: ResizeObserver | null = null;
-  let measureFrame = 0;
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
   let primaryCategoryLabel = $derived(getPrimaryCategoryLabel());
@@ -67,42 +66,14 @@
     titleTruncated = isElementTextTruncated(titleEl);
   }
 
-  function scheduleTitleTruncationMeasure() {
-    if (typeof window === 'undefined') return;
-
-    if (measureFrame) cancelAnimationFrame(measureFrame);
-    measureFrame = requestAnimationFrame(() => {
-      measureFrame = 0;
-      updateTitleTruncation();
-    });
-  }
-
-  onMount(() => {
-    if (typeof ResizeObserver !== 'undefined' && titleEl) {
-      resizeObserver = new ResizeObserver(() => {
-        scheduleTitleTruncationMeasure();
-      });
-      resizeObserver.observe(titleEl);
-    }
-
-    scheduleTitleTruncationMeasure();
-
-    return () => {
-      if (measureFrame) cancelAnimationFrame(measureFrame);
-      resizeObserver?.disconnect();
-      resizeObserver = null;
-    };
-  });
-
-  $effect(() => {
-    skill.name;
-    scheduleTitleTruncationMeasure();
-  });
 </script>
 
 <a
   href={i18n.href(buildSkillPath(skill.slug))}
   class="skill-card group block"
+  onpointerenter={updateTitleTruncation}
+  onfocus={updateTitleTruncation}
+  data-sveltekit-preload-code={preloadCode}
 >
   <div class="card-layout">
     {#if !hideAvatar}

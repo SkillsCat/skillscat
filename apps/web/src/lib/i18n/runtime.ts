@@ -38,6 +38,21 @@ export function createI18nRuntime(input: {
   getLocale: () => SupportedLocale;
   setLocale: (locale: SupportedLocale) => void;
 }): I18nRuntime {
+  // A page may render dozens of cards. Intl constructors are much more costly
+  // than format(), so reuse the two number formatters for each visited locale.
+  const numberFormats = new Map<SupportedLocale, Intl.NumberFormat>();
+  const compactFormats = new Map<SupportedLocale, Intl.NumberFormat>();
+  function numberFormat(compact = false): Intl.NumberFormat {
+    const locale = input.getLocale();
+    const formats = compact ? compactFormats : numberFormats;
+    let formatter = formats.get(locale);
+    if (!formatter) {
+      formatter = new Intl.NumberFormat(getIntlLocale(locale), compact
+        ? { notation: 'compact', maximumFractionDigits: 1 } : undefined);
+      formats.set(locale, formatter);
+    }
+    return formatter;
+  }
   return {
     locale: () => input.getLocale(),
     href: (href) => localizeHref(href, input.getLocale()),
@@ -45,12 +60,8 @@ export function createI18nRuntime(input: {
     messages: () => getMessages(input.getLocale()),
     availableLocales: () => AVAILABLE_LOCALES,
     t: (template, values) => formatMessage(template, values),
-    formatNumber: (value) => new Intl.NumberFormat(getIntlLocale(input.getLocale())).format(value),
-    formatCompactNumber: (value) =>
-      new Intl.NumberFormat(getIntlLocale(input.getLocale()), {
-        notation: 'compact',
-        maximumFractionDigits: 1,
-      }).format(value),
+    formatNumber: (value) => numberFormat().format(value),
+    formatCompactNumber: (value) => numberFormat(true).format(value),
     formatDate: (value, options) =>
       new Intl.DateTimeFormat(getIntlLocale(input.getLocale()), options).format(
         value instanceof Date ? value : new Date(value)

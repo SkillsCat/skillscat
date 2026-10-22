@@ -1,5 +1,5 @@
 <script lang="ts">
-  import SearchBox from '$lib/components/common/SearchBox.svelte';
+  import SearchBox from '$lib/components/layout/DeferredSearchBox.svelte';
   import Grid from '$lib/components/layout/Grid.svelte';
   import SkillCard from '$lib/components/skill/SkillCard.svelte';
   import EmptyState from '$lib/components/feedback/EmptyState.svelte';
@@ -77,6 +77,7 @@
       <SearchBox
         placeholder={messages.lists.filterSkills}
         bind:value={searchQuery}
+        suggestionMode="categories"
       />
     </div>
 
