@@ -8,7 +8,7 @@
   import { toasts } from '$lib/components/ui/toast-store';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { createI18nRuntime, setI18nContext } from '$lib/i18n/runtime';
+  import { createI18nRuntime, setI18nContext, rememberPathLocale } from '$lib/i18n/runtime';
 
   interface Props {
     children: import('svelte').Snippet;
@@ -69,6 +69,9 @@
   $effect(() => {
     if (browser) {
       document.documentElement.lang = i18n.htmlLang();
+      // A direct public link is also a language choice. Remember it only in
+      // the browser; Set-Cookie must never poison shared public HTML caches.
+      rememberPathLocale($page.url.pathname, i18n.locale());
     }
   });
 
@@ -150,6 +153,12 @@
   });
 
   onMount(() => {
+    // A bfcache restoration resumes this document without rerunning effects.
+    // Reconcile its visible language with preferences saved by a newer page.
+    const rememberRestoredLocale = (event: PageTransitionEvent) => {
+      if (event.persisted) rememberPathLocale(window.location.pathname, i18n.locale());
+    };
+    window.addEventListener('pageshow', rememberRestoredLocale);
     // Resolve the auth session only when there is evidence of one (server-side
     // currentUser or a better-auth cookie); anonymous visitors never load the
     // better-auth client bundle.
@@ -217,6 +226,7 @@
     }
 
     return () => {
+      window.removeEventListener('pageshow', rememberRestoredLocale);
       stopAuthSession();
       window.removeEventListener('scroll', handleScroll);
       if (rafId) {
@@ -267,6 +277,12 @@
         <Navbar {unreadCount} {currentUser} authPending={deferAuthUi} />
 
         <main class="flex-1">
+          {#if locale === 'ca' && ['/search', '/trending', '/recent', '/top', '/categories', '/category/[slug]'].includes($page.route.id ?? '')}
+            <aside class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 text-sm text-fg-muted" aria-label="Llengua del contingut">
+              La interfície i les categories predefinides són en català. Les descripcions dels skills i les categories generades conserven el text d’origen; la llengua original no consta al catàleg.
+              <a href="/ca/catala" class="text-primary hover:underline">Consulta l’abast de la traducció.</a>
+            </aside>
+          {/if}
           {@render children()}
         </main>
       </div>

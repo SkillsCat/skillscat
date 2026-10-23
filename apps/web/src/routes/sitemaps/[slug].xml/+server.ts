@@ -18,6 +18,7 @@ import {
   normalizeSitemapRefreshMinIntervalSeconds,
   SITEMAP_CORE_BROWSER_MAX_AGE_SECONDS,
   SITEMAP_CORE_CACHE_TTL,
+  SITEMAP_CORE_CACHE_KEY,
   SITEMAP_CORE_SHARED_MAX_AGE_SECONDS,
   SITEMAP_CORE_STALE_WHILE_REVALIDATE_SECONDS,
   SITEMAP_DYNAMIC_BROWSER_MAX_AGE_SECONDS,
@@ -43,7 +44,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 
   if (slug === 'core') {
     return createCachedSitemapResponse({
-      cacheKey: 'sitemap:v3:core:xml',
+      cacheKey: SITEMAP_CORE_CACHE_KEY,
       ttl: getSitemapHotCacheTtlSeconds(SITEMAP_CORE_CACHE_TTL, refreshMinIntervalSeconds),
       cacheControl: buildSitemapCacheControl({
         browserMaxAgeSeconds: SITEMAP_CORE_BROWSER_MAX_AGE_SECONDS,

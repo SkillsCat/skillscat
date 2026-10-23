@@ -30,7 +30,10 @@
 />
 
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-  <article class="prose prose-lg max-w-none">
+  {#if i18n.locale() === 'ca'}
+    <p class="mb-6 text-fg-muted">Document en anglès. La traducció jurídica al català encara no està disponible.</p>
+  {/if}
+  <article lang={i18n.locale() === 'ca' ? 'en' : i18n.htmlLang()} class="prose prose-lg max-w-none">
     <h1>{legalDocument.title}</h1>
     <p class="lead">{legalDocument.lastUpdated}</p>
     <p>{@html legalDocument.lead}</p>

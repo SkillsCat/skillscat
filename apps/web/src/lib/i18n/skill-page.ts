@@ -56,6 +56,8 @@ const en = {
   securityDimensionObfuscationEvasion: 'Obfuscation or evasion',
   noDescription: 'No description provided',
   summaryTitle: 'About this skill',
+  originalContentLabel: 'Original content · language not specified',
+  originalContentNote: 'The author’s text is preserved without translation. A localized interface does not mean this skill has been translated.',
   derivedFromTitle: 'Based on an original skill',
   derivedFromDescription: 'This skill is based on the original skill from {repo} and includes later modifications.',
   derivedFromAction: 'View original skill',
@@ -82,6 +84,88 @@ const en = {
 } as const;
 
 type SkillPageCopy = DeepLocalized<typeof en>;
+
+const ca = {
+  seoImageAlt: 'Imatge de previsualització de l’skill {name}',
+  seoNotFoundTitle: 'Skill no trobat - SkillsCat',
+  seoNotFoundDescription: 'No s’ha trobat l’skill a SkillsCat.',
+  seoNotFoundImageAlt: 'Imatge de previsualització de skill no trobat',
+  seoTemporaryUnavailableTitle: 'Skill no disponible temporalment - SkillsCat',
+  seoTemporaryUnavailableDescription: 'Aquesta pàgina de skill no està disponible temporalment. Torna-ho a provar més tard.',
+  seoTemporaryUnavailableImageAlt: 'Imatge de previsualització de skill no disponible temporalment',
+  seoFallbackDescription: 'Skill per a agents d’IA: {name}',
+  breadcrumbHome: 'Inici',
+  breadcrumbSkills: 'Skills',
+  bookmarkAdded: 'Afegit als preferits',
+  bookmarkRemoved: 'Eliminat dels preferits',
+  bookmarkFailed: 'No s’han pogut actualitzar els preferits',
+  shareText: 'Descobreix {name} a SkillsCat',
+  shareFailed: 'No s’ha pogut compartir l’skill',
+  clipboardUnavailable: 'El porta-retalls no està disponible',
+  urlCopied: 'URL copiat al porta-retalls',
+  copyFailed: 'No s’ha pogut copiar l’URL',
+  recommendFailed: 'No s’han pogut carregar els skills recomanats',
+  tooManyRequests: 'Hi ha massa sol·licituds. Espera un moment.',
+  downloadFailed: 'No s’han pogut obtenir els fitxers',
+  installedSuccess: '{name} s’ha instal·lat correctament!',
+  installed: 'Instal·lat',
+  installing: 'S’està instal·lant',
+  cliInstall: 'Instal·lació amb la CLI',
+  installCliTab: 'CLI',
+  installAgentTab: 'Agent',
+  skillscatCliLabel: 'CLI de SkillsCat',
+  skillsCliLabel: 'Skills CLI',
+  agentInstallDescription: 'Copia aquesta instrucció al teu agent perquè pugui instal·lar l’skill. Revisa el contingut i els permisos abans de confirmar-ho.',
+  shareSkill: 'Comparteix l’skill',
+  shareNative: 'Comparteix',
+  shareToX: 'Comparteix a X',
+  copyUrl: 'Copia l’URL',
+  removeBookmark: 'Elimina dels preferits',
+  addBookmark: 'Afegeix als preferits',
+  securityScanLabel: 'Anàlisi de seguretat',
+  securityAiScanLabel: 'Anàlisi amb IA',
+  securityVtScanLabel: 'Anàlisi de VirusTotal',
+  securityRiskLow: 'Baix',
+  securityRiskMid: 'Mitjà',
+  securityRiskHigh: 'Alt',
+  securityRiskFatal: 'Crític',
+  securityRiskUnknown: 'Desconegut',
+  securitySummaryLabel: 'Resum',
+  securityFindingsLabel: 'Possibles riscos',
+  securityNoFindings: 'Aquesta anàlisi no ha detectat comportaments perjudicials concrets. Això no garanteix que l’skill sigui segur.',
+  securityDimensionPromptInjection: 'Injecció d’instruccions',
+  securityDimensionPrivacyExfiltration: 'Exfiltració de dades privades',
+  securityDimensionDangerousOperations: 'Operacions perilloses',
+  securityDimensionSupplyChainMalware: 'Cadena de subministrament o programari maliciós',
+  securityDimensionObfuscationEvasion: 'Ofuscació o evasió',
+  noDescription: 'No s’ha proporcionat cap descripció',
+  summaryTitle: 'Sobre aquest skill',
+  originalContentLabel: 'Contingut original · llengua no indicada',
+  originalContentNote: 'El text de l’autor es conserva sense traduir. La interfície en català no implica que aquest skill estigui traduït.',
+  derivedFromTitle: 'Basat en un skill original',
+  derivedFromDescription: 'Aquest skill es basa en l’skill original de {repo} i inclou modificacions posteriors.',
+  derivedFromAction: 'Mostra l’skill original',
+  uploaded: 'pujat',
+  updated: 'Actualitzat {time}',
+  resources: 'Recursos',
+  loadingFile: 'S’està carregant…',
+  binaryFile: 'Fitxer binari: la previsualització no està disponible',
+  binaryFileHint: 'Baixa l’skill per veure aquest fitxer',
+  categories: 'Categories',
+  privateSkillTitle: 'Skill privat',
+  privateSkillDescription: 'Aquest skill és privat. Per instal·lar-lo, primer t’has d’autenticar amb la CLI:',
+  repositoryStarsTitle: 'Estrelles del repositori',
+  repositoryStarsDescription: 'El nombre d’estrelles correspon al repositori ({repo}), no a aquest skill concret.',
+  recommendSkills: 'Skills recomanats',
+  recommendUnavailable: 'Els skills recomanats no estan disponibles temporalment.',
+  registryCliDescription: 'Instal·la des del registre de SkillsCat.',
+  privateCliDescription: 'Cal autenticar-se. Executa primer skillscat login.',
+  vercelCliDescription: 'Compatible amb Claude Code, Cursor, Codex i més de 10 agents',
+  notFoundTitle: 'Skill no trobat',
+  notFoundMessage: 'No s’ha trobat l’skill o no tens permís per veure’l.',
+  temporarilyUnavailableTitle: 'Skill no disponible temporalment',
+  temporarilyUnavailableMessage: 'Aquesta pàgina de skill no està disponible temporalment. Torna-ho a provar d’aquí a una estona.',
+} satisfies SkillPageCopy;
 
 const zhCN = {
   seoImageAlt: '{name} 技能社交预览图',
@@ -138,6 +222,8 @@ const zhCN = {
   securityDimensionObfuscationEvasion: '混淆或规避',
   noDescription: '暂无描述',
   summaryTitle: '技能简介',
+  originalContentLabel: '原始内容 · 未注明语言',
+  originalContentNote: '作者原文保留不译。界面本地化并不表示此技能已翻译。',
   derivedFromTitle: '基于原始 skill 修改',
   derivedFromDescription: '这个 skill 基于 {repo} 的原始 skill，并包含后续修改。',
   derivedFromAction: '查看原始 skill',
@@ -218,6 +304,8 @@ const ja = {
   securityDimensionObfuscationEvasion: '難読化または回避',
   noDescription: '説明はありません',
   summaryTitle: 'このスキルについて',
+  originalContentLabel: '原文 · 言語の指定なし',
+  originalContentNote: '作者の原文は翻訳せずに保持しています。表示言語の変更は、このスキルの翻訳を意味しません。',
   derivedFromTitle: '元のスキルをベースに変更されています',
   derivedFromDescription: 'このスキルは {repo} の元のスキルをベースに、後続の変更が加えられています。',
   derivedFromAction: '元のスキルを見る',
@@ -298,6 +386,8 @@ const ko = {
   securityDimensionObfuscationEvasion: '난독화 또는 우회',
   noDescription: '설명이 없습니다',
   summaryTitle: '스킬 소개',
+  originalContentLabel: '원본 콘텐츠 · 언어 미지정',
+  originalContentNote: '작성자의 원문은 번역하지 않고 유지합니다. 인터페이스 현지화가 이 스킬의 번역을 의미하지는 않습니다.',
   derivedFromTitle: '원본 스킬을 기반으로 수정됨',
   derivedFromDescription: '이 스킬은 {repo}의 원본 스킬을 기반으로 이후 수정이 적용되었습니다.',
   derivedFromAction: '원본 스킬 보기',
@@ -325,6 +415,7 @@ const ko = {
 
 const copyByLocale: Record<SupportedLocale, SkillPageCopy> = {
   en,
+  ca,
   'zh-CN': zhCN,
   ja,
   ko,
@@ -332,4 +423,16 @@ const copyByLocale: Record<SupportedLocale, SkillPageCopy> = {
 
 export function getSkillPageCopy(locale: SupportedLocale): SkillPageCopy {
   return copyByLocale[locale];
+}
+
+export function getSkillPageErrorMessage(
+  locale: SupportedLocale,
+  kind: 'not_found' | 'temporary_failure',
+  serverMessage?: string,
+): string {
+  const copy = getSkillPageCopy(locale);
+  if (kind === 'temporary_failure') return copy.temporarilyUnavailableMessage;
+  // The server's typed not-found result is deliberately indistinguishable from
+  // permission denial. Preserve that meaning without leaking its English text.
+  return locale === 'ca' ? copy.notFoundMessage : (serverMessage || copy.notFoundMessage);
 }

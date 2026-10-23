@@ -75,7 +75,7 @@
   function handleGoto() {
     const page = parseInt(gotoInput, 10);
     if (!isNaN(page) && page >= 1 && page <= totalPages && page !== currentPage) {
-      goto(getPageUrl(page));
+      goto(i18n.href(getPageUrl(page)));
       gotoInput = '';
     }
   }

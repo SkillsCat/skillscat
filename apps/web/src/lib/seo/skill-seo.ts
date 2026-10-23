@@ -131,7 +131,12 @@ export function buildSkillSeoKeywords(skill: SkillDetail): string[] {
   return keywords.slice(0, MAX_SEO_KEYWORDS);
 }
 
-export function buildSkillSeoPayload(skill: SkillDetail, locale: 'en' | 'zh-CN' = 'en'): SkillSeoPayload {
+export function buildSkillSeoPayload(skill: SkillDetail, locale: 'en' | 'zh-CN' | 'ca' = 'en'): SkillSeoPayload {
+  if (locale === 'ca') return {
+    title: trimToLength(`${skill.name} | Skill per a agents d’IA | SkillsCat`, MAX_SEO_TITLE_LENGTH),
+    description: trimToLength(`Consulta l’origen, els fitxers i les opcions d’instal·lació de ${skill.name}. El contingut de l’autor es conserva en la llengua original.`, MAX_SEO_DESCRIPTION_LENGTH),
+    keywords: [skill.name], articleTags: [],
+  };
   if (locale === 'zh-CN') return {
     title: trimToLength(`${skill.name} | AI 智能体技能 | SkillsCat`, MAX_SEO_TITLE_LENGTH),
     description: trimToLength(sanitizeSummary(skill.summary, 'zh-CN') ?? skill.description ?? skill.name, MAX_SEO_DESCRIPTION_LENGTH),

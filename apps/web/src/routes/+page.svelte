@@ -30,8 +30,10 @@
   const messages = $derived(i18n.messages());
   let displayCount = $derived(i18n.formatNumber(data.stats.totalSkills));
   const ogImageUrl = HOME_OG_IMAGE_URL;
-  const homeTitle = $derived(i18n.locale() === 'zh-CN' ? 'SkillsCat | AI 智能体技能发现与安装平台' : 'SkillsCat | AI Agent Skill Registry and CLI');
-  const homeDescription = $derived(i18n.locale() === 'zh-CN'
+  const homeTitle = $derived(i18n.locale() === 'ca' ? 'SkillsCat | Descobreix i instal·la skills per a agents d’IA' : i18n.locale() === 'zh-CN' ? 'SkillsCat | AI 智能体技能发现与安装平台' : 'SkillsCat | AI Agent Skill Registry and CLI');
+  const homeDescription = $derived(i18n.locale() === 'ca'
+    ? 'Descobreix, revisa i instal·la skills per a agents d’IA amb SkillsCat. Consulta les categories, les guies en català i el contingut original abans d’afegir un skill al teu projecte.'
+    : i18n.locale() === 'zh-CN'
     ? '在 SkillsCat 发现、安装和发布 AI 智能体技能，浏览最新收录与趋势推荐，阅读技能介绍和源文件，并通过 CLI 将技能用于 OpenClaw、Claude Code 等工作流。'
     : 'SkillsCat is an AI agent skill registry and CLI for discovering, installing, and publishing reusable skills for OpenClaw, ClawBot, Claude Code, and local agent workflows.');
   const homeStructuredData = $derived({
@@ -97,6 +99,19 @@
         </div>
       </div>
     </div>
+
+    {#if i18n.locale() === 'ca'}
+      <section class="card p-6 mb-8 leading-relaxed" aria-labelledby="catalan-start">
+        <h2 id="catalan-start" class="text-xl font-semibold mb-3">Skills reutilitzables, també en català</h2>
+        <p class="text-fg-muted mb-3">Un skill és un conjunt d’instruccions i, de vegades, scripts o plantilles que orienta un agent d’IA en una tasca. SkillsCat t’ajuda a trobar-lo, revisar-ne l’origen i instal·lar-ne el paquet complet en eines com Claude Code, Codex o OpenClaw.</p>
+        <ol class="list-decimal pl-6 space-y-2 text-fg-muted">
+          <li>Busca per tasca o explora les <a class="text-primary hover:underline" href="/ca/categories">categories</a>.</li>
+          <li>Llegeix les instruccions, la llicència i els fitxers; comprova quins permisos i quines eines necessita.</li>
+          <li>Segueix la <a class="text-primary hover:underline" href="/ca/docs/cli">guia de la CLI</a> i prova’l primer en un projecte de prova, sense secrets.</li>
+        </ol>
+        <p class="text-fg-muted mt-4">La interfície i les guies són en català; els skills de tercers conserven el contingut original. Trobaràs exemples pràctics al <a class="text-primary hover:underline" href="/ca/blog">blog en català</a> i l’abast de la traducció a <a class="text-primary hover:underline" href="/ca/catala">SkillsCat 🧡 Català</a>.</p>
+      </section>
+    {/if}
 
     <!-- Trending Section -->
     <section class="home-section">

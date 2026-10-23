@@ -56,6 +56,14 @@ afterEach(() => {
 });
 
 describe('/search page', () => {
+  it('matches translated category names on a Catalan deep-linked search', async () => {
+    resolveRegistrySearch.mockResolvedValue({ data: { skills: [], total: 0 }, cacheControl: 'public, max-age=900', cacheStatus: 'MISS' });
+    const { load } = await import('../src/routes/search/+page.server');
+    const input = createInput('https://skills.cat/ca/search?q=Rendiment');
+    const result = await load({ ...input, locals: { ...input.locals, locale: 'ca' } } as never);
+    expect(result.matchedCategories).toEqual([expect.objectContaining({ slug: 'performance' })]);
+  });
+
   it('uses paginated registry search results and maps them to skill cards', async () => {
     resolveRegistrySearch.mockResolvedValue({
       data: {

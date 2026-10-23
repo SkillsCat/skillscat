@@ -1,3 +1,4 @@
+import { localizeCategory } from '$lib/i18n/categories';
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { CATEGORIES } from '$lib/constants';
@@ -103,10 +104,14 @@ export const load: PageServerLoad = async ({
 
   const lowerQuery = query.toLowerCase();
   const matchedCategories = CATEGORIES.filter(
-    (category) =>
-      category.name.toLowerCase().includes(lowerQuery) ||
-      category.description.toLowerCase().includes(lowerQuery) ||
-      category.keywords.some((keyword) => keyword.includes(lowerQuery))
+    (category) => {
+      const localized = localizeCategory(category, locals.locale ?? 'en');
+      return category.name.toLowerCase().includes(lowerQuery)
+        || category.description.toLowerCase().includes(lowerQuery)
+        || localized.name.toLowerCase().includes(lowerQuery)
+        || localized.description.toLowerCase().includes(lowerQuery)
+        || category.keywords.some((keyword) => keyword.includes(lowerQuery));
+    }
   );
 
   const resolved = await resolveRegistrySearch(

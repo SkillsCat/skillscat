@@ -1,3 +1,4 @@
+import { stripSeoLocale } from '$lib/seo/locale-path';
 import type { RequestEvent } from '@sveltejs/kit';
 import {
   checkDurableRateLimit,
@@ -439,6 +440,7 @@ export async function runRequestSecurity(event: RequestEvent): Promise<Response 
 }
 
 export function shouldNoIndexPath(pathname: string): boolean {
+  pathname = stripSeoLocale(pathname);
   if (pathname === '/mcp' || pathname === '/a2a') {
     return true;
   }
@@ -487,6 +489,7 @@ export function shouldNoIndexPath(pathname: string): boolean {
 }
 
 export function getXRobotsTagForPath(pathname: string): string | null {
+  pathname = stripSeoLocale(pathname);
   if (!shouldNoIndexPath(pathname)) return null;
 
   if (pathname === '/search' || pathname.startsWith('/search/')) {

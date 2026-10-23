@@ -139,7 +139,7 @@
         {#each section.categories as category}
           <li>
             <NavigationMenu.Link
-              href="/category/{category.slug}"
+              href={i18n.href(`/category/${category.slug}`)}
               class="category-item"
             >
               <div class="category-icon">

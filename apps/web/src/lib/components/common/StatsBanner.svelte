@@ -17,8 +17,12 @@
     <HugeiconsIcon icon={SparklesIcon} size={14} strokeWidth={2.5} />
   </span>
   <span class="stats-text">
-    <span class="stats-count">{i18n.formatNumber(count)}</span>
-    {messages.common.skillsIndexedSuffix}
+    {#if i18n.locale() === 'ca'}
+      {i18n.t(messages.common.skillsIndexed, { count: i18n.formatNumber(count) })}
+    {:else}
+      <span class="stats-count">{i18n.formatNumber(count)}</span>
+      {messages.common.skillsIndexedSuffix}
+    {/if}
   </span>
 </div>
 

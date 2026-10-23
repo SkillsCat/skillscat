@@ -1,6 +1,7 @@
 <script lang="ts">
   import { useI18n } from '$lib/i18n/runtime';
   import ChineseDocs from '$lib/components/docs/ChineseDocs.svelte';
+  import CatalanDocs from '$lib/components/docs/CatalanDocs.svelte';
   const i18n = useI18n();
   import SEO from '$lib/components/common/SEO.svelte';
   import DocsProseCard from '$lib/components/docs/DocsProseCard.svelte';
@@ -102,6 +103,8 @@
 </script>
 {#if i18n.locale() === 'zh-CN'}
   <ChineseDocs kind="cli" />
+{:else if i18n.locale() === 'ca'}
+  <CatalanDocs kind="cli" />
 {:else}
 
 <SEO

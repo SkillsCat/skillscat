@@ -1,4 +1,4 @@
-import { stripSeoLocale, isLocalizedPublicPath, localizeHref } from '$lib/seo/locale-path';
+import { stripSeoLocale, isLocalizedPublicPath, isCatalanEditorialPath, getPathLocale, localizeHref } from '$lib/seo/locale-path';
 import { createAuth, linkAuthorToUser, type AuthEnv } from '$lib/server/auth';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { building, version } from '$app/environment';
@@ -882,8 +882,14 @@ const baseHandle: Handle = async ({ event, resolve }) => {
       event.request.method
     ),
   });
-  if (isLocalizedPublicPath(event.url.pathname)) {
-    resolvedLocale.locale = event.url.pathname.startsWith('/zh-CN') ? 'zh-CN' : 'en';
+  if (isLocalizedPublicPath(event.url.pathname) || isCatalanEditorialPath(event.url.pathname)) {
+    const pathLocale = getPathLocale(event.url.pathname);
+    const cookieLocale = event.cookies.get(LOCALE_COOKIE_NAME);
+    // Japanese and Korean retain the existing cookie-based interface on base
+    // routes; explicit SEO prefixes always take precedence over preferences.
+    resolvedLocale.locale = pathLocale === 'en' && !shouldForceDefaultLocale
+      && (cookieLocale === 'ja' || cookieLocale === 'ko') ? cookieLocale : pathLocale;
+    resolvedLocale.source = 'path';
   }
   event.locals.locale = resolvedLocale.locale;
   event.locals.localeSource = resolvedLocale.source;
@@ -1236,17 +1242,22 @@ export function withWorkersCacheSafety(response: Response): Response {
   return cloneResponseWithHeader(response, PUBLIC_HTML_CDN_CACHE_HEADER, 'no-store');
 }
 
-export const handle: Handle = async (input) => withWorkersCacheSafety(
-  withHomeAgentDiscoveryLinks(
-    input.event.request,
-    input.event.url.pathname,
-    await withMarkdownNegotiation(
+export const handle: Handle = async (input) => {
+  const response = withWorkersCacheSafety(
+    withHomeAgentDiscoveryLinks(
       input.event.request,
-      withAuthHintCookie(
+      input.event.url.pathname,
+      await withMarkdownNegotiation(
         input.event.request,
-        input.event.url.pathname,
-        await baseHandle(input)
+        withAuthHintCookie(
+          input.event.request,
+          input.event.url.pathname,
+          await baseHandle(input)
+        )
       )
     )
-  )
-);
+  );
+  return isHtmlResponse(response)
+    ? cloneResponseWithHeader(response, 'Content-Language', input.event.locals.htmlLang)
+    : response;
+};

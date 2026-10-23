@@ -1,6 +1,7 @@
 import { SITE_URL } from '$lib/seo/constants';
 import { encodeSkillSlugForPath } from '$lib/skill-path';
 import type { SkillInstallData } from '$lib/types';
+import type { SupportedLocale } from '$lib/i18n/config';
 
 export interface SkillInstallTarget {
   slug: string;
@@ -88,35 +89,42 @@ function buildSkillFilesUrl(slug: string): string {
   return `${SITE_URL}/api/skills/${encodeURIComponent(slug)}/files`;
 }
 
-function buildAgentVisibilityNote(target: SkillInstallTarget): string | null {
+function buildAgentVisibilityNote(target: SkillInstallTarget, locale: SupportedLocale): string | null {
   if (target.visibility === 'private') {
+    if (locale === 'ca') {
+      return 'Aquest skill és privat. Si cal autenticar-se, demana’m que executi npx skillscat login abans de continuar.';
+    }
     return 'This skill is private. If authentication is required, ask me to run npx skillscat login first and then continue.';
   }
 
   if (target.visibility === 'unlisted') {
+    if (locale === 'ca') {
+      return 'Aquest skill no és llistat. Fes servir l’slug exacte i l’URL de la fitxa en lloc de cercar-lo al catàleg públic.';
+    }
     return 'This skill is unlisted. Use the exact slug and page URL instead of relying on public search.';
   }
 
   return null;
 }
 
-export function buildAgentInstallPrompt(target: SkillInstallTarget): string {
+export function buildAgentInstallPrompt(target: SkillInstallTarget, locale: SupportedLocale = 'en'): string {
   const skillscatCommand = buildSkillscatInstallCommand(target);
-  const visibilityNote = buildAgentVisibilityNote(target);
+  const visibilityNote = buildAgentVisibilityNote(target, locale);
+  const catalan = locale === 'ca';
   const lines = [
-    'Install this SkillsCat skill into the current workspace.',
+    catalan ? 'Instal·la aquest skill de SkillsCat a l’espai de treball actual.' : 'Install this SkillsCat skill into the current workspace.',
     '',
     `Skill: ${resolveSkillName(target) || target.slug}`,
     `Slug: ${target.slug}`,
   ];
 
   if (target.repoOwner && target.repoName) {
-    lines.push(`Repository: ${target.repoOwner}/${target.repoName}`);
+    lines.push(`${catalan ? 'Repositori' : 'Repository'}: ${target.repoOwner}/${target.repoName}`);
   }
 
-  lines.push(`Skill page: ${buildSkillPageUrl(target.slug)}`);
+  lines.push(`${catalan ? 'Fitxa de l’skill' : 'Skill page'}: ${buildSkillPageUrl(target.slug)}`);
   lines.push('');
-  lines.push('Command:');
+  lines.push(catalan ? 'Ordre:' : 'Command:');
   lines.push(`${skillscatCommand} --yes`);
 
   if (visibilityNote) {
@@ -125,10 +133,12 @@ export function buildAgentInstallPrompt(target: SkillInstallTarget): string {
   }
 
   lines.push('');
-  lines.push('If CLI installation is not possible or the command times out, use this SkillsCat bundle endpoint instead and preserve nested file paths exactly:');
+  lines.push(catalan
+    ? 'Si no es pot instal·lar amb la CLI o l’ordre supera el temps d’espera, utilitza aquest punt d’accés al paquet de SkillsCat i conserva exactament les rutes dels fitxers, inclosos els subdirectoris:'
+    : 'If CLI installation is not possible or the command times out, use this SkillsCat bundle endpoint instead and preserve nested file paths exactly:');
   lines.push(buildSkillFilesUrl(target.slug));
   lines.push('');
-  lines.push('After installing, tell me where the skill was written and what changed.');
+  lines.push(catalan ? 'Després d’instal·lar-lo, indica’m on s’ha desat l’skill i quins canvis s’han fet.' : 'After installing, tell me where the skill was written and what changed.');
 
   return lines.join('\n');
 }

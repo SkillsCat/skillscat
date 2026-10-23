@@ -5,6 +5,7 @@
   import DeferredSearchBox from '$lib/components/layout/DeferredSearchBox.svelte';
   import ThemeToggle from '$lib/components/ui/ThemeToggle.svelte';
   import UserMenu from '$lib/components/common/UserMenu.svelte';
+  import { stripSeoLocale } from '$lib/seo/locale-path';
   import { buildSkillPath } from '$lib/skill-path';
   import { useI18n } from '$lib/i18n/runtime';
   import type { CurrentUser } from '$lib/types';
@@ -45,7 +46,7 @@
 
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
-  const isSearchNavigating = $derived($navigating?.to?.url.pathname === '/search');
+  const isSearchNavigating = $derived(stripSeoLocale($navigating?.to?.url.pathname ?? '') === '/search');
 
   // Close mobile menu on navigation
   $effect(() => {
@@ -58,18 +59,18 @@
     // Load the auth client on demand so anonymous visitors never pay for it.
     const { signOut } = await import('$lib/auth-client');
     await signOut();
-    await goto('/', { invalidateAll: true });
+    await goto(i18n.href('/'), { invalidateAll: true });
   }
 
   function handleSearch(query: string) {
     if (query.trim()) {
-      goto(`/search?q=${encodeURIComponent(query.trim())}`);
+      goto(i18n.href(`/search?q=${encodeURIComponent(query.trim())}`));
     }
   }
 
   function handleSkillSuggestionSelect(skill: { slug: string }) {
     mobileMenuOpen = false;
-    goto(buildSkillPath(skill.slug));
+    goto(i18n.href(buildSkillPath(skill.slug)));
   }
 
   async function openSubmitDialog() {
@@ -105,11 +106,12 @@
   }
 
   function matchesPath(basePath: string) {
-    return $page.url.pathname === basePath || $page.url.pathname.startsWith(`${basePath}/`);
+    const pathname = stripSeoLocale($page.url.pathname);
+    return pathname === basePath || pathname.startsWith(`${basePath}/`);
   }
 
   function matchesCategoryPath() {
-    return $page.url.pathname === '/categories' || matchesPath('/category');
+    return matchesPath('/categories') || matchesPath('/category');
   }
 </script>
 

@@ -954,6 +954,8 @@ const ko = {
 
 const copyByLocale: Record<SupportedLocale, LegalCopy> = {
   en,
+  // Legal documents are not translated into Catalan yet; retain the English original.
+  ca: en,
   'zh-CN': zhCN,
   ja,
   ko,

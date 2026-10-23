@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { isLocalizedPublicPath, localizeSeoUrl, localizeStructuredData, stripSeoLocale } from '$lib/seo/locale-path';
+  import { getPathLocale, isLocalizedPublicPath, localizeSeoUrl, localizeStructuredData, stripSeoLocale } from '$lib/seo/locale-path';
   import { buildOgImageUrl, HOME_OG_IMAGE_URL, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH } from '$lib/seo/og';
   import { SITE_NAME, SITE_URL } from '$lib/seo/constants';
   import { getSeoLocaleMetadata } from '$lib/i18n/seo';
@@ -64,7 +64,11 @@
       ? (url.startsWith('http://') || url.startsWith('https://') ? url : `${siteUrl}${url}`)
       : siteUrl
   );
-  const fullUrl = $derived(localizeSeoUrl(rawUrl, page.url.pathname.startsWith('/zh-CN') ? 'zh-CN' : 'en'));
+  const pathLocale = $derived(getPathLocale(page.url.pathname));
+  const isSkillPage = $derived(stripSeoLocale(page.url.pathname).startsWith('/skills/'));
+  const canonicalLocale = $derived(pathLocale === 'ca' && isSkillPage ? 'en' : pathLocale);
+  const fullUrl = $derived(localizeSeoUrl(rawUrl, canonicalLocale));
+  const hasCatalan = $derived(isLocalizedPublicPath(page.url.pathname) && !isSkillPage);
   const hasChinese = $derived(isLocalizedPublicPath(page.url.pathname)
     && (!stripSeoLocale(page.url.pathname).startsWith('/skills/') || page.data.hasChineseIntroduction === true));
   const fullImage = $derived(
@@ -108,7 +112,7 @@
     structuredData === undefined ? (noindex ? null : defaultStructuredData) : structuredData
   );
   const safeJsonLd = $derived(
-    jsonLd ? JSON.stringify(localizeStructuredData(jsonLd, page.url.pathname.startsWith('/zh-CN') ? 'zh-CN' : 'en', page.data.hasChineseIntroduction === true ? `https://skills.cat${stripSeoLocale(page.url.pathname)}` : undefined)).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') : ''
+    jsonLd ? JSON.stringify(localizeStructuredData(jsonLd, canonicalLocale, page.data.hasChineseIntroduction === true ? `https://skills.cat${stripSeoLocale(page.url.pathname)}` : undefined)).replace(/</g, '\\u003c').replace(/>/g, '\\u003e') : ''
   );
 </script>
 
@@ -165,9 +169,14 @@
   {#if hasCanonical}
     <link rel="canonical" href={i18n.href(fullUrl)} />
   {/if}
-  {#if hasCanonical && !noindex && hasChinese}
+  {#if hasCanonical && !noindex && (hasChinese || hasCatalan)}
     <link rel="alternate" hreflang="en" href={i18n.href(localizeSeoUrl(rawUrl, 'en'))} />
-    <link rel="alternate" hreflang="zh-CN" href={i18n.href(localizeSeoUrl(rawUrl, 'zh-CN'))} />
+    {#if hasChinese}
+      <link rel="alternate" hreflang="zh-CN" href={localizeSeoUrl(rawUrl, 'zh-CN')} />
+    {/if}
+    {#if hasCatalan}
+      <link rel="alternate" hreflang="ca" href={localizeSeoUrl(rawUrl, 'ca')} />
+    {/if}
     <link rel="alternate" hreflang="x-default" href={i18n.href(localizeSeoUrl(rawUrl, 'en'))} />
   {/if}
   {#if fullPrevUrl}

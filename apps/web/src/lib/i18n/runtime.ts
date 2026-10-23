@@ -1,4 +1,4 @@
-import { localizeHref, isLocalizedPublicPath } from '$lib/seo/locale-path';
+import { localizeHref, isLocalizedPublicPath, isCatalanEditorialPath, getPathLocale, stripSeoLocale } from '$lib/seo/locale-path';
 import { browser } from '$app/environment';
 import { invalidateAll } from '$app/navigation';
 import { getContext, setContext } from 'svelte';
@@ -27,11 +27,29 @@ export interface I18nRuntime {
   switchLocale: (nextLocale: SupportedLocale) => Promise<void>;
 }
 
-function setLocaleCookie(locale: SupportedLocale): void {
+export function setLocaleCookie(locale: SupportedLocale): void {
   if (!browser) return;
 
   const secure = window.location.protocol === 'https:' ? '; Secure' : '';
   document.cookie = `${LOCALE_COOKIE_NAME}=${encodeURIComponent(locale)}; Path=/; Max-Age=${LOCALE_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax${secure}`;
+}
+
+// Remember explicit public URLs in both directions, including browser history
+// restoration. Japanese/Korean still use cookies on unprefixed pages; an English
+// documentation fallback must not erase those existing preferences.
+function isDocsPath(pathname: string): boolean {
+  return /^\/docs(?:\/cli|\/openclaw)?\/?$/.test(stripSeoLocale(pathname));
+}
+
+export function rememberPathLocale(pathname: string, renderedLocale: SupportedLocale): void {
+  if (!browser || (!isLocalizedPublicPath(pathname) && !isCatalanEditorialPath(pathname))) return;
+  const pathLocale = getPathLocale(pathname);
+  const savedLocale = document.cookie.split(';').map((part) => part.trim())
+    .find((part) => part.startsWith(`${LOCALE_COOKIE_NAME}=`))?.slice(LOCALE_COOKIE_NAME.length + 1);
+  if (pathLocale === 'en' && renderedLocale === 'en' && isDocsPath(pathname)
+    && (savedLocale === 'ja' || savedLocale === 'ko')) return;
+  const preference = pathLocale === 'en' ? renderedLocale : pathLocale;
+  if (savedLocale !== preference) setLocaleCookie(preference);
 }
 
 export function createI18nRuntime(input: {
@@ -69,12 +87,21 @@ export function createI18nRuntime(input: {
     switchLocale: async (nextLocale) => {
       if (nextLocale === input.getLocale()) return;
 
-      if (browser && (nextLocale === 'en' || nextLocale === 'zh-CN') && isLocalizedPublicPath(window.location.pathname)) {
+      setLocaleCookie(nextLocale);
+      // Editorial content has no translated equivalent. Japanese/Korean docs
+      // also have no localized route: their unprefixed SSR fallback is English.
+      // In both cases use the chosen homepage instead of resetting the selector.
+      const needsDocsFallback = browser && (nextLocale === 'ja' || nextLocale === 'ko')
+        && isDocsPath(window.location.pathname);
+      if (browser && (isCatalanEditorialPath(window.location.pathname) || needsDocsFallback)) {
+        window.location.assign(localizeHref('/', nextLocale));
+        return;
+      }
+      if (browser && isLocalizedPublicPath(window.location.pathname)) {
         window.location.assign(localizeHref(window.location.pathname + window.location.search + window.location.hash, nextLocale, true));
         return;
       }
       input.setLocale(nextLocale);
-      setLocaleCookie(nextLocale);
 
       if (browser) {
         document.documentElement.lang = getHtmlLang(nextLocale);

@@ -12,6 +12,7 @@ export function normalizeLocale(value: string | null | undefined): SupportedLoca
   const tag = normalizeLanguageTag(value);
   if (!tag) return null;
 
+  if (tag === 'ca' || tag.startsWith('ca-')) return 'ca';
   if (tag === 'en' || tag.startsWith('en-')) return 'en';
   if (tag === 'ja' || tag.startsWith('ja-')) return 'ja';
   if (tag === 'ko' || tag.startsWith('ko-')) return 'ko';
@@ -46,7 +47,7 @@ export function getLocaleFromAcceptLanguage(header: string | null | undefined): 
         quality: parseQuality(part),
       };
     })
-    .filter((candidate): candidate is { locale: SupportedLocale; quality: number } => Boolean(candidate.locale))
+    .filter((candidate): candidate is { locale: SupportedLocale; quality: number } => Boolean(candidate.locale) && candidate.quality > 0 && candidate.quality <= 1)
     .sort((a, b) => b.quality - a.quality);
 
   return candidates[0]?.locale ?? null;

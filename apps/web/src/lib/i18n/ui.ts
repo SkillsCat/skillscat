@@ -21,6 +21,24 @@ const en = {
 
 type UiCopy = DeepLocalized<typeof en>;
 
+const ca = {
+  visibility: {
+    public: 'Públic',
+    private: 'Privat',
+    unlisted: 'No llistat',
+  },
+  badges: {
+    uploaded: 'Pujat',
+    verified: 'Verificada',
+    organization: 'Organització',
+    owner: 'Propietari',
+    admin: 'Administrador',
+    member: 'Membre',
+    connected: 'Connexió activa',
+    github: 'GitHub',
+  },
+} satisfies UiCopy;
+
 const zhCN = {
   visibility: {
     public: '公开',
@@ -77,6 +95,7 @@ const ko = {
 
 const copyByLocale: Record<SupportedLocale, UiCopy> = {
   en,
+  ca,
   'zh-CN': zhCN,
   ja,
   ko,

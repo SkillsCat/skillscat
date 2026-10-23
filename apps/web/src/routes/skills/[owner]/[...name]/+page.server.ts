@@ -393,7 +393,7 @@ export const load: PageServerLoad = async ({ params, platform, locals, request, 
     // Avoid sending both raw markdown and rendered HTML in the same data payload.
     const skillForClient: SkillDetail = hasReadme ? { ...localizedSkill, readme: null } : localizedSkill;
     const install = buildSkillInstallData(skillForClient);
-    const seo = buildSkillSeoPayload(localizedSkill, locals.locale === 'zh-CN' ? 'zh-CN' : 'en');
+    const seo = buildSkillSeoPayload(localizedSkill, locals.locale === 'zh-CN' || locals.locale === 'ca' ? locals.locale : 'en');
 
     setPublicPageCache({
       setHeaders,

@@ -31,10 +31,10 @@ export function formatRelativeTimestamp(
   }
 
   const months = Math.floor(days / 30);
-  if (months < 12) {
-    return i18n.t(messages.common.relativeMonthsAgo, { count: months });
+  if (days < 365) {
+    return i18n.t(months === 1 ? messages.common.relativeMonthAgo : messages.common.relativeMonthsAgo, { count: months });
   }
 
   const years = Math.floor(days / 365);
-  return i18n.t(messages.common.relativeYearsAgo, { count: years });
+  return i18n.t(years === 1 ? messages.common.relativeYearAgo : messages.common.relativeYearsAgo, { count: years });
 }

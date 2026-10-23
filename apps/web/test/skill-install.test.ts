@@ -111,6 +111,32 @@ describe('splitShellCommand', () => {
 });
 
 describe('buildAgentInstallPrompt', () => {
+  it.each(['public', 'private', 'unlisted'] as const)('localizes the Catalan %s prompt without changing installation commands or bundle paths', (visibility) => {
+    const target = {
+      slug: 'testowner/nested-skill',
+      skillName: 'Original Skill Name',
+      repoOwner: 'testowner',
+      repoName: 'multi-skill-repo',
+      skillPath: 'skills/nested',
+      sourceType: 'github' as const,
+      visibility,
+    };
+    const prompt = buildAgentInstallPrompt(target, 'ca');
+    const english = buildAgentInstallPrompt(target);
+    expect(prompt).toContain('Instal·la aquest skill de SkillsCat');
+    expect(prompt).toContain('Skill: Original Skill Name');
+    expect(prompt).toContain('Repositori: testowner/multi-skill-repo');
+    expect(prompt).toContain('Ordre:\nnpx skillscat add testowner/nested-skill --yes');
+    expect(prompt).not.toContain('--skill');
+    expect(prompt.match(/https:\/\/\S+/g)).toEqual(english.match(/https:\/\/\S+/g));
+    if (visibility === 'private') {
+      expect(prompt).toContain('Aquest skill és privat.');
+      expect(prompt).toContain('npx skillscat login');
+    } else if (visibility === 'unlisted') {
+      expect(prompt).toContain('Aquest skill no és llistat.');
+    }
+  });
+
   it('uses the slug-based SkillsCat command for public GitHub skills', () => {
     const prompt = buildAgentInstallPrompt({
       slug: 'testowner/testrepo/nested-skill',
