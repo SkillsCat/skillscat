@@ -95,3 +95,36 @@ restoration. Isolated SvelteKit `__data.json` smoke checks confirm the root
 layout's URL invalidation dependency, explicit path precedence over conflicting
 cookies, translated-category search, and empty/missing-resource responses. These
 tests do not certify real browser history, visual layout or mobile interaction.
+
+## Local PR review — 2026-10-24
+
+Reviewed PR #1 at `898d9b541f1209496dd936cb0515399586a0a01e` against
+`df1ab2ef51d14d496d43d20b982ff7e0b3e8064f`. Two browser-reproduced issues were fixed:
+
+- English CLI/OpenClaw section fragments had no matching Catalan targets. The
+  Catalan guides now expose all 13 shared section IDs and keep their original
+  Catalan aliases. Switching at `#install-skills` now scrolls to the installation
+  section instead of returning to the top.
+- The blog's “Llegeix la guia” action was an inaccessible, noninteractive span.
+  It is now a link with an article-specific accessible name; mouse activation
+  and keyboard Enter both open the intended article.
+
+Local checks passed: typecheck (0 errors/warnings), lint, Cloudflare build,
+1,036 Web tests and 191 CLI tests. The previously reported submit-test timeout
+did not reproduce in either local Web run.
+
+Real Chromium checks covered 1440px desktop and 390px mobile layouts, 17 public
+and error routes, language switching, query/fragment retention, history, mobile
+navigation and keyboard activation. A fresh local D1/R2 environment with 55
+synthetic skills additionally exercised the compiled Worker: list pagination,
+page jumps, successful skill details, original content, slug-first install
+commands, and English/Catalan HTML cache MISS/HIT isolation.
+
+[Browser evidence and environment limits](catalan-review-2026-10-24/browser-evidence.json)
+and desktop/mobile screenshots are saved beside this document. No production
+bindings or production business data were used. Real OAuth, authenticated writes,
+Service Worker behavior and native-speaker certification remain outside this
+verification. The local environment intentionally omitted GitHub OAuth secrets;
+one access-telemetry request also kept Chromium's network-idle wait open despite
+a logged 200 response. No remote PR CI workflow exists; no CI pass, merge or
+deployment is claimed.

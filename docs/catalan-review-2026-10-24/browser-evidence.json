@@ -1,0 +1,510 @@
+{
+  "reviewDate": "2026-10-24 Asia/Singapore",
+  "reviewedHead": "898d9b541f1209496dd936cb0515399586a0a01e",
+  "base": "df1ab2ef51d14d496d43d20b982ff7e0b3e8064f",
+  "browser": "Chromium (installed Google Chrome)",
+  "browserVersion": "155.0.8059.84",
+  "viewports": [
+    {
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "isolation": {
+    "productionBindings": false,
+    "productionRequests": false,
+    "serviceWorkers": "blocked",
+    "externalBrowserRequests": "blocked",
+    "worker": "local workerd",
+    "database": "fresh local D1, repository migrations, 55 synthetic public skills",
+    "r2": "fresh local R2",
+    "auth": "no real OAuth or account session"
+  },
+  "checks": {
+    "types": "0 errors, 0 warnings",
+    "lint": "passed",
+    "web": "1036 passed",
+    "cli": "191 passed",
+    "build": "passed"
+  },
+  "fixes": [
+    {
+      "issue": "English CLI/OpenClaw section fragments have no Catalan targets",
+      "before": {
+        "path": "/ca/docs/cli#install-skills",
+        "targetCount": 0,
+        "scrollY": 0
+      },
+      "after": {
+        "path": "/ca/docs/cli#install-skills",
+        "targetCount": 1,
+        "scrollY": 1260
+      },
+      "docAnchors": [
+        {
+          "guide": "cli",
+          "ids": [
+            "quick-start",
+            "search-and-inspect",
+            "install-skills",
+            "manage-installs",
+            "auth-and-config",
+            "publish-and-submit",
+            "command-reference"
+          ],
+          "missing": []
+        },
+        {
+          "guide": "openclaw",
+          "ids": [
+            "auto-install",
+            "host-cli-install",
+            "registry-override",
+            "paths-and-layout",
+            "private-skills",
+            "troubleshooting"
+          ],
+          "missing": []
+        }
+      ]
+    },
+    {
+      "issue": "Read-guide CTA is an aria-hidden span",
+      "before": {
+        "path": "/ca/blog",
+        "readLinks": 0,
+        "click": "remains on index"
+      },
+      "after": {
+        "mouse": "opens intended article in compiled local Worker",
+        "keyboard": "Enter opens intended article in Vite browser"
+      }
+    }
+  ],
+  "devRouteSmoke": [
+    {
+      "path": "/ca",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "Una plataforma oberta per descobrir, compartir i instal·lar skills per a agents d’IA."
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca"
+    },
+    {
+      "path": "/ca/docs",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "Documentació de SkillsCat"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/docs"
+    },
+    {
+      "path": "/ca/docs/cli",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "Guia de la CLI de SkillsCat"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/docs/cli"
+    },
+    {
+      "path": "/ca/docs/openclaw",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "Utilitza SkillsCat amb OpenClaw"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/docs/openclaw"
+    },
+    {
+      "path": "/ca/catala",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "SkillsCat 🧡 Català"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/catala"
+    },
+    {
+      "path": "/ca/blog/installar-skills-amb-seguretat",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "Abans d’instal·lar un skill: una revisió pràctica"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/blog/installar-skills-amb-seguretat"
+    },
+    {
+      "path": "/ca/blog/localitzar-un-flux-de-treball",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "Un flux de localització al català que es pugui revisar"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/blog/localitzar-un-flux-de-treball"
+    },
+    {
+      "path": "/ca/blog/crear-i-compartir-un-skill-en-catala",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "Crea i comparteix un skill amb instruccions en català"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/blog/crear-i-compartir-un-skill-en-catala"
+    },
+    {
+      "path": "/ca/categories",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "Categories"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/categories"
+    },
+    {
+      "path": "/ca/category/i18n",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "Internacionalització"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/category/i18n"
+    },
+    {
+      "path": "/ca/search?q=mem%C3%B2ria",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        " Cerca"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/search?q=mem%C3%B2ria"
+    },
+    {
+      "path": "/ca/recent",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        " Afegits recentment"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/recent"
+    },
+    {
+      "path": "/ca/top",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        " Amb més estrelles"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/top"
+    },
+    {
+      "path": "/ca/trending",
+      "status": 200,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        " Skills en tendència"
+      ],
+      "overflow": false,
+      "canonical": "https://skills.cat/ca/trending"
+    },
+    {
+      "path": "/ca/skills/review/missing",
+      "status": 404,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "404"
+      ],
+      "overflow": false,
+      "canonical": null
+    },
+    {
+      "path": "/ca/blog/missing",
+      "status": 404,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "404"
+      ],
+      "overflow": false,
+      "canonical": null
+    },
+    {
+      "path": "/ca/search?page=101",
+      "status": 404,
+      "language": "ca",
+      "lang": "ca",
+      "h1": [
+        "404"
+      ],
+      "overflow": false,
+      "canonical": null
+    }
+  ],
+  "workerCacheChecks": [
+    {
+      "path": "/ca/recent",
+      "status": 200,
+      "language": "ca",
+      "cache": "HIT",
+      "cacheControl": "no-store",
+      "title": "Afegits recentment - SkillsCat",
+      "hasOriginal": false
+    },
+    {
+      "path": "/ca/recent",
+      "status": 200,
+      "language": "ca",
+      "cache": "HIT",
+      "cacheControl": "no-store",
+      "title": "Afegits recentment - SkillsCat",
+      "hasOriginal": false
+    },
+    {
+      "path": "/recent",
+      "status": 200,
+      "language": "en",
+      "cache": "MISS",
+      "cacheControl": "no-store",
+      "title": "Recently Added - SkillsCat",
+      "hasOriginal": false
+    },
+    {
+      "path": "/ca/skills/review/skill-6",
+      "status": 200,
+      "language": "ca",
+      "cache": "MISS",
+      "cacheControl": "no-store",
+      "title": "Review Skill 6 | Skill per a agents d’IA | SkillsCat",
+      "hasOriginal": true
+    },
+    {
+      "path": "/ca/skills/review/skill-6",
+      "status": 200,
+      "language": "ca",
+      "cache": "HIT",
+      "cacheControl": "no-store",
+      "title": "Review Skill 6 | Skill per a agents d’IA | SkillsCat",
+      "hasOriginal": true
+    },
+    {
+      "path": "/skills/review/skill-6",
+      "status": 200,
+      "language": "en",
+      "cache": "MISS",
+      "cacheControl": "no-store",
+      "title": "Review Skill 6 | i18n AI Agent Skill | SkillsCat",
+      "hasOriginal": true
+    }
+  ],
+  "historyChecks": [
+    {
+      "label": "English",
+      "url": "http://127.0.0.1:5180/recent",
+      "lang": "en",
+      "cookie": "en",
+      "h1": [
+        " Recently Added"
+      ]
+    },
+    {
+      "label": "back Catalan",
+      "url": "http://127.0.0.1:5180/ca/recent",
+      "lang": "ca",
+      "cookie": "ca",
+      "h1": [
+        " Afegits recentment"
+      ]
+    },
+    {
+      "label": "forward English",
+      "url": "http://127.0.0.1:5180/recent",
+      "lang": "en",
+      "cookie": "en",
+      "h1": [
+        " Recently Added"
+      ]
+    }
+  ],
+  "clientNavigation": [
+    {
+      "label": "cli",
+      "url": "http://127.0.0.1:5179/ca/docs/cli",
+      "lang": "ca",
+      "cookie": "ca",
+      "h1": [
+        "Guia de la CLI de SkillsCat"
+      ]
+    },
+    {
+      "label": "Japanese docs fallback",
+      "url": "http://127.0.0.1:5179/",
+      "lang": "ja",
+      "cookie": "ja",
+      "h1": [
+        "AI Agent Skills を見つけ、共有し、インストールできるオープンプラットフォームです。"
+      ]
+    },
+    {
+      "label": "Japanese to docs",
+      "url": "http://127.0.0.1:5179/docs",
+      "lang": "en",
+      "cookie": "ja",
+      "h1": [
+        "SkillsCat Documentation"
+      ]
+    },
+    {
+      "label": "back to Japanese",
+      "url": "http://127.0.0.1:5179/",
+      "lang": "ja",
+      "cookie": "ja",
+      "h1": [
+        "AI Agent Skills を見つけ、共有し、インストールできるオープンプラットフォームです。"
+      ]
+    },
+    {
+      "label": "page 2",
+      "url": "http://127.0.0.1:5180/ca/recent?page=2",
+      "lang": "ca",
+      "cookie": "ca",
+      "h1": [
+        " Afegits recentment"
+      ]
+    },
+    {
+      "label": "jump page 3",
+      "url": "http://127.0.0.1:5180/ca/recent?page=3",
+      "lang": "ca",
+      "cookie": "ca",
+      "h1": [
+        " Afegits recentment"
+      ]
+    }
+  ],
+  "pageErrors": [],
+  "failedRequests": [],
+  "observations": [
+    "One local skill-detail reload did not reach Playwright networkidle: the access telemetry request remained pending in Chromium despite a 200 response and local Worker log. The rendered page and controls were ready; screenshots use rendered content readiness.",
+    "Local Better Auth warned about absent GitHub OAuth client credentials, intentionally omitted from this isolated environment."
+  ],
+  "limitations": [
+    "Native-speaker editorial certification not performed",
+    "Real GitHub OAuth, authenticated writes, and production infrastructure not exercised",
+    "Service worker registration deliberately blocked for browser isolation",
+    "No PR workflow exists; no remote CI pass claimed"
+  ],
+  "workerResponseSummary": {
+    "total": 599,
+    "statusCounts": {
+      "200": 599
+    },
+    "pageAndDataResponses": [
+      {
+        "url": "http://127.0.0.1:5180/ca/recent",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/ca/recent/__data.json?page=2&x-sveltekit-invalidated=11",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/ca/recent/__data.json?page=3&x-sveltekit-invalidated=11",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/ca/skills/review/skill-6/__data.json?x-sveltekit-invalidated=11",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/api/skills/access",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/docs/cli",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/ca/docs/cli",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/docs/openclaw",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/ca/docs/openclaw",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/ca/blog",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/ca/blog/installar-skills-amb-seguretat/__data.json?x-sveltekit-invalidated=10",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/ca/recent",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/recent",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/ca/recent",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/recent",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/ca/blog",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/ca/skills/review/skill-6",
+        "status": 200
+      },
+      {
+        "url": "http://127.0.0.1:5180/api/skills/access",
+        "status": 200
+      }
+    ]
+  }
+}

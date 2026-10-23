@@ -38,25 +38,26 @@
       <h2>Què volen dir les llistes del catàleg?</h2>
       <p>Els skills recents són els incorporats recentment al catàleg, no necessàriament els creats fa poc. Les tendències i les classificacions serveixen per descobrir contingut; comprova sempre que el paquet resolgui la teva tasca i sigui adequat per al teu agent.</p>
     {:else if kind === 'cli'}
-      <h2 id="preparacio">Abans de començar</h2>
+      <!-- Shared section IDs keep language-switch fragments usable; retain the original Catalan aliases. -->
+      <h2 id="quick-start"><span id="preparacio">Abans de començar</span></h2>
       <p>Necessites un terminal amb Node.js i <code>npx</code> disponibles. <code>npx</code> pot descarregar i executar la CLI: revisa el paquet i utilitza un entorn de confiança. Aquesta guia és en català; les ordres, els identificadors i els missatges del programa no es tradueixen.</p>
       <p>Executa <code>npx skillscat --help</code> per consultar les opcions de la versió que utilitzes. Les ordres que instal·len, actualitzen, eliminen o publiquen contingut tenen efectes reals: llegeix les confirmacions i no les executis només per provar la documentació.</p>
 
-      <h2 id="cerca">Cerca i inspecciona</h2>
+      <h2 id="search-and-inspect"><span id="cerca">Cerca i inspecciona</span></h2>
       <pre><code>npx skillscat search "revisió de textos"
 npx skillscat search "localization" --limit 10
 npx skillscat info owner/repo
 npx skillscat add owner/repo --list</code></pre>
       <p>Substitueix <code>owner/repo</code> pel repositori real. <code>info</code> i <code>--list</code> ajuden a veure què conté un repositori abans d’instal·lar. Llegeix també els fitxers d’origen; aquestes ordres no auditen els scripts ni demostren que siguin segurs.</p>
 
-      <h2 id="instal-lacio">Instal·la amb l’slug exacte</h2>
+      <h2 id="install-skills"><span id="instal-lacio">Instal·la amb l’slug exacte</span></h2>
       <pre><code>npx skillscat add owner/my-skill
 npx skillscat add owner/my-skill --agent openclaw</code></pre>
       <p><code>owner/my-skill</code> és un exemple: substitueix-lo per l’slug de la fitxa. Aquesta és la via preferida per als skills ja publicats, també quan provenen d’un repositori amb diversos skills o d’una carpeta imbricada. No dedueixis l’slug a partir del nom del repositori.</p>
       <p>Segueix les indicacions interactives per triar l’agent i l’abast de la instal·lació. <code>--agent</code> selecciona un agent concret i <code>--global</code> instal·la al directori de l’usuari en lloc del projecte. Per a la primera prova, prefereix un projecte aïllat. <code>--force</code> pot sobreescriure fitxers i <code>--yes</code> omet confirmacions; no són opcions necessàries per començar.</p>
       <p>Si desenvolupes un paquet propi, <code>npx skillscat add ./el-meu-skill</code> permet instal·lar una carpeta local. Si se’t proposa publicar-la, tracta aquesta proposta com una acció separada i confirma-la només si vols compartir el contingut.</p>
 
-      <h2 id="gestio">Consulta i gestiona les instal·lacions</h2>
+      <h2 id="manage-installs"><span id="gestio">Consulta i gestiona les instal·lacions</span></h2>
       <pre><code>npx skillscat list
 npx skillscat list --all
 npx skillscat update --check
@@ -64,7 +65,7 @@ npx skillscat update my-skill
 npx skillscat remove my-skill</code></pre>
       <p>Fes servir el nom de la instal·lació que mostra <code>list</code> en lloc de <code>my-skill</code>. <code>--check</code> comprova si hi ha actualitzacions sense instal·lar-les. Abans d’actualitzar, desa les adaptacions locals i revisa els canvis del paquet. Eliminar un skill no reverteix els efectes de les accions que l’agent ja hagi executat.</p>
 
-      <h2 id="autenticacio">Inicia sessió i comprova la configuració</h2>
+      <h2 id="auth-and-config"><span id="autenticacio">Inicia sessió i comprova la configuració</span></h2>
       <pre><code>npx skillscat login
 npx skillscat whoami
 npx skillscat config get registry
@@ -72,12 +73,15 @@ npx skillscat logout</code></pre>
       <p><code>login</code> inicia el flux d’autenticació; segueix les indicacions del terminal i comprova el domini abans d’autoritzar. Cal una sessió vàlida per publicar, proposar repositoris o accedir a contingut privat. No enganxis tokens en incidències, captures ni exemples compartits.</p>
       <p>El registre natiu és <code>https://skills.cat/registry</code>. No el confonguis amb l’entrada compatible amb ClawHub, <code>https://skills.cat/openclaw</code>. No cal canviar el registre per triar la llengua del lloc web.</p>
 
-      <h2 id="publicacio">Proposa un repositori o publica un paquet propi</h2>
+      <h2 id="publish-and-submit"><span id="publicacio">Proposa un repositori o publica un paquet propi</span></h2>
       <pre><code>npx skillscat submit https://github.com/owner/repo
 npx skillscat publish --help
 npx skillscat publish ./el-meu-skill</code></pre>
       <p><code>submit</code> proposa un repositori públic de GitHub per a la indexació. <code>publish</code> puja un paquet local i mostra una vista prèvia abans de confirmar. Revisa el nom, l’slug, els fitxers i la visibilitat; aquesta pot dependre del compte o de l’organització, i no has de donar per fet que el paquet serà públic. L’slug no es pot canviar després de publicar.</p>
       <p>Comprova les llicències i elimina credencials i dades personals. No executis totes dues ordres si només necessites una de les dues vies. Consulta el <a href="/ca/blog/crear-i-compartir-un-skill-en-catala">tutorial de creació</a> per preparar un exemple en català.</p>
+
+      <h2 id="command-reference">Referència de les ordres</h2>
+      <p>Consulta <code>npx skillscat --help</code> per veure les ordres disponibles i <code>npx skillscat add --help</code> per llegir les opcions d’instal·lació de la versió que utilitzes.</p>
 
       <h2 id="problemes">Si alguna cosa falla</h2>
       <ul>
@@ -87,27 +91,28 @@ npx skillscat publish ./el-meu-skill</code></pre>
         <li><strong>Resultat inesperat:</strong> revisa les dependències i les instruccions originals; instal·lar un paquet no configura automàticament les eines externes que necessita.</li>
       </ul>
     {:else}
-      <h2 id="instal-lar">Instal·la des de l’espai de treball d’OpenClaw</h2>
+      <h2 id="host-cli-install"><span id="instal-lar">Instal·la des de l’espai de treball d’OpenClaw</span></h2>
       <p>Primer revisa el paquet i copia l’slug exacte de la fitxa. Obre un terminal dins de l’espai de treball on vols utilitzar-lo i substitueix el marcador de posició de l’exemple:</p>
       <pre><code>npx skillscat add owner/my-skill --agent openclaw</code></pre>
       <p>La CLI instal·la el paquet complet al format de directoris d’OpenClaw. Això no executa per tu tots els passos de configuració indicats pel seu autor ni concedeix automàticament permisos perquè l’agent executi scripts.</p>
 
-      <h2 id="directoris">Directori del projecte o de l’usuari</h2>
+      <h2 id="paths-and-layout"><span id="directoris">Directori del projecte o de l’usuari</span></h2>
       <ul>
         <li><strong>Projecte:</strong> els paquets s’instal·len dins del directori <code>skills/</code> de l’espai de treball.</li>
         <li><strong>Global:</strong> amb <code>--global</code>, el directori habitual és <code>~/.openclaw/skills/</code>.</li>
       </ul>
       <p>Per treballar en equip, prefereix l’abast del projecte i documenta els requisits. Comprova que <code>SKILL.md</code> i els fitxers associats siguin presents. Després recarrega els skills o reinicia la sessió segons la versió d’OpenClaw que utilitzis.</p>
 
-      <h2 id="registre-compatible">Si ja utilitzes un client compatible amb ClawHub</h2>
+      <h2 id="auto-install"><span id="registre-compatible">Si ja utilitzes un client compatible amb ClawHub</span></h2>
       <p>SkillsCat ofereix una entrada compatible amb ClawHub. El lloc és <code>https://skills.cat</code> i el registre compatible és <code>https://skills.cat/openclaw</code>. Configura’ls seguint les opcions del teu client; no pressuposis que comparteix la configuració de la CLI nativa de SkillsCat.</p>
+      <h2 id="registry-override">Configura el lloc i el registre</h2>
       <p>Per a la via nativa de SkillsCat, l’ordre amb <code>--agent openclaw</code> és suficient per seleccionar el format d’instal·lació: no cal substituir el registre natiu només per fer servir OpenClaw. Els dos punts d’entrada tenen finalitats diferents.</p>
 
-      <h2 id="permisos">Paquets privats, permisos i secrets</h2>
+      <h2 id="private-skills"><span id="permisos">Paquets privats, permisos i secrets</span></h2>
       <p>Els paquets privats requereixen una sessió o un token amb els permisos corresponents. Inicia sessió amb la CLI que utilitzes i no assumeixis que una credencial d’un altre servei et donarà accés. No escriguis tokens en un SKILL.md compartit ni els publiquis en una incidència.</p>
       <p>Abans de permetre que l’agent faci servir el paquet, comprova els scripts, les peticions de xarxa i els fitxers que pot llegir. Utilitza una prova sense secrets reals i concedeix només els permisos necessaris.</p>
 
-      <h2 id="diagnosi">Comprovacions si l’skill no apareix</h2>
+      <h2 id="troubleshooting"><span id="diagnosi">Comprovacions si l’skill no apareix</span></h2>
       <ol>
         <li>Confirma el directori actual i si has fet una instal·lació de projecte o global.</li>
         <li>Revisa que el paquet contingui <code>SKILL.md</code> i que les rutes relatives siguin vàlides.</li>

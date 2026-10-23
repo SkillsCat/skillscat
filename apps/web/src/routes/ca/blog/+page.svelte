@@ -15,7 +15,7 @@
         <p class="category">{article.category}</p>
         <h2><a href={`/ca/blog/${article.slug}`}>{article.title}</a></h2>
         <p>{article.description}</p>
-        <span class="read-label" aria-hidden="true">Llegeix la guia →</span>
+        <a class="read-label" href={`/ca/blog/${article.slug}`} aria-label={`Llegeix la guia: ${article.title}`}>Llegeix la guia →</a>
       </article>
     {/each}
   </section>
