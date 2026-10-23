@@ -32,6 +32,10 @@ The browser remembers explicit locale choices without adding `Set-Cookie` to
 shared public HTML responses. Language switching retains query strings and hash
 fragments on shared pages; a Catalan-only editorial page has no other-language
 equivalent, so switching takes the visitor to the chosen homepage.
+Japanese/Korean choices from docs also use their homepage, because unprefixed
+documentation has an English SSR fallback. Public route preferences synchronize
+in both directions (Catalan and English), including restored `pageshow` events;
+English-only docs do not erase the existing Japanese/Korean cookie preference.
 
 Translated public content has self-canonicals and `ca` hreflang alternatives.
 Search remains noindex. Catalan-only articles do not advertise invented
@@ -74,7 +78,7 @@ pnpm lint
 pnpm --filter @skillscat/web test
 pnpm test:cli
 pnpm build
-pnpm --filter @skillscat/web exec vitest run test/catalan-catalog.test.ts test/catalan-routing.test.ts test/catalan-editorial.test.ts test/search-page.test.ts
+pnpm --filter @skillscat/web exec vitest run test/catalan-catalog.test.ts test/catalan-routing.test.ts test/catalan-editorial.test.ts test/catalan-errors.test.ts test/search-page.test.ts
 ```
 
 Before release, use an isolated local environment for real browser checks at
@@ -84,3 +88,10 @@ switches, keyboard access, empty results/recovery links, and original-content
 labels. Check `lang`, `Content-Language`, canonical/hreflang and sitemap output.
 Do not treat HTTP/SSR tests as visual or browser-navigation validation. Public
 production verification must follow AGENTS.md's side-effect and release rules.
+
+Additional local regression coverage checks repeated locale choices, completion
+of overlapping invalidations, route-history locale resolution and preference
+restoration. Isolated SvelteKit `__data.json` smoke checks confirm the root
+layout's URL invalidation dependency, explicit path precedence over conflicting
+cookies, translated-category search, and empty/missing-resource responses. These
+tests do not certify real browser history, visual layout or mobile interaction.

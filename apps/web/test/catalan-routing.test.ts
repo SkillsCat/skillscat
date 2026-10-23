@@ -11,7 +11,8 @@ import * as og from '$lib/seo/og';
 import * as constants from '$lib/seo/constants';
 import { getSeoLocaleMetadata } from '$lib/i18n/seo';
 import { getLocaleFromAcceptLanguage, normalizeLocale, resolveRequestLocale } from '$lib/i18n/resolve';
-import { createI18nRuntime } from '$lib/i18n/runtime';
+import { createI18nRuntime, rememberPathLocale } from '$lib/i18n/runtime';
+import { load as loadLayout } from '../src/routes/+layout.server';
 import { getXRobotsTagForPath, shouldNoIndexPath } from '$lib/server/security/request';
 import { buildUrlSetXml, getCoreSitemapPages } from '$lib/server/seo/sitemap';
 
@@ -81,6 +82,7 @@ async function requestLocale(pathname: string, cookieLocale?: string, acceptLang
   };
   const resolve = vi.fn(async () => new Response('<html>test</html>', { headers: { 'content-type': 'text/html' } }));
   await handle({ event, resolve } as never);
+  expect(event.cookies.set).not.toHaveBeenCalled();
   return event.locals as { locale: SupportedLocale; htmlLang: string };
 }
 
@@ -155,6 +157,104 @@ describe('Catalan locale preference and SSR', () => {
     const runtime = createI18nRuntime({ getLocale: () => 'ca', setLocale: vi.fn() });
     await runtime.switchLocale('en');
     expect(assign).toHaveBeenCalledWith('/');
+  });
+});
+
+describe('locale history, repeated choices, and interrupted navigation regressions', () => {
+  function browserState(pathname = '/') {
+    let cookie = '';
+    const writes: string[] = [];
+    const documentMock = { documentElement: { lang: 'en' } };
+    Object.defineProperty(documentMock, 'cookie', {
+      get: () => cookie,
+      set: (value: string) => { writes.push(value); cookie = value.split(';')[0]; },
+    });
+    const assign = vi.fn();
+    vi.stubGlobal('document', documentMock);
+    vi.stubGlobal('window', { location: { protocol: 'https:', pathname, search: '', hash: '', assign } });
+    return { writes, assign, documentMock, cookie: () => cookie };
+  }
+
+  it('remembers both directions of a Catalan/English route history without redundant writes', () => {
+    const state = browserState();
+    for (const [path, locale] of [['/ca', 'ca'], ['/docs', 'en'], ['/ca', 'ca'], ['/docs', 'en']] as const) {
+      rememberPathLocale(path, locale);
+      expect(state.cookie()).toBe(`sc_locale=${locale}`);
+    }
+    rememberPathLocale('/docs', 'en');
+    expect(state.writes).toHaveLength(4);
+    // Account/profile routes use the saved preference, not a language prefix.
+    rememberPathLocale('/settings/profile', 'ca');
+    expect(state.cookie()).toBe('sc_locale=en');
+  });
+
+  it('restores cookie-only locales but does not erase them on English-only docs fallback', () => {
+    const state = browserState();
+    rememberPathLocale('/ca', 'ca');
+    rememberPathLocale('/', 'ja');
+    expect(state.cookie()).toBe('sc_locale=ja');
+    rememberPathLocale('/docs/cli', 'en');
+    expect(state.cookie()).toBe('sc_locale=ja');
+    rememberPathLocale('/', 'ko');
+    rememberPathLocale('/docs/openclaw/', 'en');
+    expect(state.cookie()).toBe('sc_locale=ko');
+    rememberPathLocale('/ca/docs', 'ca');
+    expect(state.cookie()).toBe('sc_locale=ca');
+    rememberPathLocale('/', 'en');
+    expect(state.cookie()).toBe('sc_locale=en');
+  });
+
+  it.each(['/ca/docs', '/ca/docs/cli', '/ca/docs/openclaw', '/docs', '/docs/cli', '/zh-CN/docs/openclaw'])('sends unsupported ja/ko docs choices at %s to their chosen home', async (pathname) => {
+    for (const nextLocale of ['ja', 'ko'] as const) {
+      const state = browserState(pathname);
+      const runtime = createI18nRuntime({ getLocale: () => 'ca', setLocale: vi.fn() });
+      await runtime.switchLocale(nextLocale);
+      expect(state.cookie()).toBe(`sc_locale=${nextLocale}`);
+      expect(state.assign).toHaveBeenCalledWith('/');
+      expect(mocks.invalidateAll).not.toHaveBeenCalled();
+      expect(await requestLocale('/', nextLocale)).toMatchObject({ locale: nextLocale });
+    }
+  });
+
+  it('ignores repeated selection of the currently active locale', async () => {
+    const state = browserState('/ca/search');
+    const setLocale = vi.fn();
+    const runtime = createI18nRuntime({ getLocale: () => 'ca', setLocale });
+    await runtime.switchLocale('ca');
+    await runtime.switchLocale('ca');
+    expect(state.writes).toHaveLength(0);
+    expect(state.assign).not.toHaveBeenCalled();
+    expect(setLocale).not.toHaveBeenCalled();
+    expect(mocks.invalidateAll).not.toHaveBeenCalled();
+  });
+
+  it('keeps a newer cookie-page language choice when an older invalidation finishes last', async () => {
+    const state = browserState('/settings/profile');
+    let locale: SupportedLocale = 'en';
+    let finishOlder!: () => void;
+    let finishNewer!: () => void;
+    mocks.invalidateAll.mockImplementationOnce(() => new Promise<void>((resolve) => { finishOlder = resolve; }))
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { finishNewer = resolve; }));
+    const runtime = createI18nRuntime({ getLocale: () => locale, setLocale: (next) => { locale = next; } });
+    const older = runtime.switchLocale('ca');
+    const newer = runtime.switchLocale('en');
+    finishNewer(); await newer;
+    finishOlder(); await older;
+    expect(locale).toBe('en');
+    expect(state.cookie()).toBe('sc_locale=en');
+    expect(state.documentMock.documentElement.lang).toBe('en');
+    expect(state.assign).not.toHaveBeenCalled();
+  });
+
+  it('resolves each visible path independently and tracks it for root-layout invalidation', async () => {
+    for (const path of ['/', '/ca', '/', '/ca', '/ca/docs', '/docs']) {
+      const locale = path.startsWith('/ca') ? 'ca' : 'en';
+      const locals = await requestLocale(path, locale === 'ca' ? 'en' : 'ca');
+      const readPath = vi.fn(() => path);
+      const data = await loadLayout({ locals, url: { get pathname() { return readPath(); } } } as never);
+      expect(readPath).toHaveBeenCalled();
+      expect(data).toMatchObject({ locale, htmlLang: locale });
+    }
   });
 });
 

@@ -162,7 +162,7 @@ const ca = {
   privateCliDescription: 'Cal autenticar-se. Executa primer skillscat login.',
   vercelCliDescription: 'Compatible amb Claude Code, Cursor, Codex i més de 10 agents',
   notFoundTitle: 'Skill no trobat',
-  notFoundMessage: 'L’skill que cerques no existeix o s’ha eliminat.',
+  notFoundMessage: 'No s’ha trobat l’skill o no tens permís per veure’l.',
   temporarilyUnavailableTitle: 'Skill no disponible temporalment',
   temporarilyUnavailableMessage: 'Aquesta pàgina de skill no està disponible temporalment. Torna-ho a provar d’aquí a una estona.',
 } satisfies SkillPageCopy;
@@ -423,4 +423,16 @@ const copyByLocale: Record<SupportedLocale, SkillPageCopy> = {
 
 export function getSkillPageCopy(locale: SupportedLocale): SkillPageCopy {
   return copyByLocale[locale];
+}
+
+export function getSkillPageErrorMessage(
+  locale: SupportedLocale,
+  kind: 'not_found' | 'temporary_failure',
+  serverMessage?: string,
+): string {
+  const copy = getSkillPageCopy(locale);
+  if (kind === 'temporary_failure') return copy.temporarilyUnavailableMessage;
+  // The server's typed not-found result is deliberately indistinguishable from
+  // permission denial. Preserve that meaning without leaking its English text.
+  return locale === 'ca' ? copy.notFoundMessage : (serverMessage || copy.notFoundMessage);
 }

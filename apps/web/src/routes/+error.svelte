@@ -36,7 +36,13 @@
 
   const status = $derived($page.status);
   const title = $derived(getDefaultTitle(status));
-  const message = $derived($page.error?.message || getDefaultMessage(status));
+  const serverMessage = $derived($page.error?.message);
+  // Translate framework defaults without discarding a route's useful custom
+  // message (for example the Catalan article-not-found explanation).
+  const isGenericEnglishError = $derived(
+    i18n.locale() === 'ca' && ['Page not found', 'Not Found', 'Internal Error'].includes(serverMessage ?? '')
+  );
+  const message = $derived(isGenericEnglishError ? getDefaultMessage(status) : (serverMessage || getDefaultMessage(status)));
 </script>
 
 <svelte:head>
@@ -51,7 +57,7 @@
   {message}
   fullPage
   primaryActionText={messages.common.goHome}
-  primaryActionHref="/"
+  primaryActionHref={i18n.href('/')}
   secondaryActionText={messages.common.goBack}
   secondaryActionClick={() => history.back()}
 />

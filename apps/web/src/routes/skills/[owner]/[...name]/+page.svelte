@@ -8,7 +8,7 @@
   import Avatar from '$lib/components/common/Avatar.svelte';
   import VisibilityBadge from '$lib/components/ui/VisibilityBadge.svelte';
   import { useI18n } from '$lib/i18n/runtime';
-  import { getSkillPageCopy } from '$lib/i18n/skill-page';
+  import { getSkillPageCopy, getSkillPageErrorMessage } from '$lib/i18n/skill-page';
   import { formatRelativeTimestamp } from '$lib/i18n/relative';
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
   import { splitShellCommand } from '$lib/skill-install';
@@ -839,7 +839,7 @@
     isTemporaryFailure ? copy.temporarilyUnavailableTitle : copy.notFoundTitle
   );
   const errorMessage = $derived(
-    isTemporaryFailure ? copy.temporarilyUnavailableMessage : (data.error || copy.notFoundMessage)
+    getSkillPageErrorMessage(i18n.locale(), skillErrorKind, data.error)
   );
   const errorCode = $derived(isTemporaryFailure ? 500 : 404);
   const seoImageAlt = $derived(
@@ -1549,9 +1549,9 @@
     fullPage
     primaryActionText={isTemporaryFailure ? messages.common.tryAgain : messages.common.browseSkills}
     primaryActionClick={isTemporaryFailure ? retryCurrentPage : undefined}
-    primaryActionHref={isTemporaryFailure ? undefined : '/trending'}
+    primaryActionHref={isTemporaryFailure ? undefined : i18n.href('/trending')}
     secondaryActionText={isTemporaryFailure ? messages.common.browseSkills : undefined}
-    secondaryActionHref={isTemporaryFailure ? '/trending' : undefined}
+    secondaryActionHref={isTemporaryFailure ? i18n.href('/trending') : undefined}
   />
 {/if}
 

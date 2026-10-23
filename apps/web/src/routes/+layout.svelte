@@ -8,8 +8,7 @@
   import { toasts } from '$lib/components/ui/toast-store';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { getPathLocale } from '$lib/seo/locale-path';
-  import { createI18nRuntime, setI18nContext, setLocaleCookie } from '$lib/i18n/runtime';
+  import { createI18nRuntime, setI18nContext, rememberPathLocale } from '$lib/i18n/runtime';
 
   interface Props {
     children: import('svelte').Snippet;
@@ -70,10 +69,9 @@
   $effect(() => {
     if (browser) {
       document.documentElement.lang = i18n.htmlLang();
-      // A direct prefixed link is also a language choice. Remember it only in
+      // A direct public link is also a language choice. Remember it only in
       // the browser; Set-Cookie must never poison shared public HTML caches.
-      const pathLocale = getPathLocale($page.url.pathname);
-      if (pathLocale !== 'en') setLocaleCookie(pathLocale);
+      rememberPathLocale($page.url.pathname, i18n.locale());
     }
   });
 
@@ -155,6 +153,12 @@
   });
 
   onMount(() => {
+    // A bfcache restoration resumes this document without rerunning effects.
+    // Reconcile its visible language with preferences saved by a newer page.
+    const rememberRestoredLocale = (event: PageTransitionEvent) => {
+      if (event.persisted) rememberPathLocale(window.location.pathname, i18n.locale());
+    };
+    window.addEventListener('pageshow', rememberRestoredLocale);
     // Resolve the auth session only when there is evidence of one (server-side
     // currentUser or a better-auth cookie); anonymous visitors never load the
     // better-auth client bundle.
@@ -222,6 +226,7 @@
     }
 
     return () => {
+      window.removeEventListener('pageshow', rememberRestoredLocale);
       stopAuthSession();
       window.removeEventListener('scroll', handleScroll);
       if (rafId) {
