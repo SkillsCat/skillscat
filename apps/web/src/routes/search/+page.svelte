@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { stripSeoLocale } from '$lib/seo/locale-path';
   import { goto } from '$app/navigation';
   import { navigating } from '$app/stores';
   import SearchBox from '$lib/components/common/SearchBox.svelte';
@@ -87,7 +88,7 @@
   const localizedMatchedCategories = $derived(
     data.matchedCategories.map((category) => localizeCategory(category, i18n.locale()))
   );
-  const isSearchNavigating = $derived($navigating?.to?.url.pathname === '/search');
+  const isSearchNavigating = $derived(stripSeoLocale($navigating?.to?.url.pathname ?? '') === '/search');
   const currentPage = $derived(data.pagination?.currentPage ?? 1);
   const totalSkillCount = $derived(data.pagination?.totalItems ?? data.skills.length);
   const pageRangeStart = $derived(
@@ -215,7 +216,7 @@
     const currentOffset = (data.pagination.currentPage - 1) * data.pagination.itemsPerPage;
     const targetPage = Math.floor(currentOffset / preferredPageSize) + 1;
 
-    void goto(buildSearchPath(data.query, targetPage, preferredPageSize), {
+    void goto(i18n.href(buildSearchPath(data.query, targetPage, preferredPageSize)), {
       replaceState: true,
       noScroll: true,
       keepFocus: true,
@@ -233,7 +234,7 @@
     const normalized = newQuery.trim();
     if (!normalized) {
       if (data.query) {
-        void goto('/search');
+        void goto(i18n.href('/search'));
       }
       return;
     }
@@ -242,11 +243,11 @@
       return;
     }
 
-    void goto(buildSearchPath(normalized, 1, preferredPageSize));
+    void goto(i18n.href(buildSearchPath(normalized, 1, preferredPageSize)));
   }
 
   function handleCategorySelect(category: { slug: string }) {
-    void goto(`/category/${encodeURIComponent(category.slug)}`);
+    void goto(i18n.href(`/category/${encodeURIComponent(category.slug)}`));
   }
 </script>
 
@@ -315,7 +316,7 @@
           <div class="category-chips">
             {#each localizedMatchedCategories as category (category.slug)}
               <a
-                href="/category/{category.slug}"
+                href={i18n.href(`/category/${category.slug}`)}
                 class="category-chip"
               >
                 <span class="category-chip-icon">
@@ -343,7 +344,7 @@
           title={messages.searchPage.noResultsTitle}
           description={i18n.t(messages.searchPage.noResultsDescription, { query: data.query })}
           actionText={messages.common.browseTrendingSkills}
-          actionHref="/trending"
+          actionHref={i18n.href('/trending')}
         >
           {#snippet icon()}
             <HugeiconsIcon icon={Search01Icon} size={40} strokeWidth={1.5} />

@@ -1,5 +1,6 @@
+import { catalanArticles } from '$lib/content/catalan-blog';
 import { seoFreshnessSql } from './freshness';
-import { localizeHref, isLocalizedPublicPath } from '$lib/seo/locale-path';
+import { localizeHref, isLocalizedPublicPath, getPathLocale } from '$lib/seo/locale-path';
 import { sanitizeSummary, SUMMARY_GENERATION_VERSION } from '$lib/seo/summary';
 import { CATEGORIES } from '$lib/constants/categories';
 import { invalidateCache, peekCachedText, putCachedText } from '$lib/server/cache';
@@ -25,6 +26,7 @@ export const SITEMAP_INDEX_CACHE_TTL = 86400;
 export const SITEMAP_DYNAMIC_CACHE_TTL = 86400;
 export const SITEMAP_RECENT_CACHE_TTL = 900;
 export const SITEMAP_CORE_CACHE_TTL = 86400;
+export const SITEMAP_CORE_CACHE_KEY = 'sitemap:v4:core:xml';
 export const DEFAULT_SITEMAP_REFRESH_MIN_INTERVAL_SECONDS = 3600;
 export const SITEMAP_HOT_CACHE_TTL_BUFFER_SECONDS = 300;
 export const SITEMAP_FULL_SNAPSHOT_MAX_AGE_SECONDS = 26 * 60 * 60;
@@ -266,8 +268,9 @@ export function dedupePages(pages: SitemapPage[]): SitemapPage[] {
 
 export function buildUrlSetXml(pages: SitemapPage[]): string {
   pages = dedupePages(pages.flatMap((page) => isLocalizedPublicPath(page.url.split('?')[0])
-    && !page.url.startsWith('/skills/') && !page.url.startsWith('/zh-CN')
-    ? [page, { ...page, url: localizeHref(page.url, 'zh-CN') }] : [page]));
+    && !page.url.startsWith('/skills/') && getPathLocale(page.url.split('?')[0]) === 'en'
+    && !page.url.startsWith('/search')
+    ? [page, { ...page, url: localizeHref(page.url, 'zh-CN') }, { ...page, url: localizeHref(page.url, 'ca') }] : [page]));
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${pages
@@ -309,7 +312,14 @@ export function getCoreSitemapPages(): SitemapPage[] {
     { url: '/terms', priority: '0.3', changefreq: 'monthly' },
   ] satisfies SitemapPage[];
 
-  return dedupePages(staticPages);
+  return dedupePages([
+    ...staticPages,
+    { url: '/ca/blog', priority: '0.7', changefreq: 'monthly' },
+    { url: '/ca/catala', priority: '0.7', changefreq: 'monthly' },
+    ...catalanArticles.map((article): SitemapPage => ({
+      url: `/ca/blog/${article.slug}`, priority: '0.6', changefreq: 'monthly',
+    })),
+  ]);
 }
 
 function buildPaginatedCollectionPages(options: {
@@ -1085,7 +1095,7 @@ export async function refreshPrioritySitemapSnapshots(options: {
   const recentTtl = getSitemapHotCacheTtlSeconds(SITEMAP_RECENT_CACHE_TTL, refreshMinIntervalSeconds);
   const inputs: SitemapRefreshInput[] = [
     {
-      cacheKey: 'sitemap:v3:core:xml',
+      cacheKey: SITEMAP_CORE_CACHE_KEY,
       ttl: getSitemapHotCacheTtlSeconds(SITEMAP_CORE_CACHE_TTL, refreshMinIntervalSeconds),
       debugTag: 'core',
       fetcher: async () => buildUrlSetXml(await getExpandedCoreSitemapPages(db)),
@@ -1126,7 +1136,7 @@ export async function refreshAllSitemapSnapshots(options: {
   };
 
   await refresh({
-    cacheKey: 'sitemap:v3:core:xml',
+    cacheKey: SITEMAP_CORE_CACHE_KEY,
     ttl: getSitemapHotCacheTtlSeconds(SITEMAP_CORE_CACHE_TTL, refreshMinIntervalSeconds),
     debugTag: 'core',
     fetcher: async () => buildUrlSetXml(await getExpandedCoreSitemapPages(db)),

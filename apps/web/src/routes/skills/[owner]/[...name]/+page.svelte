@@ -1243,7 +1243,7 @@
           </div>
 
           <!-- Description (full width) -->
-          <p class="skill-description-full">{data.skill.description || copy.noDescription}</p>
+          <p lang={i18n.locale() === 'ca' ? 'und' : undefined} class="skill-description-full">{data.skill.description || copy.noDescription}</p>
 
           {#if shouldShowDerivedFromCallout}
             <div class="mt-5 rounded-2xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100">
@@ -1380,6 +1380,13 @@
           </div>
         </div>
 
+        {#if i18n.locale() === 'ca'}
+          <aside class="card p-5 text-sm text-fg-muted mb-6" aria-label={copy.originalContentLabel}>
+            <p class="font-semibold text-fg mb-2">{copy.originalContentLabel}</p>
+            <p>{copy.originalContentNote}</p>
+          </aside>
+        {/if}
+
         <!-- AI summary (shown above SKILL.md when available) -->
         {#if data.skill.summary}
           <div class="card skill-summary-card">
@@ -1390,7 +1397,7 @@
               <span class="skill-content-title">{copy.summaryTitle}</span>
             </div>
             <div class="skill-content-divider"></div>
-            <p class="skill-summary-text">{data.skill.summary}</p>
+            <p lang={i18n.locale() === 'ca' ? 'und' : undefined} class="skill-summary-text">{data.skill.summary}</p>
           </div>
         {/if}
 
@@ -1404,7 +1411,7 @@
               <span class="skill-content-title">SKILL.md</span>
             </div>
             <div class="skill-content-divider"></div>
-            <div class="prose-readme">
+            <div lang={i18n.locale() === 'ca' ? 'und' : undefined} class="prose-readme">
               {@html renderedReadme}
             </div>
           </div>
@@ -1419,7 +1426,7 @@
                 {@const category = getLocalizedCategoryBySlug(categorySlug, i18n.locale())}
                 {#if category}
                   <a
-                    href="/category/{categorySlug}"
+                    href={i18n.href(`/category/${categorySlug}`)}
                     class="category-tag"
                   >
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -176,9 +176,52 @@ const ko = {
   },
 } satisfies DocsCopy;
 
+const ca = {
+  common: {
+    backToDocsAriaLabel: 'Torna a la documentació',
+    docsBreadcrumb: 'Documentació',
+    links: {
+      cliDocs: 'Documentació de la CLI',
+      openclawDocs: 'Documentació d’OpenClaw',
+      openclawGuide: 'Guia d’OpenClaw',
+    },
+  },
+  cli: {
+    title: 'CLI de SkillsCat',
+    description: 'Documentació de la CLI de SkillsCat per cercar, instal·lar, actualitzar, autenticar-se, configurar i publicar skills.',
+    imageAlt: 'Vista prèvia de la documentació de la CLI de SkillsCat',
+    eyebrow: 'Referència de la CLI',
+    heading: 'CLI de SkillsCat',
+    breadcrumb: 'CLI',
+  },
+  openclaw: {
+    title: 'Utilitza SkillsCat amb OpenClaw',
+    description: 'Utilitza SkillsCat amb OpenClaw mitjançant la CLI nativa o el registre compatible amb ClawHub a /openclaw.',
+    imageAlt: 'Vista prèvia de la documentació d’OpenClaw a SkillsCat',
+    eyebrow: 'Guia d’OpenClaw',
+    heading: 'Utilitza SkillsCat amb OpenClaw',
+    breadcrumb: 'OpenClaw',
+    howToSteps: {
+      point: {
+        name: 'Configura SkillsCat al client compatible amb ClawHub',
+        text: 'Configura el lloc https://skills.cat i el registre https://skills.cat/openclaw al client compatible; no els confonguis amb el registre de la CLI nativa.',
+      },
+      inspect: {
+        name: 'Cerca i inspecciona l’skill',
+        text: 'Utilitza la cerca o la CLI de SkillsCat per comprovar el paquet que vols instal·lar.',
+      },
+      install: {
+        name: 'Instal·la al directori d’OpenClaw',
+        text: 'Utilitza npx skillscat add <slug> --agent openclaw amb l’slug exacte de la fitxa per instal·lar el paquet al directori corresponent.',
+      },
+    },
+  },
+} satisfies DocsCopy;
+
 const copyByLocale: Record<SupportedLocale, DocsCopy> = {
   en,
   'zh-CN': zhCN,
+  ca,
   ja,
   ko,
 };

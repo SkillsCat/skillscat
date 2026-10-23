@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useI18n } from '$lib/i18n/runtime';
+  const i18n = useI18n();
   interface Props {
     size?: 'sm' | 'md' | 'lg';
     showText?: boolean;
@@ -13,7 +15,7 @@
   };
 </script>
 
-<a href="/" class="logo-link">
+<a href={i18n.href('/')} class="logo-link">
   <!-- Squircle clip path for logo -->
   <svg width="0" height="0" class="absolute">
     <clipPath id="logo-squircle" clipPathUnits="objectBoundingBox">

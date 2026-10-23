@@ -51,7 +51,7 @@
     const days = Math.floor(diff / 86400000);
     const months = Math.floor(days / 30);
 
-    if (months > 0) return i18n.t(messages.common.relativeMonthsAgo, { count: months });
+    if (months > 0) return i18n.t(months === 1 ? messages.common.relativeMonthAgo : messages.common.relativeMonthsAgo, { count: months });
     if (days > 0) return i18n.t(messages.common.relativeDaysAgo, { count: days });
     return messages.common.relativeToday;
   }

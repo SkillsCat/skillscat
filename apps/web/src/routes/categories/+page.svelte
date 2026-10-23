@@ -250,7 +250,7 @@
       <div class="categories-grid">
         {#each section.categories as category (category.slug)}
           <a
-            href="/category/{category.slug}"
+            href={i18n.href(`/category/${category.slug}`)}
             class="category-card group"
           >
             <div class="category-icon-wrapper">
@@ -275,12 +275,12 @@
     <div class="section-group">
       <h2 class="section-title">
         {messages.common.communitySuggested}
-        <span class="section-badge">AI</span>
+        <span class="section-badge">{i18n.locale() === 'ca' ? 'IA' : 'AI'}</span>
       </h2>
       <div class="categories-grid">
         {#each filteredDynamicCategories as category (category.slug)}
           <a
-            href="/category/{category.slug}"
+            href={i18n.href(`/category/${category.slug}`)}
             class="category-card group"
           >
             <div class="category-icon-wrapper category-icon-dynamic">
@@ -291,7 +291,7 @@
                 {category.name}
               </h3>
               <p class="category-description">
-                {category.description || 'AI-suggested category'}
+                {category.description || messages.categories.aiSuggestedFallback}
               </p>
             </div>
           </a>
@@ -305,7 +305,7 @@
       <div class="empty-icon">
         <HugeiconsIcon icon={Search01Icon} size={32} strokeWidth={2} />
       </div>
-      <p class="empty-text">No categories found matching "{searchQuery}"</p>
+      <p class="empty-text">{i18n.t(messages.categories.noMatches, { query: searchQuery })}</p>
     </div>
   {/if}
 </div>

@@ -92,7 +92,7 @@
   const i18n = useI18n();
   const messages = $derived(i18n.messages());
 
-  const guide = $derived(categoryGuide(data.category?.slug ?? '', i18n.locale() === 'zh-CN'));
+  const guide = $derived(categoryGuide(data.category?.slug ?? '', i18n.locale()));
   let searchQuery = $state('');
   const displayCategory = $derived(
     data.category ? (data.isDynamic ? data.category : localizeCategory(data.category, i18n.locale())) : null
@@ -293,9 +293,9 @@
 
     {#if guide.text && (data.pagination?.currentPage ?? 1) === 1}
       <section class="mb-8 text-sm text-fg-muted leading-relaxed">
-        <h2 class="text-base font-semibold text-fg mb-2">{i18n.locale() === 'zh-CN' ? '用途与选择建议' : 'Uses and selection guide'}</h2>
+        <h2 class="text-base font-semibold text-fg mb-2">{i18n.locale() === 'ca' ? 'Usos i criteris de selecció' : i18n.locale() === 'zh-CN' ? '用途与选择建议' : 'Uses and selection guide'}</h2>
         <p>{guide.text}</p>
-        <nav class="flex flex-wrap gap-3 mt-3" aria-label={i18n.locale() === 'zh-CN' ? '相关分类' : 'Related categories'}>
+        <nav class="flex flex-wrap gap-3 mt-3" aria-label={i18n.locale() === 'ca' ? 'Categories relacionades' : i18n.locale() === 'zh-CN' ? '相关分类' : 'Related categories'}>
           {#each guide.related as category}
             <a class="text-primary hover:underline" href={i18n.href(`/category/${category.slug}`)}>{localizeCategory(category, i18n.locale()).name}</a>
           {/each}
@@ -360,7 +360,7 @@
         title={messages.categories.noSkillsYetTitle}
         description={messages.categories.noSkillsYetDescription}
         actionText={messages.categories.browseTrending}
-        actionHref="/trending"
+        actionHref={i18n.href('/trending')}
       >
         {#snippet icon()}
           <HugeiconsIcon icon={Sad01Icon} size={40} strokeWidth={1.5} />
@@ -375,7 +375,7 @@
       title={messages.categories.notFoundHeading}
       description={messages.categories.notFoundDescription}
       actionText={messages.common.browseCategories}
-      actionHref="/categories"
+      actionHref={i18n.href('/categories')}
     >
       {#snippet icon()}
         <HugeiconsIcon icon={AlertCircleIcon} size={40} strokeWidth={1.5} />

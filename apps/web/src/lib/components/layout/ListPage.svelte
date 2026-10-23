@@ -126,7 +126,7 @@
       title={emptyMessage}
       description={messages.lists.skillsWillAppear}
       actionText={messages.common.browseCategories}
-      actionHref="/categories"
+      actionHref={i18n.href('/categories')}
     >
       {#snippet icon()}
         {#if titleIcon}

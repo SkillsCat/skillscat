@@ -2,7 +2,10 @@ import type { LayoutServerLoad } from './$types';
 import { AVAILABLE_LOCALES } from '$lib/i18n/config';
 import type { CurrentUser } from '$lib/types';
 
-export const load: LayoutServerLoad = async ({ locals }) => {
+export const load: LayoutServerLoad = async ({ locals, url }) => {
+  // Explicit locale prefixes can reuse the same rerouted page. Track the visible
+  // pathname so client-side footer/navigation links refresh the locale as well.
+  url.pathname;
   const currentUser: CurrentUser | null = locals.user
     ? {
         id: locals.user.id,

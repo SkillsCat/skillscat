@@ -8,7 +8,8 @@
   import { toasts } from '$lib/components/ui/toast-store';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { createI18nRuntime, setI18nContext } from '$lib/i18n/runtime';
+  import { getPathLocale } from '$lib/seo/locale-path';
+  import { createI18nRuntime, setI18nContext, setLocaleCookie } from '$lib/i18n/runtime';
 
   interface Props {
     children: import('svelte').Snippet;
@@ -69,6 +70,10 @@
   $effect(() => {
     if (browser) {
       document.documentElement.lang = i18n.htmlLang();
+      // A direct prefixed link is also a language choice. Remember it only in
+      // the browser; Set-Cookie must never poison shared public HTML caches.
+      const pathLocale = getPathLocale($page.url.pathname);
+      if (pathLocale !== 'en') setLocaleCookie(pathLocale);
     }
   });
 
@@ -267,6 +272,12 @@
         <Navbar {unreadCount} {currentUser} authPending={deferAuthUi} />
 
         <main class="flex-1">
+          {#if locale === 'ca' && ['/search', '/trending', '/recent', '/top', '/categories', '/category/[slug]'].includes($page.route.id ?? '')}
+            <aside class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 text-sm text-fg-muted" aria-label="Llengua del contingut">
+              La interfície i les categories predefinides són en català. Les descripcions dels skills i les categories generades conserven el text d’origen; la llengua original no consta al catàleg.
+              <a href="/ca/catala" class="text-primary hover:underline">Consulta l’abast de la traducció.</a>
+            </aside>
+          {/if}
           {@render children()}
         </main>
       </div>

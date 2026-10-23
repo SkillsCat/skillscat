@@ -30,7 +30,7 @@
     // Load the auth client on demand so anonymous visitors never pay for it.
     const { signOut } = await import('$lib/auth-client');
     await signOut();
-    await goto('/', { invalidateAll: true });
+    await goto(i18n.href('/'), { invalidateAll: true });
   }
 </script>
 

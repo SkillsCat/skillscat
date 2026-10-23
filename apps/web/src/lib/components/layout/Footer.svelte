@@ -79,6 +79,15 @@
         </ul>
       </div>
 
+      <nav class="md:col-start-3 md:row-start-2" aria-label="Català" lang="ca">
+        <h4 class="font-semibold text-fg mb-3">Català</h4>
+        <ul class="flex flex-wrap gap-x-6 gap-y-3 md:block md:space-y-2 text-sm">
+          <li><a href="/ca" class="text-fg-muted hover:text-fg transition-colors">SkillsCat en català</a></li>
+          <li><a href="/ca/blog" class="text-fg-muted hover:text-fg transition-colors">Blog en català</a></li>
+          <li><a href="/ca/catala" class="text-fg-muted hover:text-fg transition-colors">SkillsCat <span aria-label="estima">🧡</span> Català</a></li>
+        </ul>
+      </nav>
+
       <!-- Legal (hidden on mobile, shown in bottom bar instead) -->
       <div class="hidden md:block">
         <h4 class="font-semibold text-fg mb-3">{messages.footer.legal}</h4>

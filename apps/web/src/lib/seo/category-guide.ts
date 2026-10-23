@@ -1,3 +1,4 @@
+import type { SupportedLocale } from '$lib/i18n/config';
 import { CATEGORY_SECTIONS } from '$lib/constants/categories';
 
 const guidance: Record<string, [string, string]> = {
@@ -47,10 +48,24 @@ const guidance: Record<string, [string, string]> = {
   ]
 };
 
-export function categoryGuide(slug: string, chinese: boolean) {
+const catalanGuidance: Record<string, string> = {
+  development: 'Aquests skills ajuden a passar d’un problema reproduïble a un canvi de codi revisable. Comprova que el llenguatge, el framework i les eines de proves coincideixin amb el projecte; revisa les diferències i executa les teves comprovacions abans d’acceptar els canvis.',
+  backend: 'Per dissenyar interfícies de serveis, modificar models de dades o integrar autenticació i memòria cau. Comprova la base de dades o el proveïdor compatible, les migracions i les credencials necessàries abans de triar un flux de treball.',
+  frontend: 'Per construir i millorar interfícies. Compara els frameworks compatibles, la navegació amb teclat i el disseny adaptable. Prova els components amb contingut real en pantalles estretes i amples.',
+  devops: 'Per automatitzar compilacions, lliuraments i manteniment d’infraestructura. Identifica les ordres que modifiquen recursos remots, comprova la compatibilitat amb el proveïdor i revisa com desfer un desplegament abans d’executar-lo.',
+  quality: 'Per revisar correcció, seguretat i comportament en execució. Prioritza fluxos que expliquin les conclusions i ofereixin comprovacions reproduïbles; contrasta els resultats amb les convencions del projecte i mesures de referència.',
+  docs: 'Per documentar el comportament i mantenir les explicacions al costat del codi. Comprova els fitxers font consultats, si els exemples es poden executar i com es manté una terminologia coherent entre llengües.',
+  data: 'Per recollir, transformar i analitzar dades. Compara formats compatibles, volum de dades i tractament dels valors absents. Revisa una mostra petita abans d’aplicar una transformació a tot el conjunt.',
+  ai: 'Per connectar capacitats dels models amb fluxos repetibles d’agents. Comprova els requisits del model o de les eines, les dades d’entrada i els exemples d’avaluació. Tria el flux més senzill que cobreixi la tasca real.',
+  productivity: 'Per fer repetibles tasques quotidianes, des de l’organització de fitxers fins a les ordres de terminal. Compara eines necessàries, fitxers modificats i opcions de previsualització abans d’aplicar canvis.',
+  content: 'Per convertir material de referència en esborranys, revisions o contingut publicable. Defineix el públic i el format, verifica els fets i adapta el resultat a la teva veu abans de publicar-lo.',
+  lifestyle: 'Per estructurar recerca, aprenentatge i tasques especialitzades. Llegeix les instruccions originals, comprova l’abast i les entrades necessàries, i contrasta les conclusions especialitzades amb fonts primàries.',
+};
+
+export function categoryGuide(slug: string, locale: SupportedLocale | boolean) {
   const section = CATEGORY_SECTIONS.find((item) => item.categories.some((category) => category.slug === slug));
   return {
-    text: section ? guidance[section.id]?.[chinese ? 1 : 0] : undefined,
+    text: section ? locale === 'ca' ? catalanGuidance[section.id] : guidance[section.id]?.[locale === true || locale === 'zh-CN' ? 1 : 0] : undefined,
     related: section?.categories.filter((category) => category.slug !== slug).slice(0, 4) ?? [],
   };
 }

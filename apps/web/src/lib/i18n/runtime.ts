@@ -1,4 +1,4 @@
-import { localizeHref, isLocalizedPublicPath } from '$lib/seo/locale-path';
+import { localizeHref, isLocalizedPublicPath, isCatalanEditorialPath } from '$lib/seo/locale-path';
 import { browser } from '$app/environment';
 import { invalidateAll } from '$app/navigation';
 import { getContext, setContext } from 'svelte';
@@ -27,7 +27,7 @@ export interface I18nRuntime {
   switchLocale: (nextLocale: SupportedLocale) => Promise<void>;
 }
 
-function setLocaleCookie(locale: SupportedLocale): void {
+export function setLocaleCookie(locale: SupportedLocale): void {
   if (!browser) return;
 
   const secure = window.location.protocol === 'https:' ? '; Secure' : '';
@@ -69,12 +69,18 @@ export function createI18nRuntime(input: {
     switchLocale: async (nextLocale) => {
       if (nextLocale === input.getLocale()) return;
 
-      if (browser && (nextLocale === 'en' || nextLocale === 'zh-CN') && isLocalizedPublicPath(window.location.pathname)) {
+      setLocaleCookie(nextLocale);
+      // Editorial content has no translated equivalent; a language choice takes
+      // the visitor to that language's home rather than relabeling Catalan text.
+      if (browser && isCatalanEditorialPath(window.location.pathname)) {
+        window.location.assign(localizeHref('/', nextLocale));
+        return;
+      }
+      if (browser && isLocalizedPublicPath(window.location.pathname)) {
         window.location.assign(localizeHref(window.location.pathname + window.location.search + window.location.hash, nextLocale, true));
         return;
       }
       input.setLocale(nextLocale);
-      setLocaleCookie(nextLocale);
 
       if (browser) {
         document.documentElement.lang = getHtmlLang(nextLocale);

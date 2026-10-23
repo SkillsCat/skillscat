@@ -5,7 +5,7 @@
   import { ArrowDown01Icon, EarthIcon } from '@hugeicons/core-free-icons';
 
   const compactLocaleLabels: Record<SupportedLocale, string> = {
-    en: 'EN', 'zh-CN': '简中', ja: '日本語', ko: '한국어',
+    en: 'EN', ca: 'CA', 'zh-CN': '简中', ja: '日本語', ko: '한국어',
   };
   const i18n = useI18n();
   const messages = $derived(i18n.messages());

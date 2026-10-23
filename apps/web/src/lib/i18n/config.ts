@@ -1,7 +1,7 @@
-export const LOCALES = ['en', 'zh-CN', 'ja', 'ko'] as const;
+export const LOCALES = ['en', 'zh-CN', 'ca', 'ja', 'ko'] as const;
 
 export type SupportedLocale = (typeof LOCALES)[number];
-export type LocaleSource = 'cookie' | 'accept-language' | 'default';
+export type LocaleSource = 'cookie' | 'accept-language' | 'default' | 'path';
 
 export const DEFAULT_LOCALE: SupportedLocale = 'en';
 export const LOCALE_COOKIE_NAME = 'sc_locale';
@@ -9,6 +9,7 @@ export const LOCALE_COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 
 export const INTL_LOCALE_MAP: Record<SupportedLocale, string> = {
   en: 'en-US',
+  ca: 'ca-ES',
   'zh-CN': 'zh-CN',
   ja: 'ja-JP',
   ko: 'ko-KR',
@@ -16,6 +17,7 @@ export const INTL_LOCALE_MAP: Record<SupportedLocale, string> = {
 
 export const OG_LOCALE_MAP: Record<SupportedLocale, string> = {
   en: 'en_US',
+  ca: 'ca_ES',
   'zh-CN': 'zh_CN',
   ja: 'ja_JP',
   ko: 'ko_KR',
@@ -23,6 +25,7 @@ export const OG_LOCALE_MAP: Record<SupportedLocale, string> = {
 
 export const LOCALE_LABELS: Record<SupportedLocale, string> = {
   en: 'English',
+  ca: 'Català',
   'zh-CN': '简体中文',
   ja: '日本語',
   ko: '한국어',
