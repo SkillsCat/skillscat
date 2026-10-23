@@ -88,6 +88,9 @@ describe('Catalan core catalogs', () => {
       const ago = (days: number) => formatRelativeTimestamp(i18n, messages, now - days * 86_400_000);
       expect(ago(40)).toBe('fa 1 mes');
       expect(ago(60)).toBe('fa 2 mesos');
+      expect(ago(359)).toBe('fa 11 mesos');
+      expect(ago(360)).toBe('fa 12 mesos');
+      expect(ago(364)).toBe('fa 12 mesos');
       expect(ago(365)).toBe('fa 1 any');
       expect(ago(730)).toBe('fa 2 anys');
     } finally {

@@ -31,7 +31,7 @@ export function formatRelativeTimestamp(
   }
 
   const months = Math.floor(days / 30);
-  if (months < 12) {
+  if (days < 365) {
     return i18n.t(months === 1 ? messages.common.relativeMonthAgo : messages.common.relativeMonthsAgo, { count: months });
   }
 
