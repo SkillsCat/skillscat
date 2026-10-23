@@ -11,7 +11,7 @@
   import { getSkillPageCopy, getSkillPageErrorMessage } from '$lib/i18n/skill-page';
   import { formatRelativeTimestamp } from '$lib/i18n/relative';
   import { getLocalizedCategoryBySlug } from '$lib/i18n/categories';
-  import { splitShellCommand } from '$lib/skill-install';
+  import { buildAgentInstallPrompt, splitShellCommand } from '$lib/skill-install';
   import { encodeSkillSlugForPath } from '$lib/skill-path';
   import { createLazyAuthSession } from '$lib/auth-session';
   import type {
@@ -575,7 +575,11 @@
         description: string;
       };
 
-  const agentInstallPrompt = $derived(data.install?.agentPrompt || '');
+  const agentInstallPrompt = $derived(
+    i18n.locale() === 'ca' && data.skill && data.install?.agentPrompt
+      ? buildAgentInstallPrompt(data.skill, 'ca')
+      : data.install?.agentPrompt || ''
+  );
   const installOptions = $derived<InstallOption[]>([
     ...(data.install?.cli || []).map((installer) => ({
       id: installer.id,

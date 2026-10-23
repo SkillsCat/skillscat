@@ -1,0 +1,946 @@
+{
+  "scope": "Second pass: UI, Catalan translations, original editorial content",
+  "environment": "Compiled local Worker, isolated local D1/R2, synthetic skills/user/session/org; no production bindings",
+  "catalogs": {
+    "messages": 259,
+    "settings": 248,
+    "skill-page": 79,
+    "profiles": 51,
+    "docs": 23,
+    "ui": 11,
+    "submit-api": 34
+  },
+  "categoryStrings": "49 category names and descriptions, 11 section names and 11 guidance paragraphs",
+  "content": "Three docs pages, three original articles, language initiative page, home introduction, metadata and links reviewed against repository CLI implementation",
+  "pages": [
+    {
+      "path": "/ca",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Una plataforma oberta per descobrir, compartir i instal·lar skills per a agents d’IA."
+    },
+    {
+      "path": "/ca/docs",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Documentació de SkillsCat"
+    },
+    {
+      "path": "/ca/docs/cli",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Guia de la CLI de SkillsCat"
+    },
+    {
+      "path": "/ca/docs/openclaw",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Utilitza SkillsCat amb OpenClaw"
+    },
+    {
+      "path": "/ca/blog",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Skills, pas a pas i en català"
+    },
+    {
+      "path": "/ca/blog/installar-skills-amb-seguretat",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Abans d’instal·lar un skill: una revisió pràctica"
+    },
+    {
+      "path": "/ca/blog/localitzar-un-flux-de-treball",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Un flux de localització al català que es pugui revisar"
+    },
+    {
+      "path": "/ca/blog/crear-i-compartir-un-skill-en-catala",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Crea i comparteix un skill amb instruccions en català"
+    },
+    {
+      "path": "/ca/catala",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "SkillsCat 🧡 Català"
+    },
+    {
+      "path": "/ca/categories",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Categories"
+    },
+    {
+      "path": "/ca/category/i18n",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Internacionalització"
+    },
+    {
+      "path": "/ca/search?q=missing",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": " Cerca"
+    },
+    {
+      "path": "/ca/recent",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": " Afegits recentment"
+    },
+    {
+      "path": "/ca/skills/review/skill-6",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Review Skill 6"
+    },
+    {
+      "path": "/user/account",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Compte"
+    },
+    {
+      "path": "/user/skills",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Els meus skills"
+    },
+    {
+      "path": "/user/messages",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Missatges"
+    },
+    {
+      "path": "/user/organizations",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Organitzacions"
+    },
+    {
+      "path": "/user/tokens",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Tokens d’API"
+    },
+    {
+      "path": "/org/ui-review-org",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Organització de prova"
+    },
+    {
+      "path": "/org/ui-review-org/settings",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Perfil"
+    },
+    {
+      "path": "/org/ui-review-org/settings/members",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Membres"
+    },
+    {
+      "path": "/org/ui-review-org/settings/skills",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Skills"
+    },
+    {
+      "path": "/org/ui-review-org/settings/tokens",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Tokens d’API"
+    },
+    {
+      "path": "/bookmarks",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": " Preferits"
+    },
+    {
+      "path": "/device",
+      "width": 320,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320,
+      "h1": "Autoritza la CLI"
+    },
+    {
+      "path": "/ca",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/docs",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/docs/cli",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/docs/openclaw",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/blog",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/blog/installar-skills-amb-seguretat",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/blog/localitzar-un-flux-de-treball",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/blog/crear-i-compartir-un-skill-en-catala",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/catala",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/categories",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/category/i18n",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/search?q=missing",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/recent",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/skills/review/skill-6",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/user/account",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/user/skills",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/user/messages",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/user/organizations",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/user/tokens",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/org/ui-review-org",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/org/ui-review-org/settings",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/org/ui-review-org/settings/members",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/org/ui-review-org/settings/skills",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/org/ui-review-org/settings/tokens",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/bookmarks",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/device",
+      "width": 1440,
+      "theme": "dark",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/docs",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/docs/cli",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/docs/openclaw",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/blog",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/blog/installar-skills-amb-seguretat",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/blog/localitzar-un-flux-de-treball",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/blog/crear-i-compartir-un-skill-en-catala",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/catala",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/categories",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/category/i18n",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/search?q=missing",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/recent",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca/skills/review/skill-6",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/user/account",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/user/skills",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/user/messages",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/user/organizations",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/user/tokens",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/org/ui-review-org",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/org/ui-review-org/settings",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/org/ui-review-org/settings/members",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/org/ui-review-org/settings/skills",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/org/ui-review-org/settings/tokens",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/bookmarks",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/device",
+      "width": 1440,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 1440
+    },
+    {
+      "path": "/ca",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/docs",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/docs/cli",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/docs/openclaw",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/blog",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/blog/installar-skills-amb-seguretat",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/blog/localitzar-un-flux-de-treball",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/blog/crear-i-compartir-un-skill-en-catala",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/catala",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/categories",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/category/i18n",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/search?q=missing",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/recent",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/ca/skills/review/skill-6",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/user/account",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/user/skills",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/user/messages",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/user/organizations",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/user/tokens",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/org/ui-review-org",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/org/ui-review-org/settings",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/org/ui-review-org/settings/members",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/org/ui-review-org/settings/skills",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/org/ui-review-org/settings/tokens",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/bookmarks",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    },
+    {
+      "path": "/device",
+      "width": 320,
+      "theme": "light",
+      "status": 200,
+      "lang": "ca",
+      "scrollWidth": 320
+    }
+  ],
+  "dialogs": [
+    {
+      "name": "skill management",
+      "text": "Gestiona l’skill\nReview Skill 0\nVisibilitat\n\nControla qui pot veure aquest skill.\n\nPúblic\nNo llistat\nPrivat\nCompartició\n\nDona accés a aquest skill a persones concretes.\n\nS’estan carregant els accessos compartits...\n\nCorreu electrònic\nPermís\nLectura\nEscriptura\nCaducitat\nNo caduca\n7 dies\n30 dies\n90 dies\n1 any\nAfegeix\nTanca",
+      "width": 288
+    },
+    {
+      "name": "create organization",
+      "text": "Crea una organització\nNom de l’organització\nIdentificador de l’URL\nskills.cat/org/\nCancel·la\nCrea",
+      "width": 288
+    },
+    {
+      "name": "invite member",
+      "text": "Convida un membre\n\nConvida un usuari amb el seu nom d’usuari de GitHub. Rebrà una notificació per acceptar o rebutjar la invitació.\n\nNom d’usuari de GitHub\n@\nCancel·la\nEnvia la invitació",
+      "width": 288
+    },
+    {
+      "name": "edit organization",
+      "text": "Edita el perfil de l’organització\nNom visible\nDescripció\nURL de l’avatar\nCancel·la\nDesa",
+      "width": 288
+    },
+    {
+      "name": "delete account confirmation only",
+      "text": "Suprimeix el compte\n\nSe suprimiran permanentment:\n\nEls teus tokens d’API i les sessions\nEls teus preferits i les preferències\nEls teus skills privats\nLa teva pertinença a organitzacions\n\nEls skills públics continuaran sent visibles, però es desvincularan del compte. Si tornes a iniciar la sessió amb el mateix compte de GitHub, s’hi tornaran a vincular.\n\nEscriu el teu nom d’usuari ui-review per confirmar:\n\nCancel·la\nSuprimeix el compte",
+      "width": 288
+    },
+    {
+      "name": "submit",
+      "text": "Envia un skill\nComparteix un skill per a agents d’IA amb la comunitat. Introdueix un repositori de GitHub o un URL de skills.sh amb fitxers SKILL.md.\nRepositori de GitHub\n\nS’enviaran automàticament tots els fitxers SKILL.md del repositori\n\nCancel·la\nEnvia\nDIRECTRIUS D’ENVIAMENT\n📦\nEl repositori ha de ser públic\n📄\nHa de contenir fitxers SKILL.md vàlids\n🎯\nEls skills han de ser útils per als usuaris d’agents d’IA\n🛡️\nNo s’hi admet contingut maliciós o perjudicial",
+      "width": 512
+    }
+  ],
+  "zoom": [
+    {
+      "path": "/ca/blog",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "fontSize": "32px"
+    },
+    {
+      "path": "/ca/docs/cli",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "fontSize": "32px"
+    },
+    {
+      "path": "/ca/catala",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "fontSize": "32px"
+    },
+    {
+      "path": "/user/tokens",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "fontSize": "32px"
+    }
+  ],
+  "agentPrompt": {
+    "copied": "Instal·la aquest skill de SkillsCat a l’espai de treball actual.\n\nSkill: Review Skill 6\nSlug: review/skill-6\nRepositori: review/fixture\nFitxa de l’skill: https://skills.cat/skills/review/skill-6\n\nOrdre:\nnpx skillscat add review/skill-6 --yes\n\nSi no es pot instal·lar amb la CLI o l’ordre supera el temps d’espera, utilitza aquest punt d’accés al paquet de SkillsCat i conserva exactament les rutes dels fitxers, inclosos els subdirectoris:\nhttps://skills.cat/api/skills/review%2Fskill-6/files\n\nDesprés d’instal·lar-lo, indica’m on s’ha desat l’skill i quins canvis s’han fet.",
+    "clipboardVerified": true
+  },
+  "pageErrors": [],
+  "limits": [
+    "Real GitHub OAuth not tested; synthetic local session used.",
+    "Dialog labels and open/cancel interactions checked; no destructive or external submission executed.",
+    "Service Worker blocked to isolate browser checks.",
+    "Linguistic review by the assistant is not native-speaker certification.",
+    "Initial unsupported /ca/user/account returned expected 404; authenticated pages use unprefixed paths and locale cookie.",
+    "Wrangler watched build artifacts during rebuild and briefly logged missing files; rebuilt Worker recovered and final prompt browser checks passed."
+  ]
+}

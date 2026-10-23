@@ -128,3 +128,42 @@ verification. The local environment intentionally omitted GitHub OAuth secrets;
 one access-telemetry request also kept Chromium's network-idle wait open despite
 a logged 200 response. No remote PR CI workflow exists; no CI pass, merge or
 deployment is claimed.
+
+## UI and content follow-up — 2026-10-24
+
+The second pass reviewed all 705 strings in the seven core Catalan catalogs,
+49 category names/descriptions, 11 category sections and guidance paragraphs,
+the home introduction, all three documentation pages, all three articles and
+the Catalan initiative page. Commands and technical identifiers were compared
+with the current CLI implementation; third-party content remains unchanged.
+
+Two additional issues were corrected:
+
+- The shared relative-date formatter displayed zero years for timestamps
+  360–364 days old. It now stays in months until the first full year, with
+  boundary regression coverage.
+- The Catalan detail page's agent-install prompt was still English. Its own
+  instructions now follow the Catalan interface, including private/unlisted
+  guidance, while preserving commands, exact slugs and bundle URLs. English
+  server/API install payloads retain their existing contract.
+
+Real Chromium checked 26 routes at 1440px and 320px in both light and dark themes
+(104 page checks): all returned 200, kept `lang="ca"`, and had no document-level
+horizontal overflow or JavaScript page errors. These included all new editorial
+pages, discovery/detail pages, account settings, organization settings, bookmarks
+and device authorization. Authenticated pages used a synthetic local user,
+session, organization and private skill in the isolated D1 environment.
+
+Six dialogs were checked for translated labels and open/cancel behavior: skill
+management, organization creation/editing, member invitation, account deletion
+confirmation and repository submission. Four representative pages also retained
+their layout with 200% root text sizing. The translated agent prompt was copied
+through the real browser clipboard and its command and endpoint were verified.
+
+The complete Web suite passed (1,039 tests), as did typecheck, lint and the
+Cloudflare production build. [Detailed UI evidence](catalan-review-2026-10-24/ui-content-evidence.json)
+and five additional screenshots are saved in the review folder. This is local
+verification with synthetic data, not production acceptance or real GitHub OAuth
+validation. Dialog submissions/destructive actions and Service Worker behavior
+were not exercised. Assistant linguistic review does not replace the pending
+review by Catalan-speaking contributors.
