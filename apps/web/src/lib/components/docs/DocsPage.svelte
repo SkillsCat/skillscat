@@ -96,7 +96,6 @@
   .docs-book {
     border-color: color-mix(in srgb, var(--primary) 25%, var(--border));
     background: var(--primary-subtle);
-    transform: rotate(-5deg);
   }
 
   .docs-back-link:hover {
