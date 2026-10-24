@@ -1,5 +1,8 @@
-  <script lang="ts">
+<script lang="ts">
   import { untrack } from 'svelte';
+  import { cubicOut } from 'svelte/easing';
+  import { prefersReducedMotion } from 'svelte/motion';
+  import { slide } from 'svelte/transition';
   import CopyButton from '$lib/components/ui/CopyButton.svelte';
   import { ensureClientShikiLanguage, getClientShikiHighlighter } from '$lib/shiki-client';
   import type { FileNode, SkillDetail } from '$lib/types';
@@ -36,6 +39,8 @@
   let highlighter = $state<Awaited<ReturnType<typeof getClientShikiHighlighter>> | null>(null);
   let isLoadingShiki = $state(false);
   let activeFileSelectionId = $state(0);
+  let fileBrowser: HTMLDivElement | undefined;
+  let pendingFileScroll: string | null = null;
 
   const encodedApiSkillSlug = $derived(encodeURIComponent(skill.slug));
 
@@ -59,6 +64,7 @@
     highlighter = null;
     isLoadingShiki = false;
     activeFileSelectionId = 0;
+    pendingFileScroll = null;
   });
 
   function isBinaryFile(path: string): boolean {
@@ -78,6 +84,7 @@
   }
 
   function toggleFolder(path: string) {
+    pendingFileScroll = null;
     const nextSet = new Set(expandedFolders);
     if (nextSet.has(path)) {
       nextSet.delete(path);
@@ -176,6 +183,7 @@
   }
 
   async function selectFile(path: string) {
+    pendingFileScroll = null;
     if (selectedFile === path) return;
 
     const selectionId = activeFileSelectionId + 1;
@@ -227,6 +235,25 @@
     }
   }
 
+  function scrollToRequestedFile() {
+    if (!pendingFileScroll || !fileBrowser) return;
+
+    const safeSelector = escapeCssSelectorValue(pendingFileScroll);
+    const fileElement = fileBrowser.querySelector<HTMLElement>(`button[data-file-path="${safeSelector}"]`);
+    if (!fileElement) return;
+
+    // A clipped or still-expanding ancestor cannot scroll to the final position.
+    // Nested intros may finish in either order; the last one retries this call.
+    for (let parent = fileElement.parentElement; parent && parent !== fileBrowser; parent = parent.parentElement) {
+      if (parent.inert || parent.getAnimations().some((animation) => animation.pending || animation.playState === 'running')) {
+        return;
+      }
+    }
+
+    pendingFileScroll = null;
+    fileElement.scrollIntoView({ behavior: prefersReducedMotion.current ? 'instant' : 'smooth', block: 'center' });
+  }
+
   function navigateToFile(relativePath: string) {
     if (files.length === 0) return;
 
@@ -236,12 +263,8 @@
 
     expandParentFolders(file.path);
     void selectFile(file.path);
-
-    requestAnimationFrame(() => {
-      const safeSelector = escapeCssSelectorValue(file.path);
-      const fileElement = document.querySelector(`[data-file-path="${safeSelector}"]`);
-      fileElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
+    pendingFileScroll = file.path;
+    requestAnimationFrame(scrollToRequestedFile);
   }
 
   $effect(() => {
@@ -348,21 +371,25 @@
 
 <div class="card">
   <h2 class="text-lg font-semibold text-fg mb-4">{copy.resources}</h2>
-  <div class="file-browser">
+  <div class="file-browser" bind:this={fileBrowser}>
     {#snippet renderFileTree(nodes: FileNode[], depth: number = 0)}
       {#each nodes as node (node.path)}
         <div class="file-item" style="padding-left: {Math.min(depth, 8) * 0.75}rem">
           {#if node.type === 'directory'}
             <button
+              type="button"
               class="file-row"
               onclick={() => toggleFolder(node.path)}
+              aria-expanded={expandedFolders.has(node.path)}
               title={node.path}
               data-file-path={node.path}
             >
               <span class="file-icon">{@html getFileIconSvg(node)}</span>
               <span class="file-name">{node.name}</span>
               <svg
-                class="w-4 h-4 text-fg-muted transition-transform flex-shrink-0 {expandedFolders.has(node.path) ? 'rotate-90' : ''}"
+                class="folder-chevron"
+                class:expanded={expandedFolders.has(node.path)}
+                aria-hidden="true"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -371,7 +398,14 @@
               </svg>
             </button>
             {#if expandedFolders.has(node.path) && node.children}
-              {@render renderFileTree(node.children, depth + 1)}
+              <div
+                class="folder-children"
+                inert={!expandedFolders.has(node.path)}
+                transition:slide={{ duration: prefersReducedMotion.current ? 0 : 200, easing: cubicOut }}
+                onintroend={scrollToRequestedFile}
+              >
+                {@render renderFileTree(node.children, depth + 1)}
+              </div>
             {/if}
           {:else}
             <button
@@ -485,6 +519,24 @@
   .file-row-selected {
     background: var(--primary-subtle);
     color: var(--primary);
+  }
+
+  .folder-chevron {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    color: var(--fg-muted);
+    transition: transform 200ms cubic-bezier(0.215, 0.61, 0.355, 1);
+  }
+
+  .folder-chevron.expanded {
+    transform: rotate(90deg);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .folder-chevron {
+      transition: none;
+    }
   }
 
   .file-icon {
