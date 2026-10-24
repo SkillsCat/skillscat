@@ -30,7 +30,7 @@
 <style>
   .skill-content-card {
     padding: 2rem;
-    border-radius: 1.75rem;
+    border-radius: 1.5rem;
   }
 
   .skill-content-header {
@@ -51,12 +51,11 @@
     font-size: 1rem;
     font-weight: 600;
     color: var(--fg);
-    font-family: var(--font-mono);
   }
 
   .skill-content-divider {
-    height: 2px;
-    background: linear-gradient(90deg, var(--primary) 0%, transparent 100%);
+    height: 1px;
+    background: var(--border);
     margin-bottom: 1.5rem;
     border-radius: 1px;
   }

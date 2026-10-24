@@ -40,12 +40,12 @@ describe('Catalan editorial resources', () => {
 
   it('provides localized docs copy and all three shared docs branches', () => {
     expect(getDocsCopy('ca').common.docsBreadcrumb).toBe('Documentació');
-    const docs = readFileSync(new URL('../src/lib/components/docs/CatalanDocs.svelte', import.meta.url), 'utf8');
+    const docs = readFileSync(new URL('../src/lib/components/docs/CatalanDocsContent.svelte', import.meta.url), 'utf8');
     expect(docs).not.toContain('Instal·el');
     for (const path of ['docs', 'docs/cli', 'docs/openclaw']) {
       const source = readFileSync(new URL(`../src/routes/${path}/+page.svelte`, import.meta.url), 'utf8');
       expect(source).toContain("i18n.locale() === 'ca'");
-      expect(source).toContain('<CatalanDocs kind=');
+      expect(source).toContain('<CatalanDocsContent kind=');
     }
   });
 
@@ -56,7 +56,7 @@ describe('Catalan editorial resources', () => {
     expect(source).toContain('missatges del programa de terminal');
     expect(source).toContain('ni implica col·laboracions');
     for (const article of catalanArticles) {
-      const combined = source + readFileSync(new URL('../src/lib/components/docs/CatalanDocs.svelte', import.meta.url), 'utf8');
+      const combined = source + readFileSync(new URL('../src/lib/components/docs/CatalanDocsContent.svelte', import.meta.url), 'utf8');
       if (article.slug !== 'localitzar-un-flux-de-treball') expect(combined).toContain(`/ca/blog/${article.slug}`);
     }
   });

@@ -9,12 +9,6 @@
 </script>
 
 <div class="editorial-shell" lang="ca">
-  <nav class="editorial-nav" aria-label="Recursos en català">
-    <a href="/ca">Inici</a>
-    <a href="/ca/docs">Documentació</a>
-    <a href="/ca/blog">Blog en català</a>
-    <a href="/ca/catala">SkillsCat 🧡 Català</a>
-  </nav>
   <header class="card editorial-hero">
     <p class="eyebrow">{eyebrow}</p>
     <h1>{title}</h1>
@@ -25,9 +19,6 @@
 
 <style>
   .editorial-shell { max-width: 64rem; margin: 0 auto; padding: 2.5rem 1rem; }
-  .editorial-nav { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
-  .editorial-nav a { color: var(--primary); text-decoration: underline; text-underline-offset: 0.2em; padding: 0.35rem 0; }
-  .editorial-nav a:focus-visible { outline: 3px solid var(--primary); outline-offset: 4px; border-radius: 0.2rem; }
   .editorial-hero { padding: clamp(1.5rem, 4vw, 3rem); border-radius: 1.75rem; margin-bottom: 2rem; }
   .eyebrow { color: var(--primary); font-weight: 800; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 0.75rem; }
   h1 { font-size: clamp(2rem, 5vw, 3.25rem); font-weight: 800; line-height: 1.15; text-wrap: balance; overflow-wrap: anywhere; }

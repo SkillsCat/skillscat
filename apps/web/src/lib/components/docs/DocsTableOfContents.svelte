@@ -9,9 +9,10 @@
   interface Props {
     items: ReadonlyArray<TocItem>;
     title?: string;
+    label?: string;
   }
 
-  let { items, title = 'TOC' }: Props = $props();
+  let { items, title = 'TOC', label = 'Table of contents' }: Props = $props();
   const firstItemId = $derived(items[0]?.id ?? '');
   const desktopBreakpoint = 1100;
   const stickyTop = 96;
@@ -307,7 +308,7 @@
     aria-labelledby="docs-toc-title"
   >
     <p id="docs-toc-title" class="docs-toc-title">{title}</p>
-    <nav aria-label="Table of contents">
+    <nav aria-label={label}>
       <ul class="docs-toc-list">
         {#each items as item}
           <li>
@@ -342,7 +343,7 @@
       display: grid;
       gap: 0.9rem;
       padding: 1.25rem;
-      border-radius: 1.75rem;
+      border-radius: 1.5rem;
       max-height: calc(100vh - 7rem);
       overflow: auto;
     }
@@ -352,8 +353,6 @@
     margin: 0;
     font-size: 0.78rem;
     font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
     color: var(--primary);
   }
 
@@ -368,7 +367,7 @@
   .docs-toc-link {
     display: block;
     padding: 0.55rem 0.7rem;
-    border-radius: 999px;
+    border-radius: 0.75rem;
     color: var(--fg-muted);
     text-decoration: none;
     line-height: 1.4;

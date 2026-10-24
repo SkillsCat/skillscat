@@ -100,19 +100,6 @@
       </div>
     </div>
 
-    {#if i18n.locale() === 'ca'}
-      <section class="card p-6 mb-8 leading-relaxed" aria-labelledby="catalan-start">
-        <h2 id="catalan-start" class="text-xl font-semibold mb-3">Skills reutilitzables, també en català</h2>
-        <p class="text-fg-muted mb-3">Un skill és un conjunt d’instruccions i, de vegades, scripts o plantilles que orienta un agent d’IA en una tasca. SkillsCat t’ajuda a trobar-lo, revisar-ne l’origen i instal·lar-ne el paquet complet en eines com Claude Code, Codex o OpenClaw.</p>
-        <ol class="list-decimal pl-6 space-y-2 text-fg-muted">
-          <li>Busca per tasca o explora les <a class="text-primary hover:underline" href="/ca/categories">categories</a>.</li>
-          <li>Llegeix les instruccions, la llicència i els fitxers; comprova quins permisos i quines eines necessita.</li>
-          <li>Segueix la <a class="text-primary hover:underline" href="/ca/docs/cli">guia de la CLI</a> i prova’l primer en un projecte de prova, sense secrets.</li>
-        </ol>
-        <p class="text-fg-muted mt-4">La interfície i les guies són en català; els skills de tercers conserven el contingut original. Trobaràs exemples pràctics al <a class="text-primary hover:underline" href="/ca/blog">blog en català</a> i l’abast de la traducció a <a class="text-primary hover:underline" href="/ca/catala">SkillsCat 🧡 Català</a>.</p>
-      </section>
-    {/if}
-
     <!-- Trending Section -->
     <section class="home-section">
       <div class="home-section-header">
